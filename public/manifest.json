@@ -1,0 +1,30 @@
+{
+  "name": "NIFTY Quant Analytics Terminal",
+  "short_name": "QuantTerminal",
+  "description": "Institutional-grade real-time options analytics terminal for NIFTY 50",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d131f",
+  "theme_color": "#0d131f",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
+  ]
+}

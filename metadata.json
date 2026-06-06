@@ -1,0 +1,6 @@
+{
+  "name": "NIFTY Quant Analytics Terminal",
+  "description": "Institutional-grade real-time options analytics terminal for NIFTY 50",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
