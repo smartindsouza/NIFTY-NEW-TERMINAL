@@ -2,7 +2,9 @@ import { KiteConnect } from 'kiteconnect';
 import Database from 'better-sqlite3';
 import { generateSimulatedChain } from './simulate_data';
 
-const db = new Database('kite_session.db');
+// Must match the path used in server.ts so both read/write the same session DB.
+const KITE_DATA_DIR = process.env.KITE_DATA_DIR || '.';
+const db = new Database(`${KITE_DATA_DIR}/kite_session.db`);
 
 export function getKiteClient() {
   const apiKey = process.env.KITE_API_KEY;
