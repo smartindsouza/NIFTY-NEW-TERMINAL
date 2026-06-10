@@ -21,6 +21,17 @@ export function Header() {
     refetchInterval: 60000
   });
 
+  const { data: proxyStatus } = useQuery({
+    queryKey: ['proxy-status-sidebar'],
+    queryFn: async () => {
+      const res = await axios.get('/api/diagnostics/proxy');
+      return res.data;
+    },
+    refetchInterval: 30000
+  });
+
+  const isProxyAlive = proxyStatus?.alive ?? false;
+
   const { data: newsData } = useQuery({
     queryKey: ['live-news-sidebar'],
     queryFn: async () => {
@@ -134,6 +145,22 @@ export function Header() {
           {authStatus?.status === 'connected' ? <CheckCircle2 className="w-5 h-5" /> : <LogIn className="w-5 h-5" />}
         </Link>
 
+        {/* Proxy Status Indicator */}
+        <Link href="/terminal-control" className={cn(
+          "flex items-center justify-center w-10 h-10 rounded-full transition-all duration-300 relative group border border-transparent hover:border-0",
+          isProxyAlive ? 'text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20' : 'text-rose-500 bg-rose-500/10 hover:bg-rose-500/20',
+          location === '/terminal-control' && 'bg-white/5 text-foreground'
+        )}>
+          <span className="absolute left-full ml-4 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-popover border border-0 rounded-lg text-[10px] font-bold tracking-wider uppercase font-mono whitespace-nowrap opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300 pointer-events-none z-[100] text-popover-foreground flex flex-col items-start gap-0.5">
+            <span>Proxy: {isProxyAlive ? "Live" : "Down"}</span>
+            {proxyStatus?.egressIp && <span className="text-[9px] opacity-75 lowercase font-normal">Egress: {proxyStatus.egressIp}</span>}
+          </span>
+          <div className="flex flex-col items-center justify-center gap-0.5">
+            <span className={cn("relative inline-flex rounded-full h-2 w-2 transition-colors duration-500", isProxyAlive ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500')} />
+            <span className="text-[8px] font-bold tracking-wider uppercase font-mono">Proxy</span>
+          </div>
+        </Link>
+
         {/* Live signals ping indicator */}
         <div className={cn(
           "flex items-center justify-center w-10 h-10 rounded-full border border-transparent transition-all duration-300 relative group cursor-pointer",
@@ -142,7 +169,10 @@ export function Header() {
           <span className="absolute left-full ml-4 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-popover border border-0 rounded-lg text-[10px] font-bold tracking-wider uppercase font-mono whitespace-nowrap opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300 pointer-events-none z-[100] text-popover-foreground ">
             {wsStatus === 'Connected' ? 'Live Feeds: ACTIVE' : 'Live Feeds: DISCONNECTED'}
           </span>
-          <span className={cn("relative inline-flex rounded-full h-2 w-2 transition-colors duration-500", wsStatus === 'Connected' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500')}></span>
+          <div className="flex flex-col items-center justify-center gap-0.5">
+            <span className={cn("relative inline-flex rounded-full h-2 w-2 transition-colors duration-500", wsStatus === 'Connected' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500')} />
+            <span className="text-[8px] font-bold tracking-wider uppercase font-mono">Feed</span>
+          </div>
         </div>
       </div>
     </header>

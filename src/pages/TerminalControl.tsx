@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useLocation } from "wouter";
 import { 
   Settings2, Cpu, Bell, Laptop, CloudOff, Info, 
   HelpCircle, Volume2, HardDrive, RefreshCw, Layers, ShieldCheck, Zap,
@@ -33,6 +34,7 @@ function getContrastColor(hexColor: string) {
 
 export default function TerminalControl() {
   useProfiler("TerminalControl");
+  const [, setLocation] = useLocation();
   
   const { settings, updateSetting, resetSettings } = useUserSettings();
   const [onlineStatus, setOnlineStatus] = useState<boolean>(true);
@@ -199,26 +201,6 @@ export default function TerminalControl() {
           {swRegistered && (
             <Badge className="bg-primary/10 text-primary border border-primary/20 text-xs font-mono py-1 px-2.5">
               Service Worker: ACTIVE
-            </Badge>
-          )}
-
-          {proxyStatus && (
-            <Badge 
-              className={cn(
-                "border text-xs font-mono py-1 px-2.5 flex items-center gap-1.5 cursor-help transition-all duration-300",
-                proxyStatus.alive 
-                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
-                  : "bg-red-500/10 text-red-400 border-red-500/20 animate-pulse"
-              )}
-              title={proxyStatus.expectedIp ? `Expected Proxy IP: ${proxyStatus.expectedIp}` : undefined}
-            >
-              <span className={cn("inline-block w-1.5 h-1.5 rounded-full", proxyStatus.alive ? "bg-emerald-400 animate-pulse" : "bg-red-400")} />
-              <span>Proxy: {proxyStatus.alive ? "Live" : "Down"}</span>
-              {proxyStatus.egressIp && (
-                <span className="text-[10px] opacity-75 font-normal ml-0.5">
-                  egress {proxyStatus.egressIp}
-                </span>
-              )}
             </Badge>
           )}
         </div>
@@ -581,6 +563,7 @@ export default function TerminalControl() {
                     toast.success("Settings Saved Locally", {
                       description: "Your trading terminal options have been synchronized with localStorage.",
                     });
+                    setLocation("/");
                   }}
                   style={{
                     backgroundColor: settings.accentColor,

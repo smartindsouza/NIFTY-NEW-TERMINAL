@@ -987,6 +987,7 @@ function LineEditorModal({
   initialLineWidth,
   initialLineStyle,
   initialLabelVisible,
+  initialTitle,
   onApply,
   onDelete,
   onChange
@@ -998,9 +999,10 @@ function LineEditorModal({
   initialLineWidth: number,
   initialLineStyle: number,
   initialLabelVisible: boolean,
-  onApply: (price: number, color: string, lineWidth: number, lineStyle: number, labelVisible: boolean) => void,
+  initialTitle?: string,
+  onApply: (price: number, color: string, lineWidth: number, lineStyle: number, labelVisible: boolean, title: string) => void,
   onDelete: () => void,
-  onChange?: (price: number, color: string, lineWidth: number, lineStyle: number, labelVisible: boolean) => void
+  onChange?: (price: number, color: string, lineWidth: number, lineStyle: number, labelVisible: boolean, title: string) => void
 }) {
   const [tab, setTab] = useState<'style' | 'coordinates'>('style');
   const [price, setPrice] = useState(Math.round(initialPrice));
@@ -1008,6 +1010,7 @@ function LineEditorModal({
   const [lineWidth, setLineWidth] = useState(initialLineWidth);
   const [lineStyle, setLineStyle] = useState(initialLineStyle);
   const [labelVisible, setLabelVisible] = useState(initialLabelVisible);
+  const [title, setTitle] = useState(initialTitle || '');
 
   const isFirstRender = useRef(true);
   
@@ -1017,10 +1020,10 @@ function LineEditorModal({
       return;
     }
     if (onChange) {
-      onChange(price, color, lineWidth, lineStyle, labelVisible);
+      onChange(price, color, lineWidth, lineStyle, labelVisible, title);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [price, color, lineWidth, lineStyle, labelVisible]);
+  }, [price, color, lineWidth, lineStyle, labelVisible, title]);
 
   const predefinedColors = [
     '#ffffff', '#d1d5db', '#9ca3af', '#6b7280', '#4b5563', '#374151', '#1f2937', '#111827',
@@ -1077,6 +1080,17 @@ function LineEditorModal({
                   onLineStyleChange={setLineStyle}
                 />
               </div>
+
+              <div className="flex items-center gap-4 relative">
+                <span className="text-sm text-muted-foreground min-w-[50px]">Text</span>
+                <input 
+                  type="text" 
+                  value={title} 
+                  onChange={e => setTitle(e.target.value)}
+                  placeholder="e.g. TARGET, TRAP, resistance level text"
+                  className="bg-background border border-0 text-sm rounded-md px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary h-9 flex-1"
+                />
+              </div>
               
               <label className="flex items-center gap-2 mt-4 cursor-pointer">
                 <input 
@@ -1105,12 +1119,12 @@ function LineEditorModal({
 
         <div className="flex items-center justify-between p-4 border-t border-0 bg-muted">
            <div>
-             {/* Left section, currently blank in screenshot except for Template dropdown, using simple Delete for now */}
-             <button onClick={onDelete} className="text-sm text-red-500 hover:text-red-400 transition-colors">Delete</button>
+              {/* Left section */}
+              <button onClick={onDelete} className="text-sm text-red-500 hover:text-red-400 transition-colors">Delete</button>
            </div>
            <div className="flex gap-2">
              <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
-             <button onClick={() => onApply(price, color, lineWidth, lineStyle, labelVisible)} className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium">Ok</button>
+             <button onClick={() => onApply(price, color, lineWidth, lineStyle, labelVisible, title)} className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium">Ok</button>
            </div>
         </div>
       </div>
@@ -4299,7 +4313,7 @@ export function AdvancedChart() {
           lineWidth: line.lineWidth || 2,
           lineStyle: line.lineStyle || 0,
           axisLabelVisible: line.axisLabelVisible ?? true,
-          title: '',
+          title: line.title || '',
         });
         manualLinesRef.current.push({ ...line, instance: newPriceLine });
       } catch(e) {}
@@ -4423,6 +4437,7 @@ export function AdvancedChart() {
     // Draw H Levels if enabled
     if (showHLevels && hLevels) {
       const colors = ['#ef4444', '#ef4444', '#fbbf24', '#fbbf24', '#22c55e', '#22c55e'];
+      const textLabels = ['RED ZONE', 'RED ZONE', 'TRAP ZONE', 'TRAP ZONE', 'GREEN ZONE', 'GREEN ZONE'];
       hLevels.forEach((priceLevel, index) => {
         if (priceLevel && priceLevel > 0) {
           mainSeries.createPriceLine({
@@ -4431,7 +4446,7 @@ export function AdvancedChart() {
             lineWidth: hLevelsWidth as any,
             lineStyle: hLevelsStyle,
             axisLabelVisible: false,
-            title: '',
+            title: textLabels[index] || '',
           });
         }
       });
@@ -5789,6 +5804,7 @@ export function AdvancedChart() {
           initialLineWidth={manualLinesRef.current.find((l: any) => l.id === editingLineId)?.lineWidth || 2}
           initialLineStyle={manualLinesRef.current.find((l: any) => l.id === editingLineId)?.lineStyle || 0}
           initialLabelVisible={manualLinesRef.current.find((l: any) => l.id === editingLineId)?.axisLabelVisible ?? true}
+          initialTitle={manualLinesRef.current.find((l: any) => l.id === editingLineId)?.title || ''}
           onClose={() => setEditingLineId(null)}
           onDelete={() => {
             const idx = manualLinesRef.current.findIndex((l: any) => l.id === editingLineId);
@@ -5799,7 +5815,7 @@ export function AdvancedChart() {
             }
             setEditingLineId(null);
           }}
-          onChange={(price, color, lineWidth, lineStyle, labelVisible) => {
+          onChange={(price, color, lineWidth, lineStyle, labelVisible, title) => {
             const idx = manualLinesRef.current.findIndex((l: any) => l.id === editingLineId);
             if (idx > -1) {
               const lineData = manualLinesRef.current[idx];
@@ -5809,36 +5825,38 @@ export function AdvancedChart() {
                   color: color,
                   lineWidth: lineWidth,
                   lineStyle: lineStyle,
-                  axisLabelVisible: labelVisible
+                  axisLabelVisible: labelVisible,
+                  title: title
                 });
                 lineData.price = price;
                 lineData.color = color;
                 lineData.lineWidth = lineWidth;
                 lineData.lineStyle = lineStyle;
                 lineData.axisLabelVisible = labelVisible;
+                lineData.title = title;
               } catch(e){}
             }
           }}
-          onApply={(price, color, lineWidth, lineStyle, labelVisible) => {
+          onApply={(price, color, lineWidth, lineStyle, labelVisible, title) => {
             const idx = manualLinesRef.current.findIndex((l: any) => l.id === editingLineId);
             if (idx > -1) {
               const lineData = manualLinesRef.current[idx];
-              // To update we must remove and re-add in lightweight-charts for some properties,
-              // but we can also use applyOptions. Let's use applyOptions
               try {
                 lineData.instance.applyOptions({
                   price: price,
                   color: color,
                   lineWidth: lineWidth,
                   lineStyle: lineStyle,
-                  axisLabelVisible: labelVisible
+                  axisLabelVisible: labelVisible,
+                  title: title
                 });
                 lineData.price = price;
                 lineData.color = color;
                 lineData.lineWidth = lineWidth;
                 lineData.lineStyle = lineStyle;
                 lineData.axisLabelVisible = labelVisible;
-                setManualLineIds(prev => prev.map(l => l.id === editingLineId ? { ...l, price, color, lineWidth, lineStyle, axisLabelVisible: labelVisible } : l));
+                lineData.title = title;
+                setManualLineIds(prev => prev.map(l => l.id === editingLineId ? { ...l, price, color, lineWidth, lineStyle, axisLabelVisible: labelVisible, title } : l));
               } catch(e){}
             }
             setEditingLineId(null);

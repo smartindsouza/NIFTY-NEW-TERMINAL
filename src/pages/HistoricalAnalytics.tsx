@@ -2,6 +2,7 @@ import { TrendingUp, BarChart2, Calendar, LineChart, RefreshCw } from "lucide-re
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { MetricSourceBadge, MetricSourceType } from "../components/MetricSourceBadge";
 import { useHistoricalAnalytics, useFiiData } from "../hooks/useHistoricalAnalytics";
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
 export default function HistoricalAnalytics() {
   const { data, isLoading: loading, refetch: refetchData } = useHistoricalAnalytics();
@@ -114,13 +115,67 @@ export default function HistoricalAnalytics() {
             <CardTitle className="text-sm font-semibold tracking-wide text-foreground/80 flex items-center gap-1.5">
               <Calendar className="w-4 h-4 text-primary" /> Historical PCR Cones
             </CardTitle>
-            <MetricSourceBadge type="UNAVAILABLE" source="Rolling Kite Option Chain PCR Dumps" />
+            <MetricSourceBadge 
+              type={data?.data?.pcrHistory ? "CALCULATED" : "UNAVAILABLE"} 
+              source="Rolling Kite Option Chain PCR Dumps" 
+              formula="Put Oi / Call Oi (30-day historical range)"
+            />
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="bg-card p-4 rounded-xl border border-0 space-y-3">
-               <div className="text-muted-foreground text-xs text-center py-6">
-                  Insufficient real data stored to plot historical cones. No simulated values displayed.
-               </div>
+               {data?.data?.pcrHistory ? (
+                  <div className="h-[210px] w-full">
+                     <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={data.data.pcrHistory} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                           <defs>
+                              <linearGradient id="pcrConeColor" x1="0" y1="0" x2="0" y2="1">
+                                 <stop offset="5%" stopColor="#2563eb" stopOpacity={0.15}/>
+                                 <stop offset="95%" stopColor="#2563eb" stopOpacity={0.0}/>
+                              </linearGradient>
+                           </defs>
+                           <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.05} />
+                           <XAxis dataKey="date" tick={{ fontSize: 9 }} strokeOpacity={0.2} stroke="#94a3b8" />
+                           <YAxis domain={['auto', 'auto']} tick={{ fontSize: 9 }} strokeOpacity={0.2} stroke="#94a3b8" />
+                           <Tooltip 
+                              contentStyle={{ backgroundColor: "#0f172a", borderRadius: "8px", border: "1px solid #334155" }}
+                              labelStyle={{ color: "#94a3b8", fontSize: "10px", fontFamily: "monospace" }}
+                              itemStyle={{ fontSize: "11px" }}
+                           />
+                           <Area 
+                              type="monotone" 
+                              dataKey="upperCone" 
+                              stroke="#60a5fa" 
+                              strokeWidth={1}
+                              strokeDasharray="4 4"
+                              fillOpacity={1} 
+                              fill="url(#pcrConeColor)" 
+                              name="Expected Upper"
+                           />
+                           <Area 
+                              type="monotone" 
+                              dataKey="lowerCone" 
+                              stroke="#f87171" 
+                              strokeWidth={1}
+                              strokeDasharray="4 4"
+                              fill="none" 
+                              name="Expected Lower"
+                           />
+                           <Area 
+                              type="monotone" 
+                              dataKey="pcr" 
+                              stroke="#3b82f6" 
+                              strokeWidth={2.5} 
+                              fill="none"
+                              name="Rolling PCR"
+                           />
+                        </AreaChart>
+                     </ResponsiveContainer>
+                  </div>
+               ) : (
+                  <div className="text-muted-foreground text-xs text-center py-6">
+                     Insufficient real data stored to plot historical cones. No simulated values displayed.
+                  </div>
+               )}
             </div>
           </CardContent>
         </Card>
