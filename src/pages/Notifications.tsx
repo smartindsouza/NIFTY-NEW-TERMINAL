@@ -2,6 +2,10 @@ import { useState, useMemo } from "react";
 import { useNotifications } from "../hooks/useNotifications";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+function renderMarkdownFallback(text: string) {
+  // basic fallback, replace bold and newlines
+  return text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br/>');
+}
 import { 
   Bell, 
   Trash2, 
@@ -14,7 +18,8 @@ import {
   ArrowRight,
   TrendingDown,
   Clock,
-  ExternalLink
+  ExternalLink,
+  Bot
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +28,32 @@ type FilterType = "all" | "oi_alert" | "divergence" | "order" | "system";
 export default function Notifications() {
   const { notifications, markAsRead, markAllAsRead, clearAll, unreadCount } = useNotifications();
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [gamePlan, setGamePlan] = useState<string | null>(null);
+
+  const generateGamePlan = async () => {
+    setIsGeneratingPlan(true);
+    setGamePlan(null);
+    try {
+      const relevantNotifs = notifications.filter(n => n.type === 'oi_alert' || n.type === 'divergence').slice(0, 20);
+      const res = await fetch('/api/generate-game-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alerts: relevantNotifs })
+      });
+      const data = await res.json();
+      if(data.gamePlan) {
+        setGamePlan(data.gamePlan);
+      } else {
+        alert("Failed to generate Game Plan");
+      }
+    } catch(e) {
+      console.error(e);
+      alert("Error generating Game Plan");
+    } finally {
+      setIsGeneratingPlan(false);
+    }
+  };
 
   const filteredNotifications = useMemo(() => {
     if (activeFilter === "all") return notifications;
@@ -56,26 +87,26 @@ export default function Notifications() {
   const getNotificationIcon = (type: string) => {
     switch (type) {
       case "oi_alert":
-        return <Layers className="w-5 h-5 text-amber-400 animate-pulse" />;
+        return <Layers className="w-5 h-5 text-primary animate-pulse" />;
       case "divergence":
-        return <TrendingUp className="w-5 h-5 text-purple-400" />;
+        return <TrendingUp className="w-5 h-5 text-primary" />;
       case "order":
         return <Activity className="w-5 h-5 text-emerald-400" />;
       default:
-        return <Terminal className="w-5 h-5 text-blue-400" />;
+        return <Terminal className="w-5 h-5 text-primary" />;
     }
   };
 
   const getNotificationBadgeColor = (type: string) => {
     switch (type) {
       case "oi_alert":
-        return "bg-amber-500/10 text-amber-400 border-amber-500/20";
+        return "bg-primary/10 text-primary border-primary/20";
       case "divergence":
-        return "bg-purple-500/10 text-purple-400 border-purple-500/20";
+        return "bg-primary/10 text-primary border-primary/20";
       case "order":
         return "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
       default:
-        return "bg-blue-500/10 text-blue-400 border-blue-500/20";
+        return "bg-primary/10 text-primary border-primary/20";
     }
   };
 
@@ -93,18 +124,18 @@ export default function Notifications() {
   };
 
   return (
-    <div className="p-4 md:p-8 pb-32 max-w-[1200px] w-full mx-auto space-y-6 animate-in fade-in zoom-in-95 duration-500 font-sans">
+    <div className="p-4 md:p-8 pb-32 max-w-[1600px] w-full mx-auto space-y-6 animate-in fade-in zoom-in-95 duration-500 font-sans">
       
       {/* Absolute aura decorative glow */}
-      <div className="absolute top-10 left-12 w-96 h-96 bg-purple-500/5 blur-[120px] pointer-events-none -z-10 rounded-full" />
-      <div className="absolute top-40 right-10 w-96 h-96 bg-indigo-500/5 blur-[120px] pointer-events-none -z-10 rounded-full" />
+      <div className="absolute top-10 left-12 w-96 h-96 bg-primary/5 blur-[120px] pointer-events-none -z-10 rounded-full" />
+      <div className="absolute top-40 right-10 w-96 h-96 bg-primary/5 blur-[120px] pointer-events-none -z-10 rounded-full" />
 
       {/* Header section */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end pb-6 border-b border-white/10 border-dashed gap-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end pb-6 border-b border-0 border-dashed gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <div className="p-1.5 bg-purple-500/10 border border-purple-500/20 rounded-xl">
-              <Bell className="w-5 h-5 text-purple-400" />
+            <div className="p-1.5 bg-primary/10 border border-primary/20 rounded-xl">
+              <Bell className="w-5 h-5 text-primary" />
             </div>
             <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight flex items-center gap-2">
               Quant Notifications Terminal
@@ -115,7 +146,7 @@ export default function Notifications() {
               </Badge>
             )}
           </div>
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-muted-foreground">
             Real-time trace logs capturing high-frequency open interest swings, Bollinger volatility breakouts, and order confirmations.
           </p>
         </div>
@@ -126,7 +157,7 @@ export default function Notifications() {
             <>
               <button
                 onClick={markAllAsRead}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-slate-800/80 hover:bg-slate-700/80 border border-white/5 rounded-lg text-slate-300 transition-all font-mono"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-muted/80 hover:bg-slate-700/80 border border-0 rounded-lg text-foreground/80 transition-all font-mono"
               >
                 <CheckCheck className="w-3.5 h-3.5" /> Mark all read
               </button>
@@ -145,7 +176,7 @@ export default function Notifications() {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
         
         {/* Sidebar Controls */}
-        <div className="flex flex-row lg:flex-col overflow-x-auto lg:overflow-visible gap-1 pb-2 lg:pb-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden bg-[#0d1117]/60 p-1.5 rounded-xl border border-white/5">
+        <div className="flex flex-row lg:flex-col overflow-x-auto lg:overflow-visible gap-1 pb-2 lg:pb-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden bg-card/60 p-1.5 rounded-xl border border-0">
           {[
             { id: "all", label: "All Logs", count: stats.all },
             { id: "oi_alert", label: "OI Scanners", count: stats.oi_alert },
@@ -159,32 +190,68 @@ export default function Notifications() {
               className={cn(
                 "flex items-center justify-between gap-3 px-3 py-2 text-xs rounded-lg transition-all font-mono text-left whitespace-nowrap min-w-max lg:min-w-0 w-full",
                 activeFilter === tab.id
-                  ? "bg-purple-500/10 text-purple-400 border border-purple-500/20 shadow-[0_0_15px_rgba(168,85,247,0.08)] font-bold"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent"
+                  ? "bg-primary/10 text-primary border border-primary/20 font-bold"
+                  : "text-muted-foreground hover:text-foreground/90 hover:bg-accent hover:text-accent-foreground border border-transparent"
               )}
             >
               <span>{tab.label}</span>
               <span className={cn(
                 "px-1.5 py-0.5 rounded text-[10px] font-bold font-mono transition-colors",
                 activeFilter === tab.id
-                  ? "bg-purple-500/20 text-purple-300"
-                  : "bg-slate-800 text-slate-500"
+                  ? "bg-primary/20 text-primary"
+                  : "bg-muted text-muted-foreground"
               )}>
                 {tab.count}
               </span>
             </button>
           ))}
+
+          {/* AI Game Plan Button */}
+          <div className="mt-4 pt-4 border-t border-0 mx-2 hidden lg:block" />
+          <button
+            onClick={generateGamePlan}
+            disabled={isGeneratingPlan || notifications.length === 0}
+            className="flex items-center gap-2 justify-center lg:justify-start px-3 py-2 text-xs bg-primary/20 hover:bg-primary/30 text-primary font-bold border border-primary/30 rounded-lg transition-all whitespace-nowrap min-w-max w-full disabled:opacity-50"
+          >
+            <Bot className={cn("w-4 h-4", isGeneratingPlan && "animate-bounce")} />
+            {isGeneratingPlan ? "Thinking..." : "AI Game Plan"}
+          </button>
         </div>
 
         {/* Content Panel */}
         <div className="lg:col-span-3 space-y-4">
+          
+          {/* Game Plan Display */}
+          {(isGeneratingPlan || gamePlan) && (
+            <div className="bg-card border border-primary/30 p-5 rounded-2xl mb-6 animate-in slide-in-from-top-4 fade-in duration-300">
+               <div className="flex items-center gap-3 mb-4">
+                 <div className="p-2 bg-primary/20 border border-primary/30 rounded-xl">
+                   <Bot className="w-5 h-5 text-primary" />
+                 </div>
+                 <h2 className="text-xl font-bold text-foreground flex items-center gap-2">Intraday Strategy Analysis</h2>
+               </div>
+               {isGeneratingPlan ? (
+                 <div className="space-y-3">
+                   <div className="h-4 bg-primary/10 rounded w-3/4 animate-pulse"></div>
+                   <div className="h-4 bg-primary/10 rounded w-full animate-pulse"></div>
+                   <div className="h-4 bg-primary/10 rounded w-5/6 animate-pulse"></div>
+                 </div>
+               ) : (
+                 <div 
+                   className="markdown-body prose prose-invert prose-p:text-muted-foreground max-w-none text-sm text-foreground/80 prose-headings:text-foreground prose-h3:mt-4 prose-h3:mb-2 prose-h3:text-primary prose-strong:text-foreground"
+                   dangerouslySetInnerHTML={{ __html: renderMarkdownFallback(gamePlan || '') }}
+                 />
+               )}
+            </div>
+          )}
+
           {filteredNotifications.length === 0 ? (
-            <Card className="flex flex-col items-center justify-center p-12 text-center border-slate-800 bg-[#0d121d]/40 rounded-2xl">
-              <div className="w-12 h-12 rounded-full bg-slate-800/40 flex items-center justify-center mb-4 text-slate-500">
+            <Card className="flex flex-col items-center justify-center p-12 text-center  bg-[#0d121d]/40 rounded-2xl">
+              <div className="w-12 h-12 rounded-full bg-muted/40 flex items-center justify-center mb-4 text-muted-foreground">
                 <Inbox className="w-6 h-6" />
               </div>
-              <h3 className="text-sm font-semibold text-slate-200 mb-1">No matching logs found</h3>
-              <p className="text-xs text-slate-400 max-w-sm">
+              <h3 className="text-sm font-semibold text-foreground/90 mb-1">No matching logs found</h3>
+              <p className="text-xs text-muted-foreground max-w-sm">
                 {activeFilter === "all" 
                   ? "When real-time alerts or signals are computed, they will pop up and be archived here."
                   : `There are currently no saved notices under the "${activeFilter.replace('_', ' ')}" category.`
@@ -200,13 +267,13 @@ export default function Notifications() {
                   className={cn(
                     "relative group p-4 border rounded-xl transition-all duration-300 cursor-pointer text-left",
                     notif.read
-                      ? "bg-[#0b0e14]/40 border-slate-900/45 hover:border-slate-800/60"
-                      : "bg-[#0d1321]/80 border-purple-500/20 hover:border-purple-500/40 shadow-[0_0_15px_rgba(168,85,247,0.05)]"
+                      ? "bg-[#0b0e14]/40 /45 hover:"
+                      : "bg-[#0d1321]/80 border-primary/20 hover:border-primary/40"
                   )}
                 >
                   {/* Left priority line indicator for unread items */}
                   {!notif.read && (
-                    <div className="absolute top-0 bottom-0 left-0 w-1 bg-purple-500 rounded-l-xl" />
+                    <div className="absolute top-0 bottom-0 left-0 w-1 bg-primary rounded-l-xl" />
                   )}
 
                   <div className="flex items-start gap-3.5">
@@ -232,39 +299,39 @@ export default function Notifications() {
                             {notif.title}
                           </h4>
                         </div>
-                        <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-mono">
-                          <Clock className="w-3 h-3 text-slate-500" />
+                        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-mono">
+                          <Clock className="w-3 h-3 text-muted-foreground" />
                           <span>{formatDistanceToNow(notif.timestamp)}</span>
                         </div>
                       </div>
 
-                      <p className="text-xs text-slate-300 leading-relaxed font-mono">
+                      <p className="text-xs text-foreground/80 leading-relaxed font-mono">
                         {notif.body}
                       </p>
 
                       {/* Display structured metadata if it exists (for maximum professional layout granularity) */}
                       {notif.metadata && (
-                        <div className="mt-3 p-2.5 rounded-lg bg-black/40 border border-white/5 font-mono text-[11px] text-slate-400 space-y-1 w-full max-w-full overflow-x-auto">
+                        <div className="mt-3 p-2.5 rounded-lg bg-muted border border-0 font-mono text-[11px] text-muted-foreground space-y-1 w-full max-w-full overflow-x-auto">
                           {notif.type === "oi_alert" && (
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-left">
-                              <div><span className="text-slate-500">Strike:</span> <span className="font-bold text-slate-300">{notif.metadata.strike}</span></div>
-                              <div><span className="text-slate-500">Option:</span> <span className="font-bold text-slate-200">{notif.metadata.type}</span></div>
-                              <div><span className="text-slate-500">Distance:</span> <span className="text-slate-300">{notif.metadata.distance} pts</span></div>
-                              <div><span className="text-slate-500">Action:</span> <span className="font-bold text-amber-400">{notif.metadata.actionLabel}</span></div>
+                              <div><span className="text-muted-foreground">Strike:</span> <span className="font-bold text-foreground/80">{notif.metadata.strike}</span></div>
+                              <div><span className="text-muted-foreground">Option:</span> <span className="font-bold text-foreground/90">{notif.metadata.type}</span></div>
+                              <div><span className="text-muted-foreground">Distance:</span> <span className="text-foreground/80">{notif.metadata.distance} pts</span></div>
+                              <div><span className="text-muted-foreground">Action:</span> <span className="font-bold text-primary">{notif.metadata.actionLabel}</span></div>
                             </div>
                           )}
                           {notif.type === "divergence" && (
                             <div className="flex items-center gap-4 text-left">
-                              <div><span className="text-slate-500">Timeframe:</span> <span className="text-purple-400 font-bold">{notif.metadata.timeframe}m</span></div>
-                              <div><span className="text-slate-500">Divergence:</span> <span className="text-slate-200 capitalize font-bold">{notif.metadata.divType}</span></div>
+                              <div><span className="text-muted-foreground">Timeframe:</span> <span className="text-primary font-bold">{notif.metadata.timeframe}m</span></div>
+                              <div><span className="text-muted-foreground">Divergence:</span> <span className="text-foreground/90 capitalize font-bold">{notif.metadata.divType}</span></div>
                             </div>
                           )}
                           {notif.type === "order" && (
                             <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-1 text-left">
-                              <div><span className="text-slate-500">Contract:</span> <span className="text-slate-200">{notif.metadata.symbol}</span></div>
-                              <div><span className="text-slate-500">Side:</span> <span className={cn("font-bold", notif.metadata.side === "BUY" ? "text-emerald-400" : "text-rose-400")}>{notif.metadata.side}</span></div>
-                              <div><span className="text-slate-500">Qty:</span> <span className="text-slate-300">{notif.metadata.qty}</span></div>
-                              <div><span className="text-slate-500">Status:</span> <span className="text-emerald-400">Filled ✅</span></div>
+                              <div><span className="text-muted-foreground">Contract:</span> <span className="text-foreground/90">{notif.metadata.symbol}</span></div>
+                              <div><span className="text-muted-foreground">Side:</span> <span className={cn("font-bold", notif.metadata.side === "BUY" ? "text-emerald-400" : "text-rose-400")}>{notif.metadata.side}</span></div>
+                              <div><span className="text-muted-foreground">Qty:</span> <span className="text-foreground/80">{notif.metadata.qty}</span></div>
+                              <div><span className="text-muted-foreground">Status:</span> <span className="text-emerald-400">Filled ✅</span></div>
                             </div>
                           )}
                         </div>

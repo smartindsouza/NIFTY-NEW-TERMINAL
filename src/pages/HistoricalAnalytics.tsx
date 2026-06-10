@@ -18,21 +18,21 @@ export default function HistoricalAnalytics() {
   };
 
   return (
-    <div className="p-4 md:p-8 pb-32 max-w-[1200px] w-full mx-auto space-y-6 animate-in fade-in zoom-in-95 duration-500">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end pb-6 border-b border-white/10 border-dashed gap-4">
+    <div className="p-4 md:p-8 pb-32 max-w-[1600px] w-full mx-auto space-y-6 animate-in fade-in zoom-in-95 duration-500">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end pb-6 border-b border-0 border-dashed gap-4">
         <div>
           <h1 className="text-3xl font-bold text-foreground tracking-tight flex items-center gap-2">
-            <LineChart className="w-8 h-8 text-emerald-500 animate-in" />
+            <LineChart className="w-8 h-8 text-primary animate-in" />
             Historical Index Analytics
           </h1>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-muted-foreground mt-1">
             Browse calculated multi-month volatility cones and standard deviation anchors.
           </p>
         </div>
         <button 
            onClick={handleRefresh}
            disabled={loading}
-           className="flex items-center gap-1.5 bg-[#121824] hover:bg-white/5 border border-white/10 text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-white transition-colors disabled:opacity-50"
+           className="flex items-center gap-1.5 bg-card hover:bg-accent hover:text-accent-foreground border border-0 text-xs px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
         >
            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
            Sync Daily Data
@@ -40,10 +40,10 @@ export default function HistoricalAnalytics() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="bg-[#121824]/60 border-white/5 relative overflow-hidden">
+        <Card className="bg-card border-0 relative overflow-hidden">
           <CardContent className="p-5 space-y-2 pt-4">
              <div className="flex justify-between items-start gap-2">
-                <p className="text-[10px] text-slate-400 uppercase font-semibold">30D Historical Vol.</p>
+                <p className="text-[10px] text-muted-foreground uppercase font-semibold">30D Historical Vol.</p>
                 <MetricSourceBadge 
                    type={getMetricType(data?.data?.historicalVolatility?.hv30)}
                    source="Kite Historical API (NIFTY daily)"
@@ -51,17 +51,17 @@ export default function HistoricalAnalytics() {
                    lastUpdated={data?.timestamp}
                 />
              </div>
-             <p className="text-2xl font-mono font-bold text-white">
+             <p className="text-2xl font-mono font-bold text-foreground">
                 {data?.data?.historicalVolatility?.hv30 ? `${data.data.historicalVolatility.hv30}%` : "—"}
              </p>
-             <p className="text-[9px] text-slate-500">Requires minimum 30 daily candles</p>
+             <p className="text-[9px] text-muted-foreground">Requires minimum 30 daily candles</p>
           </CardContent>
         </Card>
 
-        <Card className="bg-[#121824]/60 border-white/5 relative overflow-hidden">
+        <Card className="bg-card border-0 relative overflow-hidden">
           <CardContent className="p-5 space-y-2 pt-4">
              <div className="flex justify-between items-start gap-2">
-                <p className="text-[10px] text-slate-400 uppercase font-semibold">30D Avg Swing</p>
+                <p className="text-[10px] text-muted-foreground uppercase font-semibold">30D Avg Swing</p>
                 <MetricSourceBadge 
                    type={getMetricType(data?.data?.intradaySwing?.swing30)}
                    source="Kite Historical API (NIFTY OHLC)"
@@ -69,17 +69,17 @@ export default function HistoricalAnalytics() {
                    lastUpdated={data?.timestamp}
                 />
              </div>
-             <p className="text-2xl font-mono font-bold text-white">
+             <p className="text-2xl font-mono font-bold text-foreground">
                 {data?.data?.intradaySwing?.swing30 ? `${data.data.intradaySwing.swing30} pts` : "—"}
              </p>
-             <p className="text-[9px] text-slate-500">Rolling mean intraday volatility</p>
+             <p className="text-[9px] text-muted-foreground">Rolling mean intraday volatility</p>
           </CardContent>
         </Card>
 
-        <Card className="bg-[#121824]/60 border-white/5 relative overflow-hidden">
+        <Card className="bg-card border-0 relative overflow-hidden">
           <CardContent className="p-5 space-y-2 pt-4">
              <div className="flex justify-between items-start gap-2">
-                <p className="text-[10px] text-slate-400 uppercase font-semibold">IV Percentile (IVP)</p>
+                <p className="text-[10px] text-muted-foreground uppercase font-semibold">IV Percentile (IVP)</p>
                 <MetricSourceBadge 
                    type="UNAVAILABLE"
                    source="Local Option Chain Snapshots"
@@ -87,48 +87,48 @@ export default function HistoricalAnalytics() {
                 />
              </div>
              <p className="text-2xl font-mono font-bold text-slate-600">—</p>
-             <p className="text-[9px] text-slate-500 italic">Insufficient real history</p>
+             <p className="text-[9px] text-muted-foreground italic">Insufficient real history</p>
           </CardContent>
         </Card>
 
-        <Card className="bg-[#121824]/60 border-white/5 relative overflow-hidden">
+        <Card className="bg-card border-0 relative overflow-hidden">
           <CardContent className="p-5 space-y-2 pt-4">
              <div className="flex justify-between items-start gap-2">
-                <p className="text-[10px] text-slate-400 uppercase font-semibold">FII Long Ratio</p>
+                <p className="text-[10px] text-muted-foreground uppercase font-semibold">FII Long Ratio</p>
                 <MetricSourceBadge 
                    type={fiiData?.status === "UNAVAILABLE" ? "UNAVAILABLE" : "STORED SNAPSHOT"}
                    source={fiiData?.message}
                 />
              </div>
-             <p className={`text-2xl font-mono font-bold ${fiiData?.status === 'UNAVAILABLE' ? 'text-slate-600' : 'text-white'}`}>
+             <p className={`text-2xl font-mono font-bold ${fiiData?.status === 'UNAVAILABLE' ? 'text-slate-600' : 'text-foreground'}`}>
                 {fiiData?.data?.fiiLongRatio ?? "—"}
              </p>
-             <p className="text-[9px] text-slate-500 italic text-nowrap truncate">{fiiData?.message || 'Daily exchange upload'}</p>
+             <p className="text-[9px] text-muted-foreground italic text-nowrap truncate">{fiiData?.message || 'Daily exchange upload'}</p>
           </CardContent>
         </Card>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="bg-[#121824]/60 border-white/5 md:col-span-2">
+        <Card className="bg-card border-0 md:col-span-2">
           <CardHeader className="flex flex-row justify-between items-center pb-2">
-            <CardTitle className="text-sm font-semibold tracking-wide text-slate-300 flex items-center gap-1.5">
-              <Calendar className="w-4 h-4 text-emerald-400" /> Historical PCR Cones
+            <CardTitle className="text-sm font-semibold tracking-wide text-foreground/80 flex items-center gap-1.5">
+              <Calendar className="w-4 h-4 text-primary" /> Historical PCR Cones
             </CardTitle>
             <MetricSourceBadge type="UNAVAILABLE" source="Rolling Kite Option Chain PCR Dumps" />
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="bg-[#0f1422] p-4 rounded-xl border border-white/5 space-y-3">
-               <div className="text-slate-500 text-xs text-center py-6">
+            <div className="bg-card p-4 rounded-xl border border-0 space-y-3">
+               <div className="text-muted-foreground text-xs text-center py-6">
                   Insufficient real data stored to plot historical cones. No simulated values displayed.
                </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="bg-[#121824]/60 border-white/5">
+        <Card className="bg-card border-0">
           <CardHeader className="flex flex-row justify-between items-center pb-2">
-            <CardTitle className="text-sm font-semibold tracking-wide text-slate-300 flex items-center gap-1.5">
-              <BarChart2 className="w-4 h-4 text-sky-400" /> Standard Deviations
+            <CardTitle className="text-sm font-semibold tracking-wide text-foreground/80 flex items-center gap-1.5">
+              <BarChart2 className="w-4 h-4 text-primary" /> Standard Deviations
             </CardTitle>
             <MetricSourceBadge 
                type={getMetricType(data?.data?.standardDeviation?.weekly1SD)} 
@@ -137,17 +137,17 @@ export default function HistoricalAnalytics() {
             />
           </CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-[11px] text-slate-400 leading-relaxed font-sans mt-0">
+            <p className="text-[11px] text-muted-foreground leading-relaxed font-sans mt-0">
                Dynamically calculated based on the trailing 30-day structural Historical Volatility index.
             </p>
             {data?.data?.standardDeviation?.weekly1SD ? (
                <>
-                  <div className="space-y-1 bg-[#0f1422] p-3 rounded-lg border border-white/5">
-                     <p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">1-SD Weekly Move</p>
+                  <div className="space-y-1 bg-card p-3 rounded-lg border border-0">
+                     <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold">1-SD Weekly Move</p>
                      <p className="text-xs font-bold text-emerald-400 font-mono">± {data.data.standardDeviation.weekly1SD} points</p>
                   </div>
-                  <div className="space-y-1 bg-[#0f1422] p-3 rounded-lg border border-white/5">
-                     <p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">2-SD Monthly Move</p>
+                  <div className="space-y-1 bg-card p-3 rounded-lg border border-0">
+                     <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold">2-SD Monthly Move</p>
                      <p className="text-xs font-bold text-emerald-400 font-mono">± {data.data.standardDeviation.monthly2SD} points</p>
                   </div>
                </>

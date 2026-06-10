@@ -16,7 +16,7 @@ export function MetricSourceBadge({ type, lastUpdated, source, formula }: Metric
 
   switch (type) {
     case "LIVE":
-      color = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+      color = "bg-primary/10 text-primary border-primary/20";
       icon = <Activity className="w-3 h-3 mr-1" />;
       break;
     case "CALCULATED":
@@ -32,7 +32,7 @@ export function MetricSourceBadge({ type, lastUpdated, source, formula }: Metric
       icon = <Brain className="w-3 h-3 mr-1" />;
       break;
     case "LOCAL RULES":
-      color = "bg-amber-500/10 text-amber-500 border-amber-500/20";
+      color = "bg-primary/10 text-primary border-primary/20";
       icon = <Activity className="w-3 h-3 mr-1" />;
       break;
     case "UNAVAILABLE":
@@ -51,23 +51,23 @@ export function MetricSourceBadge({ type, lastUpdated, source, formula }: Metric
       
       {/* Tooltip for Data Lineage */}
       {(lastUpdated || source || formula) && (
-        <div className="absolute top-full left-0 mt-2 z-50 hidden group-hover:block w-64 bg-[#0f1422] border border-white/10 rounded-lg p-3 shadow-xl pointer-events-none">
-          <p className="text-[10px] uppercase text-slate-400 font-bold mb-2">Data Lineage</p>
+        <div className="absolute top-full left-0 mt-2 z-50 hidden group-hover:block w-64 bg-card border border-0 rounded-lg p-3 pointer-events-none">
+          <p className="text-[10px] uppercase text-muted-foreground font-bold mb-2">Data Lineage</p>
           {source && (
-            <div className="mb-1 text-slate-300">
-              <span className="text-slate-500 text-[10px]">Source: </span>
+            <div className="mb-1 text-foreground/80">
+              <span className="text-muted-foreground text-[10px]">Source: </span>
               <span className="text-[11px] font-mono">{source}</span>
             </div>
           )}
           {formula && (
-            <div className="mb-1 text-slate-300">
-              <span className="text-slate-500 text-[10px]">Formula: </span>
+            <div className="mb-1 text-foreground/80">
+              <span className="text-muted-foreground text-[10px]">Formula: </span>
               <span className="text-[11px] font-mono">{formula}</span>
             </div>
           )}
           {lastUpdated && (
-            <div className="text-slate-300">
-              <span className="text-slate-500 text-[10px]">Last Updated: </span>
+            <div className="text-foreground/80">
+              <span className="text-muted-foreground text-[10px]">Last Updated: </span>
               <span className="text-[11px] font-mono">{lastUpdated}</span>
             </div>
           )}

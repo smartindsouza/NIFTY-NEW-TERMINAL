@@ -3,13 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { Route, Switch } from 'wouter';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Header } from './components/Header';
+import { ActivePositions } from './components/ActivePositions';
 import { Toaster } from '@/components/ui/sonner';
 import { DiagnosticsPanel } from './components/DiagnosticsPanel';
 import { Cpu } from 'lucide-react';
+import { useUserSettings } from './hooks/useUserSettings';
 
 // Lazy load all terminal pages & tabs to maximize performance & reduce bundle size
 const Dashboard = lazy(() => import('./pages/Dashboard').then(module => ({ default: module.Dashboard })));
@@ -34,7 +36,6 @@ const queryClient = new QueryClient({
       staleTime: 30000,
       gcTime: 600000,
       retry: (failureCount, error: any) => {
-        // Stop retrying if wait too long, but allow up to 6 retries for 429
         if (error?.response?.status === 429 || error?.message?.includes("429") || error?.status === 429) {
           return failureCount < 6;
         }
@@ -42,8 +43,7 @@ const queryClient = new QueryClient({
       },
       retryDelay: (attemptIndex, error: any) => {
         if (error?.response?.status === 429 || error?.message?.includes("429") || error?.status === 429) {
-          // Exponential backoff
-          return Math.min(1000 * 2 ** attemptIndex, 60000); // Max 60 seconds
+          return Math.min(1000 * 2 ** attemptIndex, 60000);
         }
         return Math.min(1000 * 2 ** attemptIndex, 30000);
       },
@@ -64,12 +64,64 @@ function TerminalLoader() {
 
 export default function App() {
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const { settings } = useUserSettings();
+
+  useEffect(() => {
+    document.documentElement.classList.remove('dark', 'light');
+    document.documentElement.classList.add(settings.appTheme);
+  }, [settings.appTheme]);
+
+  useEffect(() => {
+    if (settings.customFontUrl) {
+      const style = document.createElement('style');
+      style.id = 'custom-user-font';
+      style.innerHTML = `
+        @font-face {
+          font-family: 'UserCustomFont';
+          src: url('${settings.customFontUrl}');
+          font-display: swap;
+        }
+        body, html, * {
+          font-family: 'UserCustomFont', sans-serif !important;
+        }
+      `;
+      document.head.appendChild(style);
+      return () => {
+        if (style.parentNode) style.parentNode.removeChild(style);
+      };
+    }
+  }, [settings.customFontUrl]);
 
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="flex flex-col bg-background text-foreground min-h-screen selection:bg-primary/30 font-sans dark custom-scrollbar p-4 md:p-6 lg:p-8 gap-4 relative">
+      <div className={`flex flex-col bg-background text-foreground min-h-screen selection:bg-primary/30 font-sans custom-scrollbar relative ${settings.appTheme}`}>
+        <style>{`
+          .dark {
+            --primary: ${settings.accentColor};
+            --chart-1: ${settings.accentColor};
+            --sidebar-primary: ${settings.accentColor};
+            --ring: ${settings.accentColor}80;
+          }
+          :root {
+            --primary: ${settings.accentColor};
+            --chart-1: ${settings.accentColor};
+            --sidebar-primary: ${settings.accentColor};
+            --ring: ${settings.accentColor}80;
+          }
+          ${settings.customFontUrl ? `
+          @font-face {
+            font-family: 'AppCustomFont';
+            src: url('${settings.customFontUrl}');
+            font-display: swap;
+          }
+          html, body, .font-sans, .mdx-prose * {
+            font-family: 'AppCustomFont', sans-serif !important;
+          }
+          ` : ''}
+        `}</style>
         <Header />
-        <main className="flex-1 overflow-y-auto w-full relative bg-transparent pt-24 md:pt-28 pb-12">
+        <main className="flex-1 overflow-y-auto w-full relative bg-transparent pl-[80px] pt-6 md:pt-8 pb-12 pr-4 md:pr-6 lg:pr-8">
+          <ActivePositions />
           <Suspense fallback={<TerminalLoader />}>
             <Switch>
               <Route path="/" component={Dashboard} />
@@ -94,10 +146,10 @@ export default function App() {
         {/* Global floating telemetry toggle button */}
         <button
           onClick={() => setShowDiagnostics(!showDiagnostics)}
-          className={`fixed bottom-6 right-6 z-50 p-3.5 rounded-full shadow-2xl border transition-all duration-300 flex items-center justify-center cursor-pointer ${
+          className={`fixed bottom-6 right-6 z-50 p-3.5 rounded-full border transition-all duration-300 flex items-center justify-center cursor-pointer ${
             showDiagnostics 
               ? 'bg-emerald-500 text-black border-emerald-400 hover:bg-emerald-400' 
-              : 'bg-[#121824] text-slate-300 border-white/10 hover:text-white hover:bg-white/5'
+              : 'bg-card text-foreground/80 border-0 hover:text-foreground hover:bg-accent hover:text-accent-foreground'
           }`}
           title="Toggle Terminal Diagnostics"
         >
@@ -106,7 +158,7 @@ export default function App() {
 
         {/* Floating live diagnostics view */}
         {showDiagnostics && (
-          <div className="fixed bottom-20 right-6 z-50 w-80 md:w-96 max-h-[70vh] overflow-y-auto animate-in slide-in-from-bottom-5 duration-300 rounded-2xl shadow-2xl">
+          <div className="fixed bottom-20 right-6 z-50 w-80 md:w-96 max-h-[70vh] overflow-y-auto animate-in slide-in-from-bottom-5 duration-300 rounded-2xl ">
             <DiagnosticsPanel />
           </div>
         )}

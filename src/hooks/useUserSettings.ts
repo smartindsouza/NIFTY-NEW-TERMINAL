@@ -1,12 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 export interface UserSettings {
   soundAlerts: boolean;
   desktopNotifications: boolean;
-  refreshInterval: number; // in milliseconds, e.g., 5000, 10000, 30000
+  refreshInterval: number;
   chartTheme: 'cosmic' | 'neon' | 'monochrome';
-  strikeBuffer: number; // number of strike prices to load
-  highFpsMode: boolean; // toggle fancy transitions for fast renders
+  appTheme: 'dark' | 'light';
+  accentColor: string;
+  customFontUrl: string;
+  strikeBuffer: number;
+  highFpsMode: boolean;
 }
 
 const DEFAULT_SETTINGS: UserSettings = {
@@ -14,43 +17,60 @@ const DEFAULT_SETTINGS: UserSettings = {
   desktopNotifications: false,
   refreshInterval: 10000,
   chartTheme: 'cosmic',
+  appTheme: 'dark',
+  accentColor: '#a855f7',
+  customFontUrl: '',
   strikeBuffer: 5,
   highFpsMode: true,
 };
 
+// Global state mechanism
+let globalSettings: UserSettings = { ...DEFAULT_SETTINGS };
+const listeners = new Set<() => void>();
+
+try {
+  const stored = localStorage.getItem("quant_terminal_settings");
+  if (stored) {
+    globalSettings = { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
+  }
+} catch (e) {
+  console.warn("Could not load user settings from local storage:", e);
+}
+
+function dispatchChange() {
+  listeners.forEach((listener) => listener());
+}
+
 export function useUserSettings() {
-  const [settings, setSettings] = useState<UserSettings>(() => {
+  const [settings, setSettings] = useState<UserSettings>(globalSettings);
+
+  useEffect(() => {
+    const listener = () => setSettings(globalSettings);
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }, []);
+
+  const updateSetting = useCallback(<K extends keyof UserSettings>(key: K, value: UserSettings[K]) => {
+    globalSettings = { ...globalSettings, [key]: value };
     try {
-      const stored = localStorage.getItem("quant_terminal_settings");
-      if (stored) {
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
-      }
+      localStorage.setItem("quant_terminal_settings", JSON.stringify(globalSettings));
     } catch (e) {
-      console.warn("Could not load user settings from local storage:", e);
+      console.error("Failed saving settings to local storage:", e);
     }
-    return DEFAULT_SETTINGS;
-  });
+    dispatchChange();
+  }, []);
 
-  const updateSetting = <K extends keyof UserSettings>(key: K, value: UserSettings[K]) => {
-    setSettings((prev) => {
-      const updated = { ...prev, [key]: value };
-      try {
-        localStorage.setItem("quant_terminal_settings", JSON.stringify(updated));
-      } catch (e) {
-        console.error("Failed saving settings to local storage:", e);
-      }
-      return updated;
-    });
-  };
-
-  const resetSettings = () => {
-    setSettings(DEFAULT_SETTINGS);
+  const resetSettings = useCallback(() => {
+    globalSettings = { ...DEFAULT_SETTINGS };
     try {
-      localStorage.setItem("quant_terminal_settings", JSON.stringify(DEFAULT_SETTINGS));
+      localStorage.setItem("quant_terminal_settings", JSON.stringify(globalSettings));
     } catch (e) {
       console.error("Failed resetting settings:", e);
     }
-  };
+    dispatchChange();
+  }, []);
 
   return {
     settings,

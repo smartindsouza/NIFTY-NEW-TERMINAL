@@ -80,41 +80,41 @@ export function News() {
     : [];
 
   return (
-    <div className="p-4 md:p-8 pb-32 max-w-[1200px] w-full mx-auto animate-in fade-in zoom-in-95 duration-500">
+    <div className="p-4 md:p-8 pb-32 max-w-[1600px] w-full mx-auto animate-in fade-in zoom-in-95 duration-500">
       {/* Header and Controls */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end pb-6 border-b border-white/10 border-dashed mb-8 gap-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end pb-6 border-b border-0 border-dashed mb-8 gap-4">
         <div className="w-full">
           <div className="flex items-center gap-2 mb-1">
             <div className="p-1.5 bg-rose-500/10 rounded">
               <Newspaper className="w-5 h-5 text-rose-500" />
             </div>
-            <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight">
+            <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight">
               High-Impact Market Intel
             </h1>
           </div>
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-muted-foreground">
             Deduplicated, professional feeds filtered strictly of yesterday & today’s events. Only items with Impact &gt;= 60 are displayed.
           </p>
 
           {aiStatus && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-slate-400 mt-4 pt-3 border-t border-white/5">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground mt-4 pt-3 border-t border-0">
               <div className="flex items-center gap-1.5">
                 <span className={cn(
                   "inline-block w-2 h-2 rounded-full",
-                  aiStatus.success ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]" : "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)]"
+                  aiStatus.success ? "bg-green-500" : "bg-primary"
                 )} />
-                <span className="font-semibold text-slate-200">
+                <span className="font-semibold text-foreground/90">
                   {aiStatus.success ? "AI Analysis: Gemini" : "AI Analysis: Local Fallback"}
                 </span>
               </div>
               <span className="text-slate-600 hidden sm:inline">|</span>
-              <span className="text-slate-400">
-                Gemini Articles: <span className="font-mono text-slate-200 font-bold">{aiStatus.geminiCount}</span> &nbsp;•&nbsp; Local: <span className="font-mono text-slate-200 font-bold">{aiStatus.localCount}</span>
+              <span className="text-muted-foreground">
+                Gemini Articles: <span className="font-mono text-foreground/90 font-bold">{aiStatus.geminiCount}</span> &nbsp;•&nbsp; Local: <span className="font-mono text-foreground/90 font-bold">{aiStatus.localCount}</span>
               </span>
               {aiStatus.lastSuccessTime && (
                 <>
                   <span className="text-slate-600 hidden sm:inline">|</span>
-                  <span className="text-slate-400">
+                  <span className="text-muted-foreground">
                     Last Success: <span className="text-emerald-400 font-mono">{new Date(aiStatus.lastSuccessTime).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
                   </span>
                 </>
@@ -122,7 +122,7 @@ export function News() {
               {aiStatus.fallbackReason && (
                 <>
                   <span className="text-slate-600 hidden lg:inline">|</span>
-                  <span className="text-amber-400/80 italic font-mono text-[11px] max-w-md truncate" title={aiStatus.fallbackReason}>
+                  <span className="text-primary/80 italic font-mono text-[11px] max-w-md truncate" title={aiStatus.fallbackReason}>
                     Fallback: {aiStatus.fallbackReason}
                   </span>
                 </>
@@ -134,7 +134,7 @@ export function News() {
         <button
           onClick={() => refetch()}
           disabled={isLoading || isRefetching}
-          className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium border border-white/10 hover:border-white/20 rounded bg-white/[0.02] hover:bg-white/[0.05] text-slate-300 hover:text-white transition-all disabled:opacity-50 cursor-pointer text-nowrap"
+          className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium border border-0 hover:border-0 rounded bg-white/[0.02] hover:bg-white/[0.05] text-foreground/80 hover:text-foreground transition-all disabled:opacity-50 cursor-pointer text-nowrap"
         >
           <RefreshCw className={cn("w-3.5 h-3.5", (isLoading || isRefetching) && "animate-spin")} />
           {isRefetching ? 'Refreshing...' : 'Sync Feeds'}
@@ -142,8 +142,8 @@ export function News() {
       </div>
 
       {/* Category Navigation Ribbon */}
-      <div className="flex flex-wrap items-center gap-1.5 pb-6 border-b border-white/5 mb-8">
-        <div className="flex items-center gap-1.5 text-slate-400 mr-2 text-xs">
+      <div className="flex flex-wrap items-center gap-1.5 pb-6 border-b border-0 mb-8">
+        <div className="flex items-center gap-1.5 text-muted-foreground mr-2 text-xs">
           <SlidersHorizontal className="w-3.5 h-3.5" />
           <span>Filters:</span>
         </div>
@@ -154,8 +154,12 @@ export function News() {
             className={cn(
               "px-3 py-1.5 text-xs rounded font-medium border cursor-pointer transition-all duration-200",
               activeFilter === tab
-                ? "bg-white text-black border-white shadow-sm"
-                : "bg-[#16171d] text-slate-400 border-white/5 hover:border-white/10 hover:text-slate-200"
+                ? tab === 'India Market'
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-white text-black border-white"
+                : tab === 'India Market'
+                  ? "bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20"
+                  : "bg-card text-muted-foreground border-0 hover:border-0 hover:text-foreground/90"
             )}
           >
             {tab}
@@ -168,38 +172,38 @@ export function News() {
         {isLoading && (
           <div className="flex flex-col items-center justify-center p-20 gap-3">
             <Loader2 className="w-8 h-8 animate-spin text-rose-500" />
-            <p className="text-sm text-slate-400 animate-pulse">Aggregating and deduplicating financial feeds...</p>
+            <p className="text-sm text-muted-foreground animate-pulse">Aggregating and deduplicating financial feeds...</p>
           </div>
         )}
 
         {error && (
           <div className="text-center p-8 border border-red-500/20 rounded-xl bg-red-500/5 max-w-md mx-auto">
             <AlertTriangle className="w-8 h-8 text-red-500 mx-auto mb-2" />
-            <p className="text-sm font-medium text-white">Error fetching intel</p>
-            <p className="text-xs text-slate-400 mt-1">{(error as any).message || 'Server returned an error.'}</p>
+            <p className="text-sm font-medium text-foreground">Error fetching intel</p>
+            <p className="text-xs text-muted-foreground mt-1">{(error as any).message || 'Server returned an error.'}</p>
           </div>
         )}
 
         {/* Empty States */}
         {!isLoading && !error && (!news || news.length === 0) && (
-          <div className="text-center p-16 border border-dashed border-white/10 rounded-xl bg-white/[0.01]">
-            <Newspaper className="w-10 h-10 text-slate-500 mx-auto mb-3 opacity-40" />
-            <p className="text-slate-200 font-medium text-sm">
+          <div className="text-center p-16 border border-dashed border-0 rounded-xl bg-white/[0.01]">
+            <Newspaper className="w-10 h-10 text-muted-foreground mx-auto mb-3 opacity-40" />
+            <p className="text-foreground/90 font-medium text-sm">
               No high-impact NIFTY-relevant news from today/yesterday.
             </p>
-            <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+            <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
               Checking moneycontrol, ET, mint, and reuters feeds continually. No events rated above 60 impact score are logged today yet.
             </p>
           </div>
         )}
 
         {!isLoading && !error && news && news.length > 0 && filteredNews.length === 0 && (
-          <div className="text-center p-16 border border-dashed border-white/10 rounded-xl bg-white/[0.01]">
-            <SlidersHorizontal className="w-8 h-8 text-slate-500 mx-auto mb-3 opacity-40" />
-            <p className="text-slate-300 font-medium text-sm">
+          <div className="text-center p-16 border border-dashed border-0 rounded-xl bg-white/[0.01]">
+            <SlidersHorizontal className="w-8 h-8 text-muted-foreground mx-auto mb-3 opacity-40" />
+            <p className="text-foreground/80 font-medium text-sm">
               No news items fell under the &apos;{activeFilter}&apos; category today.
             </p>
-            <p className="text-xs text-slate-500 mt-1">
+            <p className="text-xs text-muted-foreground mt-1">
               Refine your filter selection or click &quot;Sync Feeds&quot; to fetch recently published events.
             </p>
           </div>
@@ -214,31 +218,29 @@ export function News() {
               key={item.id}
               onClick={() => window.open(item.link || '#', '_blank')}
               className={cn(
-                "p-5 md:p-6 border-white/5 rounded-xl transition-all duration-300 cursor-pointer hover:bg-white/[0.03] group flex flex-col gap-4 bg-[#111217]",
+                "p-5 md:p-6 border-0 rounded-xl transition-all duration-300 cursor-pointer hover:bg-white/[0.03] group flex flex-col gap-4 bg-card",
                 isExtremeImpact 
-                  ? "border-rose-500/20 bg-rose-500/[0.01] shadow-[0_4px_24px_-4px_rgba(244,63,94,0.04)]" 
-                  : "hover:border-white/10"
+                  ? "border-rose-500/20 bg-rose-500/[0.01] -4px_rgba(244,63,94,0.04)]" 
+                  : "hover:border-0"
               )}
             >
               {/* Card Meta Row */}
               <div className="flex flex-wrap items-center justify-between gap-2.5">
-                <div className="flex items-center gap-2.5 text-xs text-slate-400">
-                  <span className="font-semibold text-slate-300 uppercase text-[10px] tracking-wide px-2 py-0.5 rounded bg-white/5">
+                <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
+                  <span className="font-semibold text-foreground/80 uppercase text-[10px] tracking-wide px-2 py-0.5 rounded bg-white/5">
                     {item.source}
                   </span>
                   
                   <div className="flex items-center gap-1 text-[11px]">
-                    <Clock className="w-3.5 h-3.5 text-slate-500" />
+                    <Clock className="w-3.5 h-3.5 text-muted-foreground" />
                     <span>{item.timeIST}</span>
                   </div>
 
                   <span className={cn(
-                    "px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider",
-                    item.category === 'Geopolitical' && "bg-amber-500/10 text-amber-500 border border-amber-500/10",
-                    item.category === 'Global Macro' && "bg-cyan-500/10 text-cyan-500 border border-cyan-500/10",
-                    item.category === 'NIFTY Companies' && "bg-teal-500/10 text-teal-400 border border-teal-500/10",
-                    item.category === 'Sector' && "bg-emerald-500/10 text-emerald-500 border border-emerald-500/10",
-                    item.category === 'India Market' && "bg-rose-500/10 text-rose-500 border border-rose-500/10"
+                    "px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider transition-colors",
+                    item.category === 'India Market'
+                      ? "bg-primary/15 text-primary border border-primary/30 font-bold"
+                      : "bg-white/5 text-muted-foreground border border-white/5"
                   )}>
                     {item.category}
                   </span>
@@ -254,22 +256,22 @@ export function News() {
                   )}
 
                   {item.sentiment === 'bullish' && (
-                    <span className="flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-sm shadow-emerald-500/5">
+                    <span className="flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20  -500/5">
                       <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
                       <span>BULLISH</span>
                     </span>
                   )}
 
                   {item.sentiment === 'bearish' && (
-                    <span className="flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 shadow-sm shadow-rose-500/5">
+                    <span className="flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold rounded bg-rose-500/10 text-rose-400 border border-rose-500/20  -500/5">
                       <TrendingDown className="w-3.5 h-3.5 text-rose-400" />
                       <span>BEARISH</span>
                     </span>
                   )}
 
                   {item.sentiment === 'neutral' && (
-                    <span className="flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold rounded bg-slate-500/10 text-slate-400 border border-slate-500/10">
-                      <Minus className="w-3.5 h-3.5 text-slate-400" />
+                    <span className="flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold rounded bg-primary/10 text-primary border border-primary/20">
+                      <Minus className="w-3.5 h-3.5 text-primary" />
                       <span>NEUTRAL</span>
                     </span>
                   )}
@@ -280,42 +282,42 @@ export function News() {
                       "font-mono text-xs font-semibold px-2.5 py-0.5 border flex items-center gap-1",
                       isExtremeImpact
                         ? "bg-rose-950/20 text-rose-400 border-rose-500/30"
-                        : "bg-slate-950/40 text-slate-300 border-white/10"
+                        : "bg-background/40 text-foreground/80 border-0"
                     )}
                   >
                     <span>Impact:</span>
-                    <span className="font-bold text-white">{item.impactScore}</span>
+                    <span className="font-bold text-foreground">{item.impactScore}</span>
                   </Badge>
                 </div>
               </div>
 
               {/* Headline */}
               <div className="space-y-2">
-                <h3 className="text-base md:text-lg font-medium text-white leading-snug group-hover:text-rose-400/90 transition-colors">
+                <h3 className="text-base md:text-lg font-medium text-foreground leading-snug group-hover:text-primary transition-colors">
                   {item.headline}
                 </h3>
               </div>
 
               {/* Rationale Divider Box (WHY THIS MATTERS FOR NIFTY) */}
-              <div className="p-3.5 bg-white/[0.02] border border-white/5 rounded-lg flex items-start gap-2.5 text-xs">
-                <div className="p-1 rounded bg-slate-400/10 text-slate-300 shrink-0 mt-0.5">
+              <div className="p-3.5 bg-white/[0.02] border border-0 rounded-lg flex items-start gap-2.5 text-xs">
+                <div className="p-1 rounded bg-slate-400/10 text-foreground/80 shrink-0 mt-0.5">
                   <Info className="w-3.5 h-3.5" />
                 </div>
                 <div>
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">
+                  <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-0.5">
                     Why this matters for NIFTY
                   </div>
-                  <p className="text-slate-300 font-normal leading-relaxed">
+                  <p className="text-foreground/80 font-normal leading-relaxed">
                     {item.whyItMatters}
                   </p>
                 </div>
               </div>
 
               {/* Bottom footer bar containing outbound links */}
-              <div className="flex items-center justify-end text-xs text-slate-500 mt-2">
-                <div className="flex items-center gap-1 text-[11px] group-hover:text-white transition-colors">
+              <div className="flex items-center justify-end text-xs text-muted-foreground mt-2">
+                <div className="flex items-center gap-1 text-[11px] group-hover:text-foreground transition-colors">
                   <span>Explore full coverage</span>
-                  <ExternalLink className="w-3.2 h-3.2 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
+                  <ExternalLink className="w-3.2 h-3.2 text-muted-foreground group-hover:translate-x-0.5 transition-transform" />
                 </div>
               </div>
             </Card>

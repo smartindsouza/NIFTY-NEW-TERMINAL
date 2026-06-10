@@ -429,8 +429,8 @@ async function fetchAndProcessNewsFromSources(): Promise<NewsItem[]> {
       return [];
     }
 
-    // Sort by impact score dynamically
-    filteredCandidates.sort((a, b) => b.impactScore - a.impactScore);
+    // Sort by date dynamically
+    filteredCandidates.sort((a, b) => b.parsedDate.getTime() - a.parsedDate.getTime());
 
     // Try premium Gemini API enhancer if key is available
     const ai = getAi();

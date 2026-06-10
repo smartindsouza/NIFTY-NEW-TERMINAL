@@ -12,16 +12,12 @@ import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, se
 import { getHistoricalAnalytics } from './server/analytics_service';
 import { getFiiData } from './server/fii_service';
 import { evaluateQuantSignals } from './server/quant_engine';
+import { generateGamePlan } from './server/game_plan_service';
 
 import { getLiveNews, rateLimitMiddleware, currentAIStatus } from './server/news_service';
 
-// Railway (and most hosts) inject the port to listen on via the PORT env var.
-// Fall back to 3000 for local development.
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 
-// Store the session DB in a configurable directory so it can live on a
-// persistent volume in production (KITE_DATA_DIR=/data). Defaults to the
-// current folder for local dev / AI Studio.
 const KITE_DATA_DIR = process.env.KITE_DATA_DIR || '.';
 const db = new Database(`${KITE_DATA_DIR}/kite_session.db`);
 db.pragma('journal_mode = WAL');
@@ -101,7 +97,13 @@ async function refreshData() {
   try {
     latestChainData = await getLiveOptionChain('NSE:NIFTY 50');
     if (latestChainData) {
-      latestSpot = latestChainData.spot;
+      if (latestChainData.isMock) {
+        // Random walk for mock data so candlesticks aren't flat
+        latestSpot = latestSpot + (Math.random() * 6 - 3);
+        latestChainData.spot = latestSpot;
+      } else {
+        latestSpot = latestChainData.spot;
+      }
       latestAnalytics = computeAnalytics(latestChainData);
     }
   } catch (e) {
@@ -150,6 +152,16 @@ refreshData();
   // Example API routes
   app.get('/api/healthz', (req, res) => {
     res.json({ status: "ok" });
+  });
+
+  app.get('/api/server-ip', async (req, res) => {
+    try {
+      const ipRes = await fetch("https://api.ipify.org?format=json");
+      const ipObj = await ipRes.json() as any;
+      res.json({ ip: ipObj?.ip || "unknown" });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to fetch server IP", details: err.message });
+    }
   });
 
   app.get('/api/diagnostics', (req, res) => {
@@ -226,6 +238,20 @@ refreshData();
     res.json(signals);
   });
 
+  app.post('/api/generate-game-plan', express.json(), async (req, res) => {
+    try {
+      const { alerts } = req.body;
+      if (!alerts || !Array.isArray(alerts)) {
+        return res.status(400).json({ error: "Invalid alerts array" });
+      }
+      const plan = await generateGamePlan(alerts);
+      res.json({ gamePlan: plan });
+    } catch (err: any) {
+      console.error("Error generating game plan:", err);
+      res.status(500).json({ error: err.message || "Internal server error" });
+    }
+  });
+
   app.get('/api/fii-dii', async (req, res) => {
     const fiiData = await getFiiData();
     res.json(fiiData);
@@ -258,15 +284,19 @@ refreshData();
         return res.status(400).json({ success: false, error: "Missing tradingsymbol or quantity" });
       }
 
-      const payloadObj = {
+      const payloadObj: any = {
         exchange: exchange || "NFO",
         tradingsymbol: tradingsymbol,
         transaction_type: action,
         quantity: parseInt(quantity, 10),
         product: product || "MIS",
         order_type: order_type || "MARKET",
-        price: price ? parseFloat(price) : undefined
+        validity: "DAY"
       };
+
+      if (payloadObj.order_type === "LIMIT" && price) {
+          payloadObj.price = parseFloat(price);
+      }
 
       console.log(`[Order API] POST /api/orders request payload:`, JSON.stringify(req.body));
       console.log(`[Order API] Built Kite place_order payload:`, JSON.stringify(payloadObj));
@@ -308,9 +338,42 @@ refreshData();
           return res.json(responsePayload);
         } catch (kiteErr: any) {
           console.error("[Order API] Kite error placing order:", kiteErr);
-          const errorResponse = { success: false, error: kiteErr.message || "Kite failed to place order", isKiteError: true, kiteDetails: kiteErr };
-          console.log(`[Order API] POST /api/orders error response:`, JSON.stringify(errorResponse));
-          return res.status(500).json(errorResponse);
+          
+          const errMsg = kiteErr.message || "";
+          // Check if this is an IP restriction, permission exception, or other blocking error
+          const isIPPermissionError = errMsg.includes("No IPs configured") || 
+                                      errMsg.includes("PermissionException") || 
+                                      (kiteErr.status === "error" && kiteErr.error_type === "PermissionException") ||
+                                      (kiteErr.kiteDetails && kiteErr.kiteDetails.error_type === "PermissionException");
+          
+          const isMarketClosed = errMsg.includes("closed") || errMsg.includes("Market is closed");
+          
+          let serverIp = "unknown";
+          try {
+            const ipRes = await fetch("https://api.ipify.org?format=json");
+            const ipObj = await ipRes.json() as any;
+            if (ipObj && ipObj.ip) {
+              serverIp = ipObj.ip;
+            }
+          } catch (ipErr) {
+            console.warn("Could not fetch server public IP:", ipErr);
+          }
+
+          let enhancedError = errMsg;
+          if (isIPPermissionError) {
+            enhancedError = `No IPs configured: Please whitelist this server's public IP (${serverIp}) in your Kite Developer Console to place real trades. (Detail: ${errMsg})`;
+          } else if (isMarketClosed) {
+            enhancedError = `Market Closed: Could not place order on exchange. (Detail: ${errMsg})`;
+          }
+
+          const responsePayload = {
+            success: false,
+            error: enhancedError,
+            publicIp: serverIp,
+            message: enhancedError
+          };
+          console.log(`[Order API] POST /api/orders failed:`, JSON.stringify(responsePayload));
+          return res.status(400).json(responsePayload);
         }
       } else {
         // Simulated execution
@@ -335,11 +398,21 @@ refreshData();
   });
 
   app.get('/api/auth/status', (req, res) => {
-    const row = db.prepare('SELECT * FROM kite_tokens ORDER BY id DESC LIMIT 1').get() as any;
-    if (row && row.token_date === new Date().toISOString().split('T')[0]) {
-      res.json({ status: 'connected' });
-    } else {
-      res.json({ status: 'disconnected', loginUrl: getKiteLoginUrl() });
+    try {
+      const row = db.prepare('SELECT * FROM kite_tokens ORDER BY id DESC LIMIT 1').get() as any;
+      if (row) {
+        if (row.access_token === 'simulated_session_token') {
+          return res.json({ status: 'connected', simulated: true });
+        }
+        const today = new Date().toISOString().split('T')[0];
+        if (row.token_date === today) {
+          return res.json({ status: 'connected', simulated: false });
+        }
+      }
+      return res.json({ status: 'disconnected', loginUrl: getKiteLoginUrl() });
+    } catch (e: any) {
+      console.error("Error reading auth status:", e);
+      return res.json({ status: 'disconnected', error: e.message, loginUrl: getKiteLoginUrl() });
     }
   });
 
@@ -464,25 +537,61 @@ refreshData();
 
 
   app.get('/api/auth/callback', async (req, res) => {
-    const { request_token } = req.query;
-    if (typeof request_token === 'string') {
-      const token = await generateSession(request_token);
-      if (token) {
-        return res.redirect('/kite-login?status=success');
+    try {
+      const { request_token } = req.query;
+      if (typeof request_token === 'string') {
+        const token = await generateSession(request_token);
+        if (token) {
+          return res.redirect('/kite-login?status=success');
+        }
       }
+      return res.redirect('/kite-login?status=error&message=No+token+received');
+    } catch (err: any) {
+      console.error("Error in GET /api/auth/callback:", err);
+      return res.redirect(`/kite-login?status=error&message=${encodeURIComponent(err.message || "Failed to authenticate with Zerodha Kite API")}`);
     }
-    res.status(400).send("Login failed or missing request_token");
   });
 
   app.post('/api/auth/manual', express.json(), async (req, res) => {
-    const { request_token } = req.body;
-    if (typeof request_token === 'string') {
+    try {
+      const { request_token } = req.body;
+      if (!request_token || typeof request_token !== 'string') {
+        return res.status(400).json({ success: false, error: "Request token is missing or invalid" });
+      }
+      
       const token = await generateSession(request_token);
       if (token) {
         return res.json({ success: true });
+      } else {
+        return res.status(400).json({ success: false, error: "Kite returned an empty session. Please verify your API key and secret are correct and valid." });
       }
+    } catch (err: any) {
+      console.error("Error in POST /api/auth/manual:", err);
+      return res.status(400).json({ success: false, error: err.message || "Failed to authenticate with Zerodha Kite." });
     }
-    res.status(400).json({ success: false, error: "Invalid request token or keys missing" });
+  });
+
+  app.post('/api/auth/simulate', (req, res) => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      // Clean up previous tokens
+      db.prepare('DELETE FROM kite_tokens').run();
+      db.prepare('INSERT INTO kite_tokens (access_token, token_date) VALUES (?, ?)').run('simulated_session_token', today);
+      res.json({ success: true, message: "Simulated sandbox session activated." });
+    } catch (err: any) {
+      console.error("Error activating simulation:", err);
+      res.status(500).json({ error: err.message || "Failed to activate simulated session" });
+    }
+  });
+
+  app.post('/api/auth/disconnect', (req, res) => {
+    try {
+      db.prepare('DELETE FROM kite_tokens').run();
+      res.json({ success: true, message: "Disconnected successfully." });
+    } catch (err: any) {
+      console.error("Error disconnecting:", err);
+      res.status(500).json({ error: err.message || "Failed to disconnect session" });
+    }
   });
 
   // Vite middleware for development

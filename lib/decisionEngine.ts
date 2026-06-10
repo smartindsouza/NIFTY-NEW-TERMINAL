@@ -1,3 +1,18 @@
+export function getCandleOiSentiment(currentClose: number, prevClose: number, currentOi: number, prevOi: number): string {
+  const priceUp = currentClose > prevClose;
+  const priceDown = currentClose < prevClose;
+  const oiUp = currentOi > prevOi;
+  const oiDown = currentOi < prevOi;
+  
+  if (currentClose === prevClose || currentOi === prevOi) return 'NEUTRAL';
+  if (priceUp && oiUp) return 'LONG BUILDUP';
+  if (priceDown && oiUp) return 'SHORT BUILDUP';
+  if (priceDown && oiDown) return 'LONG UNWINDING';
+  if (priceUp && oiDown) return 'SHORT COVERING';
+  
+  return 'NEUTRAL';
+}
+
 export function computeMasterSignal(analytics: any, taData: any, fiiDiiData: any) {
   let bullScore = 0;
   let bearScore = 0;

@@ -71,23 +71,20 @@ export function Header() {
   ];
 
   return (
-    <header className="fixed top-6 left-1/2 -translate-x-1/2 z-50 w-auto max-w-[95vw] h-16 bg-[#070b13]/90 backdrop-blur-2xl border border-purple-500/30 rounded-full px-6 shadow-[0_0_35px_rgba(168,85,247,0.25)] flex items-center justify-between gap-5 shrink-0 transition-all duration-300 select-none">
-      {/* Absolute background glowing aura mirroring the user image */}
-      <div className="absolute inset-x-4 inset-y-1 -z-10 rounded-full bg-purple-500/20 blur-[18px] opacity-100 pointer-events-none" />
-
+    <header className="fixed top-0 left-0 z-50 w-16 h-screen py-6 bg-sidebar border-r border-sidebar-border flex flex-col items-center gap-5 shrink-0 transition-all duration-300 select-none">
       {/* Brand Logo */}
-      <Link href="/" className="flex items-center gap-2 cursor-pointer group pr-4 border-r border-white/10 shrink-0">
-        <div className="w-9 h-9 flex items-center justify-center rounded-full bg-primary/20 text-primary shadow-[0_0_15px_rgba(59,130,246,0.25)] transition-transform duration-300 group-hover:scale-105">
-          <Activity className="w-4 h-4 animate-pulse" />
+      <Link href="/" className="flex flex-col items-center gap-2 cursor-pointer group pb-4 border-b border-sidebar-border shrink-0 w-full">
+        <div className="w-9 h-9 flex items-center justify-center rounded-lg bg-primary/20 text-primary transition-transform duration-300 group-hover:scale-105">
+          <Activity className="w-5 h-5" />
         </div>
         <div className="hidden sm:flex flex-col">
           <span className="font-mono text-[10px] tracking-widest font-black text-slate-100">NSE</span>
         </div>
       </Link>
 
-      {/* Navigation tabs with horizontal scrollability & exact-fitting contents */}
-      <div className="overflow-x-auto md:overflow-visible [scrollbar-width:none] [&::-webkit-scrollbar]:hidden py-1">
-        <nav className="flex items-center gap-1.5 bg-black/35 border border-white/5 p-1 rounded-full min-w-max">
+      {/* Navigation tabs with vertical scrollability & exact-fitting contents */}
+      <div className="overflow-y-auto overflow-x-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden px-1 flex-1 flex justify-center w-full">
+        <nav className="flex flex-col items-center gap-1.5 w-full">
           {links.map((link) => {
             const active = location === link.href;
             const Icon = link.icon;
@@ -99,22 +96,22 @@ export function Header() {
                 key={link.href} 
                 href={link.href} 
                 className={cn(
-                  "flex items-center justify-center w-10 h-10 rounded-full transition-all duration-500 ease-in-out relative group shrink-0 cursor-pointer select-none border border-transparent",
+                  "flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-500 ease-in-out relative group shrink-0 cursor-pointer select-none border border-transparent",
                   active 
-                    ? "text-primary bg-primary/10 border-primary/20 shadow-[inset_0_0_12px_rgba(59,130,246,0.2)]" 
-                    : "text-muted-foreground hover:text-foreground hover:bg-white/5"
+                    ? "text-primary bg-primary/10 border-primary/20" 
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent hover:text-accent-foreground"
                 )}
               >
                 {showBlink && !active && (
-                  <div className="absolute top-1 right-1 w-1.5 rounded-full bg-red-500 animate-ping shadow-[0_0_10px_rgba(239,68,68,1)] z-20" />
+                  <div className="absolute top-1 right-1 w-1.5 rounded-full bg-red-500 animate-ping z-20" />
                 )}
-                <Icon className={cn("w-4 h-4 relative z-10 transition-all duration-500 ease-in-out", active && "scale-110 drop-shadow-[0_0_8px_rgba(59,130,246,0.8)]", showBlink && !active && "text-red-400 animate-pulse")} />
+                <Icon className={cn("w-5 h-5 relative z-10 transition-all duration-500 ease-in-out", active && "scale-110", showBlink && !active && "text-red-400 animate-pulse")} />
                 {showBlink && !active && (
-                  <span className="absolute top-1 right-1 w-1 h-1 bg-red-500 rounded-full border border-[#0c1421] z-20"></span>
+                  <span className="absolute top-1 right-1 w-1 h-1 bg-red-500 rounded-full border border-sidebar z-20"></span>
                 )}
                 
-                {/* Clean, high-fidelity hover tooltip showing the tab's label */}
-                <span className="absolute top-full mt-4 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-[#0a0f1d] border border-white/10 rounded-lg text-[10px] font-bold tracking-wider uppercase font-mono whitespace-nowrap opacity-0 -translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 pointer-events-none z-50 text-slate-200 shadow-[0_10px_25px_rgba(0,0,0,0.8)] border-purple-500/25">
+                {/* Clean, high-fidelity hover tooltip showing the tab's label - changed from top to right */}
+                <span className="absolute left-full ml-4 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-popover border border-0 rounded-lg text-[10px] font-bold tracking-wider uppercase font-mono whitespace-nowrap opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300 pointer-events-none z-[100] text-popover-foreground ">
                   {link.label}
                 </span>
               </Link>
@@ -123,26 +120,26 @@ export function Header() {
         </nav>
       </div>
 
-      {/* Connection metrics on the right */}
-      <div className="flex items-center gap-2 pl-4 border-l border-white/10 shrink-0">
+      {/* Connection metrics on the bottom */}
+      <div className="flex flex-col items-center gap-2 pt-4 border-t border-sidebar-border shrink-0 w-full">
         {/* Kite Connect Status */}
         <Link href="/kite-login" className={cn(
-          "flex items-center justify-center w-10 h-10 rounded-full transition-all duration-300 relative group border border-transparent hover:border-white/5",
-          authStatus?.status === 'connected' ? 'text-green-500 bg-green-500/5 hover:bg-green-500/10' : 'text-muted-foreground hover:text-foreground hover:bg-white/5',
+          "flex items-center justify-center w-10 h-10 rounded-full transition-all duration-300 relative group border border-transparent hover:border-0",
+          authStatus?.status === 'connected' ? 'text-primary bg-primary/5 hover:bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-accent hover:text-accent-foreground',
           location === '/kite-login' && 'bg-white/5 text-foreground'
         )}>
-          <span className="absolute top-full mt-4 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-[#0a0f1d] border border-white/10 rounded-lg text-[10px] font-bold tracking-wider uppercase font-mono whitespace-nowrap opacity-0 -translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 pointer-events-none z-50 text-slate-200 shadow-[0_10px_25px_rgba(0,0,0,0.8)] border-purple-500/25">
+          <span className="absolute left-full ml-4 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-popover border border-0 rounded-lg text-[10px] font-bold tracking-wider uppercase font-mono whitespace-nowrap opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300 pointer-events-none z-[100] text-popover-foreground ">
             Kite Connect: {authStatus?.status === 'connected' ? 'CONNECTED' : 'EXPIRED'}
           </span>
-          {authStatus?.status === 'connected' ? <CheckCircle2 className="w-4 h-4" /> : <LogIn className="w-4 h-4" />}
+          {authStatus?.status === 'connected' ? <CheckCircle2 className="w-5 h-5" /> : <LogIn className="w-5 h-5" />}
         </Link>
 
         {/* Live signals ping indicator */}
-        <div className="flex items-center justify-center w-10 h-10 rounded-full border border-white/5 bg-black/25 relative group cursor-pointer">
-          <span className="absolute top-full mt-4 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-[#0a0f1d] border border-white/10 rounded-lg text-[10px] font-bold tracking-wider uppercase font-mono whitespace-nowrap opacity-0 -translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 pointer-events-none z-50 text-slate-200 shadow-[0_10px_25px_rgba(0,0,0,0.8)] border-purple-500/25">
+        <div className="flex items-center justify-center w-10 h-10 rounded-full border border-0 bg-secondary/50 dark:bg-black/25 relative group cursor-pointer">
+          <span className="absolute left-full ml-4 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-popover border border-0 rounded-lg text-[10px] font-bold tracking-wider uppercase font-mono whitespace-nowrap opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300 pointer-events-none z-[100] text-popover-foreground ">
             {wsStatus === 'Connected' ? 'Live Feeds: ACTIVE' : 'Live Feeds: DISCONNECTED'}
           </span>
-          <span className={cn("relative inline-flex rounded-full h-2 w-2 transition-colors duration-500", wsStatus === 'Connected' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]')}></span>
+          <span className={cn("relative inline-flex rounded-full h-2 w-2 transition-colors duration-500", wsStatus === 'Connected' ? 'bg-primary' : 'bg-destructive')}></span>
         </div>
       </div>
     </header>

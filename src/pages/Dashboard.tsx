@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import { Card } from '@/components/ui/card';
@@ -12,12 +12,35 @@ import { toast } from 'sonner';
 import { notificationService } from '../lib/notificationService';
 
 export function Dashboard() {
+  const [timeframe, setTimeframe] = useState(() => {
+    try {
+      return localStorage.getItem('timeframe') || "15";
+    } catch(e) {
+      return "15";
+    }
+  });
+
+  useEffect(() => {
+    const handleStorage = () => {
+      try {
+        const stored = localStorage.getItem('timeframe');
+        if (stored && stored !== timeframe) setTimeframe(stored);
+      } catch (e) {}
+    };
+    window.addEventListener('storage', handleStorage);
+    const interval = setInterval(handleStorage, 1000);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      clearInterval(interval);
+    };
+  }, [timeframe]);
+
   const { data: chain } = useQuery({ queryKey: ['option-chain'], queryFn: async () => (await axios.get('/api/option-chain')).data, refetchInterval: 10000 });
   const { data: analytics } = useQuery({ queryKey: ['analytics'], queryFn: async () => (await axios.get('/api/analytics')).data, refetchInterval: 10000 });
   const { data: taData, error: taError } = useQuery({ 
-    queryKey: ['ta-data-live', '15', '256265'], // Use same queryKey as AdvancedChart so they share cache
+    queryKey: ['ta-data-live-chart', timeframe, '256265'], // Matches AdvancedChart cache
     queryFn: async () => {
-      const res = await axios.get('/api/ta?symbol=NIFTY%2050&token=256265&timeframe=15');
+      const res = await axios.get(`/api/ta?symbol=NIFTY%2050&token=256265&timeframe=${timeframe}`);
       return res.data;
     }, 
     refetchInterval: 10000 
@@ -238,13 +261,13 @@ export function Dashboard() {
   const isBuyPut = decision.signal === 'BUY PUT';
   const isRange = decision.signal === 'RANGE TRADE ONLY';
   
-  const signalColor = isBuyCall ? 'text-green-500' : isBuyPut ? 'text-red-500' : isRange ? 'text-[#f59e0b]' : 'text-gray-500';
-  const signalBg = isBuyCall ? 'bg-green-500' : isBuyPut ? 'bg-red-500' : isRange ? 'bg-[#f59e0b]' : 'bg-gray-500';
-  const signalBorder = isBuyCall ? 'border-green-500/30' : isBuyPut ? 'border-red-500/30' : isRange ? 'border-[#d97706]/30' : 'border-gray-500/30';
-  const signalBgMuted = isBuyCall ? 'bg-green-500/10' : isBuyPut ? 'bg-red-500/10' : isRange ? 'bg-[#d97706]/10' : 'bg-gray-500/10';
+  const signalColor = isBuyCall ? 'text-green-500' : isBuyPut ? 'text-red-500' : isRange ? 'text-primary' : 'text-gray-500';
+  const signalBg = isBuyCall ? 'bg-green-500' : isBuyPut ? 'bg-red-500' : isRange ? 'bg-primary' : 'bg-gray-500';
+  const signalBorder = isBuyCall ? 'border-green-500/30' : isBuyPut ? 'border-red-500/30' : isRange ? 'border-primary/30' : 'border-gray-500/30';
+  const signalBgMuted = isBuyCall ? 'bg-green-500/10' : isBuyPut ? 'bg-red-500/10' : isRange ? 'bg-primary/10' : 'bg-gray-500/10';
 
   const taBiasText = decision.bullScore > decision.bearScore ? "Bullish" : decision.bearScore > decision.bullScore ? "Bearish" : "Neutral";
-  const taBiasColor = taBiasText === 'Bullish' ? 'text-green-500' : taBiasText === 'Bearish' ? 'text-red-500' : 'text-yellow-500';
+  const taBiasColor = taBiasText === 'Bullish' ? 'text-green-500' : taBiasText === 'Bearish' ? 'text-red-500' : 'text-primary';
 
   // --- Trend Computation ---
   const vwap = taData.vwap || spot;
@@ -268,31 +291,35 @@ export function Dashboard() {
   else if (adx >= 25) trendStrength = 'Strong';
   else if (adx >= 20) trendStrength = 'Developing';
 
-  let combinedSummary = '🟡 RANGE / NO TREND';
+  let combinedSummaryText = 'RANGE / NO TREND';
+  let combinedSummaryColor = 'bg-primary';
+  
   if (adx >= 20) {
     if (trendDirection === 'Bullish') {
-      if (adx >= 35) combinedSummary = '🟢 Very Strong Bullish Trend';
-      else if (adx >= 25) combinedSummary = '🟢 Strong Bullish Trend';
-      else combinedSummary = '🟢 Bullish Trend';
+      combinedSummaryColor = 'bg-green-500';
+      if (adx >= 35) combinedSummaryText = 'Very Strong Bullish Trend';
+      else if (adx >= 25) combinedSummaryText = 'Strong Bullish Trend';
+      else combinedSummaryText = 'Bullish Trend';
     } else if (trendDirection === 'Bearish') {
-      if (adx >= 35) combinedSummary = '🔴 Very Strong Bearish Trend';
-      else if (adx >= 25) combinedSummary = '🔴 Strong Bearish Trend';
-      else combinedSummary = '🔴 Bearish Trend';
+      combinedSummaryColor = 'bg-red-500';
+      if (adx >= 35) combinedSummaryText = 'Very Strong Bearish Trend';
+      else if (adx >= 25) combinedSummaryText = 'Strong Bearish Trend';
+      else combinedSummaryText = 'Bearish Trend';
     }
   }
 
   return (
-    <div className="p-6 md:p-8 space-y-6 animate-in fade-in duration-500 max-w-[1200px] w-full mx-auto font-sans tracking-wide pb-20">
+    <div className="p-6 md:p-8 space-y-6 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto font-sans tracking-wide pb-20">
       {/* Header */}
-      <div className="flex justify-between items-end pb-4 border-b border-border border-dashed">
+      <div className="flex justify-between items-end pb-4 border-b border-0 border-dashed">
         <div>
           <h1 className="text-3xl font-bold text-foreground tracking-tight">NIFTY 50</h1>
           <div className="flex items-center gap-2 mt-1">
             <p className="text-xs text-muted-foreground">Expiry: Live Data</p>
             {isMarketOpen ? (
-              <span className="text-[9px] font-bold bg-green-500/20 text-green-500 px-2 py-0.5 rounded uppercase tracking-wider">Market Open</span>
+              <span className="text-[9px] font-bold bg-green-500/10 dark:bg-green-500/20 text-green-600 dark:text-green-500 px-2 py-0.5 rounded uppercase tracking-wider">Market Open</span>
             ) : (
-              <span className="text-[9px] font-bold bg-gray-500/20 text-gray-400 px-2 py-0.5 rounded uppercase tracking-wider">Market Closed</span>
+              <span className="text-[9px] font-bold bg-secondary/50 dark:bg-gray-500/20 text-muted-foreground px-2 py-0.5 rounded uppercase tracking-wider">Market Closed</span>
             )}
           </div>
         </div>
@@ -318,9 +345,9 @@ export function Dashboard() {
         </div>
         <div className="text-center w-full px-4">
           <p className="text-[10px] uppercase text-muted-foreground tracking-widest mb-2">CE / PE Split</p>
-          <div className="h-2 w-full bg-black/40 flex overflow-hidden shadow-inner">
-            <div className="bg-red-500" style={{ width: `${cePercent}%` }}></div>
-            <div className="bg-green-500" style={{ width: `${pePercent}%` }}></div>
+          <div className="h-2 w-full bg-muted flex overflow-hidden rounded-full">
+            <div className="bg-red-500 rounded-l-full" style={{ width: `${cePercent}%` }}></div>
+            <div className="bg-green-500 rounded-r-full" style={{ width: `${pePercent}%` }}></div>
           </div>
           <div className="flex justify-between text-[10px] mt-2 font-mono">
             <span className="text-red-500/80">{cePercent.toFixed(1)}% CE</span>
@@ -334,8 +361,8 @@ export function Dashboard() {
       </div>
 
       {/* FINAL AI DECISION */}
-      <div className="bg-[#12141c] border border-border rounded-xl overflow-hidden shadow-[inset_0_1px_rgba(255,255,255,0.05),0_8px_32px_rgba(0,0,0,0.4)]">
-        <div className="flex items-center justify-between p-4 border-b border-white/5">
+      <div className="bg-card border border-0 rounded-xl overflow-hidden ">
+        <div className="flex items-center justify-between p-4 border-b border-0">
           <div className="flex items-center gap-2 text-[10px] font-bold text-foreground tracking-widest uppercase">
             <Activity className="w-3 h-3 text-muted-foreground" />
             FINAL AI DECISION
@@ -363,8 +390,8 @@ export function Dashboard() {
              </div>
            </div>
 
-           <div className="relative h-2 w-full bg-black/40 mb-10 overflow-visible mt-6">
-             <div className={cn("absolute top-0 left-0 h-full", signalBg, "shadow-[0_0_15px_rgba(0,0,0,0.3)]")} style={{width: `${decision.confidence}%`}}></div>
+           <div className="relative h-2 w-full bg-muted mb-10 overflow-visible mt-6 rounded-full">
+             <div className={cn("absolute top-0 left-0 h-full rounded-l-full", decision.confidence === 100 ? "rounded-r-full" : "rounded-r-none", signalBg)} style={{width: `${decision.confidence}%`}}></div>
              <div className="absolute -top-1 bottom-[-4px] w-0.5 bg-muted-foreground" style={{left: '65%'}}></div>
              <p className="absolute top-4 text-[9px] text-muted-foreground whitespace-nowrap" style={{left: '65%', transform: 'translateX(-50%)'}}>65% entry threshold</p>
              <p className="absolute top-4 right-0 text-[10px] text-muted-foreground font-mono">100%</p>
@@ -374,7 +401,7 @@ export function Dashboard() {
            {/* Biases Split */}
            <div className="grid grid-cols-2 gap-8 mb-8">
              <div className="space-y-4">
-                <div className="flex items-center gap-2 text-[10px] uppercase text-muted-foreground tracking-widest border-b border-border pb-2">
+                <div className="flex items-center gap-2 text-[10px] uppercase text-muted-foreground tracking-widest border-b border-0 pb-2">
                    <TrendingUp className="w-3 h-3" /> TA CONTEXT
                 </div>
                 <div className="flex items-center gap-2">
@@ -383,7 +410,7 @@ export function Dashboard() {
                 </div>
              </div>
              <div className="space-y-4">
-                <div className="flex items-center gap-2 text-[10px] uppercase text-muted-foreground tracking-widest border-b border-border pb-2">
+                <div className="flex items-center gap-2 text-[10px] uppercase text-muted-foreground tracking-widest border-b border-0 pb-2">
                    <Activity className="w-3 h-3" /> OI ZONES
                 </div>
                 <div className="flex items-center gap-2">
@@ -392,21 +419,21 @@ export function Dashboard() {
              </div>
            </div>
 
-           <div className="space-y-4 text-xs font-mono bg-black/20 p-5 rounded-lg border border-white/5">
+           <div className="space-y-4 text-xs font-mono bg-secondary/30 dark:bg-black/20 p-5 rounded-lg border border-0">
              <div className="grid grid-cols-[130px_1fr] items-center gap-4">
-               <span className="text-[#3b82f6] uppercase tracking-wider font-bold text-[10px] bg-[#3b82f6]/10 px-2 py-1 rounded w-fit">ENTRY</span>
+               <span className="text-primary uppercase tracking-wider font-bold text-[10px] bg-primary/10 px-2 py-1 rounded w-fit">ENTRY</span>
                <span className="text-[#94a3b8] font-sans">{decision.entry}</span>
              </div>
              <div className="grid grid-cols-[130px_1fr] items-center gap-4">
-               <span className="text-[#ef4444] uppercase tracking-wider font-bold text-[10px] bg-[#ef4444]/10 px-2 py-1 rounded w-fit">STOP LOSS</span>
+               <span className="text-primary uppercase tracking-wider font-bold text-[10px] bg-primary/10 px-2 py-1 rounded w-fit">STOP LOSS</span>
                <span className="text-[#94a3b8] font-sans">{decision.stopLoss}</span>
              </div>
              <div className="grid grid-cols-[130px_1fr] items-center gap-4">
-               <span className="text-[#22c55e] uppercase tracking-wider font-bold text-[10px] bg-[#22c55e]/10 px-2 py-1 rounded w-fit">TARGET 1</span>
+               <span className="text-primary uppercase tracking-wider font-bold text-[10px] bg-primary/10 px-2 py-1 rounded w-fit">TARGET 1</span>
                <span className="text-[#94a3b8] font-sans">{decision.target1}</span>
              </div>
              <div className="grid grid-cols-[130px_1fr] items-center gap-4">
-               <span className="text-[#eab308] uppercase tracking-wider font-bold text-[10px] bg-[#eab308]/10 px-2 py-1 rounded w-fit flex gap-1">INVALIDATION</span>
+               <span className="text-primary uppercase tracking-wider font-bold text-[10px] bg-primary/10 px-2 py-1 rounded w-fit flex gap-1">INVALIDATION</span>
                <span className="text-[#94a3b8] font-sans">{decision.invalidation}</span>
              </div>
            </div>
@@ -422,26 +449,29 @@ export function Dashboard() {
 
       {/* TREND SUMMARY */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="bg-[#12141c] border-border/50 p-6 rounded-xl shadow-[inset_0_1px_rgba(255,255,255,0.05),0_8px_32px_rgba(0,0,0,0.4)] flex flex-col justify-center">
+        <Card className="bg-card border-0 p-6 rounded-xl flex flex-col justify-center">
           <p className="text-[10px] tracking-widest uppercase text-muted-foreground font-bold mb-2">Market Regime</p>
           <p className="text-xl font-bold uppercase text-foreground">{decision.regime}</p>
         </Card>
 
-        <Card className="bg-[#12141c] border-border/50 p-6 rounded-xl shadow-[inset_0_1px_rgba(255,255,255,0.05),0_8px_32px_rgba(0,0,0,0.4)] flex flex-col justify-center">
+        <Card className="bg-card border-0 p-6 rounded-xl flex flex-col justify-center">
           <p className="text-[10px] tracking-widest uppercase text-muted-foreground font-bold mb-2">Trend Direction</p>
-          <p className={cn("text-xl font-bold uppercase", trendDirection === 'Bullish' ? "text-green-500" : trendDirection === 'Bearish' ? "text-red-500" : "text-yellow-500")}>{trendDirection}</p>
+          <p className={cn("text-xl font-bold uppercase", trendDirection === 'Bullish' ? "text-green-500" : trendDirection === 'Bearish' ? "text-red-500" : "text-primary")}>{trendDirection}</p>
           <p className="text-xs text-muted-foreground mt-1">{trendExplanation}</p>
         </Card>
 
-        <Card className="bg-[#12141c] border-border/50 p-6 rounded-xl shadow-[inset_0_1px_rgba(255,255,255,0.05),0_8px_32px_rgba(0,0,0,0.4)] flex flex-col justify-center">
+        <Card className="bg-card border-0 p-6 rounded-xl flex flex-col justify-center">
           <p className="text-[10px] tracking-widest uppercase text-muted-foreground font-bold mb-2">Trend Strength</p>
           <p className="text-xl font-bold text-foreground">{trendStrength} <span className="text-sm font-mono text-muted-foreground ml-1">(ADX {adx.toFixed(1)})</span></p>
-          <p className="text-xs font-bold mt-2 uppercase">{combinedSummary}</p>
+          <div className="flex items-center gap-2 mt-2">
+            <span className={cn("w-2.5 h-2.5 rounded-full shrink-0", combinedSummaryColor)}></span>
+            <p className="text-xs font-bold uppercase text-foreground">{combinedSummaryText}</p>
+          </div>
         </Card>
       </div>
 
       {/* TECH INDICATORS TITLE */}
-      <div className="flex items-center justify-between pt-4 mt-8 mb-4 border-b border-border pb-2">
+      <div className="flex items-center justify-between pt-4 mt-8 mb-4 border-b border-0 pb-2">
          <div className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground tracking-widest uppercase">
             <BarChart2 className="w-3 h-3" />
             SUPPORTING EVIDENCE
@@ -450,20 +480,20 @@ export function Dashboard() {
 
       <div className="grid grid-cols-3 gap-6">
          {/* PCR */}
-         <Card className="bg-[#12141c] border-border/50 p-6 rounded-xl flex flex-col items-center justify-center text-center shadow-[inset_0_1px_rgba(255,255,255,0.05),0_8px_32px_rgba(0,0,0,0.4)]">
+         <Card className="bg-card border-0 p-6 rounded-xl flex flex-col items-center justify-center text-center ">
             <p className="text-[10px] tracking-widest uppercase text-muted-foreground font-bold mb-4">PCR Context</p>
-            <p className={cn("text-4xl font-mono font-bold", pcr < 0.7 ? "text-red-500" : pcr > 1.2 ? "text-green-500" : "text-yellow-500")}>{pcr.toFixed(2)}</p>
+            <p className={cn("text-4xl font-mono font-bold", pcr < 0.7 ? "text-red-500" : pcr > 1.2 ? "text-green-500" : "text-primary")}>{pcr.toFixed(2)}</p>
             <p className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground mt-2">{pcr < 0.7 ? "Oversold" : pcr > 1.2 ? "Overbought" : "Neutral"}</p>
          </Card>
 
          {/* Max Pain */}
-         <Card className="bg-[#12141c] border-border/50 p-6 rounded-xl shadow-[inset_0_1px_rgba(255,255,255,0.05),0_8px_32px_rgba(0,0,0,0.4)] flex flex-col justify-center items-center text-center">
+         <Card className="bg-card border-0 p-6 rounded-xl flex flex-col justify-center items-center text-center">
             <p className="text-[10px] tracking-widest uppercase text-muted-foreground font-bold mb-3">MAX PAIN LEVEL</p>
             <p className="text-4xl font-mono font-bold text-foreground mb-2 mt-auto">{maxPain}</p>
             {Math.abs(spot - maxPain) <= 300 ? (
               <>
                 <p className="text-[11px] text-[#94a3b8] mb-1">Spot is <span className={cn("font-bold", spot > maxPain ? "text-green-500" : "text-red-500")}>{Math.abs(spot - maxPain).toFixed(0)} pts</span> {spot > maxPain ? "above" : "below"}</p>
-                <p className="text-[9px] uppercase tracking-widest text-[#3b82f6] font-bold mt-1">Intraday Relevant</p>
+                <p className="text-[9px] uppercase tracking-widest text-primary font-bold mt-1">Intraday Relevant</p>
               </>
             ) : (
               <>
@@ -474,9 +504,9 @@ export function Dashboard() {
          </Card>
 
          {/* RSI */}
-         <Card className="bg-[#12141c] border-border/50 p-6 rounded-xl shadow-[inset_0_1px_rgba(255,255,255,0.05),0_8px_32px_rgba(0,0,0,0.4)] flex flex-col justify-center items-center">
+         <Card className="bg-card border-0 p-6 rounded-xl flex flex-col justify-center items-center">
             <p className="text-[10px] tracking-widest uppercase text-muted-foreground font-bold mb-6">RSI (14, 15m)</p>
-            <p className={cn("text-4xl font-mono font-bold", taData.rsi > 60 ? "text-green-500" : taData.rsi < 40 ? "text-red-500" : "text-yellow-500")}>
+            <p className={cn("text-4xl font-mono font-bold", taData.rsi > 60 ? "text-green-500" : taData.rsi < 40 ? "text-red-500" : "text-primary")}>
               {taData.rsi.toFixed(1)}
             </p>
             <ul className="text-[11px] text-[#94a3b8] mt-4 text-center">

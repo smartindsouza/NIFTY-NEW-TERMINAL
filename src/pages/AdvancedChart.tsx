@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings } from "lucide-react";
+import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2 } from "lucide-react";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { getDivergences } from "../lib/divergence";
@@ -21,7 +21,40 @@ import {
 import { useMarginPreview, getMarginDiagnostics, patchMarginDiagnostics } from "../hooks/useMarginPreview";
 import { getWsDiagnostics, subscribeToTicks, addWsMessageListener } from "../hooks/useWebSocket";
 import { useProfiler } from "../hooks/useProfiler";
-import { computeMasterSignal } from "../../lib/decisionEngine";
+import { computeMasterSignal, getCandleOiSentiment } from "../../lib/decisionEngine";
+
+// Patch HTMLCanvasElement.prototype.getContext to intercept 2D contexts for rounding corners
+if (typeof window !== 'undefined' && !(HTMLCanvasElement.prototype as any).__patched) {
+  (HTMLCanvasElement.prototype as any).__patched = true;
+  const originalGetContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function (type, ...args) {
+    const ctx = originalGetContext.call(this, type, ...args);
+    if (type === '2d' && ctx && !(ctx as any).__patched) {
+      (ctx as any).__patched = true;
+      const originalFillRect = ctx.fillRect;
+      ctx.fillRect = function (x, y, w, h) {
+        let style = ctx.fillStyle;
+        if (typeof style === 'string') {
+          style = style.toLowerCase();
+          const isVolume = style.includes('rgba') && style.includes('0.4');
+          if (w > 2 && w < 100 && h > 2) {
+            ctx.beginPath();
+            const radius = isVolume ? Math.min(3, w / 2, h / 2) : Math.min(w / 2, h / 2);
+            if (ctx.roundRect) {
+              ctx.roundRect(x, y, w, h, isVolume ? [radius, radius, 0, 0] : radius);
+            } else {
+              ctx.rect(x, y, w, h);
+            }
+            ctx.fill();
+            return;
+          }
+        }
+        originalFillRect.call(ctx, x, y, w, h);
+      };
+    }
+    return ctx;
+  };
+}
 
 export function calculateZerodhaCharges(action: 'BUY' | 'SELL', quantity: number, price: number) {
   const premium = quantity * price;
@@ -84,10 +117,65 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
   const [product, setProduct] = useState<'MIS' | 'NRML'>(ticket.product);
   const [orderType, setOrderType] = useState<'MARKET' | 'LIMIT'>(ticket.orderType);
   const [lots, setLots] = useState<number>(() => {
-    if (!ticket.lotSize || ticket.lotSize <= 0) return 0;
-    return Math.max(1, Math.round(ticket.quantity / ticket.lotSize));
+    const size = ticket.lotSize || 75; // Default to 75 as standard NIFTY lot size if missing
+    return Math.max(1, Math.round((ticket.quantity || size) / size));
   });
   const [limitPrice, setLimitPrice] = useState<string>(String(ticket.limitPrice));
+
+  const [isEditingBalance, setIsEditingBalance] = useState(false);
+  const [balanceInput, setBalanceInput] = useState(String(availBalance));
+
+  useEffect(() => {
+    setBalanceInput(String(availBalance));
+  }, [availBalance]);
+
+  const [liveLtp, setLiveLtp] = useState<number>(ticket.ltp);
+  const [prevLtp, setPrevLtp] = useState<number>(ticket.ltp);
+  const [priceDirection, setPriceDirection] = useState<'UP' | 'DOWN' | 'NEUTRAL'>('NEUTRAL');
+
+  useEffect(() => {
+    let isActive = true;
+    const pollLtp = async () => {
+      try {
+        const spotParam = "";
+        const expiryParam = ticket.expiry ? `&expiry=${encodeURIComponent(ticket.expiry)}` : "";
+        const res = await fetch(`/api/option-chain?symbol=${encodeURIComponent(ticket.underlying)}${spotParam}${expiryParam}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!isActive) return;
+        
+        const optionMap = ticket.optionType === 'CE' ? data.ceData : data.peData;
+        const contract = optionMap && optionMap[ticket.strike];
+        if (contract && typeof contract.ltp === 'number' && contract.ltp > 0) {
+          setLiveLtp(contract.ltp);
+        }
+      } catch (err) {
+        console.warn("Polling dynamic option LTP failed:", err);
+      }
+    };
+
+    pollLtp();
+    const intervalId = setInterval(pollLtp, 1500);
+
+    return () => {
+      isActive = false;
+      clearInterval(intervalId);
+    };
+  }, [ticket.underlying, ticket.expiry, ticket.strike, ticket.optionType]);
+
+  useEffect(() => {
+    if (liveLtp > prevLtp) {
+      setPriceDirection('UP');
+      const timer = setTimeout(() => setPriceDirection('NEUTRAL'), 800);
+      setPrevLtp(liveLtp);
+      return () => clearTimeout(timer);
+    } else if (liveLtp < prevLtp) {
+      setPriceDirection('DOWN');
+      const timer = setTimeout(() => setPriceDirection('NEUTRAL'), 800);
+      setPrevLtp(liveLtp);
+      return () => clearTimeout(timer);
+    }
+  }, [liveLtp, prevLtp]);
 
   const [showChargesBreakdown, setShowChargesBreakdown] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
@@ -97,7 +185,7 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
   const quantity = lotSize ? (lots * lotSize) : 0;
   const missingContext = !ticket.instrument_token || !ticket.tradingsymbol;
 
-  const currentPrice = orderType === 'LIMIT' ? (parseFloat(limitPrice) || 0) : ticket.ltp;
+  const currentPrice = orderType === 'LIMIT' ? (parseFloat(limitPrice) || 0) : liveLtp;
   
   const estimatedChargesDetails = calculateZerodhaCharges(ticket.action, quantity, currentPrice);
   
@@ -216,107 +304,103 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
   };
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/70 backdrop-blur-[2px] p-4 text-slate-200">
-      <div className="bg-[#1e222d] border border-slate-700/80 rounded-xl shadow-2xl w-full max-w-[420px] overflow-hidden animate-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-muted p-4 text-foreground/90">
+      <div className="bg-card border border-0 rounded-xl w-full max-w-[420px] overflow-hidden animate-in zoom-in-95 duration-200">
         
-        {/* Header with buy/sell color */}
-        <div className={`p-4 flex items-center justify-between border-b border-slate-805/70 ${isBuy ? 'bg-emerald-950/40 text-emerald-400' : 'bg-rose-950/30 text-rose-400'}`}>
+        {/* Header with light green color */}
+        <div className="p-4 flex items-center justify-between bg-emerald-100/90 text-emerald-800 border-b border-emerald-200 dark:bg-emerald-950/45 dark:text-emerald-300 dark:border-emerald-800/40">
           <div className="flex items-center gap-2">
-            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded tracking-wide ${isBuy ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded tracking-wide ${isBuy ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-350' : 'bg-rose-500/20 text-rose-700 dark:text-rose-350'}`}>
               {ticket.action}
             </span>
             <span className="font-semibold text-sm tracking-wider">
               {ticket.tradingsymbol}
             </span>
           </div>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-white transition-colors cursor-pointer">
+          <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
             <X size={18} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4 text-white">
+        <form onSubmit={handleSubmit} className="p-5 space-y-4 text-foreground">
           
           {/* Main option contract metadata visualizer */}
-          <div className="grid grid-cols-2 gap-3 bg-slate-900/50 border border-slate-800 p-3 rounded-lg text-xs">
+          <div className="grid grid-cols-2 gap-3 bg-card/50 border border-0 p-3 rounded-lg text-xs">
             <div>
-              <span className="text-slate-500 block mb-1">Underlying</span>
-              <span className="text-slate-300 font-medium">{ticket.underlying}</span>
+              <span className="text-muted-foreground block mb-1">Underlying</span>
+              <span className="text-foreground/80 font-medium">{ticket.underlying}</span>
             </div>
-            <div className="bg-amber-500/15 border-2 border-amber-500/50 p-2 rounded-lg flex flex-col justify-between shadow-[0_0_12px_rgba(245,158,11,0.2)] animate-pulse-subtle">
-              <span className="text-amber-400 font-bold text-[10px] uppercase tracking-wider block mb-1">⚠️ Expiry Date</span>
+            <div className="bg-primary/10 border border-primary/25 p-2 rounded-2xl flex flex-col justify-between">
+              <span className="text-primary font-bold text-[10px] uppercase tracking-wider block mb-1">⚠️ Expiry Date</span>
               <select
                 value={ticket.expiry}
                 onChange={(e) => onExpiryChange(e.target.value)}
-                className="w-full bg-[#2a2e3d] border border-amber-400 rounded px-3 py-1.5 text-xs text-yellow-300 font-bold focus:outline-none focus:border-amber-300 focus:ring-1 focus:ring-amber-300 cursor-pointer"
+                className="w-full bg-muted border border-primary rounded-full px-4 py-1.5 text-xs text-primary font-bold focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary cursor-pointer"
               >
                 {expiries.map((exp) => (
-                  <option key={exp} value={exp} className="bg-[#1e222d] text-white">
+                  <option key={exp} value={exp} className="bg-card text-foreground">
                     {exp}
                   </option>
                 ))}
               </select>
             </div>
             <div>
-              <span className="text-slate-500 block">Strike / Option</span>
-              <span className="text-slate-300 font-medium">{ticket.strike} {ticket.optionType}</span>
+              <span className="text-muted-foreground block">Strike / Option</span>
+              <span className="text-foreground/80 font-medium">{ticket.strike} {ticket.optionType}</span>
             </div>
             <div>
-              <span className="text-slate-500 block">LTP</span>
-              <span className="text-cyan-400 font-bold">₹{ticket.ltp.toFixed(2)}</span>
-            </div>
-            <div className="col-span-2 border-t border-slate-800/65 pt-2 mt-1 flex justify-between">
-              <div>
-                <span className="text-[10px] text-slate-500 block">Token</span>
-                <span className="text-[10px] text-slate-400 font-mono">{ticket.instrument_token || "N/A"}</span>
-              </div>
-              <div>
-                <span className="text-[10px] text-slate-500 block text-right">Lot Size</span>
-                <span className="text-[10px] text-slate-400 block text-right font-mono font-semibold">
-                  {lotSize != null ? lotSize : "Unavailable"}
-                </span>
-              </div>
+              <span className="text-muted-foreground block">LTP</span>
+              <span className={`font-bold font-mono transition-all duration-300 inline-block px-1.5 py-0.5 rounded ${
+                priceDirection === 'UP'
+                  ? 'text-emerald-800 bg-emerald-100 border border-emerald-200'
+                  : priceDirection === 'DOWN'
+                  ? 'text-rose-800 bg-rose-100 border border-rose-200'
+                  : 'text-primary'
+              }`}>
+                ₹{liveLtp.toFixed(2)}
+              </span>
             </div>
           </div>
 
           {/* Option Contract Diagnostics Box */}
-          <div className="bg-slate-950/45 border border-slate-800/60 rounded-lg p-2.5 text-[11px] font-sans">
+          <div className="bg-background/45 border border-0/60 rounded-lg p-2.5 text-[11px] font-sans">
             <button 
               type="button"
               onClick={() => setShowDiagnostics(!showDiagnostics)}
-              className="w-full flex justify-between items-center text-cyan-400/90 font-semibold pb-1 border-b border-slate-800/40 hover:text-cyan-300 transition-colors"
+              className="w-full flex justify-between items-center text-primary/90 font-semibold pb-1 border-b border-0/40 hover:text-primary transition-colors"
             >
               <span>📋 Instrument Master Diagnostics</span>
               <div className="flex items-center gap-2">
-                <span className="text-[9px] bg-cyan-950 text-cyan-400 px-1.5 py-0.5 rounded font-mono">
+                <span className="text-[9px] bg-primary/10 text-primary px-1.5 py-0.5 rounded font-mono">
                   {ticket.exchange || 'NFO'}
                 </span>
-                <span className="text-[9px] text-cyan-500/80 hover:text-cyan-300 font-sans ml-1">
+                <span className="text-[9px] text-primary/75 hover:text-primary font-sans ml-1">
                   ({showDiagnostics ? 'hide' : 'show'})
                 </span>
               </div>
             </button>
             
             {showDiagnostics && (
-              <div className="space-y-1 text-slate-400 font-sans leading-normal mt-1.5 animate-in fade-in slide-in-from-top-1">
+              <div className="space-y-1 text-muted-foreground font-sans leading-normal mt-1.5 animate-in fade-in slide-in-from-top-1">
                 <div className="flex justify-between">
                   <span>Trading Symbol:</span>
-                  <span className="text-slate-200 font-mono font-medium">{ticket.tradingsymbol || 'N/A'}</span>
+                  <span className="text-foreground/90 font-mono font-medium">{ticket.tradingsymbol || 'N/A'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Instrument Token:</span>
-                  <span className="text-slate-200 font-mono">{ticket.instrument_token || 'N/A'}</span>
+                  <span className="text-foreground/90 font-mono">{ticket.instrument_token || 'N/A'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Segment:</span>
-                  <span className="text-slate-200">{ticket.segment || 'NFO-OPT'}</span>
+                  <span className="text-foreground/90">{ticket.segment || 'NFO-OPT'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Expiry Date:</span>
-                  <span className="text-slate-200 font-mono">{ticket.expiry}</span>
+                  <span className="text-foreground/90 font-mono">{ticket.expiry}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Strike Price:</span>
-                  <span className="text-slate-200 font-mono">{ticket.strike}</span>
+                  <span className="text-foreground/90 font-mono">{ticket.strike}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Option Type:</span>
@@ -324,9 +408,9 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
                     {ticket.optionType}
                   </span>
                 </div>
-                <div className="flex justify-between border-t border-slate-800/40 pt-1.5 mt-1 pb-0.5">
-                  <span className="font-semibold text-slate-300">Lot Size from Kite Master:</span>
-                  <span className="font-mono text-cyan-400 font-bold">
+                <div className="flex justify-between border-t border-0/40 pt-1.5 mt-1 pb-0.5">
+                  <span className="font-semibold text-foreground/80">Lot Size from Kite Master:</span>
+                  <span className="font-mono text-primary font-bold">
                     {lotSize != null ? lotSize : (
                       <span className="text-rose-400 animate-pulse font-sans font-medium text-[10px]">
                         Unavailable
@@ -335,34 +419,34 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[10px] text-slate-500">Source:</span>
-                  <span className="text-[10px] text-cyan-500/80 italic font-medium">
+                  <span>Source:</span>
+                  <span className="text-[10px] text-primary/70 italic font-medium">
                     {ticket.source_of_lot_size || 'Kite Live Instrument Master'}
                   </span>
                 </div>
 
-                <div className="text-[10px] font-semibold text-cyan-400/80 mb-1 border-b border-slate-800/40 pb-0.5 mt-2 pt-1 uppercase tracking-widest">
+                <div className="text-[10px] font-semibold text-primary/80 mb-1 border-b border-0/40 pb-0.5 mt-2 pt-1 uppercase tracking-widest">
                    Auto Lot Diagnostics
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Lot Sizing Mode:</span>
-                  <span className={`font-mono font-medium ${lotSizingMode === 'AUTO MAX' ? 'text-amber-400' : 'text-slate-300'}`}>{lotSizingMode}</span>
+                  <span className="text-muted-foreground">Lot Sizing Mode:</span>
+                  <span className={`font-mono font-medium ${lotSizingMode === 'AUTO MAX' ? 'text-primary' : 'text-foreground/80'}`}>{lotSizingMode}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Cost Per Lot:</span>
-                  <span className="font-mono text-emerald-400">{costPerLot > 0 ? `₹${costPerLot.toFixed(2)}` : 'N/A'}</span>
+                  <span className="text-muted-foreground">Cost Per Lot:</span>
+                  <span className="font-mono text-primary font-semibold">{costPerLot > 0 ? `₹${costPerLot.toFixed(2)}` : 'N/A'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Max Affordable Lots:</span>
-                  <span className="font-mono text-cyan-400">{maxAffordableLots > 0 ? maxAffordableLots : '0'}</span>
+                  <span className="text-muted-foreground">Max Affordable Lots:</span>
+                  <span className="font-mono text-primary font-semibold">{maxAffordableLots > 0 ? maxAffordableLots : '0'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Selected Lots:</span>
-                  <span className="font-mono text-indigo-300">{lots}</span>
+                  <span className="text-muted-foreground">Selected Lots:</span>
+                  <span className="font-mono text-primary/90">{lots}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Auto Lot Calculation Source:</span>
-                  <span className="font-mono text-[9px] text-cyan-500/80">{calculationSource}</span>
+                  <span className="text-muted-foreground">Auto Lot Calculation Source:</span>
+                  <span className="font-mono text-[9px] text-primary/70">{calculationSource}</span>
                 </div>
               </div>
             )}
@@ -370,17 +454,17 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
 
           {/* Missing Lot Size Alert Box */}
           {!lotSize && (
-            <div className="bg-rose-950/30 border border-rose-500/35 p-3 rounded-lg text-xs flex flex-col gap-1.5 mt-2 shadow-[0_0_12px_rgba(239,68,68,0.15)] animate-in fade-in slide-in-from-top-1 duration-150">
+            <div className="bg-rose-950/30 border border-rose-500/35 p-3 rounded-lg text-xs flex flex-col gap-1.5 mt-2 animate-in fade-in slide-in-from-top-1 duration-150">
               <div className="flex items-center gap-1.5 text-rose-450 text-rose-400 font-semibold">
                 <span>⚠️ Lot size unavailable. Refresh instruments.</span>
               </div>
-              <div className="text-slate-400 text-[11px] leading-relaxed">
+              <div className="text-muted-foreground text-[11px] leading-relaxed">
                 NIFTY options require a dynamic lot size from the latest instrument master. Click below to refresh the cached database.
               </div>
               <button
                 type="button"
                 onClick={handleRefreshInstruments}
-                className={`text-[10px] uppercase font-bold self-start mt-1 cursor-pointer underline transition-all ${refreshing ? 'text-slate-500' : 'text-cyan-400 hover:text-cyan-305 hover:text-cyan-300'}`}
+                className={`text-[10px] uppercase font-bold self-start mt-1 cursor-pointer underline transition-all ${refreshing ? 'text-muted-foreground' : 'text-primary hover:text-primary/80'}`}
                 disabled={refreshing}
               >
                 {refreshing ? 'Refreshing Master Cache...' : 'Click to Refetch & Rebuild Master'}
@@ -390,19 +474,19 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
 
           {/* Product Type (MIS vs NRML) */}
           <div>
-            <label className="text-xs font-medium text-slate-400 block mb-1.5">Product</label>
-            <div className="grid grid-cols-2 gap-2 bg-slate-900/40 p-1 rounded-lg border border-slate-800">
+            <label className="text-xs font-medium text-muted-foreground block mb-1.5">Product</label>
+            <div className="grid grid-cols-2 gap-2 bg-card/40 p-1 rounded-lg border border-0">
               <button
                 type="button"
                 onClick={() => setProduct('MIS')}
-                className={`py-1.5 text-xs font-semibold rounded-md transition-all ${product === 'MIS' ? 'bg-[#292e3d] text-cyan-400 border border-cyan-500/30' : 'text-slate-400 hover:text-white'}`}
+                className={`py-1.5 text-xs font-semibold rounded-md transition-all ${product === 'MIS' ? 'bg-muted text-primary border border-primary/30' : 'text-muted-foreground hover:text-foreground'}`}
               >
                 Intraday (MIS)
               </button>
               <button
                 type="button"
                 onClick={() => setProduct('NRML')}
-                className={`py-1.5 text-xs font-semibold rounded-md transition-all ${product === 'NRML' ? 'bg-[#292e3d] text-cyan-400 border border-cyan-500/30' : 'text-slate-400 hover:text-white'}`}
+                className={`py-1.5 text-xs font-semibold rounded-md transition-all ${product === 'NRML' ? 'bg-muted text-primary border border-primary/30' : 'text-muted-foreground hover:text-foreground'}`}
               >
                 Overnight (NRML)
               </button>
@@ -411,19 +495,19 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
 
           {/* Order Type (MARKET vs LIMIT) */}
           <div>
-            <label className="text-xs font-medium text-slate-400 block mb-1.5">Order Type</label>
-            <div className="grid grid-cols-2 gap-2 bg-slate-900/40 p-1 rounded-lg border border-slate-800">
+            <label className="text-xs font-medium text-muted-foreground block mb-1.5">Order Type</label>
+            <div className="grid grid-cols-2 gap-2 bg-card/40 p-1 rounded-lg border border-0">
               <button
                 type="button"
                 onClick={() => setOrderType('MARKET')}
-                className={`py-1.5 text-xs font-semibold rounded-md transition-all ${orderType === 'MARKET' ? 'bg-[#292e3d] text-cyan-400 border border-cyan-500/30' : 'text-slate-400 hover:text-white'}`}
+                className={`py-1.5 text-xs font-semibold rounded-md transition-all ${orderType === 'MARKET' ? 'bg-muted text-primary border border-primary/30' : 'text-muted-foreground hover:text-foreground'}`}
               >
                 Market
               </button>
               <button
                 type="button"
                 onClick={() => setOrderType('LIMIT')}
-                className={`py-1.5 text-xs font-semibold rounded-md transition-all ${orderType === 'LIMIT' ? 'bg-[#292e3d] text-cyan-400 border border-cyan-500/30' : 'text-slate-400 hover:text-white'}`}
+                className={`py-1.5 text-xs font-semibold rounded-md transition-all ${orderType === 'LIMIT' ? 'bg-muted text-primary border border-primary/30' : 'text-muted-foreground hover:text-foreground'}`}
               >
                 Limit
               </button>
@@ -433,12 +517,12 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
           {/* Dynamic input blocks based on selection */}
           <div className="flex flex-col gap-4">
              {/* Lot Sizing */}
-             <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
+             <div className="bg-card/60 p-2.5 rounded-lg border border-0">
                 <div className="flex justify-between items-center mb-2">
-                   <label className="text-xs font-semibold text-slate-300">Lot Sizing</label>
-                   <div className="flex gap-1 bg-slate-950 p-0.5 rounded border border-slate-800 text-[10px]">
-                      <button type="button" onClick={() => setLotSizingMode('AUTO MAX')} className={`px-2 py-0.5 rounded font-bold transition-colors ${lotSizingMode === 'AUTO MAX' ? 'bg-cyan-900/50 text-cyan-400' : 'text-slate-500 hover:text-slate-300'}`}>AUTO MAX</button>
-                      <button type="button" onClick={() => setLotSizingMode('MANUAL')} className={`px-2 py-0.5 rounded font-bold transition-colors ${lotSizingMode === 'MANUAL' ? 'bg-slate-800 text-slate-200' : 'text-slate-500 hover:text-slate-300'}`}>MANUAL</button>
+                   <label className="text-xs font-semibold text-foreground/80">Lot Sizing</label>
+                   <div className="flex gap-1 bg-background p-0.5 rounded border border-0 text-[10px]">
+                      <button type="button" onClick={() => setLotSizingMode('AUTO MAX')} className={`px-2 py-0.5 rounded font-bold transition-colors ${lotSizingMode === 'AUTO MAX' ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground/80'}`}>AUTO MAX</button>
+                      <button type="button" onClick={() => setLotSizingMode('MANUAL')} className={`px-2 py-0.5 rounded font-bold transition-colors ${lotSizingMode === 'MANUAL' ? 'bg-muted text-foreground/90' : 'text-muted-foreground hover:text-foreground/80'}`}>MANUAL</button>
                    </div>
                 </div>
 
@@ -450,39 +534,39 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
                 
                 <div className="flex items-center gap-3">
                    <div className="flex items-center">
-                     <button type="button" onClick={() => { setLotSizingMode('MANUAL'); adjustLots(-1); }} className="bg-slate-850 hover:bg-slate-755 text-slate-300 border border-slate-700 w-8 h-9 rounded-l focus:outline-none flex items-center justify-center font-bold" disabled={lotSizingMode === 'AUTO MAX' && isKite}>-</button>
-                     <input type="number" value={lots || ''} onChange={(e) => { setLotSizingMode('MANUAL'); handleLotsChange(e.target.value); }} disabled={lotSizingMode === 'AUTO MAX' && isKite} className={`w-14 text-center bg-slate-900/40 border-y border-slate-750 font-mono text-sm h-9 focus:outline-none focus:border-cyan-500 ${lotSizingMode === 'AUTO MAX' && isKite ? 'text-cyan-400 cursor-not-allowed' : 'text-white'}`} />
-                     <button type="button" onClick={() => { setLotSizingMode('MANUAL'); adjustLots(1); }} className="bg-slate-850 hover:bg-slate-755 text-slate-300 border border-slate-700 w-8 h-9 rounded-r focus:outline-none flex items-center justify-center font-bold" disabled={lotSizingMode === 'AUTO MAX' && isKite}>+</button>
+                     <button type="button" onClick={() => { setLotSizingMode('MANUAL'); adjustLots(-1); }} className="bg-slate-850 hover:bg-slate-755 text-foreground/80 border border-0 w-8 h-9 rounded-l focus:outline-none flex items-center justify-center font-bold" disabled={lotSizingMode === 'AUTO MAX' && isKite}>-</button>
+                     <input type="number" value={lots || ''} onChange={(e) => { setLotSizingMode('MANUAL'); handleLotsChange(e.target.value); }} disabled={lotSizingMode === 'AUTO MAX' && isKite} className={`w-14 text-center bg-card/40 border-y  font-mono text-sm h-9 focus:outline-none focus:border-primary ${lotSizingMode === 'AUTO MAX' && isKite ? 'text-primary cursor-not-allowed' : 'text-foreground'}`} />
+                     <button type="button" onClick={() => { setLotSizingMode('MANUAL'); adjustLots(1); }} className="bg-slate-850 hover:bg-slate-755 text-foreground/80 border border-0 w-8 h-9 rounded-r focus:outline-none flex items-center justify-center font-bold" disabled={lotSizingMode === 'AUTO MAX' && isKite}>+</button>
                    </div>
                    
                    <div className="flex flex-1 justify-end gap-1.5 h-9">
-                      <button type="button" onClick={() => { setLotSizingMode('MANUAL'); setLots(1); }} className={`px-2 rounded border text-[10px] uppercase font-bold tracking-wider transition-colors hover:bg-slate-700 hover:text-cyan-300 ${lotSizingMode === 'MANUAL' && lots === 1 ? 'bg-cyan-900/50 border-cyan-700/50 text-cyan-400' : 'bg-slate-800/80 border-slate-700/60 text-slate-400'}`}>1 Lot</button>
-                      <button type="button" onClick={() => { setLotSizingMode('MANUAL'); setLots(Math.max(1, Math.floor(maxAffordableLots / 2))); }} className={`px-2 rounded border text-[10px] uppercase font-bold tracking-wider transition-colors hover:bg-slate-700 hover:text-cyan-300 ${lotSizingMode === 'MANUAL' && lots === Math.max(1, Math.floor(maxAffordableLots / 2)) && maxAffordableLots > 2 ? 'bg-cyan-900/50 border-cyan-700/50 text-cyan-400' : 'bg-slate-800/80 border-slate-700/60 text-slate-400'}`} disabled={maxAffordableLots <= 0}>Half</button>
-                      <button type="button" onClick={() => { setLotSizingMode('AUTO MAX'); }} className={`px-2 rounded border text-[10px] uppercase font-bold tracking-wider transition-colors hover:bg-slate-700 hover:text-cyan-300 ${lotSizingMode === 'AUTO MAX' ? 'bg-cyan-900/50 border-cyan-700/50 text-cyan-400' : 'bg-slate-800/80 border-slate-700/60 text-slate-400'}`}>Max</button>
+                      <button type="button" onClick={() => { setLotSizingMode('MANUAL'); setLots(1); }} className={`px-2 rounded border text-[10px] uppercase font-bold tracking-wider transition-colors hover:bg-slate-700 hover:text-primary ${lotSizingMode === 'MANUAL' && lots === 1 ? 'bg-primary/20 border-primary/25 text-primary' : 'bg-muted/80 border-0/60 text-muted-foreground'}`}>1 Lot</button>
+                      <button type="button" onClick={() => { setLotSizingMode('MANUAL'); setLots(Math.max(1, Math.floor(maxAffordableLots / 2))); }} className={`px-2 rounded border text-[10px] uppercase font-bold tracking-wider transition-colors hover:bg-slate-700 hover:text-primary ${lotSizingMode === 'MANUAL' && lots === Math.max(1, Math.floor(maxAffordableLots / 2)) && maxAffordableLots > 2 ? 'bg-primary/20 border-primary/25 text-primary' : 'bg-muted/80 border-0/60 text-muted-foreground'}`} disabled={maxAffordableLots <= 0}>Half</button>
+                      <button type="button" onClick={() => { setLotSizingMode('AUTO MAX'); }} className={`px-2 rounded border text-[10px] uppercase font-bold tracking-wider transition-colors hover:bg-slate-700 hover:text-primary ${lotSizingMode === 'AUTO MAX' ? 'bg-primary/20 border-primary/25 text-primary' : 'bg-muted/80 border-0/60 text-muted-foreground'}`}>Max</button>
                    </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 mt-2.5 pt-2 border-t border-slate-800/60 text-[10px]">
+                <div className="grid grid-cols-2 gap-2 mt-2.5 pt-2 border-t border-0/60 text-[10px]">
                    <div className="flex justify-between">
-                     <span className="text-slate-500">Total Qty:</span>
-                     <span className="font-mono text-slate-300">{quantity} <span className="text-slate-600 text-[9px]">(x{lotSize})</span></span>
+                     <span className="text-muted-foreground">Total Qty:</span>
+                     <span className="font-mono text-foreground/80">{quantity} <span className="text-slate-600 text-[9px]">(x{lotSize})</span></span>
                    </div>
                    <div className="flex justify-between items-center">
-                     <span className="text-slate-500">Cost/Lot:</span>
+                     <span className="text-muted-foreground">Cost/Lot:</span>
                      <span className="font-mono text-emerald-400/90 flex items-center gap-1">
                         {costPerLot > 0 ? `₹${costPerLot.toFixed(1)}` : '...' }
-                        {!isKite && costPerLot > 0 && <span className="text-amber-500/80 text-[8px]" title="Estimated">*Est</span>}
+                        {!isKite && costPerLot > 0 && <span className="text-primary/80 text-[8px]" title="Estimated">*Est</span>}
                      </span>
                    </div>
                    <div className="flex justify-between items-center">
-                     <span className="text-slate-500">Max Afford:</span>
-                     <span className="font-mono text-cyan-400 flex items-center gap-1">
+                     <span className="text-muted-foreground">Max Afford:</span>
+                     <span className="font-mono text-primary flex items-center gap-1">
                         {maxAffordableLots > 0 ? maxAffordableLots : 0} lots
-                        {!isKite && maxAffordableLots > 0 && <span className="text-amber-500/80 text-[8px]" title="Estimated">*Est</span>}
+                        {!isKite && maxAffordableLots > 0 && <span className="text-primary/80 text-[8px]" title="Estimated">*Est</span>}
                      </span>
                    </div>
                    <div className="flex justify-between">
-                     <span className="text-slate-500">Avail margin:</span>
+                     <span className="text-muted-foreground">Avail margin:</span>
                      <span className="font-mono text-emerald-400/90">₹{availBalance.toFixed(0)}</span>
                    </div>
                 </div>
@@ -490,120 +574,170 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
              
              {/* Price input when LIMIT type */}
             <div>
-              <label className="text-xs font-medium text-slate-400 block mb-1">Price</label>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">Price</label>
               <input
                 type="number"
                 step="0.05"
                 disabled={orderType === 'MARKET'}
-                value={orderType === 'MARKET' ? ticket.ltp.toFixed(2) : limitPrice}
+                value={orderType === 'MARKET' ? liveLtp.toFixed(2) : limitPrice}
                 onChange={(e) => setLimitPrice(e.target.value)}
-                className={`w-full bg-slate-900/60 border border-slate-705 rounded-md text-center text-xs h-9 focus:outline-none focus:border-cyan-500 font-mono ${orderType === 'MARKET' ? 'text-slate-500 cursor-not-allowed bg-slate-950/20' : 'text-white'}`}
+                className={`w-full bg-card/60 border border-0 rounded-md text-center text-xs h-9 focus:outline-none focus:border-primary font-mono ${orderType === 'MARKET' ? 'text-muted-foreground cursor-not-allowed bg-background/20' : 'text-foreground'}`}
               />
-              <span className="text-[10px] text-slate-500 block mt-1">Tick size ₹0.05</span>
+              <span className="text-[10px] text-muted-foreground block mt-1">Tick size ₹0.05</span>
             </div>
           </div>
 
           {/* Required vs Available details */}
-          <div className="bg-slate-900 border border-slate-700/60 p-3 rounded-lg shadow-inner text-xs">
+          <div className="bg-card border border-0/60 p-3 rounded-lg text-xs">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
               <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-slate-400 font-medium tracking-wide font-sans">Required Margin:</span>
-                <span className="text-white font-bold font-mono text-[13px]">
+                <span className="text-muted-foreground font-medium tracking-wide font-sans">Required Margin:</span>
+                <span className="text-foreground font-bold font-mono text-[13px]">
                   ₹{Math.round(reqAmount).toLocaleString('en-IN')}
                 </span>
                 <button
                   type="button"
                   onClick={() => setShowChargesBreakdown(!showChargesBreakdown)}
-                  className="text-slate-500 font-mono text-xs hover:text-cyan-400 focus:outline-none transition-colors inline-flex items-center gap-0.5 cursor-pointer"
+                  className="text-muted-foreground font-mono text-xs hover:text-primary focus:outline-none transition-colors inline-flex items-center gap-0.5 cursor-pointer"
                   title="Click to view Zerodha charges breakdown"
                 >
                   + ₹{charges.toFixed(2)}
-                  <span className={`text-[9px] px-1 py-0.5 rounded ml-1 font-bold font-sans uppercase ${isKite ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                  <span className={`text-[9px] px-1 py-0.5 rounded ml-1 font-bold font-sans uppercase ${isKite ? 'bg-emerald-500/20 text-emerald-400' : 'bg-primary/20 text-primary'}`}>
                     {isKite ? 'Kite API' : 'Local Calculation'}
                   </span>
-                  <span className="text-[9px] text-cyan-400/80 hover:underline font-sans font-normal ml-1">
+                  <span className="text-[9px] text-primary/70 hover:underline font-sans font-normal ml-1">
                     ({showChargesBreakdown ? 'hide' : 'details'})
                   </span>
                 </button>
               </div>
               
               <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-slate-400 font-medium font-sans">Available Margin:</span>
-                <span className={`font-mono font-bold px-2 py-0.5 rounded flex items-center transition-all ${
-                  (reqAmount + charges) > availBalance 
-                    ? 'text-rose-400 bg-rose-950/45 border border-rose-500/30 shadow-[0_0_8px_rgba(239,68,68,0.15)] animate-pulse' 
-                    : 'text-emerald-400 bg-emerald-950/25 border border-emerald-500/20'
-                }`}>
-                  ₹{availBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onRefreshBalance();
-                      toast.success("Refreshing Kite account balance...");
-                    }}
-                    className="text-[10px] text-cyan-400 hover:text-cyan-300 ml-2 cursor-pointer font-sans font-normal"
-                    title="Refresh Balance"
-                  >
-                    <Loader2 className={`w-3.5 h-3.5 ${processing ? 'animate-spin' : ''}`} />
-                  </button>
-                </span>
+                <span className="text-muted-foreground font-medium font-sans">Available Margin:</span>
+                {isEditingBalance ? (
+                  <div className="flex items-center gap-1.5 bg-background border border-primary/45 rounded px-2 py-0.5 animate-in zoom-in-95 duration-100">
+                    <span className="text-muted-foreground text-xs font-mono">₹</span>
+                    <input
+                      type="number"
+                      autoFocus
+                      value={balanceInput}
+                      onChange={(e) => setBalanceInput(e.target.value)}
+                      onBlur={() => {
+                        const val = parseFloat(balanceInput);
+                        if (!isNaN(val) && val >= 0) {
+                          setAvailBalance(val);
+                          try {
+                            localStorage.setItem('kite_sim_balance', val.toFixed(2));
+                          } catch (err) {}
+                          toast.success(`Simulated balance updated to ₹${val.toLocaleString('en-IN')}`);
+                        }
+                        setIsEditingBalance(false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const val = parseFloat(balanceInput);
+                          if (!isNaN(val) && val >= 0) {
+                            setAvailBalance(val);
+                            try {
+                              localStorage.setItem('kite_sim_balance', val.toFixed(2));
+                            } catch (err) {}
+                            toast.success(`Simulated balance updated to ₹${val.toLocaleString('en-IN')}`);
+                          }
+                          setIsEditingBalance(false);
+                        } else if (e.key === 'Escape') {
+                          setIsEditingBalance(false);
+                        }
+                      }}
+                      className="w-24 bg-transparent border-0 text-foreground text-xs p-0 font-mono focus:outline-none"
+                    />
+                  </div>
+                ) : (
+                  <span className={`font-mono font-bold px-2 py-0.5 rounded flex items-center transition-all ${
+                    (reqAmount + charges) > availBalance 
+                      ? 'text-rose-455 text-rose-400 bg-rose-950/25 border border-rose-500/30' 
+                      : 'bg-primary text-primary-foreground border border-primary/20'
+                  }`}>
+                    <span 
+                      onClick={() => setIsEditingBalance(true)}
+                      className="cursor-pointer hover:underline flex items-center gap-1"
+                      title="Click to edit simulated balance"
+                    >
+                      ₹{availBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <Edit2 size={10} className="opacity-70" />
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onRefreshBalance();
+                        toast.success("Refreshing Kite account balance...");
+                      }}
+                      className={`text-[10px] ml-2 cursor-pointer font-sans font-normal transition-all ${
+                        (reqAmount + charges) > availBalance 
+                          ? 'text-primary hover:text-primary/80' 
+                          : 'text-primary-foreground/90 hover:text-primary-foreground'
+                      }`}
+                      title="Refresh Balance"
+                    >
+                      <Loader2 className={`w-3.5 h-3.5 ${processing ? 'animate-spin' : ''}`} />
+                    </button>
+                  </span>
+                )}
               </div>
             </div>
 
             {showChargesBreakdown && (
-              <div className="mt-3 pt-2.5 border-t border-slate-800/80 grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] text-slate-400 font-sans leading-relaxed animate-in fade-in slide-in-from-top-1 duration-150">
-                <div className="text-slate-500 font-medium col-span-2 text-[11px] text-cyan-400 flex justify-between items-center pb-1 border-b border-slate-800/40 mb-1">
+              <div className="mt-3 pt-2.5 border-t border-0/80 grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground font-sans leading-relaxed animate-in fade-in slide-in-from-top-1 duration-150">
+                <div className="text-muted-foreground font-medium col-span-2 text-[11px] text-primary flex justify-between items-center pb-1 border-b border-0/40 mb-1">
                   <span className="font-semibold flex items-center gap-2">
                     Charges Breakdown
-                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide uppercase ${isKite ? 'bg-emerald-500/20 text-emerald-400' : isLocalFallback ? 'bg-amber-500/20 text-amber-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide uppercase ${isKite ? 'bg-emerald-500/20 text-emerald-400' : isLocalFallback ? 'bg-primary/20 text-primary' : 'bg-rose-500/20 text-rose-400'}`}>
                       {isKite ? 'Kite Margin API' : isLocalFallback ? 'Local Estimate' : 'Margin Unavailable'}
                     </span>
                   </span>
-                  <span className="text-[10px] text-slate-500 italic">NSE F&O Options</span>
+                  <span className="text-[10px] text-muted-foreground italic">NSE F&O Options</span>
                 </div>
                 
                 {isLocalFallback && (
-                  <div className="col-span-2 text-amber-500/90 text-[10px] leading-relaxed bg-amber-500/10 border border-amber-500/20 px-2 py-1.5 rounded-md mb-1.5">
+                  <div className="col-span-2 text-primary/90 text-[10px] leading-relaxed bg-primary/10 border border-primary/20 px-2 py-1.5 rounded-md mb-1.5">
                     <strong>⚠️ Fallback Active:</strong> Charges are estimated and may differ from Zerodha.
                   </div>
                 )}
                 
                 {marginPreview.loading ? (
-                  <div className="col-span-2 text-center text-slate-400 py-3 flex items-center justify-center gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin text-cyan-500" />
+                  <div className="col-span-2 text-center text-muted-foreground py-3 flex items-center justify-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-primary" />
                     Fetching live charges from Kite...
                   </div>
                 ) : (
                   <>
-                    <div className="flex justify-between border-b border-slate-800/20 pb-1">
+                    <div className="flex justify-between border-b border-0/20 pb-1">
                       <span>Brokerage:</span>
-                      <span className="font-mono text-slate-300">₹{(isKite ? marginPreview.data!.charges.brokerage : estimatedChargesDetails.brokerage).toFixed(2)}</span>
+                      <span className="font-mono text-foreground/80">₹{(isKite ? marginPreview.data!.charges.brokerage : estimatedChargesDetails.brokerage).toFixed(2)}</span>
                     </div>
-                    <div className="flex justify-between border-b border-slate-800/20 pb-1">
+                    <div className="flex justify-between border-b border-0/20 pb-1">
                       <span>Exchange Turnover Fee:</span>
-                      <span className="font-mono text-slate-300">₹{(isKite ? marginPreview.data!.charges.exchange_turnover_charge : estimatedChargesDetails.txnCharge).toFixed(2)}</span>
+                      <span className="font-mono text-foreground/80">₹{(isKite ? marginPreview.data!.charges.exchange_turnover_charge : estimatedChargesDetails.txnCharge).toFixed(2)}</span>
                     </div>
-                    <div className="flex justify-between border-b border-slate-800/20 pb-1">
+                    <div className="flex justify-between border-b border-0/20 pb-1">
                       <span>GST:</span>
-                      <span className="font-mono text-slate-300">₹{(isKite ? marginPreview.data!.charges.gst.total : estimatedChargesDetails.gst).toFixed(2)}</span>
+                      <span className="font-mono text-foreground/80">₹{(isKite ? marginPreview.data!.charges.gst.total : estimatedChargesDetails.gst).toFixed(2)}</span>
                     </div>
-                    <div className="flex justify-between border-b border-slate-800/20 pb-1">
+                    <div className="flex justify-between border-b border-0/20 pb-1">
                       <span>Stamp Duty:</span>
-                      <span className="font-mono text-slate-300">₹{(isKite ? marginPreview.data!.charges.stamp_duty : estimatedChargesDetails.stamp).toFixed(2)}</span>
+                      <span className="font-mono text-foreground/80">₹{(isKite ? marginPreview.data!.charges.stamp_duty : estimatedChargesDetails.stamp).toFixed(2)}</span>
                     </div>
-                    <div className="flex justify-between border-b border-slate-800/20 pb-1">
+                    <div className="flex justify-between border-b border-0/20 pb-1">
                       <span>STT:</span>
-                      <span className="font-mono text-slate-300">₹{(isKite ? marginPreview.data!.charges.transaction_tax : estimatedChargesDetails.stt).toFixed(2)}</span>
+                      <span className="font-mono text-foreground/80">₹{(isKite ? marginPreview.data!.charges.transaction_tax : estimatedChargesDetails.stt).toFixed(2)}</span>
                     </div>
-                    <div className="flex justify-between border-b border-slate-800/20 pb-1">
+                    <div className="flex justify-between border-b border-0/20 pb-1">
                       <span>SEBI Charges:</span>
-                      <span className="font-mono text-slate-300">₹{(isKite ? marginPreview.data!.charges.sebi_turnover_charge : estimatedChargesDetails.sebi).toFixed(2)}</span>
+                      <span className="font-mono text-foreground/80">₹{(isKite ? marginPreview.data!.charges.sebi_turnover_charge : estimatedChargesDetails.sebi).toFixed(2)}</span>
                     </div>
-                    <div className="flex justify-between border-b-2 border-slate-700/60 pb-1 font-bold pt-1">
-                      <span className="text-cyan-400">Total Charges:</span>
-                      <span className="font-mono text-cyan-400">₹{(isKite ? marginPreview.data!.charges.total : estimatedChargesDetails.total).toFixed(2)}</span>
+                    <div className="flex justify-between border-b-2 border-0/60 pb-1 font-bold pt-1">
+                      <span className="text-primary">Total Charges:</span>
+                      <span className="font-mono text-primary">₹{(isKite ? marginPreview.data!.charges.total : estimatedChargesDetails.total).toFixed(2)}</span>
                     </div>
-                    <div className="col-span-2 text-[10px] text-slate-500 leading-normal italic mt-0.5 pt-0.5">
+                    <div className="col-span-2 text-[10px] text-muted-foreground leading-normal italic mt-0.5 pt-0.5">
                       {isKite 
                         ? "* Sourced from Zerodha Kite Margin API." 
                         : `* Local estimate calculated dynamically. ${marginPreview.error ? 'Kite Error: ' + marginPreview.error : ''}`}
@@ -614,15 +748,29 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
             )}
 
             {(reqAmount + charges) > availBalance && (
-              <div className="mt-2.5 pt-2 border-t border-rose-500/20 flex flex-col gap-1 text-[11px]">
+              <div className="mt-2.5 pt-3 border-t border-rose-500/20 flex flex-col gap-2 text-[11px]">
                 <div className="flex items-center gap-1.5 text-rose-400 font-semibold">
                   <span>⚠️ Insufficient Funds for this transaction</span>
                 </div>
-                <div className="text-slate-400 font-medium">
-                  Shortfall: <span className="font-mono text-rose-350 font-bold">₹{((reqAmount + charges) - availBalance).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <div className="text-muted-foreground font-medium flex items-center justify-between">
+                  <span>Shortfall: <span className="font-mono text-rose-350 font-bold">₹{((reqAmount + charges) - availBalance).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const required = Math.ceil(reqAmount + charges + 50000);
+                      setAvailBalance(required);
+                      try {
+                        localStorage.setItem('kite_sim_balance', required.toFixed(2));
+                      } catch (err) {}
+                      toast.success(`Simulated balance increased to ₹${required.toLocaleString('en-IN')} (Required + ₹50K buffer!)`);
+                    }}
+                    className="bg-emerald-950/45 text-emerald-400 border border-emerald-800/40 px-2 py-0.5 rounded hover:bg-emerald-900/50 transition-all font-bold cursor-pointer font-sans"
+                  >
+                    Fix Balance
+                  </button>
                 </div>
-                <div className="text-[10px] text-slate-500 leading-relaxed italic">
-                  Tip: You can edit and increase the simulated "Available" balance above to test successfully.
+                <div className="text-[10px] text-muted-foreground leading-relaxed italic">
+                  Tip: Click "Fix Balance" above or click on the Available Margin amount to edit it directly.
                 </div>
               </div>
             )}
@@ -630,24 +778,24 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
 
           {/* Warning banner when instrument context is incomplete */}
           {missingContext && (
-            <div className="bg-amber-950/25 border border-amber-900/80 text-amber-500 p-2.5 rounded-lg text-[10px] leading-relaxed">
+            <div className="bg-amber-950/25 border border-primary/80 text-primary p-2.5 rounded-lg text-[10px] leading-relaxed">
               <strong>Warning:</strong> Trading symbol or instrument token is missing. Real-time index feed is fallback or simulated. Order placement is restricted to simulated confirmation.
             </div>
           )}
 
           {/* Actions panel */}
-          <div className="pt-3 border-t border-slate-800 flex gap-3">
+          <div className="pt-3 border-t border-0 flex gap-3">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 py-1.5 text-xs font-semibold rounded bg-slate-800 hover:bg-slate-750 text-slate-300 transition-colors cursor-pointer"
+              className="flex-1 py-1.5 text-xs font-semibold rounded bg-muted hover:bg-slate-755 text-foreground/80 transition-colors cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={processing || lots <= 0 || (reqAmount + charges) > availBalance}
-              className={`flex-1 py-1.5 text-xs font-bold rounded text-white transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer ${isBuy ? 'bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-900/10 disabled:text-emerald-500/40' : 'bg-rose-600 hover:bg-rose-500 disabled:bg-rose-900/10 disabled:text-rose-500/40'}`}
+              className="flex-1 py-1.5 text-xs font-bold rounded bg-primary hover:bg-opacity-90 disabled:bg-primary/20 text-primary-foreground disabled:text-primary/40 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
             >
               {processing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               {isBuy ? 'Confirm BUY' : 'Confirm SELL'}
@@ -707,20 +855,26 @@ function TVStylePicker({
       {/* Trigger Button */}
       <button 
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsOpen(!isOpen); }}
-        className="flex items-center justify-center border border-white/20 rounded p-1.5 cursor-pointer bg-transparent hover:bg-white/5 transition-colors h-8 w-14"
+        className="flex items-center justify-center border border-0 rounded p-1.5 cursor-pointer bg-transparent hover:bg-accent hover:text-accent-foreground transition-colors h-8 w-14"
       >
-        <div className="w-5 h-5 rounded-sm shadow-sm" style={{ backgroundColor: color }} />
+        <div className="w-5 h-5 rounded-sm " style={{ backgroundColor: color }} />
       </button>
 
       {/* Popover */}
       {isOpen && (
-        <div 
-          className="absolute left-0 top-10 w-[240px] bg-[#1a1e27] border border-white/10 rounded-lg shadow-2xl z-[1000] p-4 flex flex-col gap-4 animate-in fade-in zoom-in-95 duration-100"
-          onClick={e => e.stopPropagation()}
-        >
+        <>
+          {/* Invisible overlay for click-outside */}
+          <div 
+            className="fixed inset-0 z-[999]" 
+            onClick={() => setIsOpen(false)}
+          />
+          <div 
+            className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[240px] bg-popover border border-0 rounded-lg z-[1000] p-4 flex flex-col gap-4 animate-in fade-in zoom-in-95 duration-100"
+            onClick={e => e.stopPropagation()}
+          >
           {/* Top line preview (like screenshot) */}
-          <div className="flex items-center gap-3 border border-[#2a2e39] bg-[#222631] rounded p-2">
-            <div className="w-6 h-6 rounded shadow-sm" style={{ backgroundColor: color }} />
+          <div className="flex items-center gap-3 border border-0 bg-muted rounded p-2">
+            <div className="w-6 h-6 rounded " style={{ backgroundColor: color }} />
             {thickness !== undefined && lineStyle !== undefined && (
               <div className="flex-1 flex items-center">
                 <div 
@@ -740,7 +894,10 @@ function TVStylePicker({
             {PREDEFINED_COLORS.map((c, i) => (
               <div 
                 key={c + i}
-                onClick={() => onColorChange(c)}
+                onClick={() => {
+                  onColorChange(c);
+                  setIsOpen(false);
+                }}
                 className={`w-5 h-5 rounded-sm cursor-pointer border hover:scale-110 transition-transform ${color.toLowerCase() === c.toLowerCase() ? 'border-white' : 'border-transparent'}`}
                 style={{ backgroundColor: c }}
               />
@@ -751,7 +908,7 @@ function TVStylePicker({
 
           {/* Custom + Button (Placeholder like screenshot) */}
           <div>
-            <button className="text-white/70 hover:text-white transition-colors flex items-center justify-center p-1 border border-transparent hover:border-white/20 rounded">
+            <button className="text-foreground/70 hover:text-foreground transition-colors flex items-center justify-center p-1 border border-transparent hover:border-0 rounded">
               <Plus className="w-5 h-5" />
             </button>
           </div>
@@ -759,7 +916,7 @@ function TVStylePicker({
           {/* Opacity */}
           {onOpacityChange && opacity !== undefined && (
             <div className="space-y-1.5">
-              <div className="text-[11px] text-white/50 font-medium">Opacity</div>
+              <div className="text-[11px] text-muted-foreground font-medium">Opacity</div>
               <div className="flex items-center gap-3">
                 <input 
                   type="range" 
@@ -770,7 +927,7 @@ function TVStylePicker({
                   className="flex-1 h-1.5 bg-gradient-to-r from-transparent to-[var(--slider-color)] rounded-full appearance-none cursor-pointer outline-none slider-thumb-ring"
                   style={{ '--slider-color': color } as any}
                 />
-                <div className="text-xs text-white/80 w-8 border border-white/10 bg-[#222631] rounded px-1 py-0.5 text-center">{opacity}%</div>
+                <div className="text-xs text-foreground/80 w-8 border border-0 bg-muted rounded px-1 py-0.5 text-center">{opacity}%</div>
               </div>
             </div>
           )}
@@ -778,13 +935,13 @@ function TVStylePicker({
           {/* Thickness */}
           {onThicknessChange && thickness !== undefined && (
             <div className="space-y-1.5">
-              <div className="text-[11px] text-white/50 font-medium">Thickness</div>
-              <div className="flex border border-white/20 rounded overflow-hidden h-8">
+              <div className="text-[11px] text-muted-foreground font-medium">Thickness</div>
+              <div className="flex border border-0 rounded overflow-hidden h-8">
                 {[1, 2, 3, 4].map((lw) => (
                   <button 
                     key={`lw-${lw}`}
                     onClick={() => onThicknessChange(lw)}
-                    className={`flex-[1] flex items-center justify-center border-r border-white/20 last:border-r-0 hover:bg-white/10 transition-colors ${thickness === lw ? 'bg-[#2a2e39]' : 'bg-transparent'}`}
+                    className={`flex-[1] flex items-center justify-center border-r border-0 last:border-r-0 hover:bg-white/10 transition-colors ${thickness === lw ? 'bg-muted/50' : 'bg-transparent'}`}
                   >
                     <div className="w-5" style={{ height: `${lw}px`, backgroundColor: '#fff' }} />
                   </button>
@@ -796,8 +953,8 @@ function TVStylePicker({
           {/* Line style */}
           {onLineStyleChange && lineStyle !== undefined && (
             <div className="space-y-1.5">
-              <div className="text-[11px] text-white/50 font-medium">Line style</div>
-              <div className="flex border border-white/20 rounded overflow-hidden h-8">
+              <div className="text-[11px] text-muted-foreground font-medium">Line style</div>
+              <div className="flex border border-0 rounded overflow-hidden h-8">
                 {[
                   { val: 0, style: 'solid' },
                   { val: 1, style: 'dashed' },
@@ -806,7 +963,7 @@ function TVStylePicker({
                   <button 
                     key={`ls-${ls.val}`}
                     onClick={() => onLineStyleChange(ls.val)}
-                    className={`flex-[1] flex items-center justify-center border-r border-white/20 last:border-r-0 hover:bg-white/10 transition-colors ${lineStyle === ls.val ? 'bg-[#2a2e39]' : 'bg-transparent'}`}
+                    className={`flex-[1] flex items-center justify-center border-r border-0 last:border-r-0 hover:bg-white/10 transition-colors ${lineStyle === ls.val ? 'bg-muted/50' : 'bg-transparent'}`}
                   >
                     <div className="w-5 border-t-[1.5px]" style={{ borderColor: '#fff', borderTopStyle: ls.style as any }} />
                   </button>
@@ -816,6 +973,7 @@ function TVStylePicker({
           )}
 
         </div>
+        </>
       )}
     </div>
   );
@@ -876,29 +1034,29 @@ function LineEditorModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-[#1e222d] border border-border rounded-lg shadow-xl w-full max-w-[400px] overflow-visible flex flex-col animate-in zoom-in-95 duration-200 relative">
-        <div className="flex items-center justify-between p-4 border-b border-white/10">
+      <div className="bg-card border border-0 rounded-lg w-full max-w-[400px] overflow-visible flex flex-col animate-in zoom-in-95 duration-200 relative">
+        <div className="flex items-center justify-between p-4 border-b border-0">
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-medium text-white">Horizontal line</h2>
+            <h2 className="text-lg font-medium text-foreground">Horizontal line</h2>
             <div className="w-3 h-3 text-muted-foreground ml-1">
                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
             </div>
           </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-white p-1">
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1">
             <X className="w-5 h-5" />
           </button>
         </div>
         
-        <div className="flex px-4 border-b border-white/10 mt-2 gap-4">
+        <div className="flex px-4 border-b border-0 mt-2 gap-4">
           <button 
             onClick={() => setTab('style')}
-            className={`pb-2 text-sm font-medium transition-colors ${tab === 'style' ? 'text-white border-b-2 border-white' : 'text-muted-foreground hover:text-white'}`}
+            className={`pb-2 text-sm font-medium transition-colors ${tab === 'style' ? 'text-foreground border-b-2 border-white' : 'text-muted-foreground hover:text-foreground'}`}
           >
             Style
           </button>
           <button 
             onClick={() => setTab('coordinates')}
-            className={`pb-2 text-sm font-medium transition-colors ${tab === 'coordinates' ? 'text-white border-b-2 border-white' : 'text-muted-foreground hover:text-white'}`}
+            className={`pb-2 text-sm font-medium transition-colors ${tab === 'coordinates' ? 'text-foreground border-b-2 border-white' : 'text-muted-foreground hover:text-foreground'}`}
           >
             Coordinates
           </button>
@@ -925,9 +1083,9 @@ function LineEditorModal({
                   type="checkbox" 
                   checked={labelVisible} 
                   onChange={e => setLabelVisible(e.target.checked)}
-                  className="rounded border-white/20 bg-black/20 text-blue-500 focus:ring-0"
+                  className="rounded border-0 bg-muted/40 dark:bg-black/20 text-blue-500 focus:ring-0"
                 />
-                <span className="text-sm text-full text-foreground hover:text-white">Price label</span>
+                <span className="text-sm text-full text-foreground hover:text-foreground">Price label</span>
               </label>
             </div>
           )}
@@ -938,20 +1096,20 @@ function LineEditorModal({
                 type="number" 
                 value={price}
                 onChange={e => setPrice(parseInt(e.target.value) || 0)}
-                className="bg-[#2a2e39] text-sm text-white px-3 py-1.5 rounded border border-blue-500/50 focus:outline-none focus:ring-1 focus:ring-blue-500 w-[120px]"
+                className="bg-muted/50 text-sm text-foreground px-3 py-1.5 rounded border border-blue-500/50 focus:outline-none focus:ring-1 focus:ring-blue-500 w-[120px]"
                 step="1"
               />
             </div>
           )}
         </div>
 
-        <div className="flex items-center justify-between p-4 border-t border-white/10 bg-[#151822]">
+        <div className="flex items-center justify-between p-4 border-t border-0 bg-muted">
            <div>
              {/* Left section, currently blank in screenshot except for Template dropdown, using simple Delete for now */}
              <button onClick={onDelete} className="text-sm text-red-500 hover:text-red-400 transition-colors">Delete</button>
            </div>
            <div className="flex gap-2">
-             <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-white/20 hover:bg-white/5 rounded text-white transition-colors">Cancel</button>
+             <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
              <button onClick={() => onApply(price, color, lineWidth, lineStyle, labelVisible)} className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium">Ok</button>
            </div>
         </div>
@@ -998,11 +1156,7 @@ const getIstDateTime = (unixSeconds: number) => {
 };
 
 const isMarketOpen = (unixSeconds: number): boolean => {
-  const ist = getIstDateTime(unixSeconds);
-  if (ist.dayOfWeek === 0 || ist.dayOfWeek === 6) {
-    return false; // Weekend
-  }
-  return ist.timeOfDaySec >= MARKET_OPEN_SECONDS_IST && ist.timeOfDaySec < MARKET_CLOSE_SECONDS_IST;
+  return true;
 };
 
 const toUnixSeconds = (value: any): number => {
@@ -1052,23 +1206,23 @@ function BBEditorModal({
   const [color, setColor] = useState(initialColor);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-250" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-transparent p-4 animate-in fade-in duration-250" onClick={onClose}>
       <div 
-        className="bg-[#1e222d] border border-border rounded-lg shadow-xl w-full max-w-[320px] overflow-visible flex flex-col pt-1 relative"
+        className="bg-card border border-0 rounded-lg w-full max-w-[320px] overflow-visible flex flex-col pt-1 relative"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between p-4 border-b border-white/10">
+        <div className="flex items-center justify-between p-4 border-b border-0">
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-medium text-white">Bollinger Bands Settings</h2>
+            <h2 className="text-lg font-medium text-foreground">Bollinger Bands Settings</h2>
           </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-white p-1">
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <div className="p-4 space-y-4">
           <div className="flex items-center justify-between gap-4">
-            <span className="text-sm font-medium text-slate-300">Period length:</span>
+            <span className="text-sm font-medium text-foreground/80">Period length:</span>
             <input
               type="number"
               value={period}
@@ -1078,12 +1232,12 @@ function BBEditorModal({
                 const val = parseInt(e.target.value, 10);
                 if (!isNaN(val) && val >= 2 && val <= 100) setPeriod(val);
               }}
-              className="w-16 bg-slate-950 border border-slate-700/50 rounded px-2.5 py-1 text-white text-right focus:outline-none focus:border-cyan-500 text-sm"
+              className="w-16 bg-background border border-0 rounded px-2.5 py-1 text-foreground text-right focus:outline-none focus:border-cyan-500 text-sm"
             />
           </div>
 
           <div className="flex items-center justify-between gap-4">
-            <span className="text-sm font-medium text-slate-300">Std Dev:</span>
+            <span className="text-sm font-medium text-foreground/80">Std Dev:</span>
             <input
               type="number"
               step="0.1"
@@ -1094,12 +1248,12 @@ function BBEditorModal({
                 const val = parseFloat(e.target.value);
                 if (!isNaN(val) && val >= 0.1 && val <= 10) setStdDev(val);
               }}
-              className="w-16 bg-slate-950 border border-slate-700/50 rounded px-2.5 py-1 text-white text-right focus:outline-none focus:border-cyan-500 text-sm"
+              className="w-16 bg-background border border-0 rounded px-2.5 py-1 text-foreground text-right focus:outline-none focus:border-cyan-500 text-sm"
             />
           </div>
 
           <div className="flex items-center justify-between">
-             <div className="text-sm font-medium text-slate-300">Bands Color</div>
+             <div className="text-sm font-medium text-foreground/80">Bands Color</div>
              <TVStylePicker 
                color={color}
                onColorChange={setColor}
@@ -1107,8 +1261,8 @@ function BBEditorModal({
           </div>
         </div>
 
-        <div className="flex items-center justify-end p-4 border-t border-white/10 bg-[#151822] gap-2 mt-2">
-          <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-white/20 hover:bg-white/5 rounded text-white transition-colors">Cancel</button>
+        <div className="flex items-center justify-end p-4 border-t border-0 bg-muted gap-2 mt-2">
+          <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
           <button onClick={() => onApply(period, stdDev, color)} className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium">Ok</button>
         </div>
       </div>
@@ -1119,31 +1273,45 @@ function BBEditorModal({
 function OiBarsEditorModal({
   onClose,
   initialMaxBarWidth,
+  initialGap,
+  initialBarThickness,
   initialCallColor,
   initialPutColor,
-  onApply
+  onApply,
+  onChange
 }: {
   onClose: () => void,
   initialMaxBarWidth: number,
+  initialGap: number,
+  initialBarThickness: number,
   initialCallColor: string,
   initialPutColor: string,
-  onApply: (maxBarWidth: number, callColor: string, putColor: string) => void
+  onApply: (maxBarWidth: number, gap: number, barThickness: number, callColor: string, putColor: string) => void,
+  onChange?: (maxBarWidth: number, gap: number, barThickness: number, callColor: string, putColor: string) => void
 }) {
   const [maxBarWidth, setMaxBarWidth] = useState(initialMaxBarWidth);
+  const [gap, setGap] = useState(initialGap);
+  const [barThickness, setBarThickness] = useState(initialBarThickness);
   const [callColor, setCallColor] = useState(initialCallColor);
   const [putColor, setPutColor] = useState(initialPutColor);
 
+  useEffect(() => {
+    if (onChange) {
+      onChange(maxBarWidth, gap, barThickness, callColor, putColor);
+    }
+  }, [maxBarWidth, gap, barThickness, callColor, putColor, onChange]);
+
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-250" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-transparent p-4 animate-in fade-in duration-250" onClick={onClose}>
       <div 
-        className="bg-[#1e222d] border border-border rounded-lg shadow-xl w-full max-w-[320px] overflow-visible flex flex-col pt-1 relative"
+        className="bg-card border border-0 rounded-lg w-full max-w-[320px] overflow-visible flex flex-col pt-1 relative"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between p-4 border-b border-white/10">
+        <div className="flex items-center justify-between p-4 border-b border-0">
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-medium text-white">OI Bars Settings</h2>
+            <h2 className="text-lg font-medium text-foreground">OI Bars Settings</h2>
           </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-white p-1">
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -1151,8 +1319,24 @@ function OiBarsEditorModal({
         <div className="p-4 space-y-6">
           <div className="space-y-2">
             <div className="flex justify-between text-xs text-muted-foreground">
-              <span>Max Bar Width</span>
-              <span className="font-mono text-white">{maxBarWidth}px</span>
+              <span>Gap from Strike Price Line</span>
+              <span className="font-mono text-foreground">{gap}px</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={300}
+              step={5}
+              value={gap}
+              onChange={(e) => setGap(parseInt(e.target.value))}
+              className="w-full h-1.5 bg-gradient-to-r from-transparent to-cyan-500 rounded-full appearance-none cursor-pointer outline-none slider-thumb-ring"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>Max Bar Length</span>
+              <span className="font-mono text-foreground">{maxBarWidth}px</span>
             </div>
             <input
               type="range"
@@ -1165,8 +1349,24 @@ function OiBarsEditorModal({
             />
           </div>
 
+          <div className="space-y-2">
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>Max Bar Width</span>
+              <span className="font-mono text-foreground">{barThickness}px</span>
+            </div>
+            <input
+              type="range"
+              min={2}
+              max={24}
+              step={2}
+              value={barThickness}
+              onChange={(e) => setBarThickness(parseInt(e.target.value))}
+              className="w-full h-1.5 bg-gradient-to-r from-transparent to-cyan-500 rounded-full appearance-none cursor-pointer outline-none slider-thumb-ring"
+            />
+          </div>
+
           <div className="flex items-center justify-between">
-             <div className="text-sm font-medium text-slate-300">Call OI Color (CE)</div>
+             <div className="text-sm font-medium text-foreground/80">Call OI Color (CE)</div>
              <TVStylePicker 
                color={callColor}
                onColorChange={setCallColor}
@@ -1174,7 +1374,7 @@ function OiBarsEditorModal({
           </div>
 
           <div className="flex items-center justify-between">
-             <div className="text-sm font-medium text-slate-300">Put OI Color (PE)</div>
+             <div className="text-sm font-medium text-foreground/80">Put OI Color (PE)</div>
              <TVStylePicker 
                color={putColor}
                onColorChange={setPutColor}
@@ -1182,9 +1382,9 @@ function OiBarsEditorModal({
           </div>
         </div>
 
-        <div className="flex items-center justify-end p-4 border-t border-white/10 bg-[#151822] gap-2 mt-2">
-          <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-white/20 hover:bg-white/5 rounded text-white transition-colors">Cancel</button>
-          <button onClick={() => onApply(maxBarWidth, callColor, putColor)} className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium">Ok</button>
+        <div className="flex items-center justify-end p-4 border-t border-0 bg-muted gap-2 mt-2">
+          <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
+          <button onClick={() => onApply(maxBarWidth, gap, barThickness, callColor, putColor)} className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium">Ok</button>
         </div>
       </div>
     </div>
@@ -1194,90 +1394,127 @@ function OiBarsEditorModal({
 function RsiEditorModal({
   onClose,
   initialColor,
-  initialOverbought,
+  initialLineWidth,
+  initialLineStyle,
+  initialSmaLineWidth,
+  initialSmaLineStyle,
+  initialOverbought1,
   initialOverbought2,
-  initialOversold,
+  initialOversold1,
   initialOversold2,
   initialSmaColor,
   initialOverboughtColor,
   initialOversoldColor,
-  onApply
+  onApply,
+  onChange
 }: {
   onClose: () => void,
   initialColor: string,
-  initialOverbought: number,
+  initialLineWidth: number,
+  initialLineStyle: number,
+  initialSmaLineWidth: number,
+  initialSmaLineStyle: number,
+  initialOverbought1: number,
   initialOverbought2: number,
-  initialOversold: number,
+  initialOversold1: number,
   initialOversold2: number,
   initialSmaColor: string,
   initialOverboughtColor: string,
   initialOversoldColor: string,
   onApply: (
     color: string,
-    overbought: number,
+    lineWidth: number,
+    lineStyle: number,
+    smaLineWidth: number,
+    smaLineStyle: number,
+    overbought1: number,
     overbought2: number,
-    oversold: number,
+    oversold1: number,
     oversold2: number,
     smaColor: string,
     overboughtColor: string,
     oversoldColor: string
-  ) => void
+  ) => void,
+  onChange?: (
+    color: string,
+    lineWidth: number,
+    lineStyle: number,
+    smaLineWidth: number,
+    smaLineStyle: number,
+    overbought1: number,
+    overbought2: number,
+    oversold1: number,
+    oversold2: number,
+    smaColor: string,
+    overboughtColor: string,
+    oversoldColor: string
+  ) => void;
 }) {
   const [color, setColor] = useState(initialColor);
-  const [overbought, setOverbought] = useState(initialOverbought);
+  const [lineWidth, setLineWidth] = useState(initialLineWidth);
+  const [lineStyle, setLineStyle] = useState(initialLineStyle);
+  const [smaLineWidth, setSmaLineWidth] = useState(initialSmaLineWidth);
+  const [smaLineStyle, setSmaLineStyle] = useState(initialSmaLineStyle);
+  const [overbought1, setOverbought1] = useState(initialOverbought1);
   const [overbought2, setOverbought2] = useState(initialOverbought2);
-  const [oversold, setOversold] = useState(initialOversold);
+  const [oversold1, setOversold1] = useState(initialOversold1);
   const [oversold2, setOversold2] = useState(initialOversold2);
   const [smaColor, setSmaColor] = useState(initialSmaColor);
   const [overboughtColor, setOverboughtColor] = useState(initialOverboughtColor);
   const [oversoldColor, setOversoldColor] = useState(initialOversoldColor);
 
+  useEffect(() => {
+    if (onChange) {
+      onChange(color, lineWidth, lineStyle, smaLineWidth, smaLineStyle, overbought1, overbought2, oversold1, oversold2, smaColor, overboughtColor, oversoldColor);
+    }
+  }, [color, lineWidth, lineStyle, smaLineWidth, smaLineStyle, overbought1, overbought2, oversold1, oversold2, smaColor, overboughtColor, oversoldColor, onChange]);
+
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-250" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-transparent p-4 animate-in fade-in duration-250" onClick={onClose}>
       <div 
-        className="bg-[#1e222d] border border-border rounded-lg shadow-xl w-full max-w-[420px] overflow-visible flex flex-col pt-1 relative text-white"
+        className="bg-card border border-0 rounded-lg w-full max-w-[420px] overflow-visible flex flex-col pt-1 relative text-foreground"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between p-4 border-b border-white/10">
+        <div className="flex items-center justify-between p-4 border-b border-0">
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-medium text-white">RSI Settings</h2>
+            <h2 className="text-lg font-medium text-foreground">RSI Settings</h2>
           </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-white p-1">
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
+        <div className="p-4 space-y-4">
           {/* Overbought Levels */}
           <div className="space-y-2">
-            <div className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Overbought Levels</div>
+            <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Overbought Levels</div>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1">
-                <span className="text-xs text-slate-300">Level 1 (Inner):</span>
+                <span className="text-xs text-foreground/80">Level 1:</span>
                 <input
                   type="number"
-                  value={overbought}
+                  value={overbought1}
                   min={50}
                   max={95}
                   onChange={(e) => {
                     const val = parseInt(e.target.value, 10);
-                    if (!isNaN(val) && val >= 50 && val <= 95) setOverbought(val);
+                    if (!isNaN(val) && val >= 50 && val <= 95) setOverbought1(val);
                   }}
-                  className="w-full bg-slate-950 border border-slate-700/50 rounded px-2.5 py-1.5 text-white text-right focus:outline-none focus:border-cyan-500 text-sm"
+                  className="w-full bg-background border border-0 rounded px-2.5 py-1.5 text-foreground text-right focus:outline-none focus:border-cyan-500 text-sm"
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <span className="text-xs text-slate-300">Level 2 (Outer):</span>
+                <span className="text-xs text-foreground/80">Level 2:</span>
                 <input
                   type="number"
                   value={overbought2}
                   min={50}
-                  max={99}
+                  max={95}
                   onChange={(e) => {
                     const val = parseInt(e.target.value, 10);
-                    if (!isNaN(val) && val >= 50 && val <= 99) setOverbought2(val);
+                    if (!isNaN(val) && val >= 50 && val <= 95) setOverbought2(val);
                   }}
-                  className="w-full bg-slate-950 border border-slate-700/50 rounded px-2.5 py-1.5 text-white text-right focus:outline-none focus:border-cyan-500 text-sm"
+                  className="w-full bg-background border border-0 rounded px-2.5 py-1.5 text-foreground text-right focus:outline-none focus:border-cyan-500 text-sm"
                 />
               </div>
             </div>
@@ -1285,60 +1522,68 @@ function RsiEditorModal({
 
           {/* Oversold Levels */}
           <div className="space-y-2">
-            <div className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Oversold Levels</div>
+            <div className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Oversold Levels</div>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1">
-                <span className="text-xs text-slate-300">Level 1 (Inner):</span>
+                <span className="text-xs text-foreground/80">Level 1:</span>
                 <input
                   type="number"
-                  value={oversold}
+                  value={oversold1}
                   min={5}
                   max={50}
                   onChange={(e) => {
                     const val = parseInt(e.target.value, 10);
-                    if (!isNaN(val) && val >= 5 && val <= 50) setOversold(val);
+                    if (!isNaN(val) && val >= 5 && val <= 50) setOversold1(val);
                   }}
-                  className="w-full bg-slate-950 border border-slate-700/50 rounded px-2.5 py-1.5 text-white text-right focus:outline-none focus:border-cyan-500 text-sm"
+                  className="w-full bg-background border border-0 rounded px-2.5 py-1.5 text-foreground text-right focus:outline-none focus:border-cyan-500 text-sm"
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <span className="text-xs text-slate-300">Level 2 (Outer):</span>
+                <span className="text-xs text-foreground/80">Level 2:</span>
                 <input
                   type="number"
                   value={oversold2}
-                  min={1}
+                  min={5}
                   max={50}
                   onChange={(e) => {
                     const val = parseInt(e.target.value, 10);
-                    if (!isNaN(val) && val >= 1 && val <= 50) setOversold2(val);
+                    if (!isNaN(val) && val >= 5 && val <= 50) setOversold2(val);
                   }}
-                  className="w-full bg-slate-950 border border-slate-700/50 rounded px-2.5 py-1.5 text-white text-right focus:outline-none focus:border-cyan-500 text-sm"
+                  className="w-full bg-background border border-0 rounded px-2.5 py-1.5 text-foreground text-right focus:outline-none focus:border-cyan-500 text-sm"
                 />
               </div>
             </div>
           </div>
 
           {/* Line Colors */}
-          <div className="space-y-4 pt-4 border-t border-white/10">
+          <div className="space-y-4 pt-4 border-t border-0">
             
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-300">RSI Line</span>
+              <span className="text-sm font-medium text-foreground/80">RSI Line</span>
               <TVStylePicker 
                 color={color}
+                thickness={lineWidth}
+                lineStyle={lineStyle}
                 onColorChange={setColor}
+                onThicknessChange={setLineWidth}
+                onLineStyleChange={setLineStyle}
               />
             </div>
 
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-300">SMA Line</span>
+              <span className="text-sm font-medium text-foreground/80">SMA Line</span>
               <TVStylePicker 
                 color={smaColor}
+                thickness={smaLineWidth}
+                lineStyle={smaLineStyle}
                 onColorChange={setSmaColor}
+                onThicknessChange={setSmaLineWidth}
+                onLineStyleChange={setSmaLineStyle}
               />
             </div>
 
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-300">Overbought Level</span>
+              <span className="text-sm font-medium text-foreground/80">Overbought Level</span>
               <TVStylePicker 
                 color={overboughtColor}
                 onColorChange={setOverboughtColor}
@@ -1346,7 +1591,7 @@ function RsiEditorModal({
             </div>
 
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-300">Oversold Level</span>
+              <span className="text-sm font-medium text-foreground/80">Oversold Level</span>
               <TVStylePicker 
                 color={oversoldColor}
                 onColorChange={setOversoldColor}
@@ -1356,10 +1601,10 @@ function RsiEditorModal({
           </div>
         </div>
 
-        <div className="flex items-center justify-end p-4 border-t border-white/10 bg-[#151822] gap-2">
-          <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-white/20 hover:bg-white/5 rounded text-white transition-colors">Cancel</button>
+        <div className="flex items-center justify-end p-4 border-t border-0 bg-muted gap-2">
+          <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
           <button 
-            onClick={() => onApply(color, overbought, overbought2, oversold, oversold2, smaColor, overboughtColor, oversoldColor)} 
+            onClick={() => onApply(color, lineWidth, lineStyle, smaLineWidth, smaLineStyle, overbought1, overbought2, oversold1, oversold2, smaColor, overboughtColor, oversoldColor)} 
             className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium"
           >
             Ok
@@ -1374,19 +1619,28 @@ function HLevelsEditorModal({
   onClose,
   initialLevels,
   initialLineStyle,
+  initialLineWidth,
   spotPrice,
+  initialShowFiftyPercent,
+  initialFiftyPercentColor,
   onApply
 }: {
   onClose: () => void,
   initialLevels: number[],
   initialLineStyle: number,
+  initialLineWidth: number,
   spotPrice?: number,
-  onApply: (levels: number[], lineStyle: number) => void
+  initialShowFiftyPercent: boolean,
+  initialFiftyPercentColor: string,
+  onApply: (levels: number[], lineStyle: number, lineWidth: number, showFifty: boolean, fiftyColor: string) => void
 }) {
   const [levels, setLevels] = useState<number[]>(() => {
     return [...initialLevels];
   });
   const [lineStyle, setLineStyle] = useState(initialLineStyle);
+  const [lineWidth, setLineWidth] = useState(initialLineWidth);
+  const [showFifty, setShowFifty] = useState(initialShowFiftyPercent);
+  const [fiftyColor, setFiftyColor] = useState(initialFiftyPercentColor);
 
   const handleLevelChange = (index: number, valStr: string) => {
     const val = parseFloat(valStr);
@@ -1411,24 +1665,24 @@ function HLevelsEditorModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-250">
-      <div className="bg-[#1e222d] border border-border rounded-lg shadow-xl w-full max-w-[420px] overflow-visible flex flex-col animate-in zoom-in-95 duration-200">
-        <div className="flex items-center justify-between p-4 border-b border-white/10">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-transparent p-4 animate-in fade-in duration-250">
+      <div className="bg-card border border-0 rounded-lg w-full max-w-[420px] overflow-visible flex flex-col animate-in zoom-in-95 duration-200">
+        <div className="flex items-center justify-between p-4 border-b border-0">
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-medium text-white">H Levels Settings</h2>
+            <h2 className="text-lg font-medium text-foreground">H Levels Settings</h2>
           </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-white p-1">
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <div className="p-4 space-y-4 max-h-[60vh] overflow-y-auto">
           {spotPrice && spotPrice > 0 ? (
-            <div className="flex items-center justify-between bg-slate-900/40 border border-slate-800 rounded p-2 text-xs">
-              <span className="text-slate-400 font-sans">Spot price: <span className="font-mono text-slate-200 font-medium">{spotPrice.toFixed(2)}</span></span>
+            <div className="flex items-center justify-between bg-card/40 border border-0 rounded p-2 text-xs">
+              <span className="text-muted-foreground font-sans">Spot price: <span className="font-mono text-foreground/90 font-medium">{spotPrice.toFixed(2)}</span></span>
               <button 
                 onClick={autoAlign}
-                className="px-2 py-1 bg-cyan-600 hover:bg-cyan-500 hover:text-white rounded text-white text-[11px] font-medium transition-colors font-sans"
+                className="px-2 py-1 bg-cyan-600 hover:bg-cyan-500 hover:text-foreground rounded text-foreground text-[11px] font-medium transition-colors font-sans"
                 title="Automatically calculate levels centered around current price"
               >
                 Auto-align to Spot
@@ -1445,7 +1699,7 @@ function HLevelsEditorModal({
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-[10px] text-slate-400 uppercase font-sans">Red Level 1</label>
+                  <label className="text-[10px] text-muted-foreground uppercase font-sans">Red Level 1</label>
                   <input
                     type="number"
                     step="1"
@@ -1453,11 +1707,11 @@ function HLevelsEditorModal({
                     placeholder="0"
                     onChange={(e) => handleLevelChange(0, e.target.value)}
                     onFocus={(e) => e.target.select()}
-                    className="w-full bg-slate-950 border border-red-900/30 rounded px-2 py-1 text-white text-right focus:outline-none focus:border-red-500 text-sm font-mono h-9"
+                    className="w-full bg-background border border-red-900/30 rounded px-2 py-1 text-foreground text-right focus:outline-none focus:border-red-500 text-sm font-mono h-9"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] text-slate-400 uppercase font-sans">Red Level 2</label>
+                  <label className="text-[10px] text-muted-foreground uppercase font-sans">Red Level 2</label>
                   <input
                     type="number"
                     step="1"
@@ -1465,21 +1719,21 @@ function HLevelsEditorModal({
                     placeholder="0"
                     onChange={(e) => handleLevelChange(1, e.target.value)}
                     onFocus={(e) => e.target.select()}
-                    className="w-full bg-slate-950 border border-red-900/30 rounded px-2 py-1 text-white text-right focus:outline-none focus:border-red-500 text-sm font-mono h-9"
+                    className="w-full bg-background border border-red-900/30 rounded px-2 py-1 text-foreground text-right focus:outline-none focus:border-red-500 text-sm font-mono h-9"
                   />
                 </div>
               </div>
             </div>
 
             {/* Trap zones */}
-            <div className="rounded-lg bg-yellow-950/10 border border-yellow-900/25 p-3 space-y-2.5">
-              <div className="text-xs font-semibold text-yellow-500 uppercase tracking-wider flex items-center gap-1.5 font-sans">
-                <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
+            <div className="rounded-lg bg-yellow-950/10 border border-primary/25 p-3 space-y-2.5">
+              <div className="text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-1.5 font-sans">
+                <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
                 Trap Zones (Intraday ranges)
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-[10px] text-slate-400 uppercase font-sans">Trap Level 1</label>
+                  <label className="text-[10px] text-muted-foreground uppercase font-sans">Trap Level 1</label>
                   <input
                     type="number"
                     step="1"
@@ -1487,11 +1741,11 @@ function HLevelsEditorModal({
                     placeholder="0"
                     onChange={(e) => handleLevelChange(2, e.target.value)}
                     onFocus={(e) => e.target.select()}
-                    className="w-full bg-slate-950 border border-yellow-900/30 rounded px-2 py-1 text-white text-right focus:outline-none focus:border-yellow-500 text-sm font-mono h-9"
+                    className="w-full bg-background border border-primary/30 rounded px-2 py-1 text-foreground text-right focus:outline-none focus:border-primary text-sm font-mono h-9"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] text-slate-400 uppercase font-sans">Trap Level 2</label>
+                  <label className="text-[10px] text-muted-foreground uppercase font-sans">Trap Level 2</label>
                   <input
                     type="number"
                     step="1"
@@ -1499,7 +1753,7 @@ function HLevelsEditorModal({
                     placeholder="0"
                     onChange={(e) => handleLevelChange(3, e.target.value)}
                     onFocus={(e) => e.target.select()}
-                    className="w-full bg-slate-950 border border-yellow-900/30 rounded px-2 py-1 text-white text-right focus:outline-none focus:border-yellow-500 text-sm font-mono h-9"
+                    className="w-full bg-background border border-primary/30 rounded px-2 py-1 text-foreground text-right focus:outline-none focus:border-primary text-sm font-mono h-9"
                   />
                 </div>
               </div>
@@ -1513,7 +1767,7 @@ function HLevelsEditorModal({
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-[10px] text-slate-400 uppercase font-sans">Green Level 1</label>
+                  <label className="text-[10px] text-muted-foreground uppercase font-sans">Green Level 1</label>
                   <input
                     type="number"
                     step="1"
@@ -1521,11 +1775,11 @@ function HLevelsEditorModal({
                     placeholder="0"
                     onChange={(e) => handleLevelChange(4, e.target.value)}
                     onFocus={(e) => e.target.select()}
-                    className="w-full bg-slate-950 border border-green-900/30 rounded px-2 py-1 text-white text-right focus:outline-none focus:border-emerald-500 text-sm font-mono h-9"
+                    className="w-full bg-background border border-green-900/30 rounded px-2 py-1 text-foreground text-right focus:outline-none focus:border-emerald-500 text-sm font-mono h-9"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] text-slate-400 uppercase font-sans">Green Level 2</label>
+                  <label className="text-[10px] text-muted-foreground uppercase font-sans">Green Level 2</label>
                   <input
                     type="number"
                     step="1"
@@ -1533,16 +1787,38 @@ function HLevelsEditorModal({
                     placeholder="0"
                     onChange={(e) => handleLevelChange(5, e.target.value)}
                     onFocus={(e) => e.target.select()}
-                    className="w-full bg-slate-950 border border-emerald-500/30 rounded px-2 py-1 text-white text-right focus:outline-none focus:border-emerald-500 text-sm font-mono h-9"
+                    className="w-full bg-background border border-emerald-500/30 rounded px-2 py-1 text-foreground text-right focus:outline-none focus:border-emerald-500 text-sm font-mono h-9"
                   />
                 </div>
               </div>
             </div>
 
+            {/* Line width selection */}
+            <div className="space-y-2 pt-1">
+              <div className="text-xs text-muted-foreground uppercase tracking-wider font-sans text-muted-foreground">Line thickness</div>
+              <div className="flex border border-0 rounded overflow-hidden">
+                {[1, 2, 3, 4].map((width) => (
+                  <div 
+                    key={`lw-${width}`}
+                    onClick={() => setLineWidth(width)}
+                    className={`flex-[1] h-8 flex items-center justify-center cursor-pointer border-r border-0 last:border-r-0 hover:bg-white/10 ${lineWidth === width ? 'bg-white text-black' : 'bg-muted/50 text-foreground'}`}
+                  >
+                    <div 
+                      className={`w-6 border-t-${width === 1 ? '' : width}`} 
+                      style={{ 
+                         borderTopWidth: `${width}px`,
+                         borderColor: lineWidth === width ? '#000' : '#fff'
+                      }} 
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
             {/* Line style selection */}
             <div className="space-y-2 pt-1">
-              <div className="text-xs text-muted-foreground uppercase tracking-wider font-sans text-slate-400">Line style</div>
-              <div className="flex border border-white/20 rounded overflow-hidden">
+              <div className="text-xs text-muted-foreground uppercase tracking-wider font-sans text-muted-foreground">Line style</div>
+              <div className="flex border border-0 rounded overflow-hidden">
                 {[
                   { val: 0, dash: 'solid', label: 'Solid' },
                   { val: 1, dash: 'dashed', label: 'Dashed' },
@@ -1551,7 +1827,7 @@ function HLevelsEditorModal({
                   <div 
                     key={`ls-${ls.val}`}
                     onClick={() => setLineStyle(ls.val)}
-                    className={`flex-[1] h-8 flex items-center justify-center cursor-pointer border-r border-white/20 last:border-r-0 hover:bg-white/10 ${lineStyle === ls.val ? 'bg-white text-black font-semibold' : 'bg-[#2a2e39] text-white'}`}
+                    className={`flex-[1] h-8 flex items-center justify-center cursor-pointer border-r border-0 last:border-r-0 hover:bg-white/10 ${lineStyle === ls.val ? 'bg-white text-black font-semibold' : 'bg-muted/50 text-foreground'}`}
                   >
                     <div 
                       className="w-6 border-t-2" 
@@ -1565,13 +1841,42 @@ function HLevelsEditorModal({
               </div>
             </div>
 
+            {/* 50% levels customization */}
+            <div className="space-y-2 pt-1 border-t border-0 mt-2">
+              <div className="text-xs text-muted-foreground uppercase tracking-wider font-sans text-muted-foreground mt-2">50% Levels (Midpoints)</div>
+              <div className="flex items-center justify-between mt-2">
+                <span className="text-sm text-foreground/90">Show 50% levels</span>
+                <button
+                  onClick={() => setShowFifty(!showFifty)}
+                  className={`w-10 h-5 rounded-full relative transition-colors ${showFifty ? 'bg-emerald-500' : 'bg-slate-700'}`}
+                >
+                  <div className={`w-4 h-4 bg-white rounded-full absolute top-0.5 transition-transform ${showFifty ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
+              {showFifty && (
+                <div className="flex items-center justify-between mt-2">
+                  <span className="text-sm text-foreground/90">Color</span>
+                  <div className="flex gap-2">
+                    {['#3b82f6', '#8b5cf6', '#a1a1aa', '#fbbf24', '#f87171'].map(c => (
+                      <div
+                        key={c}
+                        onClick={() => setFiftyColor(c)}
+                        className={`w-6 h-6 rounded-full cursor-pointer border-2 ${fiftyColor === c ? 'border-white' : 'border-transparent'}`}
+                        style={{ backgroundColor: c }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
           </div>
         </div>
 
-        <div className="flex items-center justify-end p-4 border-t border-white/10 bg-[#151822] gap-2 mt-2">
-          <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-white/20 hover:bg-white/5 rounded text-white transition-colors font-sans">Cancel</button>
+        <div className="flex items-center justify-end p-4 border-t border-0 bg-muted gap-2 mt-2">
+          <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors font-sans">Cancel</button>
           <button 
-            onClick={() => onApply(levels, lineStyle)} 
+            onClick={() => onApply(levels, lineStyle, lineWidth, showFifty, fiftyColor)} 
             className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium font-sans"
           >
             Ok
@@ -1603,26 +1908,26 @@ function PdhPdlEditorModal({
   const [lineStyle, setLineStyle] = useState(initialLineStyle);
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 animate-in fade-in duration-250" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-transparent p-4 animate-in fade-in duration-250" onClick={onClose}>
       <div 
-        className="bg-[#1e222d] border border-border rounded-lg shadow-xl w-full max-w-[320px] overflow-visible flex flex-col pt-1 relative"
+        className="bg-card border border-0 rounded-lg w-full max-w-[320px] overflow-visible flex flex-col pt-1 relative"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between p-4 border-b border-white/10">
+        <div className="flex items-center justify-between p-4 border-b border-0">
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-medium text-white">PDH & PDL Settings</h2>
+            <h2 className="text-lg font-medium text-foreground">PDH & PDL Settings</h2>
             <div className="w-3 h-3 text-muted-foreground ml-1">
                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
             </div>
           </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-white p-1">
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <div className="p-4 space-y-4">
           <div className="flex items-center justify-between">
-             <div className="text-sm font-medium text-slate-300">Previous Day High (PDH)</div>
+             <div className="text-sm font-medium text-foreground/80">Previous Day High (PDH)</div>
              <TVStylePicker 
                color={pdhColor}
                thickness={lineWidth}
@@ -1634,7 +1939,7 @@ function PdhPdlEditorModal({
           </div>
 
           <div className="flex items-center justify-between">
-             <div className="text-sm font-medium text-slate-300">Previous Day Low (PDL)</div>
+             <div className="text-sm font-medium text-foreground/80">Previous Day Low (PDL)</div>
              <TVStylePicker 
                color={pdlColor}
                thickness={lineWidth}
@@ -1646,8 +1951,8 @@ function PdhPdlEditorModal({
           </div>
         </div>
 
-        <div className="flex items-center justify-end p-4 border-t border-white/10 bg-[#151822] gap-2 mt-2">
-          <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-white/20 hover:bg-white/5 rounded text-white transition-colors">Cancel</button>
+        <div className="flex items-center justify-end p-4 border-t border-0 bg-muted gap-2 mt-2">
+          <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
           <button onClick={() => onApply(pdhColor, pdlColor, lineWidth, lineStyle)} className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium">Ok</button>
         </div>
       </div>
@@ -1660,7 +1965,7 @@ const createOHLCInfoPanel = (container: HTMLElement) => {
   let panel = container.querySelector('.ohlc-panel') as HTMLDivElement;
   if (!panel) {
     panel = document.createElement('div');
-    panel.className = 'ohlc-panel absolute top-2 left-2 z-[20] flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-mono select-none pointer-events-none px-2.5 py-1.5 rounded bg-[#1e222d]/90 backdrop-blur shadow-sm border border-white/10';
+    panel.className = 'ohlc-panel absolute top-2 left-2 z-[20] flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-mono select-none pointer-events-none px-2.5 py-1.5 rounded-full bg-card/90 backdrop-blur border border-0';
     container.appendChild(panel);
   }
   return panel;
@@ -1687,21 +1992,21 @@ function SnREditorModal({
   const [lineStyle, setLineStyle] = useState(initialLineStyle);
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 animate-in fade-in duration-250" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-transparent p-4 animate-in fade-in duration-250" onClick={onClose}>
       <div 
-        className="bg-[#1e222d] border border-border rounded-lg shadow-xl w-full max-w-[320px] overflow-visible flex flex-col pt-1"
+        className="bg-card border border-0 rounded-lg w-full max-w-[320px] overflow-visible flex flex-col pt-1"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between p-4 border-b border-white/10">
-          <h3 className="text-lg font-medium text-white">Support/Resistance Settings</h3>
-          <button onClick={onClose} className="p-1 hover:bg-white/10 rounded text-slate-400 hover:text-white transition-colors">
+        <div className="flex items-center justify-between p-4 border-b border-0">
+          <h3 className="text-lg font-medium text-foreground">Support/Resistance Settings</h3>
+          <button onClick={onClose} className="p-1 hover:bg-white/10 rounded text-muted-foreground hover:text-foreground transition-colors">
             <X size={16} />
           </button>
         </div>
         
         <div className="p-4 space-y-4">
           <div className="flex items-center justify-between">
-             <div className="text-sm font-medium text-slate-300">Support Line</div>
+             <div className="text-sm font-medium text-foreground/80">Support Line</div>
              <TVStylePicker 
                color={supportColor}
                thickness={lineWidth}
@@ -1713,7 +2018,7 @@ function SnREditorModal({
           </div>
 
           <div className="flex items-center justify-between">
-             <div className="text-sm font-medium text-slate-300">Resistance Line</div>
+             <div className="text-sm font-medium text-foreground/80">Resistance Line</div>
              <TVStylePicker 
                color={resistanceColor}
                thickness={lineWidth}
@@ -1725,8 +2030,8 @@ function SnREditorModal({
           </div>
         </div>
 
-        <div className="flex bg-[#151822] p-4 gap-2 border-t border-white/10 mt-2">
-          <button onClick={onClose} className="flex-1 py-1.5 text-sm bg-transparent border border-white/20 hover:bg-white/5 rounded text-white transition-colors">Cancel</button>
+        <div className="flex bg-muted p-4 gap-2 border-t border-0 mt-2">
+          <button onClick={onClose} className="flex-1 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
           <button 
             className="flex-1 py-1.5 rounded bg-white text-black hover:bg-gray-200 font-medium text-sm transition-colors"
             onClick={() => onApply(supportColor, resistanceColor, lineWidth, lineStyle)}
@@ -1835,9 +2140,9 @@ function OrderDiagnosticsPanel({ testMode, setTestMode }: { testMode: boolean, s
 
   return (
     <>
-      <div className="w-full h-px bg-slate-800 my-2" />
+      <div className="w-full h-px bg-muted my-2" />
       <div className="flex justify-between items-center mb-1">
-        <span className="text-slate-400 font-semibold uppercase text-[11px]">Kite Order API</span>
+        <span className="text-muted-foreground font-semibold uppercase text-[11px]">Kite Order API</span>
         {d.lastApiStatus === 'Success' ? (
           <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded font-bold uppercase">Success</span>
         ) : d.lastApiStatus === 'Failed' ? (
@@ -1845,54 +2150,54 @@ function OrderDiagnosticsPanel({ testMode, setTestMode }: { testMode: boolean, s
         ) : d.lastApiStatus === 'Calling' ? (
           <span className="text-[9px] bg-sky-500/20 text-sky-400 px-1.5 py-0.5 rounded font-bold uppercase">Calling</span>
         ) : (
-          <span className="text-[9px] bg-slate-500/20 text-slate-400 px-1.5 py-0.5 rounded font-bold uppercase">Not Called</span>
+          <span className="text-[9px] bg-slate-500/20 text-muted-foreground px-1.5 py-0.5 rounded font-bold uppercase">Not Called</span>
         )}
       </div>
 
-      <div className="flex justify-between items-center bg-slate-900 border border-slate-700/60 p-2 rounded-lg mt-1 mb-2">
-        <span className="text-[10px] text-slate-300 font-medium tracking-wide">Test Order Placement Mode</span>
+      <div className="flex justify-between items-center bg-card border border-0/60 p-2 rounded-lg mt-1 mb-2">
+        <span className="text-[10px] text-foreground/80 font-medium tracking-wide">Test Order Placement Mode</span>
         <label className="relative inline-flex items-center cursor-pointer">
           <input type="checkbox" className="sr-only peer" checked={testMode} onChange={e => setTestMode(e.target.checked)} />
-          <div className="w-7 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-cyan-500"></div>
+          <div className="w-7 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after: after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
         </label>
       </div>
 
       <div className="flex flex-col gap-1.5 text-[10px] space-y-1">
         <div className="flex justify-between">
-          <span className="text-slate-500">Order API Status</span>
-          <span className={`font-mono ${d.lastApiStatus === 'Success' ? 'text-emerald-400' : d.lastApiStatus === 'Failed' ? 'text-rose-400' : 'text-slate-300'}`}>
+          <span className="text-muted-foreground">Order API Status</span>
+          <span className={`font-mono ${d.lastApiStatus === 'Success' ? 'text-emerald-400' : d.lastApiStatus === 'Failed' ? 'text-rose-400' : 'text-foreground/80'}`}>
             {d.lastApiStatus}
           </span>
         </div>
         <div className="flex justify-between">
-          <span className="text-slate-500">Last Order ID</span>
-          <span className="text-slate-300 font-mono text-right truncate max-w-[150px]">
+          <span className="text-muted-foreground">Last Order ID</span>
+          <span className="text-foreground/80 font-mono text-right truncate max-w-[150px]">
             {d.lastOrderId || 'N/A'}
           </span>
         </div>
-        <div className="flex justify-between border-b border-slate-800/40 pb-1">
-          <span className="text-slate-500">Exchange Order ID</span>
-          <span className="text-slate-300 font-mono">
+        <div className="flex justify-between border-b border-0/40 pb-1">
+          <span className="text-muted-foreground">Exchange Order ID</span>
+          <span className="text-foreground/80 font-mono">
             {d.lastExchangeOrderId || 'N/A'}
           </span>
         </div>
         
         <div className="flex flex-col gap-0.5">
-          <span className="text-slate-500">Request Payload</span>
-          <div className="bg-slate-900 overflow-x-auto p-1.5 rounded border border-slate-800 text-slate-300 font-mono whitespace-pre-wrap max-h-32 text-[9px]">
+          <span className="text-muted-foreground">Request Payload</span>
+          <div className="bg-card overflow-x-auto p-1.5 rounded border border-0 text-foreground/80 font-mono whitespace-pre-wrap max-h-32 text-[9px]">
             {d.lastOrderPayload || 'N/A'}
           </div>
         </div>
 
         <div className="flex flex-col gap-0.5">
-          <span className="text-slate-500">Response Payload</span>
-          <div className="bg-slate-900 overflow-x-auto p-1.5 rounded border border-slate-800 text-slate-300 font-mono whitespace-pre breaks-all max-h-32 text-[9px]">
+          <span className="text-muted-foreground">Response Payload</span>
+          <div className="bg-card overflow-x-auto p-1.5 rounded border border-0 text-foreground/80 font-mono whitespace-pre breaks-all max-h-32 text-[9px]">
             {d.lastOrderResponse || 'N/A'}
           </div>
         </div>
 
         {d.lastOrderError && (
-            <div className="flex flex-col gap-0.5 mt-1 border-t border-slate-800/40 pt-1">
+            <div className="flex flex-col gap-0.5 mt-1 border-t border-0/40 pt-1">
               <span className="text-rose-400">Order Error:</span>
               <span className="text-rose-300 font-medium">
                 {d.lastOrderError}
@@ -1915,9 +2220,9 @@ function MarginDiagnosticsPanel({ ticketData, kiteDiagnosticsData }: { ticketDat
 
   return (
     <>
-      <div className="w-full h-px bg-slate-800 my-1" />
+      <div className="w-full h-px bg-muted my-1" />
       <div className="flex justify-between items-center mb-1">
-        <span className="text-slate-400 font-semibold uppercase">Kite Margin API</span>
+        <span className="text-muted-foreground font-semibold uppercase">Kite Margin API</span>
         {getMarginDiagnostics().lastApiStatus === 'Success' ? (
           <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded font-bold uppercase">Success</span>
         ) : getMarginDiagnostics().lastApiStatus === 'Failed' ? (
@@ -1925,25 +2230,25 @@ function MarginDiagnosticsPanel({ ticketData, kiteDiagnosticsData }: { ticketDat
         ) : getMarginDiagnostics().lastApiStatus === 'Calling' ? (
           <span className="text-[9px] bg-sky-500/20 text-sky-400 px-1.5 py-0.5 rounded font-bold uppercase">Calling</span>
         ) : (
-          <span className="text-[9px] bg-slate-500/20 text-slate-400 px-1.5 py-0.5 rounded font-bold uppercase">Not Called</span>
+          <span className="text-[9px] bg-slate-500/20 text-muted-foreground px-1.5 py-0.5 rounded font-bold uppercase">Not Called</span>
         )}
       </div>
       
       <div className="flex justify-between">
-         <span className="text-slate-500">Margin Source</span>
-         <span className={getMarginDiagnostics().lastResponseTimestamp > 0 ? "text-emerald-400" : "text-amber-400"}>
+         <span className="text-muted-foreground">Margin Source</span>
+         <span className={getMarginDiagnostics().lastResponseTimestamp > 0 ? "text-emerald-400" : "text-primary"}>
             {getMarginDiagnostics().lastResponseTimestamp > 0 ? 'Kite Margin API' : 'Local Estimate'}
          </span>
       </div>
       <div className="flex justify-between">
-         <span className="text-slate-500">Fallback Count Today</span>
-         <span className={getMarginDiagnostics().fallbackCount > 0 ? "text-amber-400 font-bold" : "text-slate-300"}>
+         <span className="text-muted-foreground">Fallback Count Today</span>
+         <span className={getMarginDiagnostics().fallbackCount > 0 ? "text-primary font-bold" : "text-foreground/80"}>
             {getMarginDiagnostics().fallbackCount}
          </span>
       </div>
       {getMarginDiagnostics().fallbackCount > 0 && (
         <div className="flex justify-between text-[10px] mt-0.5">
-           <span className="text-slate-500 truncate mr-2">Last Reason:</span>
+           <span className="text-muted-foreground truncate mr-2">Last Reason:</span>
            <span className="text-rose-400 text-right truncate max-w-[150px]" title={getMarginDiagnostics().lastFallbackReason}>
              {getMarginDiagnostics().lastFallbackReason}
            </span>
@@ -1951,43 +2256,43 @@ function MarginDiagnosticsPanel({ ticketData, kiteDiagnosticsData }: { ticketDat
       )}
       
       <div className="flex justify-between mt-1">
-         <span className="text-slate-500">Cache Hit/Miss</span>
+         <span className="text-muted-foreground">Cache Hit/Miss</span>
          <span className="text-purple-400">{getMarginDiagnostics().hits} / {getMarginDiagnostics().misses}</span>
       </div>
       <div className="flex justify-between">
-         <span className="text-slate-500">Resp Time / Size</span>
+         <span className="text-muted-foreground">Resp Time / Size</span>
          <span className="text-sky-400">
            {getMarginDiagnostics().lastApiTime > 0 ? `${getMarginDiagnostics().lastApiTime}ms / ${getMarginDiagnostics().lastResponseSize}B` : 'N/A'}
          </span>
       </div>
       
-      <div className="mt-2 bg-slate-900/50 p-2 rounded-lg border border-slate-700/50">
-        <span className="text-[10px] uppercase text-slate-500 font-bold block mb-1.5 text-center tracking-wider">Side-by-Side Comparison</span>
-        <div className="grid grid-cols-[1fr_1fr_1fr] text-[10px] gap-x-2 pb-1 border-b border-slate-700/60 mb-1 text-center">
-           <span className="text-slate-500 text-left">Metric</span>
+      <div className="mt-2 bg-card/50 p-2 rounded-lg border border-0">
+        <span className="text-[10px] uppercase text-muted-foreground font-bold block mb-1.5 text-center tracking-wider">Side-by-Side Comparison</span>
+        <div className="grid grid-cols-[1fr_1fr_1fr] text-[10px] gap-x-2 pb-1 border-b border-0/60 mb-1 text-center">
+           <span className="text-muted-foreground text-left">Metric</span>
            <span className="text-emerald-400">Kite API</span>
-           <span className="text-amber-400">Local Est</span>
+           <span className="text-primary">Local Est</span>
         </div>
         <div className="grid grid-cols-[1fr_1fr_1fr] text-[10px] gap-x-2 text-center items-center">
-           <span className="text-slate-400 text-left font-medium">Margin</span>
+           <span className="text-muted-foreground text-left font-medium">Margin</span>
            <span className="text-emerald-300 font-mono">
              {getMarginDiagnostics().totalMargin > 0 ? `₹${Math.round(getMarginDiagnostics().totalMargin)}` : '-'}
            </span>
-           <span className="text-amber-300 font-mono">
+           <span className="text-primary font-mono">
              {getMarginDiagnostics().localMargin > 0 ? `₹${Math.round(getMarginDiagnostics().localMargin)}` : '-'}
            </span>
         </div>
         <div className="grid grid-cols-[1fr_1fr_1fr] text-[10px] gap-x-2 text-center items-center mt-1">
-           <span className="text-slate-400 text-left font-medium">Charges</span>
+           <span className="text-muted-foreground text-left font-medium">Charges</span>
            <span className="text-emerald-300 font-mono">
              {getMarginDiagnostics().totalCharges > 0 ? `₹${getMarginDiagnostics().totalCharges.toFixed(1)}` : '-'}
            </span>
-           <span className="text-amber-300 font-mono">
+           <span className="text-primary font-mono">
              {getMarginDiagnostics().localCharges > 0 ? `₹${getMarginDiagnostics().localCharges.toFixed(1)}` : '-'}
            </span>
         </div>
         {getMarginDiagnostics().totalCharges > 0 && getMarginDiagnostics().localCharges > 0 && (
-           <div className="text-[9px] text-center mt-1.5 pt-1 border-t border-slate-800/60 text-slate-400">
+           <div className="text-[9px] text-center mt-1.5 pt-1 border-t border-0/60 text-muted-foreground">
              Diff: <span className="font-mono text-cyan-400">₹{Math.abs(getMarginDiagnostics().totalCharges - getMarginDiagnostics().localCharges).toFixed(2)}</span>
            </div>
         )}
@@ -2073,83 +2378,83 @@ function MarginDiagnosticsPanel({ ticketData, kiteDiagnosticsData }: { ticketDat
         </button>
       </div>
 
-      <div className="w-full h-px bg-slate-800 my-2" />
-      <div className="text-slate-400 font-semibold uppercase mb-1">Kite API Status</div>
+      <div className="w-full h-px bg-muted my-2" />
+      <div className="text-muted-foreground font-semibold uppercase mb-1">Kite API Status</div>
       <div className="flex flex-col gap-1.5 text-[10px] mt-1 space-y-1">
          <div className="flex justify-between">
-           <span className="text-slate-500">Kite API Keys Configured</span>
+           <span className="text-muted-foreground">Kite API Keys Configured</span>
            <span className={`font-mono font-bold ${kiteDiagnosticsData?.kiteApiKeysConfigured ? 'text-emerald-400' : 'text-rose-400 animate-pulse'}`}>
              {kiteDiagnosticsData?.kiteApiKeysConfigured ? 'TRUE' : 'FALSE'}
            </span>
          </div>
          <div className="flex justify-between">
-           <span className="text-slate-500">Kite Access Token Present</span>
+           <span className="text-muted-foreground">Kite Access Token Present</span>
            <span className={`font-mono font-bold ${kiteDiagnosticsData?.kiteAccessTokenPresent ? 'text-emerald-400' : 'text-rose-400 animate-pulse'}`}>
              {kiteDiagnosticsData?.kiteAccessTokenPresent ? 'TRUE' : 'FALSE'}
            </span>
          </div>
       </div>
 
-      <div className="w-full h-px bg-slate-800 my-2" />
-      <div className="text-slate-400 font-semibold uppercase mb-1">Margin API Debug</div>
+      <div className="w-full h-px bg-muted my-2" />
+      <div className="text-muted-foreground font-semibold uppercase mb-1">Margin API Debug</div>
       <div className="flex flex-col gap-1.5 text-[10px] mt-1 space-y-1">
         <div className="flex justify-between">
-          <span className="text-slate-500">API Status</span>
-          <span className={`font-mono ${getMarginDiagnostics().lastApiStatus === 'Success' ? 'text-emerald-400' : getMarginDiagnostics().lastApiStatus === 'Failed' ? 'text-rose-400' : 'text-slate-300'}`}>
+          <span className="text-muted-foreground">API Status</span>
+          <span className={`font-mono ${getMarginDiagnostics().lastApiStatus === 'Success' ? 'text-emerald-400' : getMarginDiagnostics().lastApiStatus === 'Failed' ? 'text-rose-400' : 'text-foreground/80'}`}>
             {getMarginDiagnostics().lastApiStatus}
           </span>
         </div>
         <div className="flex justify-between">
-          <span className="text-slate-500">Last Endpoint</span>
-          <span className="text-slate-300 font-mono">
+          <span className="text-muted-foreground">Last Endpoint</span>
+          <span className="text-foreground/80 font-mono">
             {getMarginDiagnostics().lastApiEndpoint || 'N/A'}
           </span>
         </div>
         <div className="flex flex-col gap-0.5">
-          <span className="text-slate-500">Last Payload</span>
-          <div className="bg-slate-900 overflow-x-auto p-1.5 rounded border border-slate-800 text-slate-300 font-mono whitespace-pre-wrap max-h-32 text-[9px]">
+          <span className="text-muted-foreground">Last Payload</span>
+          <div className="bg-card overflow-x-auto p-1.5 rounded border border-0 text-foreground/80 font-mono whitespace-pre-wrap max-h-32 text-[9px]">
             {getMarginDiagnostics().lastApiRequestPayload || 'N/A'}
           </div>
         </div>
         <div className="flex justify-between">
-          <span className="text-slate-500">Res Status Code</span>
-          <span className={`font-mono ${getMarginDiagnostics().lastApiStatusCode === 200 ? 'text-emerald-400' : getMarginDiagnostics().lastApiStatusCode > 0 ? 'text-rose-400' : 'text-slate-300'}`}>
+          <span className="text-muted-foreground">Res Status Code</span>
+          <span className={`font-mono ${getMarginDiagnostics().lastApiStatusCode === 200 ? 'text-emerald-400' : getMarginDiagnostics().lastApiStatusCode > 0 ? 'text-rose-400' : 'text-foreground/80'}`}>
             {getMarginDiagnostics().lastApiStatusCode || 'N/A'}
           </span>
         </div>
         <div className="flex flex-col gap-0.5">
-          <span className="text-slate-500">Last Response Body</span>
-          <div className="bg-slate-900 overflow-x-auto p-1.5 rounded border border-slate-800 text-slate-300 font-mono whitespace-pre breaks-all max-h-32 text-[9px]">
+          <span className="text-muted-foreground">Last Response Body</span>
+          <div className="bg-card overflow-x-auto p-1.5 rounded border border-0 text-foreground/80 font-mono whitespace-pre breaks-all max-h-32 text-[9px]">
             {getMarginDiagnostics().lastApiResponseBody || 'N/A'}
           </div>
         </div>
         <div className="flex justify-between">
-          <span className="text-slate-500">Last Success</span>
-          <span className={`font-mono ${getMarginDiagnostics().lastResponseTimestamp > 0 ? 'text-emerald-400' : 'text-slate-300'}`}>
+          <span className="text-muted-foreground">Last Success</span>
+          <span className={`font-mono ${getMarginDiagnostics().lastResponseTimestamp > 0 ? 'text-emerald-400' : 'text-foreground/80'}`}>
             {getMarginDiagnostics().lastResponseTimestamp > 0 ? new Date(getMarginDiagnostics().lastResponseTimestamp).toLocaleTimeString() : 'N/A'}
           </span>
         </div>
         <div className="flex justify-between">
-          <span className="text-slate-500">Margin API Res Parsed</span>
-          <span className={`font-mono ${getMarginDiagnostics().lastApiResponseParsed ? 'text-emerald-400' : 'text-slate-300'}`}>
+          <span className="text-muted-foreground">Margin API Res Parsed</span>
+          <span className={`font-mono ${getMarginDiagnostics().lastApiResponseParsed ? 'text-emerald-400' : 'text-foreground/80'}`}>
             {getMarginDiagnostics().lastApiResponseParsed ? 'TRUE' : 'FALSE'}
           </span>
         </div>
         <div className="flex justify-between">
-          <span className="text-slate-500">Kite API Total Margin</span>
+          <span className="text-muted-foreground">Kite API Total Margin</span>
           <span className="font-mono text-cyan-400">
             {getMarginDiagnostics().totalMargin > 0 ? `₹${getMarginDiagnostics().totalMargin.toFixed(2)}` : 'N/A'}
           </span>
         </div>
         <div className="flex justify-between">
-          <span className="text-slate-500">Kite API Total Charges</span>
+          <span className="text-muted-foreground">Kite API Total Charges</span>
           <span className="font-mono text-cyan-400">
             {getMarginDiagnostics().totalCharges > 0 ? `₹${getMarginDiagnostics().totalCharges.toFixed(2)}` : 'N/A'}
           </span>
         </div>
         <div className="flex justify-between">
-          <span className="text-slate-500">Applied To Order Ticket</span>
-          <span className={`font-mono ${getMarginDiagnostics().lastApiAppliedToTicket ? 'text-emerald-400' : 'text-slate-300'}`}>
+          <span className="text-muted-foreground">Applied To Order Ticket</span>
+          <span className={`font-mono ${getMarginDiagnostics().lastApiAppliedToTicket ? 'text-emerald-400' : 'text-foreground/80'}`}>
             {getMarginDiagnostics().lastApiAppliedToTicket ? 'TRUE' : 'FALSE'}
           </span>
         </div>
@@ -2171,6 +2476,9 @@ function MarginDiagnosticsPanel({ ticketData, kiteDiagnosticsData }: { ticketDat
   );
 }
 
+// Global cache to remember the chart position across tab switches and unmounts
+const globalLogicalRangeCache: Record<string, any> = {};
+
 export function AdvancedChart() {
   useProfiler("AdvancedChart");
   const { data: kiteDiagnosticsData } = useQuery({
@@ -2187,6 +2495,8 @@ export function AdvancedChart() {
   const rsiContainerRef = useRef<HTMLDivElement>(null);
   const mainChartRef = useRef<IChartApi | null>(null);
   const mainSeriesRef = useRef<any>(null);
+  const rsiSeriesRef = useRef<any>(null);
+  const volumeSeriesRef = useRef<any>(null);
   const lastCandleTimeRef = useRef<number | null>(null);
   const lastCandleDataRef = useRef<any>(null);
   const chartDataRef = useRef<any>(null);
@@ -2200,6 +2510,23 @@ export function AdvancedChart() {
     return "15";
   });
   const [wsError, setWsError] = useState<string>('');
+  const [quickTradeEnabled, setQuickTradeEnabled] = useState(() => {
+    try {
+      return localStorage.getItem('quickTradeEnabled') === 'true';
+    } catch(e) {}
+    return false;
+  });
+  const quickTradeEnabledRef = useRef(quickTradeEnabled);
+  useEffect(() => {
+    quickTradeEnabledRef.current = quickTradeEnabled;
+  }, [quickTradeEnabled]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('quickTradeEnabled', String(quickTradeEnabled));
+    } catch(e) {}
+  }, [quickTradeEnabled]);
+
   const [testOrderMode, setTestOrderMode] = useState(() => {
     try {
       return localStorage.getItem('testOrderMode') === 'true';
@@ -2210,6 +2537,7 @@ export function AdvancedChart() {
   useEffect(() => {
     try {
       localStorage.setItem('timeframe', timeframe);
+      window.dispatchEvent(new Event('storage'));
     } catch(e) {}
   }, [timeframe]);
 
@@ -2218,7 +2546,12 @@ export function AdvancedChart() {
       localStorage.setItem('testOrderMode', String(testOrderMode));
     } catch(e) {}
   }, [testOrderMode]);
-  const [crosshairInfo, setCrosshairInfo] = useState<{ y: number, price: number } | null>(null);
+  const [crosshairInfo, setCrosshairInfo] = useState<{ x: number, y: number, price: number } | null>(null);
+  const crosshairInfoRef = useRef<{ x: number, y: number, price: number } | null>(null);
+
+  useEffect(() => {
+    crosshairInfoRef.current = crosshairInfo;
+  }, [crosshairInfo]);
   const [showPdhPdl, setShowPdhPdl] = useState(() => {
     try {
       return localStorage.getItem('showPdhPdl') === 'true';
@@ -2382,6 +2715,33 @@ export function AdvancedChart() {
     return null;
   });
 
+  const [activePositions, setActivePositions] = useState<any[]>([]);
+  const [isExitingAllTrades, setIsExitingAllTrades] = useState(false);
+
+  const loadActivePositions = () => {
+    try {
+      const stored = localStorage.getItem('active_positions');
+      if (stored) {
+        setActivePositions(JSON.parse(stored));
+      } else {
+        setActivePositions([]);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  useEffect(() => {
+    loadActivePositions();
+    const handleUpdate = () => loadActivePositions();
+    window.addEventListener('active_positions_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    return () => {
+      window.removeEventListener('active_positions_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
+  }, []);
+
   useEffect(() => {
     try {
       if (selectedStrikeOnChart) {
@@ -2511,6 +2871,28 @@ export function AdvancedChart() {
     return 1;
   });
 
+  const [hLevelsWidth, setHLevelsWidth] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('hLevelsWidth');
+      return saved ? parseInt(saved, 10) : 1;
+    } catch(e) {}
+    return 1;
+  });
+
+  const [showFiftyPercentLevels, setShowFiftyPercentLevels] = useState(() => {
+    try {
+      return localStorage.getItem('showFiftyPercentLevels') === 'true';
+    } catch(e) {}
+    return false;
+  });
+
+  const [fiftyPercentColor, setFiftyPercentColor] = useState(() => {
+    try {
+      return localStorage.getItem('fiftyPercentColor') || '#a1a1aa';
+    } catch(e) {}
+    return '#a1a1aa';
+  });
+
   const [isEditingHLevels, setIsEditingHLevels] = useState(false);
 
   useEffect(() => {
@@ -2530,6 +2912,24 @@ export function AdvancedChart() {
       localStorage.setItem('hLevelsStyle', String(hLevelsStyle));
     } catch(e) {}
   }, [hLevelsStyle]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('hLevelsWidth', String(hLevelsWidth));
+    } catch(e) {}
+  }, [hLevelsWidth]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('showFiftyPercentLevels', String(showFiftyPercentLevels));
+    } catch(e) {}
+  }, [showFiftyPercentLevels]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('fiftyPercentColor', fiftyPercentColor);
+    } catch(e) {}
+  }, [fiftyPercentColor]);
 
   const [showBB, setShowBB] = useState(() => {
     try {
@@ -2609,6 +3009,12 @@ export function AdvancedChart() {
     } catch(e) {}
     return [];
   });
+  
+  const manualLineIdsRef = useRef<any[]>(manualLineIds);
+  useEffect(() => {
+    manualLineIdsRef.current = manualLineIds;
+  }, [manualLineIds]);
+  
   const [editingLineId, setEditingLineId] = useState<number | null>(null);
   const [isEditingPdhPdl, setIsEditingPdhPdl] = useState(false);
   const [isEditingSnR, setIsEditingSnR] = useState(false);
@@ -2618,9 +3024,11 @@ export function AdvancedChart() {
 
   const logicalRangeRef = useRef<any>(null);
 
+  const cacheKey = `${selectedInstrument?.instrument_token}_${timeframe}`;
+
   useEffect(() => {
-    logicalRangeRef.current = null;
-  }, [selectedInstrument, timeframe]);
+    logicalRangeRef.current = globalLogicalRangeCache[cacheKey] || null;
+  }, [cacheKey]);
 
   const [bbColor, setBbColor] = useState(() => {
     try {
@@ -2635,6 +3043,22 @@ export function AdvancedChart() {
       return saved ? parseInt(saved, 10) : 250;
     } catch(e) {}
     return 250;
+  });
+
+  const [oiBarGap, setOiBarGap] = useState(() => {
+    try {
+      const saved = localStorage.getItem('oiBarGap');
+      return saved ? parseInt(saved, 10) : 0;
+    } catch(e) {}
+    return 0;
+  });
+
+  const [oiBarThickness, setOiBarThickness] = useState(() => {
+    try {
+      const saved = localStorage.getItem('oiBarThickness');
+      return saved ? parseInt(saved, 10) : 8;
+    } catch(e) {}
+    return 8;
   });
 
   const [oiCallColor, setOiCallColor] = useState(() => {
@@ -2657,10 +3081,26 @@ export function AdvancedChart() {
     } catch(e) {}
     return '#a855f7';
   });
+  const [rsiLineWidth, setRsiLineWidth] = useState(() => {
+    try { return parseInt(localStorage.getItem('rsiLineWidth') || '2', 10); } catch(e) {}
+    return 2;
+  });
+  const [rsiLineStyle, setRsiLineStyle] = useState(() => {
+    try { return parseInt(localStorage.getItem('rsiLineStyle') || '0', 10); } catch(e) {}
+    return 0;
+  });
+  const [rsiSmaLineWidth, setRsiSmaLineWidth] = useState(() => {
+    try { return parseInt(localStorage.getItem('rsiSmaLineWidth') || '1', 10); } catch(e) {}
+    return 1;
+  });
+  const [rsiSmaLineStyle, setRsiSmaLineStyle] = useState(() => {
+    try { return parseInt(localStorage.getItem('rsiSmaLineStyle') || '0', 10); } catch(e) {}
+    return 0;
+  });
 
-  const [rsiOverbought, setRsiOverbought] = useState(() => {
+  const [rsiOverbought1, setRsiOverbought1] = useState(() => {
     try {
-      const saved = localStorage.getItem('rsiOverbought');
+      const saved = localStorage.getItem('rsiOverbought1');
       return saved ? parseInt(saved, 10) : 60;
     } catch (e) {}
     return 60;
@@ -2669,25 +3109,25 @@ export function AdvancedChart() {
   const [rsiOverbought2, setRsiOverbought2] = useState(() => {
     try {
       const saved = localStorage.getItem('rsiOverbought2');
-      return saved ? parseInt(saved, 10) : 70;
+      return saved ? parseInt(saved, 10) : 65;
     } catch (e) {}
-    return 70;
+    return 65;
   });
 
-  const [rsiOversold, setRsiOversold] = useState(() => {
+  const [rsiOversold1, setRsiOversold1] = useState(() => {
     try {
-      const saved = localStorage.getItem('rsiOversold');
-      return saved ? parseInt(saved, 10) : 40;
+      const saved = localStorage.getItem('rsiOversold1');
+      return saved ? parseInt(saved, 10) : 38;
     } catch (e) {}
-    return 40;
+    return 38;
   });
 
   const [rsiOversold2, setRsiOversold2] = useState(() => {
     try {
       const saved = localStorage.getItem('rsiOversold2');
-      return saved ? parseInt(saved, 10) : 30;
+      return saved ? parseInt(saved, 10) : 40;
     } catch (e) {}
-    return 30;
+    return 40;
   });
 
   const [rsiSmaColor, setRsiSmaColor] = useState(() => {
@@ -2725,6 +3165,18 @@ export function AdvancedChart() {
 
   useEffect(() => {
     try {
+      localStorage.setItem('oiBarGap', String(oiBarGap));
+    } catch(e) {}
+  }, [oiBarGap]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('oiBarThickness', String(oiBarThickness));
+    } catch(e) {}
+  }, [oiBarThickness]);
+
+  useEffect(() => {
+    try {
       localStorage.setItem('oiCallColor', oiCallColor);
     } catch(e) {}
   }, [oiCallColor]);
@@ -2738,14 +3190,18 @@ export function AdvancedChart() {
   useEffect(() => {
     try {
       localStorage.setItem('rsiColor', rsiColor);
+      localStorage.setItem('rsiLineWidth', String(rsiLineWidth));
+      localStorage.setItem('rsiLineStyle', String(rsiLineStyle));
+      localStorage.setItem('rsiSmaLineWidth', String(rsiSmaLineWidth));
+      localStorage.setItem('rsiSmaLineStyle', String(rsiSmaLineStyle));
     } catch(e) {}
-  }, [rsiColor]);
+  }, [rsiColor, rsiLineWidth, rsiLineStyle, rsiSmaLineWidth, rsiSmaLineStyle]);
 
   useEffect(() => {
     try {
-      localStorage.setItem('rsiOverbought', String(rsiOverbought));
+      localStorage.setItem('rsiOverbought1', String(rsiOverbought1));
     } catch(e) {}
-  }, [rsiOverbought]);
+  }, [rsiOverbought1]);
 
   useEffect(() => {
     try {
@@ -2755,9 +3211,9 @@ export function AdvancedChart() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('rsiOversold', String(rsiOversold));
+      localStorage.setItem('rsiOversold1', String(rsiOversold1));
     } catch(e) {}
-  }, [rsiOversold]);
+  }, [rsiOversold1]);
 
   useEffect(() => {
     try {
@@ -2967,6 +3423,97 @@ export function AdvancedChart() {
     await resolveStrikeDetails(action, optionType, clickedPrice);
   };
 
+  const handleExitAllTrades = async () => {
+    if (activePositions.length === 0 || isExitingAllTrades) return;
+    
+    setIsExitingAllTrades(true);
+    const toastId = toast.loading(`Exiting all ${activePositions.length} active trade(s)...`);
+    
+    try {
+      const positionsToExit = [...activePositions];
+      let successCount = 0;
+      let failCount = 0;
+      let finalTotalPnl = 0;
+
+      for (const pos of positionsToExit) {
+        const oppositeAction = pos.side === 'BUY' ? 'SELL' : 'BUY';
+        
+        try {
+          const response = await fetch('/api/orders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: oppositeAction,
+              tradingsymbol: pos.symbol,
+              quantity: pos.qty,
+              product: 'MIS',
+              orderType: 'MARKET',
+              test_mode: !!pos.testMode
+            })
+          });
+
+          const result = await response.json();
+          if (response.ok && (result.success || result.simulated)) {
+            successCount++;
+            
+            const finalPrice = pos.currentPrice || pos.entryPrice;
+            const pnl = pos.side === 'BUY'
+              ? (finalPrice - pos.entryPrice) * pos.qty
+              : (pos.entryPrice - finalPrice) * pos.qty;
+            finalTotalPnl += pnl;
+
+            try {
+              const closedHistory = JSON.parse(localStorage.getItem('closed_positions_history') || '[]');
+              closedHistory.unshift({
+                ...pos,
+                exitPrice: finalPrice,
+                exitTime: new Date().toISOString(),
+                pnl,
+                formattedPnl: pnl >= 0 ? `+₹${pnl.toFixed(2)}` : `-₹${Math.abs(pnl).toFixed(2)}`
+              });
+              localStorage.setItem('closed_positions_history', JSON.stringify(closedHistory));
+            } catch (err) {
+              console.error(err);
+            }
+          } else {
+            failCount++;
+            console.error(`Failed to exit position ${pos.symbol}:`, result.error);
+          }
+        } catch (err) {
+          failCount++;
+          console.error(`Network error exiting position ${pos.symbol}:`, err);
+        }
+      }
+
+      const currentActive = JSON.parse(localStorage.getItem('active_positions') || '[]');
+      const remainingActive = currentActive.filter((item: any) => 
+        !positionsToExit.slice(0, successCount).some(p => p.id === item.id)
+      );
+      
+      const finalRemaining = failCount === 0 ? [] : remainingActive;
+      localStorage.setItem('active_positions', JSON.stringify(finalRemaining));
+      window.dispatchEvent(new Event('active_positions_updated'));
+
+      if (failCount === 0) {
+        toast.success(`Exited all trades successfully!`, {
+          id: toastId,
+          description: `All trades closed in Kite. Total P&L: ₹${finalTotalPnl.toFixed(2)}`
+        });
+      } else {
+        toast.warning(`Exited ${successCount} trade(s) with ${failCount} failure(s).`, {
+          id: toastId,
+          description: `Check details. Partial P&L: ₹${finalTotalPnl.toFixed(2)}`
+        });
+      }
+
+    } catch (err: any) {
+      console.error(err);
+      toast.error(`Failed to exit trades: ${err.message}`, { id: toastId });
+    } finally {
+      setIsExitingAllTrades(false);
+    }
+  };
+
   const handleExpiryChange = async (newExpiry: string) => {
     if (!ticketData) return;
     await resolveStrikeDetails(ticketData.action, ticketData.optionType, ticketData.strike, newExpiry);
@@ -3085,6 +3632,28 @@ export function AdvancedChart() {
         });
       }
 
+      // Save details to active positions for 1-click exit!
+      try {
+        const activeTrade = {
+          id: result.orderId || `ORD-${Date.now()}`,
+          symbol: data.tradingsymbol || 'Option Contract',
+          side: data.action,
+          qty: data.quantity,
+          entryPrice: data.price || currentPrice,
+          currentPrice: data.price || currentPrice,
+          optionType: ticketData?.optionType || (data.tradingsymbol.endsWith('CE') ? 'CE' : data.tradingsymbol.endsWith('PE') ? 'PE' : undefined),
+          strike: ticketData?.strike,
+          timestamp: new Date().toISOString(),
+          testMode: !!result.test_mode
+        };
+        const currentActive = JSON.parse(localStorage.getItem('active_positions') || '[]');
+        currentActive.unshift(activeTrade);
+        localStorage.setItem('active_positions', JSON.stringify(currentActive));
+        window.dispatchEvent(new Event('active_positions_updated'));
+      } catch (e) {
+        console.error("Failed to append active position:", e);
+      }
+
       // Update simulated available balance only if not in test mode
       if (!result.test_mode) {
         setAvailBalance(prev => {
@@ -3123,7 +3692,7 @@ export function AdvancedChart() {
 
   const instrumentToken = selectedInstrument ? String(selectedInstrument.instrument_token) : "256265";
   const { data: taInfo, isLoading: isLoadingTa, isError: isTaError, error: taError } = useQuery({
-    queryKey: ["ta-data-live", timeframe, instrumentToken],
+    queryKey: ["ta-data-live-chart", timeframe, instrumentToken],
     queryFn: async () => {
       const res = await fetch(`/api/ta?timeframe=${timeframe}&token=${instrumentToken}&symbol=${encodeURIComponent(selectedInstrument ? selectedInstrument.tradingsymbol : "NIFTY 50")}`);
       if (!res.ok) {
@@ -3134,13 +3703,25 @@ export function AdvancedChart() {
       }
       return res.json();
     },
-    // Prevent background polling to save computer/broker resources
+    // Fetch periodically while visible to sync indicator bias with dashboard
+    // using false here and manual update interval below to prevent chart full redraws
     refetchInterval: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     refetchOnMount: false,
-    staleTime: Infinity,
+    staleTime: 10 * 1000,
     gcTime: 10 * 60000,
+    enabled: Boolean(timeframe && instrumentToken)
+  });
+
+  const { data: liveTa } = useQuery({
+    queryKey: ["ta-data-decision", timeframe, instrumentToken],
+    queryFn: async () => {
+      const res = await fetch(`/api/ta?timeframe=${timeframe}&token=${instrumentToken}&symbol=${encodeURIComponent(selectedInstrument ? selectedInstrument.tradingsymbol : "NIFTY 50")}`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    refetchInterval: 10000,
     enabled: Boolean(timeframe && instrumentToken)
   });
 
@@ -3168,8 +3749,18 @@ export function AdvancedChart() {
       const res = await fetch("/api/fii-dii");
       if (!res.ok) throw new Error("Network error");
       return res.json();
-    }
+    },
+    refetchInterval: () => document.visibilityState === 'visible' ? 10 * 1000 : false,
   });
+
+  const oiHistoryRef = useRef<{ current: any, prev: any }>({ current: null, prev: null });
+
+  useEffect(() => {
+    if (oiData && oiData !== oiHistoryRef.current.current) {
+      oiHistoryRef.current.prev = oiHistoryRef.current.current;
+      oiHistoryRef.current.current = oiData;
+    }
+  }, [oiData]);
 
   const localAnalytics = useMemo(() => {
     if (!oiData || !oiData.strikes || !oiData.ceData || !oiData.peData) return null;
@@ -3190,9 +3781,9 @@ export function AdvancedChart() {
   }, [oiData]);
 
   const decision = useMemo(() => {
-     if (!localAnalytics || !taInfo) return null;
-     return computeMasterSignal(localAnalytics, taInfo, fiiDiiData);
-  }, [localAnalytics, taInfo, fiiDiiData]);
+     if (!localAnalytics || (!liveTa && !taInfo)) return null;
+     return computeMasterSignal(localAnalytics, liveTa || taInfo, fiiDiiData);
+  }, [localAnalytics, liveTa, taInfo, fiiDiiData]);
 
   const [lastTickMessage, setLastTickMessage] = useState<string>('');
 
@@ -3263,6 +3854,7 @@ export function AdvancedChart() {
               high: Math.max(seededLastCandle.high, msg.candle.close),
               low: Math.min(seededLastCandle.low, msg.candle.close),
               close: msg.candle.close,
+              rsi14: seededLastCandle.rsi14,
             };
           } else {
             const prevClose = seededLastCandle ? seededLastCandle.close : msg.candle.close;
@@ -3272,6 +3864,7 @@ export function AdvancedChart() {
               high: Math.max(prevClose, msg.candle.close),
               low: Math.min(prevClose, msg.candle.close),
               close: msg.candle.close,
+              rsi14: seededLastCandle ? seededLastCandle.rsi14 : undefined
             };
             lastCandleTimeRef.current = updateTime;
           }
@@ -3326,10 +3919,27 @@ export function AdvancedChart() {
              high: latestCandle.high,
              low: latestCandle.low,
              close: latestCandle.close,
+             rsi14: latestCandle.rsi14,
            };
            lastCandleTimeRef.current = updateTime;
            lastCandleDataRef.current = updatedCandle;
            mainSeriesRef.current.update(updatedCandle);
+
+           if (volumeSeriesRef.current) {
+             const vol = latestCandle.volume || Math.floor(Math.abs(latestCandle.close - latestCandle.open) * 1000) + 100;
+             volumeSeriesRef.current.update({
+               time: updateTime,
+               value: vol,
+               color: latestCandle.close >= latestCandle.open ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)'
+             });
+           }
+
+           if (rsiSeriesRef.current && latestCandle.rsi14 !== undefined) {
+             rsiSeriesRef.current.update({
+               time: updateTime,
+               value: latestCandle.rsi14,
+             });
+           }
         }
       } catch(e) {
         // ignore fetch error on background interval
@@ -3359,7 +3969,7 @@ export function AdvancedChart() {
         exchange: selectedInstrument?.exchange || "NSE",
         instrument_token: instrumentToken,
         instrument_type: selectedInstrument?.instrument_type || "EQ",
-        segment: selectedInstrument?.segment || "INDICES",
+        segment: (selectedInstrument as any)?.segment || "INDICES",
       });
       console.log("[NIFTY DIAGNOSTIC] First 5 Raw Candles from Kite:", taInfo.rawTop5);
       console.log("[NIFTY DIAGNOSTIC] Raw Volume Field (Candle 0):", taInfo.rawTop5[0]?.volume);
@@ -3489,10 +4099,52 @@ export function AdvancedChart() {
     }
   }, [divergences, timeframe]);
 
+  const lastAlertedFiftyPercentLevelRef = useRef<{ level: number, time: number } | null>(null);
+
+  useEffect(() => {
+    if (!showFiftyPercentLevels || !hLevels || hLevels.length === 0 || !chartData) return;
+    
+    const currentPrice = chartData.spot || (chartData.candles && chartData.candles.length > 0 ? chartData.candles[chartData.candles.length - 1].close : null);
+    if (!currentPrice) return;
+
+    const activeLevels = hLevels.filter(v => v > 0).sort((a, b) => b - a);
+    const midPoints = [];
+    for (let i = 0; i < activeLevels.length - 1; i++) {
+      midPoints.push(Math.round((activeLevels[i] + activeLevels[i+1]) / 2));
+    }
+
+    // Use a small point distance for approaches (e.g. 5 points for indices)
+    const threshold = currentPrice > 10000 ? 5 : 2;
+
+    for (const mid of midPoints) {
+      if (Math.abs(currentPrice - mid) <= threshold) {
+        const now = Date.now();
+        const lastAlert = lastAlertedFiftyPercentLevelRef.current;
+        
+        // Prevent spamming the alert for the same level within 5 minutes
+        if (!lastAlert || lastAlert.level !== mid || (now - lastAlert.time > 5 * 60 * 1000)) {
+          lastAlertedFiftyPercentLevelRef.current = { level: mid, time: now };
+          toast(`⚠️ Approaching 50% Levels`, {
+            description: `Price (${currentPrice}) is near internal H Level midpoint (${mid}).`,
+            duration: 8000,
+            closeButton: true,
+          });
+
+          notificationService.add(
+            "system",
+            `Approaching 50% Levels`,
+            `Price (${currentPrice}) is near internal H Level midpoint (${mid}).`,
+            { level: mid }
+          );
+        }
+      }
+    }
+  }, [chartData, hLevels, showFiftyPercentLevels]);
+
   useEffect(() => {
     if (!chartContainerRef.current || !chartData || chartData.candles.length === 0) return;
 
-    const VISIBLE_BARS = 100;
+    const VISIBLE_BARS = 55;
     const RIGHT_OFFSET = 8;
 
     function focusRecentCandles(chart: any, candles: any[]) {
@@ -3507,7 +4159,7 @@ export function AdvancedChart() {
 
     const commonOptions = {
       layout: {
-        background: { type: ColorType.Solid, color: '#0d1117' },
+        background: { type: ColorType.Solid, color: 'transparent' },
         textColor: '#64748b',
       },
       grid: {
@@ -3521,22 +4173,50 @@ export function AdvancedChart() {
         borderColor: 'rgba(255, 255, 255, 0.1)',
         timeVisible: true,
         secondsVisible: false,
+        barSpacing: 12,
+        minBarSpacing: 6,
         tickMarkFormatter: (time: any, tickMarkType: any, locale: string) => {
           const date = new Date(time * 1000);
-          switch (tickMarkType) {
-            case 0: // Year
-              return Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', year: 'numeric' }).format(date);
-            case 1: // Month
-              return Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', month: 'short' }).format(date);
-            case 2: // DayOfMonth
-              return Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric' }).format(date);
-            case 3: // Time
-              return Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
-            case 4: // TimeWithSeconds
-              return Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(date);
-            default:
-              return Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
+          
+          const parts = Intl.DateTimeFormat('en-IN', {
+            timeZone: 'Asia/Kolkata',
+            day: '2-digit',
+            month: 'short',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+          }).formatToParts(date);
+
+          const getValue = (type: string) => parts.find(p => p.type === type)?.value || '';
+          const day = getValue('day');
+          const month = getValue('month');
+          const hour = getValue('hour');
+          const minute = getValue('minute');
+
+          const isIntraday = timeframe && parseInt(timeframe, 10) < 1440;
+          if (!isIntraday) {
+            switch (tickMarkType) {
+              case 0: // Year
+                return Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', year: 'numeric' }).format(date);
+              case 1: // Month
+                return Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', month: 'short' }).format(date);
+              default:
+                return `${day} ${month}`;
+            }
           }
+
+          // Intraday logic
+          const hrNum = parseInt(hour, 10);
+          const minNum = parseInt(minute, 10);
+
+          if (hrNum === 9 && minNum === 30) {
+            return "09:30";
+          }
+          if (hrNum === 9 && (minNum === 15 || minNum === 0)) {
+            return `${day} ${month}`;
+          }
+
+          return `${hour}:${minute}`;
         },
       },
       localization: {
@@ -3600,9 +4280,8 @@ export function AdvancedChart() {
       borderVisible: false,
       wickUpColor: '#22c55e',
       wickDownColor: '#ef4444',
-      priceLineColor: 'rgba(34, 197, 94, 0.45)',
-      priceLineWidth: 1,
-      priceLineStyle: 1, // 1 is Dashed
+      lastValueVisible: false,
+      priceLineVisible: false,
     });
 
     mainSeriesRef.current = mainSeries;
@@ -3612,7 +4291,7 @@ export function AdvancedChart() {
     // S&R Lines are now drawn via canvas in requestAnimationFrame
 
     manualLinesRef.current = [];
-    manualLineIds.forEach(line => {
+    manualLineIdsRef.current.forEach(line => {
       try {
         const newPriceLine = mainSeries.createPriceLine({
           price: line.price,
@@ -3667,7 +4346,7 @@ export function AdvancedChart() {
 
           // Default: Open the option strike selection floating menu
           const price = mainSeries.coordinateToPrice(y);
-          if (price !== null) {
+          if (price !== null && quickTradeEnabledRef.current) {
             // Open the menu near the clicked cursor coordinate
             setClickMenu({
               x: param.point.x,
@@ -3749,7 +4428,7 @@ export function AdvancedChart() {
           mainSeries.createPriceLine({
             price: priceLevel,
             color: colors[index],
-            lineWidth: 1,
+            lineWidth: hLevelsWidth as any,
             lineStyle: hLevelsStyle,
             axisLabelVisible: false,
             title: '',
@@ -3757,35 +4436,6 @@ export function AdvancedChart() {
         }
       });
     }
-
-    // Draw selected strike on chart (if selected)
-    if (selectedStrikeOnChart && selectedStrikeOnChart.strike > 0) {
-      try {
-        mainSeries.createPriceLine({
-          price: selectedStrikeOnChart.strike,
-          color: selectedStrikeOnChart.optionType === 'CE' ? '#22c55e' : '#ef4444',
-          lineWidth: 2,
-          lineStyle: 1, // Dashed
-          axisLabelVisible: true,
-          title: `Selected ATM: ${selectedStrikeOnChart.tradingsymbol}`,
-        });
-      } catch (e) {
-        console.error("Error creating selected strike price line:", e);
-      }
-    }
-
-    // Recreate manual lines
-    manualLinesRef.current.forEach((lineData) => {
-      const newLine = mainSeries.createPriceLine({
-        price: lineData.price,
-        color: '#facc15',
-        lineWidth: 2,
-        lineStyle: 0,
-        axisLabelVisible: true,
-        title: 'Line',
-      });
-      lineData.instance = newLine;
-    });
 
     // PDH/PDL Lines are now drawn via canvas in requestAnimationFrame
 
@@ -3807,6 +4457,7 @@ export function AdvancedChart() {
       color: c.close >= c.open ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)'
     }));
     volumeSeries.setData(volumeData);
+    volumeSeriesRef.current = volumeSeries;
 
     // Create RSI Chart
     const rsiChart = createChart(rsiContainerRef.current, {
@@ -3817,20 +4468,29 @@ export function AdvancedChart() {
       },
       rightPriceScale: {
         borderColor: 'rgba(255, 255, 255, 0.1)',
-        autoScale: false,
+        autoScale: true,
       },
     });
 
     // Add RSI Series
     const rsiSeries = rsiChart.addSeries(LineSeries, {
       color: rsiColor,
-      lineWidth: 2,
+      lineWidth: rsiLineWidth as any,
+      lineStyle: rsiLineStyle as any,
       priceLineVisible: false,
+      autoscaleInfoProvider: () => ({
+        priceRange: {
+          minValue: 0,
+          maxValue: 100,
+        },
+      }),
     });
+    
+    rsiSeriesRef.current = rsiSeries;
 
     const rsiData = chartData.candles.map((c: any) => ({
       time: c.time as any,
-      value: c.rsi14 || 50,
+      value: c.rsi14 !== undefined ? c.rsi14 : 50,
     }));
     rsiSeries.setData(rsiData);
     
@@ -3843,10 +4503,10 @@ export function AdvancedChart() {
     }
 
     const rsiLevels = [
-      { price: rsiOversold2, color: hexToRgba(rsiOversoldColor, 0.25) }, // OS 2 (outer)
-      { price: rsiOversold, color: hexToRgba(rsiOversoldColor, 0.45) },  // OS 1 (inner)
-      { price: rsiOverbought, color: hexToRgba(rsiOverboughtColor, 0.45) }, // OB 1 (inner)
-      { price: rsiOverbought2, color: hexToRgba(rsiOverboughtColor, 0.25) } // OB 2 (outer)
+      { price: rsiOversold1, color: hexToRgba(rsiOversoldColor, 0.45) },
+      { price: rsiOversold2, color: hexToRgba(rsiOversoldColor, 0.45) },
+      { price: rsiOverbought1, color: hexToRgba(rsiOverboughtColor, 0.45) },
+      { price: rsiOverbought2, color: hexToRgba(rsiOverboughtColor, 0.45) }
     ];
 
     rsiLevels.forEach(lvl => {
@@ -3875,7 +4535,8 @@ export function AdvancedChart() {
 
     const rsiSmaSeries = rsiChart.addSeries(LineSeries, {
         color: rsiSmaColor,
-        lineWidth: 1,
+        lineWidth: rsiSmaLineWidth as any,
+        lineStyle: rsiSmaLineStyle as any,
         crosshairMarkerVisible: false,
         priceLineVisible: false,
         lastValueVisible: false,
@@ -3927,6 +4588,7 @@ export function AdvancedChart() {
         try {
           timeScale2.setVisibleLogicalRange(range);
           logicalRangeRef.current = range;
+          globalLogicalRangeCache[`${selectedInstrument?.instrument_token}_${timeframe}`] = range;
         } catch(e) {}
         isSyncing = false;
       }
@@ -3937,6 +4599,7 @@ export function AdvancedChart() {
         try {
           timeScale1.setVisibleLogicalRange(range);
           logicalRangeRef.current = range;
+          globalLogicalRangeCache[`${selectedInstrument?.instrument_token}_${timeframe}`] = range;
         } catch(e) {}
         isSyncing = false;
       }
@@ -3966,19 +4629,26 @@ export function AdvancedChart() {
         if (!param.point || param.point.x < 0 || param.point.y < 0) {
           try { rsiChart.clearCrosshairPosition(); } catch(e) {}
           setRsiHoverValue(null);
-          if (!isHoveringButtonRef.current) {
-             setCrosshairInfo(null);
-          }
+          setTimeout(() => {
+            if (!isHoveringButtonRef.current) {
+               setCrosshairInfo(null);
+            }
+          }, 50);
         } else {
           const price = mainSeries.coordinateToPrice(param.point.y);
           if (price !== null) {
-            setCrosshairInfo({ y: param.point.y, price });
+            setCrosshairInfo({ x: param.point.x, y: param.point.y, price });
           }
 
           if (param.time) {
             const dataPoint = getCrosshairDataPoint(mainSeries, param);
-            const rVal = rsiDataMap.get(param.time) as number | undefined;
-            if (rVal !== undefined) setRsiHoverValue(rVal.toFixed(2));
+            let rVal = rsiDataMap.get(param.time) as number | undefined;
+            
+            if (rVal === undefined && lastCandleDataRef.current && param.time === lastCandleDataRef.current.time && lastCandleDataRef.current.rsi14 !== undefined) {
+              rVal = lastCandleDataRef.current.rsi14;
+            }
+
+            if (rVal !== undefined) setRsiHoverValue(Number(rVal).toFixed(2));
             
             if(dataPoint) {
                try { rsiChart.setCrosshairPosition(rVal ?? 50, param.time, rsiSeries); } catch(e) {}
@@ -4014,9 +4684,11 @@ export function AdvancedChart() {
         let currentCandle = null;
         let currentVolume = null;
         
-        if (!isHoveringButtonRef.current) {
-          setCrosshairInfo(null);
-        }
+        setTimeout(() => {
+          if (!isHoveringButtonRef.current) {
+            setCrosshairInfo(null);
+          }
+        }, 50);
 
         if (!param.point || param.point.x < 0 || param.point.y < 0) {
           try { mainChart.clearCrosshairPosition(); } catch(e) {}
@@ -4105,7 +4777,7 @@ export function AdvancedChart() {
     };
     // Re-run if chartData structure changes drastically, but memo keeps it stable
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chartData, divergences, showRsi, showBB, bbData, bbColor, rsiColor, rsiOverbought, rsiOverbought2, rsiOversold, rsiOversold2, rsiSmaColor, rsiOverboughtColor, rsiOversoldColor, showHLevels, hLevels, hLevelsStyle, selectedStrikeOnChart]);
+  }, [chartData, divergences, showRsi, showBB, bbData, bbColor, rsiColor, rsiLineWidth, rsiLineStyle, rsiSmaLineWidth, rsiSmaLineStyle, rsiOverbought1, rsiOverbought2, rsiOversold1, rsiOversold2, rsiSmaColor, rsiOverboughtColor, rsiOversoldColor, showHLevels, hLevels, hLevelsStyle, hLevelsWidth, selectedStrikeOnChart]);
 
   // Hook for drawing Overlays (OI Bars & Bollinger Bands) via requestAnimationFrame
   useEffect(() => {
@@ -4179,8 +4851,9 @@ export function AdvancedChart() {
           ctx.textAlign = 'right';
           ctx.textBaseline = 'middle';
           
-          // Draw from left edge to avoid overlapping with price labels on the right
-          const leftEdge = 0;
+          // Draw from right edge (strike price line) towards the left
+          const priceScaleWidth = mainChartRef.current ? mainChartRef.current.priceScale('right').width() : 60;
+          const rightEdge = canvas.width - priceScaleWidth - oiBarGap;
           const maxBarWidth = oiMaxBarWidth; // max length of bars
           
           optionRows.forEach((row: any) => {
@@ -4190,19 +4863,24 @@ export function AdvancedChart() {
               const callWidth = (row.call_oi / maxOI) * maxBarWidth;
               const putWidth = (row.put_oi / maxOI) * maxBarWidth;
               
-              const barHeight = 8;
+              const barHeight = oiBarThickness;
               
               // Call (Red) goes slightly above
               ctx.fillStyle = hexToRgba(oiCallColor, 0.75);
-              ctx.fillRect(leftEdge, y - barHeight/2, callWidth, barHeight/2);
+              // Draw leftwards from the right edge
+              ctx.beginPath();
+              ctx.roundRect(rightEdge - callWidth, y - barHeight/2, callWidth, barHeight/2, [4, 0, 0, 4]);
+              ctx.fill();
               
               // Put (Green) goes slightly below
               ctx.fillStyle = hexToRgba(oiPutColor, 0.75);
-              ctx.fillRect(leftEdge, y, putWidth, barHeight/2);
+              ctx.beginPath();
+              ctx.roundRect(rightEdge - putWidth, y, putWidth, barHeight/2, [4, 0, 0, 4]);
+              ctx.fill();
           });
         }
         
-        // 3. Draw Countdown to bar close on Y axis
+        // 3. Draw Spot Price and Countdown to bar close on Y axis
         const lastCandle = lastCandleDataRef.current || (chartData && chartData.candles && chartData.candles.length > 0 ? chartData.candles[chartData.candles.length - 1] : null);
         if (lastCandle) {
           const y = mainSeriesRef.current!.priceToCoordinate(lastCandle.close);
@@ -4211,7 +4889,31 @@ export function AdvancedChart() {
             const badgeWidth = priceScaleWidth;
             const x = canvas.width - priceScaleWidth;
             const badgeHeight = 18;
-            const badgeY = y + 9; 
+            const spotY = y - badgeHeight / 2;
+            const badgeY = y + badgeHeight / 2; 
+
+            // Determine Spot Color
+            const isRed = lastCandle.close < lastCandle.open;
+            const spotColor = isRed ? '#ef4444' : '#22c55e';
+
+            // Draw Spot Price Line (Right to Left)
+            ctx.beginPath();
+            ctx.strokeStyle = spotColor;
+            ctx.lineWidth = 0.5;
+            ctx.setLineDash([2, 4]);
+            ctx.moveTo(0, y);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Draw Spot Price Badge
+            ctx.fillStyle = spotColor;
+            ctx.fillRect(x, spotY, badgeWidth, badgeHeight);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = "bold 12px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(lastCandle.close.toFixed(2), x + badgeWidth / 2, spotY + badgeHeight / 2);
 
             if (badgeY + badgeHeight <= canvas.height) {
               const nowMs = Date.now();
@@ -4221,21 +4923,24 @@ export function AdvancedChart() {
               const istMinutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
               const marketOpen = istDay !== 0 && istDay !== 6 && istMinutes >= 9 * 60 + 15 && istMinutes <= 15 * 60 + 30;
 
-              ctx.fillStyle = '#1e222d';
+              // Countdown background matches spot price color slightly darker or same? 
+              // User said "keep the market closed background and the countdown to close background to match the spot price background"
+              ctx.fillStyle = spotColor;
               ctx.fillRect(x, badgeY, badgeWidth, badgeHeight);
               ctx.font = "12px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
 
               if (!marketOpen) {
-                ctx.fillStyle = '#6b7280';
-                ctx.fillText('MKT CLOSED', x + badgeWidth / 2, badgeY + badgeHeight / 2);
+                // Dimmer text for closed
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+                ctx.fillText('CLOSED', x + badgeWidth / 2, badgeY + badgeHeight / 2);
               } else {
                 const now = Math.floor(nowMs / 1000) + serverTimeOffsetRef.current;
                 const barDurationSeconds = parseInt(timeframe, 10) * 60;
                 const alignedBarStart = Math.floor(now / barDurationSeconds) * barDurationSeconds;
                 const remainingSec = Math.max(0, alignedBarStart + barDurationSeconds - now);
-                ctx.fillStyle = '#f59e0b';
+                ctx.fillStyle = '#ffffff';
                 ctx.fillText(formatCountdown(remainingSec), x + badgeWidth / 2, badgeY + badgeHeight / 2);
               }
             }
@@ -4263,11 +4968,11 @@ export function AdvancedChart() {
               const snrDash = snrStyle === 1 ? [5, 5] : snrStyle === 2 ? [2, 4] : [];
               if (showSnR && localAnalytics?.supportZone?.strikePrice) {
                  const y = mainSeriesRef.current.priceToCoordinate(localAnalytics.supportZone.strikePrice);
-                 if (y !== null) linesToDraw.push({ text: `Support ${localAnalytics.supportZone.strikePrice}`, y, color: supportColor, dash: snrDash, lineWidth: snrWidth });
+                 if (y !== null) linesToDraw.push({ text: `SUP`, y, color: supportColor, dash: snrDash, lineWidth: snrWidth });
               }
               if (showSnR && localAnalytics?.resistanceZone?.strikePrice) {
                  const y = mainSeriesRef.current.priceToCoordinate(localAnalytics.resistanceZone.strikePrice);
-                 if (y !== null) linesToDraw.push({ text: `Resistance ${localAnalytics.resistanceZone.strikePrice}`, y, color: resistanceColor, dash: snrDash, lineWidth: snrWidth });
+                 if (y !== null) linesToDraw.push({ text: `RES`, y, color: resistanceColor, dash: snrDash, lineWidth: snrWidth });
               }
               const pdhPdlDash = pdhPdlStyle === 1 ? [5, 5] : pdhPdlStyle === 2 ? [2, 4] : [];
               if (showPdhPdl && pdhPrice !== null) {
@@ -4278,6 +4983,16 @@ export function AdvancedChart() {
                  const y = mainSeriesRef.current.priceToCoordinate(pdlPrice);
                  if (y !== null) linesToDraw.push({ text: `PDL ${pdlPrice}`, y, color: pdlColor, dash: pdhPdlDash, lineWidth: pdhPdlWidth });
               }
+              if (showFiftyPercentLevels && hLevels) {
+                 const activeLevels = hLevels.filter(v => v > 0).sort((a, b) => b - a);
+                 for (let i = 0; i < activeLevels.length - 1; i++) {
+                   const midPoint = Math.round((activeLevels[i] + activeLevels[i+1]) / 2);
+                   const y = mainSeriesRef.current.priceToCoordinate(midPoint);
+                   if (y !== null) {
+                     linesToDraw.push({ text: `50% LEVEL`, y, color: fiftyPercentColor, dash: [4, 4], lineWidth: 1 });
+                   }
+                 }
+              }
 
               // Draw Lines
               linesToDraw.forEach(item => {
@@ -4285,35 +5000,116 @@ export function AdvancedChart() {
                  ctx.strokeStyle = item.color;
                  ctx.lineWidth = item.lineWidth || 1;
                  if (item.dash && item.dash.length > 0) ctx.setLineDash(item.dash);
-                 ctx.moveTo(startX, item.y);
-                 ctx.lineTo(endX, item.y);
+                 ctx.moveTo(0, item.y); 
+                 ctx.lineTo(textAlignX, item.y); // Stop before right scale
                  ctx.stroke();
                  ctx.setLineDash([]);
               });
 
-              // Collision avoidance for text labels
-              const labels = [...linesToDraw];
-              labels.sort((a, b) => a.y - b.y); // Top to bottom
-              for (let i = 1; i < labels.length; i++) {
-                 if (labels[i].y - labels[i - 1].y < 14) { // Minimum 14px vertical gap
-                    labels[i].y = labels[i - 1].y + 14;
-                 }
-              }
-
-              ctx.font = '11px sans-serif';
-              ctx.textAlign = 'right';
+              ctx.font = '12px sans-serif';
+              ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
               
-              labels.forEach(label => {
-                 // Optional: Draw a subtle background behind text for better readability
-                 const textWidth = ctx.measureText(label.text).width;
-                 ctx.fillStyle = 'rgba(13, 17, 23, 0.7)';
-                 ctx.fillRect(textDrawX - textWidth - 2, label.y - 7, textWidth + 4, 14);
+              const baseCenterX = textAlignX / 2;
+              
+              // Sort labels top-to-bottom
+              const labels = [...linesToDraw];
+              labels.sort((a, b) => a.y - b.y);
+
+              const assignedPositions: {x: number, y: number}[] = [];
+
+              labels.forEach((label) => {
+                 let displayText = label.text;
+                 if (displayText === 'SUP') displayText = 'SUPPORT';
+                 else if (displayText === 'RES') displayText = 'RESISTANCE';
+                 else if (displayText.startsWith('PDH')) displayText = 'PDH';
+                 else if (displayText.startsWith('PDL')) displayText = 'PDL';
+
+                 // Find a non-colliding X position (if Y overlaps)
+                 let currentX = baseCenterX;
+                 let collision = true;
+                 let offsetMultiplier = 1;
+                 while (collision) {
+                    collision = assignedPositions.some(pos => 
+                       Math.abs(pos.y - label.y) < 20 && Math.abs(pos.x - currentX) < Math.max(120, ctx.measureText(displayText).width + 30)
+                    );
+                    if (collision) {
+                       const offset = (offsetMultiplier % 2 === 0 ? -1 : 1) * Math.ceil(offsetMultiplier / 2) * 140;
+                       currentX = baseCenterX + offset;
+                       offsetMultiplier++;
+                    }
+                 }
+                 assignedPositions.push({ x: currentX, y: label.y });
+
+                 // Calculate inline label dimensions
+                 const textWidth = ctx.measureText(displayText).width;
+                 const paddingX = 16; 
+                 const totalWidth = textWidth + paddingX;
+                 const totalHeight = 18;
                  
+                 const bgX = currentX - totalWidth / 2;
+                 const bgY = label.y - totalHeight / 2;
+
+                 // Draw the pill background using the label's color
                  ctx.fillStyle = label.color;
-                 ctx.fillText(label.text, textDrawX, label.y);
+                 ctx.beginPath();
+                 ctx.roundRect(bgX, bgY, totalWidth, totalHeight, totalHeight / 2);
+                 ctx.fill();
+                 
+                 // Draw the text in the chart's background color
+                 const isDark = document.documentElement.classList.contains('dark');
+                 ctx.fillStyle = isDark ? '#0d1117' : '#ffffff';
+                 ctx.fillText(displayText, currentX, label.y);
+                 
+                 // Restore font for next inline label
+                 ctx.font = '12px sans-serif';
               });
            }
+        }
+
+        // 5. Draw Crosshair price label above MKT CLOSED and SUP/RES
+        if (crosshairInfoRef && crosshairInfoRef.current) {
+          const crossY = crosshairInfoRef.current.y;
+          const crossX = crosshairInfoRef.current.x;
+          const crossPrice = crosshairInfoRef.current.price;
+          
+          if (crossY >= 0 && crossY <= canvas.height && mainChartRef.current) {
+            const priceScaleWidth = mainChartRef.current.priceScale('right').width() || 60;
+            const x = canvas.width - priceScaleWidth;
+
+            if (isHoveringButtonRef && isHoveringButtonRef.current) {
+              ctx.beginPath();
+              ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)'; // matched lightweight charts
+              ctx.lineWidth = 1;
+              ctx.setLineDash([4, 4]);
+
+              // Horizontal line
+              ctx.moveTo(0, crossY);
+              ctx.lineTo(x, crossY);
+
+              // Vertical line
+              const chartHeight = Math.max(0, canvas.height - (mainChartRef.current.timeScale().height() || 26));
+              if (crossX >= 0 && crossX <= x) {
+                ctx.moveTo(crossX, 0);
+                ctx.lineTo(crossX, chartHeight);
+              }
+
+              ctx.stroke();
+              ctx.setLineDash([]);
+            }
+
+            const labelHeight = 22;
+            const labelY = crossY - labelHeight / 2;
+            
+            ctx.fillStyle = '#2b2b43'; // crosshair label bg color
+            ctx.fillRect(x, labelY, priceScaleWidth, labelHeight);
+            
+            ctx.fillStyle = '#d1d4dc'; // crosshair text color
+            ctx.font = "12px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(crossPrice.toFixed(2), x + priceScaleWidth / 2, labelY + labelHeight / 2);
+          }
         }
 
       } catch (e) {
@@ -4326,7 +5122,7 @@ export function AdvancedChart() {
     draw();
     
     return () => cancelAnimationFrame(animationFrameId);
-  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth]);
+  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor]);
 
   const { data: serverStats } = useQuery({
     queryKey: ["server-diagnostics"],
@@ -4339,42 +5135,42 @@ export function AdvancedChart() {
   });
 
   return (
-    <div className="p-6 md:p-8 animate-in fade-in duration-500 max-w-[1200px] w-full mx-auto pb-20 flex flex-col min-h-screen relative">
+    <div className="p-6 md:p-8 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto pb-20 flex flex-col min-h-screen relative">
       
       {showDiagnostic && (
-        <div className="fixed bottom-6 right-6 z-50 bg-[#0d1117]/95 backdrop-blur-md border border-slate-700 p-4 rounded-lg shadow-2xl text-xs font-mono w-[340px] max-h-[80vh] overflow-y-auto">
-          <div className="flex items-center justify-between border-b border-slate-700 pb-2 mb-2">
-            <span className="text-slate-400 font-semibold uppercase">Diagnostic Panel</span>
-            <button onClick={() => setShowDiagnostic(false)} className="text-slate-500 hover:text-white transition-colors">
+        <div className="fixed bottom-6 right-6 z-50 bg-card/95 backdrop-blur-md border border-0 p-4 rounded-lg text-xs font-mono w-[340px] max-h-[80vh] overflow-y-auto">
+          <div className="flex items-center justify-between border-b border-0 pb-2 mb-2">
+            <span className="text-muted-foreground font-semibold uppercase">Diagnostic Panel</span>
+            <button onClick={() => setShowDiagnostic(false)} className="text-muted-foreground hover:text-foreground transition-colors">
               <X size={14} />
             </button>
           </div>
           {serverStats && (
             <div className="flex flex-col gap-1.5 mb-2">
-              <span className="text-slate-400 font-semibold uppercase mb-1">Backend Connectivity</span>
+              <span className="text-muted-foreground font-semibold uppercase mb-1">Backend Connectivity</span>
               <div className="flex justify-between">
-                 <span className="text-slate-500">Req / Min</span>
+                 <span className="text-muted-foreground">Req / Min</span>
                  <span className="text-sky-400">{serverStats.requestCountPerMinute} req/min</span>
               </div>
               <div className="flex justify-between">
-                 <span className="text-slate-500">Cache Hit/Miss</span>
+                 <span className="text-muted-foreground">Cache Hit/Miss</span>
                  <span className="text-purple-400">{serverStats.cacheHits} / {serverStats.cacheMisses}</span>
               </div>
               <div className="flex justify-between">
-                 <span className="text-slate-500">Total 429 Errors</span>
+                 <span className="text-muted-foreground">Total 429 Errors</span>
                  <span className={serverStats.error429Count > 0 ? "text-red-400 font-bold" : "text-emerald-400"}>{serverStats.error429Count}</span>
               </div>
               <div className="flex justify-between">
-                 <span className="text-slate-500">Last Req</span>
-                 <span className="text-slate-300">{serverStats.lastRequestTime ? new Date(serverStats.lastRequestTime).toLocaleTimeString() : 'N/A'}</span>
+                 <span className="text-muted-foreground">Last Req</span>
+                 <span className="text-foreground/80">{serverStats.lastRequestTime ? new Date(serverStats.lastRequestTime).toLocaleTimeString() : 'N/A'}</span>
               </div>
-              <div className="w-full h-px bg-slate-800 my-1" />
-              <span className="text-slate-400 font-semibold uppercase mb-1">WebSocket Connections</span>
+              <div className="w-full h-px bg-muted my-1" />
+              <span className="text-muted-foreground font-semibold uppercase mb-1">WebSocket Connections</span>
               <div className="flex justify-between">
-                 <span className="text-slate-500">Status</span>
+                 <span className="text-muted-foreground">Status</span>
                  <span className={`font-medium ${
                    getWsDiagnostics().status === 'Connected' ? 'text-emerald-400' : 
-                   getWsDiagnostics().status === 'Failed' ? 'text-red-400' : 'text-amber-400'
+                   getWsDiagnostics().status === 'Failed' ? 'text-red-400' : 'text-primary'
                  }`}>
                     {getWsDiagnostics().status}
                  </span>
@@ -4385,95 +5181,95 @@ export function AdvancedChart() {
           )}
           {taInfo && (
             <div className="flex flex-col gap-1.5">
-              <span className="text-slate-400 font-semibold uppercase mb-1">Chart Data</span>
+              <span className="text-muted-foreground font-semibold uppercase mb-1">Chart Data</span>
               <div className="flex justify-between">
-                <span className="text-slate-500">Token</span>
-              <span className="text-white">{instrumentToken}</span>
+                <span className="text-muted-foreground">Token</span>
+              <span className="text-foreground">{instrumentToken}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-500">Symbol</span>
+              <span className="text-muted-foreground">Symbol</span>
               <span className="text-cyan-400">{selectedInstrument?.tradingsymbol || 'NIFTY 50'}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-500">Exchange</span>
-              <span className="text-white">{selectedInstrument?.exchange || 'NSE'}</span>
+              <span className="text-muted-foreground">Exchange</span>
+              <span className="text-foreground">{selectedInstrument?.exchange || 'NSE'}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-500">Segment</span>
-              <span className="text-white">{selectedInstrument?.segment || 'INDICES'}</span>
+              <span className="text-muted-foreground">Segment</span>
+              <span className="text-foreground">{(selectedInstrument as any)?.segment || 'INDICES'}</span>
             </div>
-            <div className="w-full h-px bg-slate-800 my-1" />
+            <div className="w-full h-px bg-muted my-1" />
             <div className="flex justify-between">
-              <span className="text-slate-500">Latest Vol</span>
+              <span className="text-muted-foreground">Latest Vol</span>
               <span className="text-emerald-400">{taInfo.rawTop5?.[0]?.volume ?? '0'}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-500">Vol Source</span>
-              <span className="text-amber-400">Raw Kite Data</span>
+              <span className="text-muted-foreground">Vol Source</span>
+              <span className="text-primary">Raw Kite Data</span>
             </div>
-            <div className="w-full h-px bg-slate-800 my-1" />
-            <span className="text-slate-400 font-semibold uppercase mb-1">Bollinger Bands</span>
+            <div className="w-full h-px bg-muted my-1" />
+            <span className="text-muted-foreground font-semibold uppercase mb-1">Bollinger Bands</span>
             <div className="flex justify-between">
-              <span className="text-slate-500">Status</span>
-              <span className={showBB ? "text-emerald-400 font-bold" : "text-slate-500"}>
+              <span className="text-muted-foreground">Status</span>
+              <span className={showBB ? "text-emerald-400 font-bold" : "text-muted-foreground"}>
                 {showBB ? "ENABLED" : "DISABLED"}
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-500">Period</span>
-              <span className="text-white">{bbPeriod}</span>
+              <span className="text-muted-foreground">Period</span>
+              <span className="text-foreground">{bbPeriod}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-500">Std Dev</span>
-              <span className="text-white">{bbStdDev}</span>
+              <span className="text-muted-foreground">Std Dev</span>
+              <span className="text-foreground">{bbStdDev}</span>
             </div>
             {showBB && bbData.length > 0 ? (
               <>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Latest Upper</span>
+                  <span className="text-muted-foreground">Latest Upper</span>
                   <span className="text-cyan-400 font-mono">{bbData[bbData.length - 1].upper.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Latest Basis</span>
+                  <span className="text-muted-foreground">Latest Basis</span>
                   <span className="text-purple-400 font-mono">{bbData[bbData.length - 1].middle.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Latest Lower</span>
+                  <span className="text-muted-foreground">Latest Lower</span>
                   <span className="text-cyan-400 font-mono">{bbData[bbData.length - 1].lower.toFixed(2)}</span>
                 </div>
               </>
             ) : showBB && (
-              <div className="text-[10px] text-amber-500 italic">No calculation data available</div>
+              <div className="text-[10px] text-primary italic">No calculation data available</div>
             )}
             {taInfo.rawVolumeStats && (
               <>
-                <div className="w-full h-px bg-slate-800 my-1" />
+                <div className="w-full h-px bg-muted my-1" />
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Max Hist Vol</span>
+                  <span className="text-muted-foreground">Max Hist Vol</span>
                   <span className="text-pink-400">{taInfo.rawVolumeStats.max}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Min Hist Vol</span>
+                  <span className="text-muted-foreground">Min Hist Vol</span>
                   <span className="text-pink-400">{taInfo.rawVolumeStats.min}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Avg Hist Vol</span>
+                  <span className="text-muted-foreground">Avg Hist Vol</span>
                   <span className="text-pink-400">{taInfo.rawVolumeStats.avg}</span>
                 </div>
               </>
             )}
             {taInfo.rawTop5 && taInfo.rawTop5.length > 0 && (
               <>
-                <div className="w-full h-px bg-slate-800 my-1" />
-                <span className="text-slate-400 font-semibold uppercase mb-1">Historical Candle Audit</span>
+                <div className="w-full h-px bg-muted my-1" />
+                <span className="text-muted-foreground font-semibold uppercase mb-1">Historical Candle Audit</span>
                 <div className="flex flex-col gap-2 relative">
                   {taInfo.rawTop5.map((c: any, i: number) => (
-                    <div key={i} className="flex flex-col bg-slate-800/50 p-2 rounded text-[10px]">
-                      <div className="text-slate-400 flex justify-between">
+                    <div key={i} className="flex flex-col bg-muted/50 p-2 rounded text-[10px]">
+                      <div className="text-muted-foreground flex justify-between">
                         <span>{new Date(c.date || c.time).toLocaleString()}</span>
                         <span className="text-emerald-400">Vol: {c.volume ?? 'N/A'}</span>
                       </div>
-                      <div className="grid grid-cols-4 gap-1 mt-1 text-slate-300">
+                      <div className="grid grid-cols-4 gap-1 mt-1 text-foreground/80">
                         <span>O:{Number(c.open)?.toFixed(1)}</span>
                         <span>H:{Number(c.high)?.toFixed(1)}</span>
                         <span>L:{Number(c.low)?.toFixed(1)}</span>
@@ -4489,43 +5285,33 @@ export function AdvancedChart() {
         </div>
       )}
 
-      <div className="flex justify-between items-end pb-4 mb-6">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground tracking-tight">
+      <div className="flex justify-between items-center pb-2 mb-4">
+        <div className="flex items-center gap-4">
+          <h1 className="text-2xl font-bold text-foreground tracking-tight whitespace-nowrap">
             Advanced Trading Chart
           </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Live price action with Candlesticks, Volume, and RSI Divergences
-          </p>
-          <div className="flex gap-2 items-center mt-2 flex-wrap">
-             {lastTickMessage && (
-               <span className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-md text-xs font-mono font-bold animate-pulse">
-                LIVE TICK: {lastTickMessage}
-               </span>
-             )}
-             {wsError && (
-               <span className="bg-red-500/20 text-red-400 px-3 py-1 rounded-md text-xs font-mono font-bold animate-pulse">
-                WS ERROR: {wsError}
-               </span>
-             )}
-          </div>
-          {parseInt(timeframe) < 15 && (
-            <p className="text-sm text-amber-500 mt-2 font-medium">
-              RSI Divergence is available only on 15-minute and higher timeframes.
-            </p>
+          {lastTickMessage && (
+             <span className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-md text-xs font-mono font-bold animate-pulse whitespace-nowrap">
+              LIVE TICK: {lastTickMessage}
+             </span>
+          )}
+          {wsError && (
+             <span className="bg-red-500/20 text-red-400 px-3 py-1 rounded-md text-xs font-mono font-bold animate-pulse whitespace-nowrap">
+              WS ERROR: {wsError}
+             </span>
           )}
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 flex-wrap justify-end">
           <SymbolSearch 
             onSelect={setSelectedInstrument} 
             currentSymbol={selectedInstrument ? selectedInstrument.tradingsymbol : "NIFTY 50"} 
           />
           {decision && localAnalytics && (
-             <div className="flex items-center gap-4 px-3 py-1 bg-slate-800/40 border border-slate-700/50 rounded-md ml-2">
+             <div className="flex items-center gap-4 px-3 py-1 bg-muted/40 border border-0 rounded-md ml-2">
                 <div className="flex items-center gap-2">
                    {(() => {
                       const biasText = decision.bullScore > decision.bearScore ? 'Bullish' : decision.bearScore > decision.bullScore ? 'Bearish' : 'Neutral';
-                      const textColor = biasText === 'Bullish' ? 'text-green-500' : biasText === 'Bearish' ? 'text-red-500' : 'text-[#f59e0b]';
+                      const textColor = biasText === 'Bullish' ? 'text-green-500' : biasText === 'Bearish' ? 'text-red-500' : 'text-primary';
                       return (
                          <span className={`font-bold ${textColor}`}>
                             {biasText}
@@ -4535,6 +5321,13 @@ export function AdvancedChart() {
                 </div>
              </div>
           )}
+          <div className="flex items-center gap-2 bg-muted/40 border border-0 rounded-md px-3 py-1.5 ml-2 cursor-pointer" onClick={() => setQuickTradeEnabled(!quickTradeEnabled)}>
+             <span className="text-xs font-medium text-foreground/80">Quick Trade</span>
+             <label className="relative inline-flex items-center cursor-pointer pointer-events-none">
+               <input type="checkbox" className="sr-only peer" checked={quickTradeEnabled} readOnly />
+               <div className="w-7 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after: after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
+             </label>
+          </div>
           <div className="flex bg-muted p-1 rounded-md">
             <div className="relative" ref={indicatorsRef}>
               <button
@@ -4545,14 +5338,14 @@ export function AdvancedChart() {
                 <ChevronDown size={14} className={`transition-transform ${isIndicatorsOpen ? 'rotate-180' : ''}`} />
               </button>
               {isIndicatorsOpen && (
-                <div className="absolute top-full mt-1.5 right-0 min-w-[240px] bg-[#0d1117] border border-slate-700/50 rounded-md shadow-xl py-1.5 z-50 overflow-hidden flex flex-col">
-                  <div className="px-3 py-1.5 text-xs font-semibold text-slate-500 uppercase">Available Indicators</div>
+                <div className="absolute top-full mt-1.5 right-0 min-w-[240px] bg-card border border-0 rounded-md py-1.5 z-50 overflow-hidden flex flex-col">
+                  <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase">Available Indicators</div>
                   
                   {/* Previous Day High/Low */}
-                  <div className="flex items-center justify-between px-3 hover:bg-slate-800 transition-colors group">
+                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
                     <button
                       onClick={() => setShowPdhPdl(!showPdhPdl)}
-                      className="flex items-center gap-2 py-2 text-sm text-slate-300 hover:text-white transition-colors text-left flex-grow"
+                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
                         {showPdhPdl && <Check size={14} className="text-emerald-400" />}
@@ -4565,7 +5358,7 @@ export function AdvancedChart() {
                         setIsEditingPdhPdl(true);
                         setIsIndicatorsOpen(false);
                       }}
-                      className="text-slate-500 hover:text-white p-1 hover:bg-slate-700 rounded transition-colors"
+                      className="text-muted-foreground hover:text-foreground p-1 hover:bg-slate-700 rounded transition-colors"
                       title="PDH/PDL Settings"
                     >
                       <Settings size={13} />
@@ -4573,10 +5366,10 @@ export function AdvancedChart() {
                   </div>
 
                   {/* Support/Resistance Lines */}
-                  <div className="flex items-center justify-between px-3 hover:bg-slate-800 transition-colors group">
+                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
                     <button
                       onClick={() => setShowSnR(!showSnR)}
-                      className="flex items-center gap-2 py-2 text-sm text-slate-300 hover:text-white transition-colors text-left flex-grow"
+                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
                         {showSnR && <Check size={14} className="text-emerald-400" />}
@@ -4589,7 +5382,7 @@ export function AdvancedChart() {
                         setIsEditingSnR(true);
                         setIsIndicatorsOpen(false);
                       }}
-                      className="text-slate-500 hover:text-white p-1 hover:bg-slate-700 rounded transition-colors"
+                      className="text-muted-foreground hover:text-foreground p-1 hover:bg-slate-700 rounded transition-colors"
                       title="Support/Resistance Settings"
                     >
                       <Settings size={13} />
@@ -4597,10 +5390,10 @@ export function AdvancedChart() {
                   </div>
 
                   {/* OI Bars */}
-                  <div className="flex items-center justify-between px-3 hover:bg-slate-800 transition-colors group">
+                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
                     <button
                       onClick={() => setShowOiBars(!showOiBars)}
-                      className="flex items-center gap-2 py-2 text-sm text-slate-300 hover:text-white transition-colors text-left flex-grow"
+                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
                         {showOiBars && <Check size={14} className="text-emerald-400" />}
@@ -4613,7 +5406,7 @@ export function AdvancedChart() {
                         setIsEditingOiBars(true);
                         setIsIndicatorsOpen(false);
                       }}
-                      className="text-slate-500 hover:text-white p-1 hover:bg-slate-700 rounded transition-colors"
+                      className="text-muted-foreground hover:text-foreground p-1 hover:bg-slate-700 rounded transition-colors"
                       title="OI Bars Settings"
                     >
                       <Settings size={13} />
@@ -4621,10 +5414,10 @@ export function AdvancedChart() {
                   </div>
 
                   {/* RSI */}
-                  <div className="flex items-center justify-between px-3 hover:bg-slate-800 transition-colors group">
+                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
                     <button
                       onClick={() => setShowRsi(!showRsi)}
-                      className="flex items-center gap-2 py-2 text-sm text-slate-300 hover:text-white transition-colors text-left flex-grow"
+                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
                         {showRsi && <Check size={14} className="text-emerald-400" />}
@@ -4637,7 +5430,7 @@ export function AdvancedChart() {
                         setIsEditingRsi(true);
                         setIsIndicatorsOpen(false);
                       }}
-                      className="text-slate-500 hover:text-white p-1 hover:bg-slate-700 rounded transition-colors"
+                      className="text-muted-foreground hover:text-foreground p-1 hover:bg-slate-700 rounded transition-colors"
                       title="RSI Settings"
                     >
                       <Settings size={13} />
@@ -4645,10 +5438,10 @@ export function AdvancedChart() {
                   </div>
 
                   {/* Bollinger Bands */}
-                  <div className="flex items-center justify-between px-3 hover:bg-slate-800 transition-colors group">
+                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
                     <button
                       onClick={() => setShowBB(!showBB)}
-                      className="flex items-center gap-2 py-2 text-sm text-slate-300 hover:text-white transition-colors text-left flex-grow"
+                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
                         {showBB && <Check size={14} className="text-emerald-400" />}
@@ -4661,7 +5454,7 @@ export function AdvancedChart() {
                         setIsEditingBB(true);
                         setIsIndicatorsOpen(false);
                       }}
-                      className="text-slate-500 hover:text-white p-1 hover:bg-slate-700 rounded transition-colors"
+                      className="text-muted-foreground hover:text-foreground p-1 hover:bg-slate-700 rounded transition-colors"
                       title="Bollinger Bands Settings"
                     >
                       <Settings size={13} />
@@ -4669,10 +5462,10 @@ export function AdvancedChart() {
                   </div>
 
                   {/* H Levels */}
-                  <div className="flex items-center justify-between px-3 hover:bg-slate-800 transition-colors group">
+                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
                     <button
                       onClick={() => setShowHLevels(!showHLevels)}
-                      className="flex items-center gap-2 py-2 text-sm text-slate-300 hover:text-white transition-colors text-left flex-grow"
+                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
                         {showHLevels && <Check size={14} className="text-emerald-400" />}
@@ -4685,7 +5478,7 @@ export function AdvancedChart() {
                         setIsEditingHLevels(true);
                         setIsIndicatorsOpen(false);
                       }}
-                      className="text-slate-500 hover:text-white p-1 hover:bg-slate-700 rounded transition-colors"
+                      className="text-muted-foreground hover:text-foreground p-1 hover:bg-slate-700 rounded transition-colors"
                       title="H Levels Settings"
                     >
                       <Settings size={13} />
@@ -4695,7 +5488,7 @@ export function AdvancedChart() {
                   {/* Diagnostic Panel */}
                   <button
                     onClick={() => setShowDiagnostic(!showDiagnostic)}
-                    className="flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-left"
+                    className="flex items-center gap-2 px-3 py-2 text-sm text-foreground/80 hover:bg-muted hover:text-foreground transition-colors text-left"
                   >
                     <div className="w-4 flex items-center justify-center">
                       {showDiagnostic && <Check size={14} className="text-emerald-400" />}
@@ -4714,7 +5507,7 @@ export function AdvancedChart() {
             <select
               value={timeframe}
               onChange={(e) => setTimeframe(e.target.value)}
-              className="bg-background text-foreground border border-border text-sm rounded-md px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary h-9"
+              className="bg-background text-foreground border border-0 text-sm rounded-md px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary h-9"
             >
               <option value="1">1m</option>
               <option value="3">3m</option>
@@ -4738,22 +5531,66 @@ export function AdvancedChart() {
         </div>
       ) : (
         <div className="flex flex-col flex-grow gap-2">
+          {/* Active Positions Sell/Exit One-Click Button Bar */}
+          {activePositions.length > 0 && (
+            <div className={`p-2.5 px-4 mb-1 border rounded-xl flex items-center justify-between transition-all duration-300 animate-in slide-in-from-top-2 select-none z-30 ${
+              activePositions.some(p => p.side === 'BUY') 
+                ? 'border-emerald-500/20 bg-emerald-950/20 text-emerald-300' 
+                : 'border-rose-500/20 bg-rose-950/20 text-rose-300'
+            }`}>
+              <div className="flex items-center gap-3">
+                <span className="flex h-2.5 w-2.5 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
+                </span>
+                <span className="text-sm font-bold tracking-wide font-sans">
+                  Active Trades: {activePositions.length} position(s) placed
+                </span>
+                <div className="hidden sm:flex flex-wrap items-center gap-1 text-[11px] font-mono opacity-80 border-l border-white/10 pl-3">
+                  {activePositions.map((pos) => (
+                    <span key={pos.id} className="bg-black/35 px-1.5 py-0.5 rounded mr-1">
+                      {pos.symbol} ({pos.qty} Qty @ ₹{pos.entryPrice.toFixed(1)})
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleExitAllTrades}
+                disabled={isExitingAllTrades}
+                className="flex items-center gap-2 px-5 py-2 font-bold rounded-lg border border-rose-500 bg-rose-600 hover:bg-rose-750 active:scale-95 text-white text-xs transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed select-none shadow-[0_0_15px_rgba(239,68,68,0.2)] hover:shadow-[0_0_20px_rgba(239,68,68,0.45)]"
+              >
+                {isExitingAllTrades ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Exiting All Positions...
+                  </>
+                ) : (
+                  <>
+                    <X className="w-3.5 h-3.5" />
+                    1-Click SELL / EXIT ALL TRADES
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+
           {/* Main Chart (Price & Volume) */}
-          <div className="relative flex-grow flex w-full" style={{ minHeight: "450px" }} onMouseLeave={() => setCrosshairInfo(null)}>
+          <div className="relative flex-grow flex w-full bg-card rounded-xl" style={{ minHeight: "450px" }} onMouseLeave={() => setCrosshairInfo(null)}>
             <div
               ref={chartContainerRef}
               onPointerDownCapture={handlePointerDown}
               onPointerMoveCapture={handlePointerMove}
               onPointerUpCapture={handlePointerUp}
               onPointerLeave={handlePointerUp}
-              className="bg-[#0d1117] border border-border rounded-xl stretch-self shadow-sm flex-grow relative w-full overflow-hidden"
+              className="border border-0 rounded-xl stretch-self flex-grow relative w-full overflow-hidden z-20"
             />
             {crosshairInfo && (
               <button
                 onClick={handleAddManualLine}
                 onMouseEnter={() => { isHoveringButtonRef.current = true; }}
                 onMouseLeave={() => { isHoveringButtonRef.current = false; }}
-                className="absolute right-[65px] w-6 h-6 rounded-full bg-[#1e222d] border border-slate-600 flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-700 shadow-sm z-[60] transition-colors"
+                className="absolute right-[65px] w-6 h-6 rounded-full bg-card border  flex items-center justify-center text-foreground/80 hover:text-foreground hover:bg-slate-700 z-[60] transition-colors"
                 style={{
                   top: `${crosshairInfo.y}px`,
                   transform: 'translateY(-50%)' // Center vertically
@@ -4764,25 +5601,131 @@ export function AdvancedChart() {
             )}
             <canvas
               ref={overlayCanvasRef}
-              className="absolute inset-0 w-full h-full pointer-events-none rounded-xl z-10"
+              className="absolute inset-0 w-full h-full pointer-events-none rounded-xl z-30"
             />
+            {(() => {
+              if (showOiBars && oiData && crosshairInfo) {
+                const priceScaleWidth = mainChartRef.current ? mainChartRef.current.priceScale('right').width() : 60;
+                const chartWidth = chartContainerRef.current?.getBoundingClientRect().width || 0;
+                
+                if (oiData.strikes && oiData.strikes.length > 0) {
+                   const nearestStrike = oiData.strikes.reduce((prev: number, curr: number) => 
+                      Math.abs(curr - crosshairInfo.price) < Math.abs(prev - crosshairInfo.price) ? curr : prev
+                   );
+                   
+                   const y = mainSeriesRef.current?.priceToCoordinate(nearestStrike);
+                   if (y !== null && y !== undefined && Math.abs(crosshairInfo.y - y) <= 10) {
+                     const ce = oiData.ceData[nearestStrike];
+                     const pe = oiData.peData[nearestStrike];
+                     
+                     const prevCe = oiHistoryRef.current.prev?.ceData?.[nearestStrike];
+                     const prevPe = oiHistoryRef.current.prev?.peData?.[nearestStrike];
+                     
+                     const getSentimentColor = (sentiment: string) => {
+                       if (sentiment.includes("LONG BUILDUP") || sentiment.includes("SHORT COVERING")) return "text-emerald-400";
+                       if (sentiment.includes("SHORT BUILDUP") || sentiment.includes("LONG UNWINDING")) return "text-rose-400";
+                       return "text-muted-foreground";
+                     };
+                     
+                     const getSentimentFromChg = (chgLtp: number, chgOi: number) => {
+                       if (chgLtp > 0 && chgOi > 0) return 'LONG BUILDUP';
+                       if (chgLtp < 0 && chgOi > 0) return 'SHORT BUILDUP';
+                       if (chgLtp < 0 && chgOi < 0) return 'LONG UNWINDING';
+                       if (chgLtp > 0 && chgOi < 0) return 'SHORT COVERING';
+                       return 'NEUTRAL';
+                     };
+
+                     const ceSentimentLabel = ce ? getSentimentFromChg(ce.chgLtp || 0, ce.chgOi || 0) : 'NEUTRAL';
+                     const peSentimentLabel = pe ? getSentimentFromChg(pe.chgLtp || 0, pe.chgOi || 0) : 'NEUTRAL';
+                     
+                     const maxOI = Math.max(...oiData.strikes.map((s: number) => Math.max(oiData.ceData[s]?.oi || 0, oiData.peData[s]?.oi || 0)));
+                     
+                     const callWidth = maxOI > 0 ? ((ce?.oi || 0) / maxOI) * oiMaxBarWidth : 0;
+                     const putWidth = maxOI > 0 ? ((pe?.oi || 0) / maxOI) * oiMaxBarWidth : 0;
+                     const maxCurrentBarWidth = Math.max(callWidth, putWidth);
+                     
+                     const rightEdge = chartWidth - priceScaleWidth - oiBarGap;
+                     
+                     if (crosshairInfo.x >= rightEdge - maxCurrentBarWidth - 5 && crosshairInfo.x <= rightEdge + 5) {
+                       const formatOi = (oiInLakhs: number) => {
+                         if (!oiInLakhs) return '0';
+                         const val = Math.abs(oiInLakhs);
+                         if (val >= 1) return oiInLakhs.toFixed(2) + ' L';
+                         if (val >= 0.01) return (oiInLakhs * 100).toFixed(2) + ' K';
+                         return (oiInLakhs * 100000).toFixed(0);
+                       };
+
+                       return (
+                         <div 
+                           className="absolute z-[80] bg-popover border border-0 rounded overflow-hidden p-2.5 flex flex-col gap-1 w-[200px] pointer-events-none text-xs font-mono"
+                           style={{
+                             top: `${Math.min(crosshairInfo.y + 15, (chartContainerRef.current?.getBoundingClientRect().height || 450) - 140)}px`,
+                             left: `${crosshairInfo.x - 210}px`,
+                           }}
+                         >
+                            <div className="flex justify-between text-muted-foreground border-b border-0 pb-1 mb-1">
+                              <span>Expiry:</span>
+                              <span className="text-foreground">{oiData.expiryDate}</span>
+                            </div>
+                            <div className="flex justify-between text-muted-foreground border-b border-0 pb-1 mb-1">
+                              <span>Strike:</span>
+                              <span className="text-foreground">{nearestStrike}</span>
+                            </div>
+                            <div className="flex justify-between" style={{ color: oiCallColor }}>
+                              <span>CE OI:</span>
+                              <span>{formatOi(ce?.oi)}</span>
+                            </div>
+                            <div className="flex justify-between pb-1 mb-1" style={{ color: oiCallColor }}>
+                              <span>CE OI Chg:</span>
+                              <span>{formatOi(ce?.chgOi)} ({(ce?.oi && (ce.oi - (ce?.chgOi || 0)) > 0) ? (((ce?.chgOi || 0) / (ce.oi - (ce?.chgOi || 0))) * 100).toFixed(1) : '0.0'}%)</span>
+                            </div>
+                            <div className="flex justify-between pb-1 text-muted-foreground mb-1">
+                              <span>CE IV:</span>
+                              <span>{(ce?.iv || 0).toFixed(1)}%</span>
+                            </div>
+                            <div className="flex justify-center pb-1 border-b border-0 mb-1">
+                              <span className={`text-[10px] font-bold ${getSentimentColor(ceSentimentLabel)}`}>{ceSentimentLabel}</span>
+                            </div>
+                            <div className="flex justify-between" style={{ color: oiPutColor }}>
+                              <span>PE OI:</span>
+                              <span>{formatOi(pe?.oi)}</span>
+                            </div>
+                            <div className="flex justify-between pb-1 mb-1" style={{ color: oiPutColor }}>
+                              <span>PE OI Chg:</span>
+                              <span>{formatOi(pe?.chgOi)} ({(pe?.oi && (pe.oi - (pe?.chgOi || 0)) > 0) ? (((pe?.chgOi || 0) / (pe.oi - (pe?.chgOi || 0))) * 100).toFixed(1) : '0.0'}%)</span>
+                            </div>
+                            <div className="flex justify-between pb-1 text-muted-foreground mb-1">
+                              <span>PE IV:</span>
+                              <span>{(pe?.iv || 0).toFixed(1)}%</span>
+                            </div>
+                            <div className="flex justify-center pb-1 border-b border-0 mb-1">
+                              <span className={`text-[10px] font-bold ${getSentimentColor(peSentimentLabel)}`}>{peSentimentLabel}</span>
+                            </div>
+                         </div>
+                       );
+                     }
+                   }
+                }
+              }
+              return null;
+            })()}
             
             {clickMenu && (
               <div 
-                className="absolute z-[100] bg-[#1a1f2c] border border-slate-705 rounded-lg shadow-2xl p-2 flex flex-col gap-1.5 w-[160px] transition-all duration-150 animate-in fade-in zoom-in-95"
+                className="absolute z-[100] bg-popover border border-0 rounded-lg p-2 flex flex-col gap-1.5 w-[160px] transition-all duration-150 animate-in fade-in zoom-in-95"
                 style={{
                   top: `${Math.max(5, Math.min(clickMenu.y, (chartContainerRef.current?.getBoundingClientRect().height || 450) - 170))}px`,
                   left: `${Math.min(clickMenu.x, (chartContainerRef.current?.getBoundingClientRect().width || 600) - 175)}px`,
                 }}
               >
-                <div className="text-[10px] font-semibold text-slate-400 border-b border-slate-800 pb-1 mb-0.5 px-1 flex justify-between items-center">
+                <div className="text-[10px] font-semibold text-muted-foreground border-b border-0 pb-1 mb-0.5 px-1 flex justify-between items-center">
                   <span>Strike Click</span>
-                  <button type="button" onClick={(e) => { e.stopPropagation(); setClickMenu(null); }} className="text-slate-500 hover:text-white transition-colors text-xs font-bold font-mono">✕</button>
+                  <button type="button" onClick={(e) => { e.stopPropagation(); setClickMenu(null); }} className="text-muted-foreground hover:text-foreground transition-colors text-xs font-bold font-mono">✕</button>
                 </div>
                 <button 
                   type="button"
                   onClick={(e) => { e.stopPropagation(); handleStrikeAction('BUY', 'CE', clickMenu.price); }}
-                  className="w-full text-left text-xs bg-emerald-950/25 hover:bg-emerald-900 border border-emerald-800/40 rounded px-2 py-1 text-emerald-400 font-semibold transition-colors flex items-center justify-between cursor-pointer"
+                  className="w-full text-left text-xs bg-transparent hover:bg-emerald-500/20 border border-emerald-500/30 rounded px-2 py-1 text-emerald-400 font-semibold transition-colors flex items-center justify-between cursor-pointer"
                 >
                   <span>Buy Call</span>
                   <span className="text-[9px] bg-emerald-500/20 px-1 rounded text-emerald-400">CE</span>
@@ -4790,7 +5733,7 @@ export function AdvancedChart() {
                 <button 
                   type="button"
                   onClick={(e) => { e.stopPropagation(); handleStrikeAction('SELL', 'CE', clickMenu.price); }}
-                  className="w-full text-left text-xs bg-rose-955/15 hover:bg-rose-900 border border-rose-900/40 rounded px-2 py-1 text-rose-400 font-semibold transition-colors flex items-center justify-between cursor-pointer"
+                  className="w-full text-left text-xs bg-transparent hover:bg-rose-500/20 border border-rose-500/30 rounded px-2 py-1 text-rose-400 font-semibold transition-colors flex items-center justify-between cursor-pointer"
                 >
                   <span>Sell Call</span>
                   <span className="text-[9px] bg-rose-500/20 px-1 rounded text-rose-400">CE</span>
@@ -4798,7 +5741,7 @@ export function AdvancedChart() {
                 <button 
                   type="button"
                   onClick={(e) => { e.stopPropagation(); handleStrikeAction('BUY', 'PE', clickMenu.price); }}
-                  className="w-full text-left text-xs bg-emerald-950/25 hover:bg-emerald-900 border border-emerald-800/40 rounded px-2 py-1 text-emerald-400 font-semibold transition-colors flex items-center justify-between cursor-pointer"
+                  className="w-full text-left text-xs bg-transparent hover:bg-emerald-500/20 border border-emerald-500/30 rounded px-2 py-1 text-emerald-400 font-semibold transition-colors flex items-center justify-between cursor-pointer"
                 >
                   <span>Buy Put</span>
                   <span className="text-[9px] bg-emerald-500/20 px-1 rounded text-emerald-400">PE</span>
@@ -4806,7 +5749,7 @@ export function AdvancedChart() {
                 <button 
                   type="button"
                   onClick={(e) => { e.stopPropagation(); handleStrikeAction('SELL', 'PE', clickMenu.price); }}
-                  className="w-full text-left text-xs bg-rose-955/15 hover:bg-rose-900 border border-rose-900/40 rounded px-2 py-1 text-rose-400 font-semibold transition-colors flex items-center justify-between cursor-pointer"
+                  className="w-full text-left text-xs bg-transparent hover:bg-rose-500/20 border border-rose-500/30 rounded px-2 py-1 text-rose-400 font-semibold transition-colors flex items-center justify-between cursor-pointer"
                 >
                   <span>Sell Put</span>
                   <span className="text-[9px] bg-rose-500/20 px-1 rounded text-rose-400">PE</span>
@@ -4815,10 +5758,10 @@ export function AdvancedChart() {
             )}
 
             {isProcessingStrikeAction && (
-              <div className="absolute inset-0 z-[120] bg-black/40 backdrop-blur-[1px] flex items-center justify-center rounded-xl">
-                <div className="bg-[#1e222d] border border-slate-700/80 px-4 py-3 rounded-lg flex items-center gap-2.5 shadow-2xl">
-                  <Loader2 className="w-5 h-5 animate-spin text-cyan-400" />
-                  <span className="text-xs text-slate-250 font-medium text-slate-200">Resolving option strike details...</span>
+              <div className="absolute inset-0 z-[120] bg-muted backdrop-blur-[1px] flex items-center justify-center rounded-xl">
+                <div className="bg-card border border-0 px-4 py-3 rounded-lg flex items-center gap-2.5 ">
+                  <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                  <span className="text-xs text-slate-250 font-medium text-foreground/90">Resolving option strike details...</span>
                 </div>
               </div>
             )}
@@ -4827,7 +5770,7 @@ export function AdvancedChart() {
           <div className={`relative w-full ${!showRsi ? 'hidden' : ''}`} style={{ height: "200px", minHeight: "200px" }}>
             <div
               ref={rsiContainerRef}
-              className="bg-[#0d1117] border border-border rounded-xl overflow-hidden shadow-sm w-full h-full absolute inset-0"
+              className="bg-card border border-0 rounded-xl overflow-hidden w-full h-full absolute inset-0"
             />
             {rsiHoverValue && (
                <div className="absolute top-2 left-2 z-10 text-xs font-mono font-medium text-cyan-400">
@@ -4955,14 +5898,25 @@ export function AdvancedChart() {
       {isEditingOiBars && (
         <OiBarsEditorModal
           initialMaxBarWidth={oiMaxBarWidth}
+          initialGap={oiBarGap}
+          initialBarThickness={oiBarThickness}
           initialCallColor={oiCallColor}
           initialPutColor={oiPutColor}
           onClose={() => setIsEditingOiBars(false)}
-          onApply={(maxBarWidth, callColor, putColor) => {
+          onApply={(maxBarWidth, gap, barThickness, callColor, putColor) => {
             setOiMaxBarWidth(maxBarWidth);
+            setOiBarGap(gap);
+            setOiBarThickness(barThickness);
             setOiCallColor(callColor);
             setOiPutColor(putColor);
             setIsEditingOiBars(false);
+          }}
+          onChange={(maxBarWidth, gap, barThickness, callColor, putColor) => {
+            setOiMaxBarWidth(maxBarWidth);
+            setOiBarGap(gap);
+            setOiBarThickness(barThickness);
+            setOiCallColor(callColor);
+            setOiPutColor(putColor);
           }}
         />
       )}
@@ -4970,24 +5924,46 @@ export function AdvancedChart() {
       {isEditingRsi && (
         <RsiEditorModal
           initialColor={rsiColor}
-          initialOverbought={rsiOverbought}
+          initialLineWidth={rsiLineWidth}
+          initialLineStyle={rsiLineStyle}
+          initialSmaLineWidth={rsiSmaLineWidth}
+          initialSmaLineStyle={rsiSmaLineStyle}
+          initialOverbought1={rsiOverbought1}
           initialOverbought2={rsiOverbought2}
-          initialOversold={rsiOversold}
+          initialOversold1={rsiOversold1}
           initialOversold2={rsiOversold2}
           initialSmaColor={rsiSmaColor}
           initialOverboughtColor={rsiOverboughtColor}
           initialOversoldColor={rsiOversoldColor}
           onClose={() => setIsEditingRsi(false)}
-          onApply={(color, overbought, overbought2, oversold, oversold2, smaColor, overboughtColor, oversoldColor) => {
+          onApply={(color, lineWidth, lineStyle, smaLineWidth, smaLineStyle, overbought1, overbought2, oversold1, oversold2, smaColor, overboughtColor, oversoldColor) => {
             setRsiColor(color);
-            setRsiOverbought(overbought);
+            setRsiLineWidth(lineWidth);
+            setRsiLineStyle(lineStyle);
+            setRsiSmaLineWidth(smaLineWidth);
+            setRsiSmaLineStyle(smaLineStyle);
+            setRsiOverbought1(overbought1);
             setRsiOverbought2(overbought2);
-            setRsiOversold(oversold);
+            setRsiOversold1(oversold1);
             setRsiOversold2(oversold2);
             setRsiSmaColor(smaColor);
             setRsiOverboughtColor(overboughtColor);
             setRsiOversoldColor(oversoldColor);
             setIsEditingRsi(false);
+          }}
+          onChange={(color, lineWidth, lineStyle, smaLineWidth, smaLineStyle, overbought1, overbought2, oversold1, oversold2, smaColor, overboughtColor, oversoldColor) => {
+            setRsiColor(color);
+            setRsiLineWidth(lineWidth);
+            setRsiLineStyle(lineStyle);
+            setRsiSmaLineWidth(smaLineWidth);
+            setRsiSmaLineStyle(smaLineStyle);
+            setRsiOverbought1(overbought1);
+            setRsiOverbought2(overbought2);
+            setRsiOversold1(oversold1);
+            setRsiOversold2(oversold2);
+            setRsiSmaColor(smaColor);
+            setRsiOverboughtColor(overboughtColor);
+            setRsiOversoldColor(oversoldColor);
           }}
         />
       )}
@@ -4996,11 +5972,17 @@ export function AdvancedChart() {
         <HLevelsEditorModal
           initialLevels={hLevels}
           initialLineStyle={hLevelsStyle}
+          initialLineWidth={hLevelsWidth}
+          initialShowFiftyPercent={showFiftyPercentLevels}
+          initialFiftyPercentColor={fiftyPercentColor}
           spotPrice={chartData?.spot || (chartData?.candles && chartData.candles.length > 0 ? chartData.candles[chartData.candles.length - 1].close : undefined)}
           onClose={() => setIsEditingHLevels(false)}
-          onApply={(levels, style) => {
+          onApply={(levels, style, width, showFifty, fiftyColor) => {
             setHLevels(levels);
             setHLevelsStyle(style);
+            setHLevelsWidth(width);
+            setShowFiftyPercentLevels(showFifty);
+            setFiftyPercentColor(fiftyColor);
             setIsEditingHLevels(false);
           }}
         />

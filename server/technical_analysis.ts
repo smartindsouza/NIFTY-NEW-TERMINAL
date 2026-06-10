@@ -2,30 +2,34 @@ import { getKiteClient } from "./kite_service.js";
 import { aggregateCandles } from "./aggregator.js";
 
 function calculateRSI(closes: number[], period: number = 14) {
-  if (closes.length < period) return new Array(closes.length).fill(50);
+  if (closes.length <= period) return new Array(closes.length).fill(50);
 
-  let deltas = closes.slice(1).map((c, i) => c - closes[i]);
   const rsiArray = new Array(closes.length).fill(50);
-
-  let gain = 0,
-    loss = 0;
-  for (let i = 0; i < period; i++) {
-    if (deltas[i] > 0) gain += deltas[i];
-    else loss -= deltas[i];
+  let gain = 0, loss = 0;
+  
+  for (let i = 1; i <= period; i++) {
+    const d = closes[i] - closes[i - 1];
+    if (d > 0) gain += d;
+    else loss -= d;
   }
   gain /= period;
   loss /= period;
 
-  for (let i = period; i < closes.length; i++) {
-    const d = deltas[i - 1]; // deltas length is closes.length - 1
+  if (loss === 0) rsiArray[period] = 100;
+  else if (gain === 0) rsiArray[period] = 0;
+  else rsiArray[period] = 100 - (100 / (1 + (gain / loss)));
+
+  for (let i = period + 1; i < closes.length; i++) {
+    const d = closes[i] - closes[i - 1];
     const currentGain = d > 0 ? d : 0;
     const currentLoss = d < 0 ? -d : 0;
 
     gain = (gain * (period - 1) + currentGain) / period;
     loss = (loss * (period - 1) + currentLoss) / period;
 
-    let rs = loss === 0 ? 100 : gain / loss;
-    rsiArray[i] = loss === 0 ? 100 : 100 - 100 / (1 + rs);
+    if (loss === 0) rsiArray[i] = 100;
+    else if (gain === 0) rsiArray[i] = 0;
+    else rsiArray[i] = 100 - (100 / (1 + (gain / loss)));
   }
   return rsiArray;
 }
@@ -168,28 +172,28 @@ export async function getTechnicalAnalysis(
         let fromDate: any = new Date();
         
         let intervalName = "minute";
-        let daysToFetch = 5;
+        let daysToFetch = 15;
         let baseIntervalMin = 1;
 
         if (timeframeMin === 1) {
             intervalName = "minute";
-            daysToFetch = 2; // Kite limit for 1min is 60d, use 2
+            daysToFetch = 40; // Kite limit for 1min is 60d
             baseIntervalMin = 1;
         } else if (timeframeMin === 3) {
             intervalName = "3minute";
-            daysToFetch = 5;
+            daysToFetch = 60;
             baseIntervalMin = 3;
         } else if (timeframeMin === 5) {
             intervalName = "5minute";
-            daysToFetch = 10;
+            daysToFetch = 100; // More history = exact RSI
             baseIntervalMin = 5;
         } else if (timeframeMin === 10) {
             intervalName = "10minute";
-            daysToFetch = 15;
+            daysToFetch = 100;
             baseIntervalMin = 10;
         } else if (timeframeMin >= 15 && timeframeMin < 1440) {
             intervalName = "15minute";
-            daysToFetch = 60; // Get more days to build larger timeframes like 4h
+            daysToFetch = 150; // Get more days to build larger timeframes like 4h
             baseIntervalMin = 15;
         } else if (timeframeMin >= 1440) {
             intervalName = "day";
@@ -212,6 +216,18 @@ export async function getTechnicalAnalysis(
         if (rawHist && rawHist.length > 0) {
           const hist = aggregateCandles(rawHist, timeframeMin, baseIntervalMin);
           
+          const actualSpot = resolvedSpot;
+          const tolerance = Math.max(50, actualSpot * 0.05);
+          
+          if (
+            hist.length > 0 &&
+            Math.abs(hist[hist.length - 1].close - actualSpot) < tolerance
+          ) {
+            hist[hist.length - 1].close = actualSpot;
+            hist[hist.length - 1].high = Math.max(hist[hist.length - 1].high, actualSpot);
+            hist[hist.length - 1].low = Math.min(hist[hist.length - 1].low, actualSpot);
+          }
+
           const closes = hist.map((h: any) => h.close);
           const rsiValues = calculateRSI(closes, 14);
 
@@ -227,23 +243,6 @@ export async function getTechnicalAnalysis(
             rsi14: h.rsi14 === 0 ? 50 : h.rsi14,
             time: h.date instanceof Date ? h.date.toISOString() : new Date(h.date).toISOString(),
           }));
-
-          const actualSpot = resolvedSpot;
-          const tolerance = Math.max(50, actualSpot * 0.05);
-          if (
-            candles.length > 0 &&
-            Math.abs(candles[candles.length - 1].close - actualSpot) < tolerance
-          ) {
-            candles[candles.length - 1].close = actualSpot;
-            candles[candles.length - 1].high = Math.max(
-              candles[candles.length - 1].high,
-              actualSpot,
-            );
-            candles[candles.length - 1].low = Math.min(
-              candles[candles.length - 1].low,
-              actualSpot,
-            );
-          }
 
           const latestRsi = candles[candles.length - 1]?.rsi14 || 50;
           let rsiZoneShift = null;
@@ -364,38 +363,56 @@ export async function getTechnicalAnalysis(
       ? patterns[Math.floor(Math.random() * patterns.length)]
       : "No major pattern detected";
 
-  const result = {
-    isMock: true,
-    rsi,
-    rsiZoneShift,
-    adx,
-    plusDi,
-    minusDi,
-    adxTrend,
-    currentPattern,
-    timeframe: timeframeMin,
-    instrument_token,
-    spot,
-    baseSpot: spot,
-    vwap: spot - (Math.random() * 20 - 10),
-    ema20: spot - (Math.random() * 40 - 20),
-    candles: Array.from({ length: 500 }).map((_, i) => {
-      const base = spot - 50 + Math.sin(i / 5) * 50;
-      const open = base + (Math.random() * 20 - 10);
-      const close = base + (Math.random() * 20 - 10);
+    const candlesData: any[] = [];
+    let lastClose = spot - 50 + Math.sin(0) * 50;
+    
+    for (let i = 0; i < 500; i++) {
+      const open = lastClose; // No price gaps!
+      const close = open + (Math.random() * 20 - 10);
       const high = Math.max(open, close) + Math.random() * 15;
       const low = Math.min(open, close) - Math.random() * 15;
-      const rsi14 = 50 + Math.sin((i + 10) / 4) * 30 + (Math.random() * 10 - 5);
       const volume = Math.floor(Math.abs(close - open) * 1000) + 100;
       
-      // Ensure the exact recent time makes sense for our candle steps:
       const roundedNow = Math.floor(now / (timeframeMin * 60000)) * (timeframeMin * 60000);
       const candleTime = new Date(
         roundedNow - (499 - i) * timeframeMin * 60000,
       ).toISOString();
-      return { open, high, low, close, rsi14, volume, time: candleTime };
-    }),
-  };
+      
+      candlesData.push({ open, high, low, close, volume, time: candleTime });
+      lastClose = close; // Persist for next candle
+    }
+
+    // Force the last candle's close to be exactly the current spot
+    if (candlesData.length > 0) {
+      const last = candlesData[candlesData.length - 1];
+      last.close = spot;
+      last.high = Math.max(last.high, spot);
+      last.low = Math.min(last.low, spot);
+    }
+
+    const closes = candlesData.map(c => c.close);
+    const mockRsiValues = calculateRSI(closes, 14);
+    candlesData.forEach((c, i) => {
+      c.rsi14 = mockRsiValues[i] === 0 ? 50 : mockRsiValues[i];
+    });
+
+    const result = {
+      isMock: true,
+      rsi,
+      rsiZoneShift,
+      adx,
+      plusDi,
+      minusDi,
+      adxTrend,
+      currentPattern,
+      timeframe: timeframeMin,
+      instrument_token,
+      spot,
+      baseSpot: spot,
+      vwap: spot - (Math.random() * 20 - 10),
+      ema20: spot - (Math.random() * 40 - 20),
+      candles: candlesData,
+    };
 
   cacheMap.set(cacheKey, { data: result, lastUpdate: now });
 

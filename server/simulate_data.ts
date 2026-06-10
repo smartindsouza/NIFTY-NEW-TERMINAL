@@ -142,6 +142,7 @@ export function generateSimulatedChain(spot: number = 22000, expiryDays: number 
   });
 
   return { 
+    isMock: true,
     spot, 
     strikes, 
     ceData, 

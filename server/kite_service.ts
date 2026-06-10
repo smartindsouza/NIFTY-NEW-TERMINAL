@@ -2,9 +2,18 @@ import { KiteConnect } from 'kiteconnect';
 import Database from 'better-sqlite3';
 import { generateSimulatedChain } from './simulate_data';
 
-// Must match the path used in server.ts so both read/write the same session DB.
 const KITE_DATA_DIR = process.env.KITE_DATA_DIR || '.';
 const db = new Database(`${KITE_DATA_DIR}/kite_session.db`);
+db.pragma('journal_mode = WAL');
+
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS daily_oi (
+    instrument_token INTEGER,
+    date TEXT,
+    oi REAL,
+    PRIMARY KEY (instrument_token, date)
+  )
+`).run();
 
 export function getKiteClient() {
   const apiKey = process.env.KITE_API_KEY;
@@ -38,7 +47,7 @@ export async function generateSession(requestToken: string) {
   const apiSecret = process.env.KITE_API_SECRET;
   
   if (!apiKey || !apiSecret) {
-    throw new Error('Kite API keys not configured');
+    throw new Error('Zerodha Kite API keys are not configured. Please define KITE_API_KEY and KITE_API_SECRET in your settings (such as the Secrets menu).');
   }
 
   const kc = new KiteConnect({ api_key: apiKey });
@@ -50,10 +59,11 @@ export async function generateSession(requestToken: string) {
       db.prepare('INSERT INTO kite_tokens (access_token, token_date) VALUES (?, ?)').run(response.access_token, today);
       return response.access_token;
     }
-  } catch (e) {
+    throw new Error("No access token was returned by Zerodha Kite Connect.");
+  } catch (e: any) {
     console.error("Error generating kite session:", e);
+    throw new Error(e.message || "Failed to generate Kite session with Zerodha API.");
   }
-  return null;
 }
 
 let allInstrumentsCache: any[] | null = null;
@@ -233,6 +243,39 @@ export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot
         optionQuotes = { ...optionQuotes, ...chunkQuotes };
     }
 
+    const today = new Date().toISOString().split('T')[0];
+    const prevOiMap: Record<number, number> = {};
+    try {
+        const tokens = Object.values(optionQuotes).map((q: any) => q.instrument_token);
+        if (tokens.length > 0) {
+            // Get previous day OI
+            const prevRows = db.prepare(`
+                SELECT instrument_token, oi FROM daily_oi 
+                WHERE instrument_token IN (${tokens.join(',')}) AND date < ?
+                ORDER BY date DESC
+            `).all(today) as any[];
+            
+            const seen = new Set();
+            for (let r of prevRows) {
+               if (!seen.has(r.instrument_token)) {
+                  prevOiMap[r.instrument_token] = r.oi;
+                  seen.add(r.instrument_token);
+               }
+            }
+
+            // Save currently fetched OI
+            const insertStmt = db.prepare('INSERT INTO daily_oi (instrument_token, date, oi) VALUES (?, ?, ?) ON CONFLICT(instrument_token, date) DO UPDATE SET oi=excluded.oi');
+            const insertMany = db.transaction((items: any[]) => {
+                for (const item of items) {
+                    if (item.instrument_token && item.oi) {
+                        insertStmt.run(item.instrument_token, today, item.oi);
+                    }
+                }
+            });
+            insertMany(Object.values(optionQuotes));
+        }
+    } catch(e) { console.error("OI tracking error", e); }
+
     // Process and format data
     const strikes = Array.from(new Set(relevantOptions.map((i: any) => Math.round(Number(i.strike))))).sort((a: any, b: any) => a - b);
     
@@ -245,12 +288,14 @@ export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot
 
         if (ceInst && optionQuotes[`NFO:${ceInst.tradingsymbol}`]) {
             const q = optionQuotes[`NFO:${ceInst.tradingsymbol}`];
+            const prevOi = prevOiMap[q.instrument_token] || q.oi_day_low || q.oi;
             ceData[strike] = {
                 strikePrice: strike,
                 type: 'CE',
                 ltp: q.last_price,
+                chgLtp: q.net_change !== undefined ? q.net_change : (q.last_price - (q.ohlc?.close || q.last_price)),
                 oi: q.oi / 100000, // in lakhs
-                chgOi: (q.oi - (q.oi_day_low || q.oi)) / 100000, // approx chg
+                chgOi: (q.oi - prevOi) / 100000, 
                 volume: q.volume,
                 iv: 15.0, // require black_scholes for real IV
                 tradingsymbol: ceInst.tradingsymbol,
@@ -266,12 +311,14 @@ export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot
         }
         if (peInst && optionQuotes[`NFO:${peInst.tradingsymbol}`]) {
             const q = optionQuotes[`NFO:${peInst.tradingsymbol}`];
+            const prevOi = prevOiMap[q.instrument_token] || q.oi_day_low || q.oi;
             peData[strike] = {
                 strikePrice: strike,
                 type: 'PE',
                 ltp: q.last_price,
+                chgLtp: q.net_change !== undefined ? q.net_change : (q.last_price - (q.ohlc?.close || q.last_price)),
                 oi: q.oi / 100000,
-                chgOi: (q.oi - (q.oi_day_low || q.oi)) / 100000,
+                chgOi: (q.oi - prevOi) / 100000,
                 volume: q.volume,
                 iv: 15.0,
                 tradingsymbol: peInst.tradingsymbol,
