@@ -46,19 +46,6 @@ export default function TerminalControl() {
   const [serverIp, setServerIp] = useState<string>("");
   const [loadingIp, setLoadingIp] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
-  const [proxyStatus, setProxyStatus] = useState<{ alive: boolean; egressIp: string | null; expectedIp: string | null } | null>(null);
-
-  const fetchProxyStatus = async () => {
-    try {
-      const res = await fetch("/api/diagnostics/proxy");
-      if (res.ok) {
-        const data = await res.json();
-        setProxyStatus(data);
-      }
-    } catch (e) {
-      console.error("Failed to fetch proxy status:", e);
-    }
-  };
 
   const fetchServerIp = async () => {
     setLoadingIp(true);
@@ -97,9 +84,6 @@ export default function TerminalControl() {
 
   useEffect(() => {
     fetchServerIp();
-    fetchProxyStatus();
-    const proxyInterval = setInterval(fetchProxyStatus, 30000);
-    return () => clearInterval(proxyInterval);
   }, []);
 
   // Track online/offline status & custom installation prompts
@@ -259,52 +243,10 @@ export default function TerminalControl() {
                   </button>
                 </div>
 
-                <div className="mt-2 pt-2 border-t border-muted-foreground/10 flex flex-col gap-1.5 text-xs">
-                  <div className="flex justify-between items-center">
-                    <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Outbound VPS Proxy</span>
-                    {proxyStatus && (
-                      <span className={cn(
-                        "text-[10px] uppercase font-mono font-bold px-1.5 py-0.5 rounded flex items-center gap-1",
-                        proxyStatus.alive ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
-                      )}>
-                        <span className={cn("w-1.5 h-1.5 rounded-full", proxyStatus.alive ? "bg-emerald-400 animate-pulse" : "bg-rose-400")} />
-                        {proxyStatus.alive ? "LIVE" : "DOWN"}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex justify-between items-center bg-background/30 p-2 rounded border border-border/5 text-[11px] font-mono">
-                    <span className="text-muted-foreground">Egress / Exit IP:</span>
-                    <span className="text-foreground/90 font-bold truncate">
-                      {proxyStatus ? (proxyStatus.egressIp || "Unknown / Timeout") : "Querying..."}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center bg-background/30 p-2 rounded border border-border/5 text-[11px] font-mono">
-                    <span className="text-muted-foreground">Expected Proxy Host:</span>
-                    <span className="text-foreground/80 font-semibold truncate max-w-[150px]" title={proxyStatus?.expectedIp || ""}>
-                      {proxyStatus ? (proxyStatus.expectedIp || "None configured") : "Querying..."}
-                    </span>
-                  </div>
+                <div className="mt-2 pt-2 border-t border-muted-foreground/10 text-[11px] text-muted-foreground leading-relaxed">
+                  This is the IP your trades exit from. Whitelist it in your Kite developer app under <span className="text-foreground/80 font-semibold">Profile → IP Whitelist</span>.
                 </div>
                 
-                <div className="mt-3 p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[11px] text-amber-500 leading-normal space-y-1.5">
-                  <p className="font-semibold flex items-center gap-1">
-                    <Info className="w-3.5 h-3.5 shrink-0" />
-                    Cloud Run Dynamic Outbound IP Warning
-                  </p>
-                  <p className="text-muted-foreground text-[10px]">
-                    This application is currently hosted on <strong>Google Cloud Run</strong>. Its outbound requests emerge from a dynamic pool of shared GCP IPs. 
-                  </p>
-                  <p className="text-muted-foreground text-[10px]">
-                    Even if you whitelist the current IP above, subsequent requests in a few minutes may exit from a different IP and fail with <code className="bg-amber-500/5 px-1 py-0.5 rounded text-amber-400">PermissionException</code>.
-                  </p>
-                  <div className="pt-1.5 border-t border-amber-500/10 space-y-1 text-[10px]">
-                    <span className="font-semibold text-amber-500 block">How to resolve:</span>
-                    <ul className="list-disc pl-3 text-muted-foreground space-y-1">
-                      <li><strong>Local Instance (100% stable)</strong>: Run of this app on your local machine (<code className="bg-muted px-1.5 py-0.5 rounded text-primary">npm run dev</code>) and whitelist your residential broadband or server IP.</li>
-                      <li><strong>GCP Static NAT</strong>: Setup a Serverless VPC Access Connector + Cloud NAT with reserved static external IP in your GCP project and whitelist that IP in Kite.</li>
-                    </ul>
-                  </div>
-                </div>
               </div>
 
               <a 
