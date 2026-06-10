@@ -83,7 +83,7 @@ export function Header() {
       </Link>
 
       {/* Navigation tabs with vertical scrollability & exact-fitting contents */}
-      <div className="overflow-y-auto overflow-x-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden px-1 flex-1 flex justify-center w-full">
+      <div className="overflow-visible px-1 flex-1 flex justify-center w-full">
         <nav className="flex flex-col items-center gap-1.5 w-full">
           {links.map((link) => {
             const active = location === link.href;
@@ -125,7 +125,7 @@ export function Header() {
         {/* Kite Connect Status */}
         <Link href="/kite-login" className={cn(
           "flex items-center justify-center w-10 h-10 rounded-full transition-all duration-300 relative group border border-transparent hover:border-0",
-          authStatus?.status === 'connected' ? 'text-primary bg-primary/5 hover:bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-accent hover:text-accent-foreground',
+          authStatus?.status === 'connected' ? 'text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20' : 'text-rose-500 bg-rose-500/10 hover:bg-rose-500/20',
           location === '/kite-login' && 'bg-white/5 text-foreground'
         )}>
           <span className="absolute left-full ml-4 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-popover border border-0 rounded-lg text-[10px] font-bold tracking-wider uppercase font-mono whitespace-nowrap opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300 pointer-events-none z-[100] text-popover-foreground ">
@@ -135,11 +135,14 @@ export function Header() {
         </Link>
 
         {/* Live signals ping indicator */}
-        <div className="flex items-center justify-center w-10 h-10 rounded-full border border-0 bg-secondary/50 dark:bg-black/25 relative group cursor-pointer">
+        <div className={cn(
+          "flex items-center justify-center w-10 h-10 rounded-full border border-transparent transition-all duration-300 relative group cursor-pointer",
+          wsStatus === 'Connected' ? 'text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20' : 'text-rose-500 bg-rose-500/10 hover:bg-rose-500/20'
+        )}>
           <span className="absolute left-full ml-4 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-popover border border-0 rounded-lg text-[10px] font-bold tracking-wider uppercase font-mono whitespace-nowrap opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300 pointer-events-none z-[100] text-popover-foreground ">
             {wsStatus === 'Connected' ? 'Live Feeds: ACTIVE' : 'Live Feeds: DISCONNECTED'}
           </span>
-          <span className={cn("relative inline-flex rounded-full h-2 w-2 transition-colors duration-500", wsStatus === 'Connected' ? 'bg-primary' : 'bg-destructive')}></span>
+          <span className={cn("relative inline-flex rounded-full h-2 w-2 transition-colors duration-500", wsStatus === 'Connected' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500')}></span>
         </div>
       </div>
     </header>

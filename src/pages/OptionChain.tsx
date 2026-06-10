@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import { Card } from '@/components/ui/card';
@@ -8,9 +8,26 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Activity, TrendingDown, TrendingUp, AlertCircle, ArrowRight, Layers, Target } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { addWsMessageListener } from '../hooks/useWebSocket';
 
 export function OptionChain() {
   const [selectedExpiry, setSelectedExpiry] = useState<string>('latest');
+  const [liveTicks, setLiveTicks] = useState<Record<number, { ltp: number; oi?: number; volume?: number }>>({});
+
+  useEffect(() => {
+    const unsub = addWsMessageListener((msg) => {
+      if (msg && msg.type === 'optionTick') {
+        const { token, ltp, oi, volume } = msg;
+        setLiveTicks((prev) => ({
+          ...prev,
+          [token]: { ltp, oi, volume }
+        }));
+      }
+    });
+    return () => {
+      unsub();
+    };
+  }, []);
 
   const { data: chain, isLoading: isChainLoading } = useQuery({
     queryKey: ['option-chain', selectedExpiry],
@@ -348,10 +365,29 @@ export function OptionChain() {
             </TableHeader>
             <TableBody className="font-mono">
               {(() => {
-                const maxTableOi = Math.max(1, ...strikes.map((s: number) => Math.max(ceData[s]?.oi || 0, peData[s]?.oi || 0)));
+                const maxTableOi = Math.max(1, ...strikes.map((s: number) => {
+                  const ce = ceData[s];
+                  const pe = peData[s];
+                  const ceLive = ce?.instrument_token ? liveTicks[ce.instrument_token] : null;
+                  const peLive = pe?.instrument_token ? liveTicks[pe.instrument_token] : null;
+                  const ceOiVal = ceLive?.oi !== undefined ? (ceLive.oi / 100000) : (ce?.oi || 0);
+                  const peOiVal = peLive?.oi !== undefined ? (peLive.oi / 100000) : (pe?.oi || 0);
+                  return Math.max(ceOiVal, peOiVal);
+                }));
+
                 return strikes.map((strike: number) => {
                   const ce = ceData[strike];
                   const pe = peData[strike];
+                  
+                  const ceLive = ce?.instrument_token ? liveTicks[ce.instrument_token] : null;
+                  const peLive = pe?.instrument_token ? liveTicks[pe.instrument_token] : null;
+
+                  const ceLtp = ceLive?.ltp !== undefined ? ceLive.ltp : (ce?.ltp || 0);
+                  const peLtp = peLive?.ltp !== undefined ? peLive.ltp : (pe?.ltp || 0);
+
+                  const ceOiValue = ceLive?.oi !== undefined ? (ceLive.oi / 100000) : (ce?.oi || 0);
+                  const peOiValue = peLive?.oi !== undefined ? (peLive.oi / 100000) : (pe?.oi || 0);
+
                   const isAtm = Math.abs(strike - spot) < 25;
                   const isItmCE = strike < spot;
                   const isItmPE = strike > spot;
@@ -363,8 +399,8 @@ export function OptionChain() {
                     return 'text-muted-foreground';
                   };
 
-                  const cePct = ((ce?.oi || 0) / maxTableOi) * 100;
-                  const pePct = ((pe?.oi || 0) / maxTableOi) * 100;
+                  const cePct = (ceOiValue / maxTableOi) * 100;
+                  const pePct = (peOiValue / maxTableOi) * 100;
                   
                   const getChgPct = (oiP?: number, chgOiP?: number) => {
                     const oi = oiP || 0;
@@ -384,7 +420,7 @@ export function OptionChain() {
                     )}>
                       {/* Calls */}
                       <TableCell className={cn("text-center text-xs p-2", getSentimentChgOiClass(ce?.chgOi))}>{Math.round(ceChgPct)}%</TableCell>
-                      <TableCell className={cn("text-center text-xs p-2", isItmCE ? "text-foreground" : "text-muted-foreground")}>{(ce?.oi || 0).toFixed(1)}</TableCell>
+                      <TableCell className={cn("text-center text-xs p-2", isItmCE ? "text-foreground" : "text-muted-foreground")}>{ceOiValue.toFixed(1)}</TableCell>
                       <TableCell className={cn("p-0 min-w-[60px] relative")}>
                         {isItmCE && <div className="absolute inset-0 bg-red-500/[0.03] pointer-events-none"></div>}
                         <div className="h-full w-full flex justify-end items-center px-1">
@@ -392,7 +428,7 @@ export function OptionChain() {
                         </div>
                       </TableCell>
                       <TableCell className={cn("text-center font-medium text-[11px] p-2 border-r border-0", isItmCE ? "bg-red-500/[0.04] text-foreground" : "text-muted-foreground")}>
-                        {(ce?.ltp || 0).toFixed(2)}
+                        {ceLtp.toFixed(2)}
                       </TableCell>
                       
                       {/* Strike */}
@@ -407,7 +443,7 @@ export function OptionChain() {
                       
                       {/* Puts */}
                       <TableCell className={cn("text-center font-medium text-[11px] p-2 border-l border-0", isItmPE ? "bg-green-500/[0.04] text-foreground" : "text-muted-foreground")}>
-                        {(pe?.ltp || 0).toFixed(2)}
+                        {peLtp.toFixed(2)}
                       </TableCell>
                       <TableCell className={cn("p-0 min-w-[60px] relative")}>
                         {isItmPE && <div className="absolute inset-0 bg-green-500/[0.03] pointer-events-none"></div>}
@@ -415,7 +451,7 @@ export function OptionChain() {
                           <div className="h-[20px] bg-green-500/20 rounded-r-[2px]" style={{ width: `${pePct}%` }}></div>
                         </div>
                       </TableCell>
-                      <TableCell className={cn("text-center text-xs p-2", isItmPE ? "text-foreground" : "text-muted-foreground")}>{(pe?.oi || 0).toFixed(1)}</TableCell>
+                      <TableCell className={cn("text-center text-xs p-2", isItmPE ? "text-foreground" : "text-muted-foreground")}>{peOiValue.toFixed(1)}</TableCell>
                       <TableCell className={cn("text-center text-xs p-2", getSentimentChgOiClass(pe?.chgOi))}>{Math.round(peChgPct)}%</TableCell>
                     </TableRow>
                   );

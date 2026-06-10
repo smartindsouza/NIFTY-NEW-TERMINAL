@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import axios from 'axios';
 import { createServer as createViteServer } from "vite";
 import { WebSocketServer } from 'ws';
 import * as http from 'http';
@@ -15,6 +16,7 @@ import { evaluateQuantSignals } from './server/quant_engine';
 import { generateGamePlan } from './server/game_plan_service';
 
 import { getLiveNews, rateLimitMiddleware, currentAIStatus } from './server/news_service';
+import { startTicker, setSubscriptions, isTickerConnected } from './server/ticker_service';
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 
@@ -30,6 +32,14 @@ db.prepare(`
     token_date TEXT
   )
 `).run();
+
+function getTodayAccessToken(): string | null {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const row = db.prepare('SELECT access_token FROM kite_tokens WHERE token_date = ? ORDER BY id DESC LIMIT 1').get(today) as any;
+    return row?.access_token || null;
+  } catch { return null; }
+}
 
 async function startServer() {
   const app = express();
@@ -65,6 +75,7 @@ async function startServer() {
   }
 
   setInterval(() => {
+    if (isTickerConnected()) return;
     if (!isNSEMarketOpen()) return;
     wss.clients.forEach((client) => {
       if (client.readyState === 1) {
@@ -97,6 +108,13 @@ async function refreshData() {
   try {
     latestChainData = await getLiveOptionChain('NSE:NIFTY 50');
     if (latestChainData) {
+      const tokens: number[] = [256265];
+      for (const k of (latestChainData.strikes || [])) {
+        if (latestChainData.ceData?.[k]?.instrument_token) tokens.push(latestChainData.ceData[k].instrument_token);
+        if (latestChainData.peData?.[k]?.instrument_token) tokens.push(latestChainData.peData[k].instrument_token);
+      }
+      setSubscriptions(tokens);
+
       if (latestChainData.isMock) {
         // Random walk for mock data so candlesticks aren't flat
         latestSpot = latestSpot + (Math.random() * 6 - 3);
@@ -111,8 +129,6 @@ async function refreshData() {
   }
 }
 
-refreshData();
-
   // Broadcast function
   const broadcast = (data: any) => {
     wss.clients.forEach((client) => {
@@ -121,6 +137,25 @@ refreshData();
       }
     });
   };
+
+function connectTicker() {
+  const apiKey = process.env.KITE_API_KEY;
+  const token = getTodayAccessToken();
+  if (!apiKey || !token) return;
+  startTicker(apiKey, token, (tick) => {
+    if (tick.token === 256265) {
+      latestSpot = tick.ltp;
+      const ts = Math.floor(Date.now() / 1000);
+      broadcast({ type: 'tick', symbol: 'NSE:NIFTY 50', price: tick.ltp, timestamp: ts,
+        candle: { time: ts, open: tick.ltp, high: tick.ltp, low: tick.ltp, close: tick.ltp } });
+    } else {
+      broadcast({ type: 'optionTick', token: tick.token, ltp: tick.ltp, oi: tick.oi, volume: tick.volume });
+    }
+  });
+}
+
+refreshData();
+connectTicker();
 
   // Schedule updates every 30 seconds
   cron.schedule('*/10 * * * * *', async () => {
@@ -173,6 +208,19 @@ refreshData();
       error429Count: kiteDiagnostics.error429Count,
       endpoints: Object.fromEntries(kiteDiagnostics.endpoints),
     });
+  });
+
+  app.get('/api/diagnostics/proxy', async (req, res) => {
+    const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '';
+    let expectedIp = null;
+    try { expectedIp = new URL(proxyUrl).hostname; } catch {}
+    try {
+      const r = await axios.get('https://api.ipify.org', { timeout: 4000 });
+      const egressIp = String(r.data || '').trim();
+      res.json({ alive: !!expectedIp && egressIp === expectedIp, egressIp, expectedIp });
+    } catch (e: any) {
+      res.json({ alive: false, egressIp: null, expectedIp, error: String((e && e.message) || e) });
+    }
   });
 
   app.get('/api/instruments/search', async (req, res) => {
@@ -542,6 +590,7 @@ refreshData();
       if (typeof request_token === 'string') {
         const token = await generateSession(request_token);
         if (token) {
+          connectTicker();
           return res.redirect('/kite-login?status=success');
         }
       }
@@ -561,6 +610,7 @@ refreshData();
       
       const token = await generateSession(request_token);
       if (token) {
+        connectTicker();
         return res.json({ success: true });
       } else {
         return res.status(400).json({ success: false, error: "Kite returned an empty session. Please verify your API key and secret are correct and valid." });

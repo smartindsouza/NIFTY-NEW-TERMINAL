@@ -11,6 +11,7 @@ import { notificationService } from "../lib/notificationService";
 import { performanceTracker } from "../lib/performanceTracker";
 import { toast } from "sonner";
 import { useProfiler } from "../hooks/useProfiler";
+import { cn } from "@/lib/utils";
 
 function getContrastColor(hexColor: string) {
   const hex = (hexColor || "#a855f7").replace(/^\s*#|\s*$/g, '');
@@ -43,6 +44,19 @@ export default function TerminalControl() {
   const [serverIp, setServerIp] = useState<string>("");
   const [loadingIp, setLoadingIp] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
+  const [proxyStatus, setProxyStatus] = useState<{ alive: boolean; egressIp: string | null; expectedIp: string | null } | null>(null);
+
+  const fetchProxyStatus = async () => {
+    try {
+      const res = await fetch("/api/diagnostics/proxy");
+      if (res.ok) {
+        const data = await res.json();
+        setProxyStatus(data);
+      }
+    } catch (e) {
+      console.error("Failed to fetch proxy status:", e);
+    }
+  };
 
   const fetchServerIp = async () => {
     setLoadingIp(true);
@@ -81,6 +95,9 @@ export default function TerminalControl() {
 
   useEffect(() => {
     fetchServerIp();
+    fetchProxyStatus();
+    const proxyInterval = setInterval(fetchProxyStatus, 30000);
+    return () => clearInterval(proxyInterval);
   }, []);
 
   // Track online/offline status & custom installation prompts
@@ -168,7 +185,7 @@ export default function TerminalControl() {
         </div>
         
         {/* Connection status pills */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {onlineStatus ? (
             <Badge className="bg-primary/10 text-primary border border-primary/20 text-xs font-mono py-1 px-2.5">
               ● ONLINE TERMINAL NODE
@@ -182,6 +199,26 @@ export default function TerminalControl() {
           {swRegistered && (
             <Badge className="bg-primary/10 text-primary border border-primary/20 text-xs font-mono py-1 px-2.5">
               Service Worker: ACTIVE
+            </Badge>
+          )}
+
+          {proxyStatus && (
+            <Badge 
+              className={cn(
+                "border text-xs font-mono py-1 px-2.5 flex items-center gap-1.5 cursor-help transition-all duration-300",
+                proxyStatus.alive 
+                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
+                  : "bg-red-500/10 text-red-400 border-red-500/20 animate-pulse"
+              )}
+              title={proxyStatus.expectedIp ? `Expected Proxy IP: ${proxyStatus.expectedIp}` : undefined}
+            >
+              <span className={cn("inline-block w-1.5 h-1.5 rounded-full", proxyStatus.alive ? "bg-emerald-400 animate-pulse" : "bg-red-400")} />
+              <span>Proxy: {proxyStatus.alive ? "Live" : "Down"}</span>
+              {proxyStatus.egressIp && (
+                <span className="text-[10px] opacity-75 font-normal ml-0.5">
+                  egress {proxyStatus.egressIp}
+                </span>
+              )}
             </Badge>
           )}
         </div>
@@ -238,6 +275,33 @@ export default function TerminalControl() {
                       <Copy className="w-4 h-4" />
                     )}
                   </button>
+                </div>
+
+                <div className="mt-2 pt-2 border-t border-muted-foreground/10 flex flex-col gap-1.5 text-xs">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Outbound VPS Proxy</span>
+                    {proxyStatus && (
+                      <span className={cn(
+                        "text-[10px] uppercase font-mono font-bold px-1.5 py-0.5 rounded flex items-center gap-1",
+                        proxyStatus.alive ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
+                      )}>
+                        <span className={cn("w-1.5 h-1.5 rounded-full", proxyStatus.alive ? "bg-emerald-400 animate-pulse" : "bg-rose-400")} />
+                        {proxyStatus.alive ? "LIVE" : "DOWN"}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex justify-between items-center bg-background/30 p-2 rounded border border-border/5 text-[11px] font-mono">
+                    <span className="text-muted-foreground">Egress / Exit IP:</span>
+                    <span className="text-foreground/90 font-bold truncate">
+                      {proxyStatus ? (proxyStatus.egressIp || "Unknown / Timeout") : "Querying..."}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center bg-background/30 p-2 rounded border border-border/5 text-[11px] font-mono">
+                    <span className="text-muted-foreground">Expected Proxy Host:</span>
+                    <span className="text-foreground/80 font-semibold truncate max-w-[150px]" title={proxyStatus?.expectedIp || ""}>
+                      {proxyStatus ? (proxyStatus.expectedIp || "None configured") : "Querying..."}
+                    </span>
+                  </div>
                 </div>
                 
                 <div className="mt-3 p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[11px] text-amber-500 leading-normal space-y-1.5">
