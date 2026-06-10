@@ -1,36 +1,17 @@
 import { useEffect, useState } from "react";
-import { Activity, ShieldAlert, Cpu, HardDrive, RefreshCw, Layers, Globe } from "lucide-react";
+import { Activity, ShieldAlert, Cpu, HardDrive, RefreshCw, Layers } from "lucide-react";
 import { performanceTracker } from "../lib/performanceTracker";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
 
 export function DiagnosticsPanel() {
   const [metrics, setMetrics] = useState(performanceTracker.getMetrics());
-  const [proxyStatus, setProxyStatus] = useState<{ alive: boolean; egressIp: string | null; expectedIp: string | null } | null>(null);
 
   useEffect(() => {
     const handle = setInterval(() => {
       setMetrics(performanceTracker.getMetrics());
     }, 1000);
     return () => clearInterval(handle);
-  }, []);
-
-  useEffect(() => {
-    const fetchProxy = async () => {
-      try {
-        const res = await fetch("/api/diagnostics/proxy");
-        if (res.ok) {
-          const data = await res.json();
-          setProxyStatus(data);
-        }
-      } catch (e) {
-        console.error("Failed to fetch proxy in panel:", e);
-      }
-    };
-    fetchProxy();
-    const interval = setInterval(fetchProxy, 30000);
-    return () => clearInterval(interval);
   }, []);
 
   return (
@@ -82,46 +63,6 @@ export function DiagnosticsPanel() {
             <span className="text-xs font-mono font-bold text-indigo-400 truncate block mt-1" title={metrics.wsSubscriptions.join(", ")}>
               {metrics.wsSubscriptions.join(", ") || "None"}
             </span>
-          </div>
-        </div>
-
-        {/* Outbound Proxy Status section */}
-        <div className={cn(
-          "border rounded-xl p-3 flex flex-col gap-2 transition-all duration-300",
-          proxyStatus?.alive 
-            ? "bg-emerald-500/[0.02] border-emerald-500/10" 
-            : "bg-rose-500/[0.02] border-rose-500/10 animate-pulse"
-        )}>
-          <div className="flex justify-between items-center">
-            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
-              <Globe className={cn("w-3.5 h-3.5", proxyStatus?.alive ? "text-emerald-400" : "text-rose-400")} /> Outbound Proxy Status
-            </span>
-            {proxyStatus && (
-              <Badge 
-                className={cn(
-                  "text-[10px] font-mono py-0.5 px-1.5 border leading-none",
-                  proxyStatus.alive 
-                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
-                    : "bg-rose-500/10 text-rose-400 border-rose-500/20"
-                )}
-              >
-                ● {proxyStatus.alive ? "LIVE" : "DOWN"}
-              </Badge>
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-2 text-[10px] font-mono mt-1">
-            <div className="bg-card p-2 rounded border border-0">
-              <span className="text-muted-foreground block text-[9px] uppercase">Egress/Exit IP</span>
-              <span className={cn("font-bold block mt-0.5 truncate", proxyStatus?.alive ? "text-cyan-400" : "text-rose-400")}>
-                {proxyStatus ? (proxyStatus.egressIp || "Unknown") : "Querying..."}
-              </span>
-            </div>
-            <div className="bg-card p-2 rounded border border-0">
-              <span className="text-muted-foreground block text-[9px] uppercase">Expected Hub</span>
-              <span className="text-foreground/80 font-semibold block mt-0.5 truncate" title={proxyStatus?.expectedIp || ""}>
-                {proxyStatus ? (proxyStatus.expectedIp || "None") : "Querying..."}
-              </span>
-            </div>
           </div>
         </div>
 
