@@ -15,9 +15,15 @@ import { evaluateQuantSignals } from './server/quant_engine';
 
 import { getLiveNews, rateLimitMiddleware, currentAIStatus } from './server/news_service';
 
-const PORT = 3000;
+// Railway (and most hosts) inject the port to listen on via the PORT env var.
+// Fall back to 3000 for local development.
+const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 
-const db = new Database('kite_session.db');
+// Store the session DB in a configurable directory so it can live on a
+// persistent volume in production (KITE_DATA_DIR=/data). Defaults to the
+// current folder for local dev / AI Studio.
+const KITE_DATA_DIR = process.env.KITE_DATA_DIR || '.';
+const db = new Database(`${KITE_DATA_DIR}/kite_session.db`);
 db.pragma('journal_mode = WAL');
 
 // Simple Token Table
