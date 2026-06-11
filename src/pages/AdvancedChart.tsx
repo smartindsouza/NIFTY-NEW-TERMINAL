@@ -1192,6 +1192,34 @@ const getNextMarketAlignedClose = (unixSeconds: number, timeframeMinutes: number
   return getMarketAlignedCandleStart(unixSeconds, timeframeMinutes) + timeframeMinutes * 60;
 };
 
+// Client-side RSI (Wilder's smoothing / RMA) — mirrors the server's calculateRSI exactly,
+// so the live forming-candle RSI matches the server-computed values (and Zerodha's method).
+const computeRsiArray = (closes: number[], period: number = 14): number[] => {
+  const rsiArray = new Array(closes.length).fill(50);
+  if (closes.length <= period) return rsiArray;
+  let gain = 0, loss = 0;
+  for (let i = 1; i <= period; i++) {
+    const d = closes[i] - closes[i - 1];
+    if (d > 0) gain += d; else loss -= d;
+  }
+  gain /= period; loss /= period;
+  if (loss === 0) rsiArray[period] = 100;
+  else if (gain === 0) rsiArray[period] = 0;
+  else rsiArray[period] = 100 - (100 / (1 + (gain / loss)));
+  for (let i = period + 1; i < closes.length; i++) {
+    const d = closes[i] - closes[i - 1];
+    const currentGain = d > 0 ? d : 0;
+    const currentLoss = d < 0 ? -d : 0;
+    gain = (gain * (period - 1) + currentGain) / period;
+    loss = (loss * (period - 1) + currentLoss) / period;
+    if (loss === 0) rsiArray[i] = 100;
+    else if (gain === 0) rsiArray[i] = 0;
+    else rsiArray[i] = 100 - (100 / (1 + (gain / loss)));
+  }
+  return rsiArray;
+};
+
+
 function BBEditorModal({
   onClose,
   initialPeriod,
@@ -2500,6 +2528,8 @@ export function AdvancedChart() {
   const mainChartRef = useRef<IChartApi | null>(null);
   const mainSeriesRef = useRef<any>(null);
   const rsiSeriesRef = useRef<any>(null);
+  const rsiSmaSeriesRef = useRef<any>(null);
+  const rsiClosesRef = useRef<number[]>([]);
   const volumeSeriesRef = useRef<any>(null);
   const lastCandleTimeRef = useRef<number | null>(null);
   const lastCandleDataRef = useRef<any>(null);
@@ -3851,6 +3881,7 @@ export function AdvancedChart() {
             (currentChartData?.candles?.length ? currentChartData.candles[currentChartData.candles.length - 1] : null);
 
           let updatedCandle;
+          const sameCandle = !!(seededLastCandle && seededLastCandle.time === updateTime);
           if (seededLastCandle && seededLastCandle.time === updateTime) {
             updatedCandle = {
               time: updateTime,
@@ -3880,6 +3911,30 @@ export function AdvancedChart() {
           } catch(e: any) {
             setWsError(`WS TICK ERR: ${e.message} (t=${updateTime}, last=${lastCandleDataRef.current?.time})`);
           }
+
+          // Live RSI + SMA: keep a rolling closes buffer and recompute (Wilder's) each tick
+          // so both the RSI line and its SMA track the live premium, like Zerodha.
+          try {
+            const closes = rsiClosesRef.current;
+            if (closes && closes.length > 0) {
+              if (sameCandle) {
+                closes[closes.length - 1] = updatedCandle.close; // update forming candle
+              } else {
+                closes.push(updatedCandle.close); // a new candle started
+                if (closes.length > 500) closes.shift();
+              }
+              const rsiArr = computeRsiArray(closes, 14);
+              const liveRsi = rsiArr[rsiArr.length - 1];
+              if (rsiSeriesRef.current && typeof liveRsi === 'number') {
+                rsiSeriesRef.current.update({ time: updateTime, value: liveRsi });
+              }
+              if (rsiSmaSeriesRef.current && rsiArr.length >= 14) {
+                const last14 = rsiArr.slice(-14);
+                const avg = last14.reduce((s, v) => s + v, 0) / 14;
+                rsiSmaSeriesRef.current.update({ time: updateTime, value: avg });
+              }
+            }
+          } catch (e) { /* RSI is display-only; never block price updates */ }
         }
       }
     });
@@ -3943,6 +3998,19 @@ export function AdvancedChart() {
                time: updateTime,
                value: latestCandle.rsi14,
              });
+           }
+
+           // Keep the live closes buffer aligned with the server's latest close
+           if (rsiClosesRef.current.length > 0) {
+             rsiClosesRef.current[rsiClosesRef.current.length - 1] = latestCandle.close;
+           }
+           // Refresh the SMA from server-computed RSI values (authoritative, every 15s)
+           if (rsiSmaSeriesRef.current && data.candles.length >= 14) {
+             const last14 = data.candles.slice(-14);
+             if (last14.every((c: any) => typeof c.rsi14 === 'number')) {
+               const avg = last14.reduce((s: number, c: any) => s + c.rsi14, 0) / 14;
+               rsiSmaSeriesRef.current.update({ time: updateTime, value: avg });
+             }
            }
         }
       } catch(e) {
@@ -4532,6 +4600,9 @@ export function AdvancedChart() {
         lastValueVisible: false,
     });
     rsiSmaSeries.setData(rsiSmaData);
+    rsiSmaSeriesRef.current = rsiSmaSeries;
+    // Seed the live closes buffer used for real-time RSI recomputation on ticks
+    rsiClosesRef.current = chartData.candles.map((c: any) => c.close);
 
     // Markers for Divergences
     const markers: any[] = [];
