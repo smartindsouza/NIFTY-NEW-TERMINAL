@@ -33,12 +33,69 @@ db.prepare(`
   )
 `).run();
 
+// Auto-exit rules (server-side stoploss/target watcher: spot levels + RSI levels)
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS exit_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tradingsymbol TEXT,
+    exchange TEXT,
+    qty INTEGER,
+    product TEXT,
+    exit_side TEXT,
+    spot_lower REAL,
+    spot_upper REAL,
+    spot_mode TEXT,
+    rsi_lower REAL,
+    rsi_upper REAL,
+    timeframe TEXT,
+    underlying_token TEXT,
+    status TEXT,
+    detail TEXT,
+    created_at INTEGER
+  )
+`).run();
+
 function getTodayAccessToken(): string | null {
   try {
     const today = new Date().toISOString().split('T')[0];
     const row = db.prepare('SELECT access_token FROM kite_tokens WHERE token_date = ? ORDER BY id DESC LIMIT 1').get(today) as any;
     return row?.access_token || null;
   } catch { return null; }
+}
+
+// Places a LIMIT exit order on Kite (used by the auto-exit watcher).
+// SELL to close a long, BUY to cover a short. Priced at live ±0.5% (tick-rounded) so it fills fast.
+async function placeKiteLimitExit(opts: { exchange: string; tradingsymbol: string; qty: number; product: string; side: string; }): Promise<{ ok: boolean; orderId?: string; error?: string }> {
+  try {
+    const kc = getKiteClient();
+    // @ts-ignore
+    if (!kc || !kc.access_token) return { ok: false, error: 'No active Kite session — cannot place exit order' };
+    const fullSymbol = `${opts.exchange}:${opts.tradingsymbol}`;
+    let basePrice = 0;
+    try {
+      const q = await kc.getQuote([fullSymbol]);
+      basePrice = q?.[fullSymbol]?.last_price || 0;
+    } catch {}
+    if (!basePrice || basePrice <= 0) return { ok: false, error: 'Could not fetch live price for exit' };
+    const isBuy = String(opts.side).toUpperCase() === 'BUY';
+    const buffer = isBuy ? 1.005 : 0.995;
+    const price = parseFloat((Math.round((basePrice * buffer) / 0.05) * 0.05).toFixed(2));
+    const payload: any = {
+      exchange: opts.exchange,
+      tradingsymbol: opts.tradingsymbol,
+      transaction_type: opts.side,
+      quantity: opts.qty,
+      product: opts.product || 'MIS',
+      order_type: 'LIMIT',
+      price,
+      validity: 'DAY',
+    };
+    const resp = await kc.placeOrder('regular', payload);
+    const orderId = typeof resp === 'string' ? resp : (resp as any).order_id;
+    return { ok: true, orderId };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || String(e) };
+  }
 }
 
 async function startServer() {
@@ -157,6 +214,70 @@ function connectTicker() {
 refreshData();
 connectTicker();
 
+  // ===== Auto-Exit Watcher: server-side stoploss/target on spot levels + RSI =====
+  const lastClosedCandleByTf: Record<string, number> = {};
+
+  async function triggerRuleExit(rule: any, reason: string) {
+    // Atomic claim prevents double-firing across overlapping loops
+    const claim = db.prepare("UPDATE exit_rules SET status='TRIGGERING', detail=? WHERE id=? AND status='ACTIVE'").run(reason, rule.id);
+    if (claim.changes === 0) return;
+    const result = await placeKiteLimitExit({ exchange: rule.exchange, tradingsymbol: rule.tradingsymbol, qty: rule.qty, product: rule.product, side: rule.exit_side });
+    if (result.ok) {
+      db.prepare("UPDATE exit_rules SET status='TRIGGERED', detail=? WHERE id=?").run(`${reason} | exit order ${result.orderId}`, rule.id);
+      console.log(`[ExitWatcher] EXITED ${rule.tradingsymbol}: ${reason} (order ${result.orderId})`);
+    } else {
+      db.prepare("UPDATE exit_rules SET status='ERROR', detail=? WHERE id=?").run(`${reason} | FAILED: ${result.error}`, rule.id);
+      console.error(`[ExitWatcher] EXIT FAILED ${rule.tradingsymbol}: ${result.error}`);
+    }
+  }
+
+  // Fast loop (2s): live spot TOUCH triggers
+  setInterval(async () => {
+    try {
+      if (!latestSpot || latestSpot <= 0) return;
+      const rules = db.prepare("SELECT * FROM exit_rules WHERE status='ACTIVE' AND spot_mode='TOUCH'").all() as any[];
+      for (const r of rules) {
+        let hit = '';
+        if (r.spot_lower && latestSpot <= r.spot_lower) hit = `Spot ${latestSpot.toFixed(2)} hit lower ${r.spot_lower}`;
+        else if (r.spot_upper && latestSpot >= r.spot_upper) hit = `Spot ${latestSpot.toFixed(2)} hit upper ${r.spot_upper}`;
+        if (hit) await triggerRuleExit(r, hit);
+      }
+    } catch (e) { /* keep watcher alive */ }
+  }, 2000);
+
+  // Slow loop (15s): candle-close triggers — spot CLOSE mode + RSI — only on a newly-closed candle
+  setInterval(async () => {
+    try {
+      const rules = db.prepare("SELECT * FROM exit_rules WHERE status='ACTIVE' AND (spot_mode='CLOSE' OR rsi_lower IS NOT NULL OR rsi_upper IS NOT NULL)").all() as any[];
+      if (!rules.length) return;
+      const timeframes = Array.from(new Set(rules.map(r => String(r.timeframe || '5'))));
+      for (const tf of timeframes) {
+        let ta: any;
+        try { ta = await getTechnicalAnalysis(latestSpot, parseInt(tf, 10) || 5, '256265', 'NIFTY 50'); } catch { continue; }
+        const candles = ta?.candles;
+        if (!candles || candles.length < 2) continue;
+        const closed = candles[candles.length - 2]; // last fully-closed candle
+        const closedTime = new Date(closed.time).getTime();
+        if (lastClosedCandleByTf[tf] === closedTime) continue; // already evaluated this candle
+        lastClosedCandleByTf[tf] = closedTime;
+        const closePrice = closed.close;
+        const closeRsi = closed.rsi14;
+        for (const r of rules.filter(rr => String(rr.timeframe || '5') === tf)) {
+          let hit = '';
+          if (r.spot_mode === 'CLOSE') {
+            if (r.spot_lower && closePrice <= r.spot_lower) hit = `Candle closed ${closePrice} below lower ${r.spot_lower}`;
+            else if (r.spot_upper && closePrice >= r.spot_upper) hit = `Candle closed ${closePrice} above upper ${r.spot_upper}`;
+          }
+          if (!hit && typeof closeRsi === 'number') {
+            if (r.rsi_lower && closeRsi <= r.rsi_lower) hit = `RSI ${closeRsi.toFixed(1)} reached ${r.rsi_lower} on close`;
+            else if (r.rsi_upper && closeRsi >= r.rsi_upper) hit = `RSI ${closeRsi.toFixed(1)} reached ${r.rsi_upper} on close`;
+          }
+          if (hit) await triggerRuleExit(r, hit);
+        }
+      }
+    } catch (e) { /* keep watcher alive */ }
+  }, 15000);
+
   // Schedule updates every 30 seconds
   cron.schedule('*/10 * * * * *', async () => {
     await refreshData();
@@ -169,6 +290,50 @@ connectTicker();
         analytics: latestAnalytics
       }
     });
+  });
+
+  // ===== Auto-Exit Rules API =====
+  app.post('/api/exit-rules', (req, res) => {
+    try {
+      const { tradingsymbol, exchange, qty, product, positionSide, spotLower, spotUpper, spotMode, rsiLower, rsiUpper, timeframe } = req.body;
+      if (!tradingsymbol || !qty) return res.status(400).json({ success: false, error: 'Missing tradingsymbol or qty' });
+      const exitSide = String(positionSide).toUpperCase() === 'BUY' ? 'SELL' : 'BUY';
+      db.prepare("UPDATE exit_rules SET status='CANCELLED' WHERE tradingsymbol=? AND status='ACTIVE'").run(tradingsymbol);
+      const info = db.prepare(`INSERT INTO exit_rules
+        (tradingsymbol, exchange, qty, product, exit_side, spot_lower, spot_upper, spot_mode, rsi_lower, rsi_upper, timeframe, underlying_token, status, detail, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'ACTIVE', '', ?)`).run(
+          tradingsymbol, exchange || 'NFO', parseInt(qty, 10), product || 'MIS', exitSide,
+          spotLower || null, spotUpper || null, (spotMode === 'CLOSE' ? 'CLOSE' : 'TOUCH'),
+          rsiLower || null, rsiUpper || null, String(timeframe || '5'), '256265', Math.floor(Date.now() / 1000)
+        );
+      const kc = getKiteClient();
+      // @ts-ignore
+      const armed = !!(kc && kc.access_token);
+      return res.json({ success: true, id: info.lastInsertRowid, armed });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.get('/api/exit-rules', (_req, res) => {
+    try {
+      const rows = db.prepare("SELECT * FROM exit_rules WHERE status IN ('ACTIVE','TRIGGERING','TRIGGERED','ERROR') ORDER BY id DESC LIMIT 50").all();
+      const kc = getKiteClient();
+      // @ts-ignore
+      const armed = !!(kc && kc.access_token);
+      return res.json({ success: true, rules: rows, armed });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.delete('/api/exit-rules/:id', (req, res) => {
+    try {
+      db.prepare("UPDATE exit_rules SET status='CANCELLED' WHERE id=? AND status='ACTIVE'").run(req.params.id);
+      return res.json({ success: true });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e?.message || String(e) });
+    }
   });
 
   app.get('/api/ta', async (req, res) => {
