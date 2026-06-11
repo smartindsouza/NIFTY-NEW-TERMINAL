@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { X, RefreshCw, Sparkles, TrendingUp, TrendingDown } from "lucide-react";
+import { X, RefreshCw, Sparkles, TrendingUp, TrendingDown, Shield } from "lucide-react";
 import { toast } from "sonner";
 
 export interface ActiveTrade {
@@ -17,6 +17,68 @@ export interface ActiveTrade {
 
 export function ActivePositions() {
   const [positions, setPositions] = useState<ActiveTrade[]>([]);
+
+  // ===== Auto-exit (server-side stoploss/target watcher) state =====
+  const [autoExitOpenId, setAutoExitOpenId] = useState<string | null>(null);
+  const [exitRules, setExitRules] = useState<any[]>([]);
+  const [rulesArmed, setRulesArmed] = useState<boolean>(true);
+  const [savingRule, setSavingRule] = useState(false);
+  const [form, setForm] = useState<{ spotLower: string; spotUpper: string; spotMode: 'TOUCH' | 'CLOSE'; rsiLower: string; rsiUpper: string; timeframe: string }>({ spotLower: '', spotUpper: '', spotMode: 'TOUCH', rsiLower: '', rsiUpper: '', timeframe: '5' });
+
+  useEffect(() => {
+    let active = true;
+    const fetchRules = async () => {
+      try {
+        const res = await fetch('/api/exit-rules');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (active && data.success) { setExitRules(data.rules || []); setRulesArmed(!!data.armed); }
+      } catch {}
+    };
+    fetchRules();
+    const id = setInterval(fetchRules, 5000);
+    return () => { active = false; clearInterval(id); };
+  }, []);
+
+  const armAutoExit = async (pos: ActiveTrade) => {
+    const spotLower = parseFloat(form.spotLower) || null;
+    const spotUpper = parseFloat(form.spotUpper) || null;
+    const rsiLower = parseFloat(form.rsiLower) || null;
+    const rsiUpper = parseFloat(form.rsiUpper) || null;
+    if (!spotLower && !spotUpper && !rsiLower && !rsiUpper) {
+      toast.error('Set at least one level (spot or RSI) before arming.');
+      return;
+    }
+    setSavingRule(true);
+    try {
+      const res = await fetch('/api/exit-rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tradingsymbol: pos.symbol, exchange: 'NFO', qty: pos.qty, product: 'MIS',
+          positionSide: pos.side, spotLower, spotUpper, spotMode: form.spotMode,
+          rsiLower, rsiUpper, timeframe: form.timeframe
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(data.armed ? 'Auto-exit armed on the Zerodha watcher.' : 'Saved — but no active Kite session. Log in today to arm it.');
+        setAutoExitOpenId(null);
+      } else {
+        toast.error(data.error || 'Could not arm auto-exit.');
+      }
+    } catch {
+      toast.error('Network error arming auto-exit.');
+    } finally { setSavingRule(false); }
+  };
+
+  const cancelAutoExit = async (ruleId: number) => {
+    try {
+      await fetch(`/api/exit-rules/${ruleId}`, { method: 'DELETE' });
+      setExitRules(rs => rs.filter(r => r.id !== ruleId));
+      toast.success('Auto-exit cancelled.');
+    } catch { toast.error('Could not cancel auto-exit.'); }
+  };
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
   const [lastPrices, setLastPrices] = useState<Record<string, { price: number; dir: "up" | "down" | "flat" }>>({});
 
@@ -233,9 +295,11 @@ export function ActivePositions() {
               ? "text-rose-400 font-bold bg-rose-950/20 px-1 rounded transition-all duration-200"
               : "text-foreground font-semibold font-mono";
 
+          const rule = exitRules.find((r:any) => r.tradingsymbol === pos.symbol && r.status === 'ACTIVE');
+          const isAutoOpen = autoExitOpenId === pos.id;
           return (
+            <div key={pos.id}>
             <div 
-              key={pos.id} 
               className="flex flex-wrap items-center justify-between gap-4 p-3 md:px-5 md:py-3.5 hover:bg-emerald-500/[0.02] transition-colors"
             >
               {/* Left Column: Symbol & Side Tags */}
@@ -297,8 +361,15 @@ export function ActivePositions() {
                 </div>
               </div>
 
-              {/* Right: Quick Exit Trigger */}
-              <div className="flex items-center">
+              {/* Right: Auto-Exit + Quick Exit */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { setAutoExitOpenId(isAutoOpen ? null : pos.id); setForm({ spotLower: rule?.spot_lower ? String(rule.spot_lower) : '', spotUpper: rule?.spot_upper ? String(rule.spot_upper) : '', spotMode: (rule?.spot_mode === 'CLOSE' ? 'CLOSE' : 'TOUCH'), rsiLower: rule?.rsi_lower ? String(rule.rsi_lower) : '', rsiUpper: rule?.rsi_upper ? String(rule.rsi_upper) : '', timeframe: rule?.timeframe ? String(rule.timeframe) : '5' }); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all duration-200 select-none ${rule ? 'border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20' : 'border-primary/30 bg-primary/10 text-primary hover:bg-primary/20'}`}
+                >
+                  <Shield className="w-3.5 h-3.5" />
+                  {rule ? 'Auto-Exit ON' : 'Set Auto-Exit'}
+                </button>
                 <button
                   onClick={() => handleExitPosition(pos)}
                   disabled={exitingIds.has(pos.id)}
@@ -317,6 +388,72 @@ export function ActivePositions() {
                   )}
                 </button>
               </div>
+            </div>
+
+            {/* Active auto-exit rule banner */}
+            {rule && !isAutoOpen && (
+              <div className="px-4 py-2 bg-amber-950/20 border-t border-amber-500/15 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
+                <span className="text-amber-300/90 flex items-center gap-1.5">
+                  <Shield className="w-3 h-3" />
+                  Auto-exit armed:
+                  {rule.spot_lower ? ` spot ≤ ${rule.spot_lower}` : ''}
+                  {rule.spot_upper ? ` · spot ≥ ${rule.spot_upper}` : ''}
+                  {(rule.spot_lower || rule.spot_upper) ? ` (${rule.spot_mode === 'CLOSE' ? 'on close' : 'touch'})` : ''}
+                  {rule.rsi_lower ? ` · RSI ≤ ${rule.rsi_lower}` : ''}
+                  {rule.rsi_upper ? ` · RSI ≥ ${rule.rsi_upper}` : ''}
+                  {` · ${rule.timeframe}m`}
+                </span>
+                <span className="flex items-center gap-2">
+                  {!rulesArmed && <span className="text-rose-400">⚠ no Kite session — log in to arm</span>}
+                  <button onClick={() => cancelAutoExit(rule.id)} className="px-2 py-0.5 rounded border border-rose-500/40 text-rose-300 hover:bg-rose-500/20">Cancel</button>
+                </span>
+              </div>
+            )}
+
+            {/* Auto-exit setup form */}
+            {isAutoOpen && (
+              <div className="px-4 py-3 bg-background/40 border-t border-primary/15 space-y-3">
+                <div className="text-[11px] text-muted-foreground">
+                  Exits the <span className="text-foreground font-semibold">entire</span> position on Zerodha when any level is hit. Spot levels watch the NIFTY index; RSI is checked on candle close. Leave a field blank to ignore it.
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  <label className="flex flex-col gap-1 text-[10px] text-muted-foreground uppercase font-semibold">
+                    Spot lower
+                    <input type="number" value={form.spotLower} onChange={(e)=>setForm(f=>({...f, spotLower:e.target.value}))} placeholder="e.g. 23100" className="bg-card border border-0 rounded px-2 h-8 text-xs text-foreground font-mono focus:outline-none focus:border-primary" />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[10px] text-muted-foreground uppercase font-semibold">
+                    Spot upper
+                    <input type="number" value={form.spotUpper} onChange={(e)=>setForm(f=>({...f, spotUpper:e.target.value}))} placeholder="e.g. 23300" className="bg-card border border-0 rounded px-2 h-8 text-xs text-foreground font-mono focus:outline-none focus:border-primary" />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[10px] text-muted-foreground uppercase font-semibold">
+                    Spot trigger
+                    <div className="grid grid-cols-2 gap-1 bg-card/40 p-0.5 rounded border border-0 h-8">
+                      <button type="button" onClick={()=>setForm(f=>({...f, spotMode:'TOUCH'}))} className={`rounded text-[10px] font-bold ${form.spotMode==='TOUCH'?'bg-primary/20 text-primary':'text-muted-foreground'}`}>Touch</button>
+                      <button type="button" onClick={()=>setForm(f=>({...f, spotMode:'CLOSE'}))} className={`rounded text-[10px] font-bold ${form.spotMode==='CLOSE'?'bg-primary/20 text-primary':'text-muted-foreground'}`}>On Close</button>
+                    </div>
+                  </label>
+                  <label className="flex flex-col gap-1 text-[10px] text-muted-foreground uppercase font-semibold">
+                    RSI lower
+                    <input type="number" value={form.rsiLower} onChange={(e)=>setForm(f=>({...f, rsiLower:e.target.value}))} placeholder="e.g. 40" className="bg-card border border-0 rounded px-2 h-8 text-xs text-foreground font-mono focus:outline-none focus:border-primary" />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[10px] text-muted-foreground uppercase font-semibold">
+                    RSI upper
+                    <input type="number" value={form.rsiUpper} onChange={(e)=>setForm(f=>({...f, rsiUpper:e.target.value}))} placeholder="e.g. 60" className="bg-card border border-0 rounded px-2 h-8 text-xs text-foreground font-mono focus:outline-none focus:border-primary" />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[10px] text-muted-foreground uppercase font-semibold">
+                    Timeframe (RSI / close)
+                    <select value={form.timeframe} onChange={(e)=>setForm(f=>({...f, timeframe:e.target.value}))} className="bg-card border border-0 rounded px-2 h-8 text-xs text-foreground font-mono focus:outline-none focus:border-primary">
+                      <option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="10">10m</option><option value="15">15m</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  {rule && <button onClick={()=>cancelAutoExit(rule.id)} className="px-3 py-1.5 rounded-lg border border-rose-500/40 text-rose-300 text-xs hover:bg-rose-500/20">Remove</button>}
+                  <button onClick={()=>setAutoExitOpenId(null)} className="px-3 py-1.5 rounded-lg border border-0 text-muted-foreground text-xs hover:text-foreground">Close</button>
+                  <button onClick={()=>armAutoExit(pos)} disabled={savingRule} className="px-4 py-1.5 rounded-lg bg-primary text-primary-foreground font-semibold text-xs hover:opacity-90 disabled:opacity-50">{savingRule ? 'Arming…' : (rule ? 'Update Auto-Exit' : 'Arm Auto-Exit')}</button>
+                </div>
+              </div>
+            )}
             </div>
           );
         })}
