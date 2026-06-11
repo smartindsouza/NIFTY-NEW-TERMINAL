@@ -1713,7 +1713,7 @@ function HLevelsEditorModal({
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground uppercase font-sans">Red Level 1</label>
+                  <label className="text-[10px] text-muted-foreground uppercase font-sans">RED OUTER</label>
                   <input
                     type="number"
                     step="1"
@@ -1725,7 +1725,7 @@ function HLevelsEditorModal({
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground uppercase font-sans">Red Level 2</label>
+                  <label className="text-[10px] text-muted-foreground uppercase font-sans">RED INNER</label>
                   <input
                     type="number"
                     step="1"
@@ -1747,7 +1747,7 @@ function HLevelsEditorModal({
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground uppercase font-sans">Trap Level 1</label>
+                  <label className="text-[10px] text-muted-foreground uppercase font-sans">TRAP UPPER</label>
                   <input
                     type="number"
                     step="1"
@@ -1759,7 +1759,7 @@ function HLevelsEditorModal({
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground uppercase font-sans">Trap Level 2</label>
+                  <label className="text-[10px] text-muted-foreground uppercase font-sans">TRAP LOWER</label>
                   <input
                     type="number"
                     step="1"
@@ -1781,7 +1781,7 @@ function HLevelsEditorModal({
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground uppercase font-sans">Green Level 1</label>
+                  <label className="text-[10px] text-muted-foreground uppercase font-sans">GREEN OUTER</label>
                   <input
                     type="number"
                     step="1"
@@ -1793,7 +1793,7 @@ function HLevelsEditorModal({
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground uppercase font-sans">Green Level 2</label>
+                  <label className="text-[10px] text-muted-foreground uppercase font-sans">GREEN INNER</label>
                   <input
                     type="number"
                     step="1"
@@ -4437,7 +4437,7 @@ export function AdvancedChart() {
     // Draw H Levels if enabled
     if (showHLevels && hLevels) {
       const colors = ['#ef4444', '#ef4444', '#fbbf24', '#fbbf24', '#22c55e', '#22c55e'];
-      const textLabels = ['RED ZONE', 'RED ZONE', 'TRAP ZONE', 'TRAP ZONE', 'GREEN ZONE', 'GREEN ZONE'];
+      const textLabels = ['RED OUTER', 'RED INNER', 'TRAP UPPER', 'TRAP LOWER', 'GREEN OUTER', 'GREEN INNER'];
       hLevels.forEach((priceLevel, index) => {
         if (priceLevel && priceLevel > 0) {
           mainSeries.createPriceLine({
