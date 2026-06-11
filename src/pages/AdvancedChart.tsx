@@ -115,7 +115,7 @@ interface OrderTicketModalProps {
 
 function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit, processing, availBalance, setAvailBalance, onRefreshBalance }: OrderTicketModalProps) {
   const [product, setProduct] = useState<'MIS' | 'NRML'>(ticket.product);
-  const [orderType, setOrderType] = useState<'MARKET' | 'LIMIT'>(ticket.orderType);
+  const [orderType] = useState<'MARKET' | 'LIMIT'>('LIMIT'); // Always LIMIT — Kite rejects MARKET orders via API
   const [lots, setLots] = useState<number>(() => {
     const size = ticket.lotSize || 75; // Default to 75 as standard NIFTY lot size if missing
     return Math.max(1, Math.round((ticket.quantity || size) / size));
@@ -132,6 +132,16 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
   const [liveLtp, setLiveLtp] = useState<number>(ticket.ltp);
   const [prevLtp, setPrevLtp] = useState<number>(ticket.ltp);
   const [priceDirection, setPriceDirection] = useState<'UP' | 'DOWN' | 'NEUTRAL'>('NEUTRAL');
+
+  // Auto-fill the LIMIT price from the live premium: BUY slightly above (+0.5%),
+  // SELL slightly below (-0.5%), so it fills immediately. Rounded to the 0.05 tick.
+  // Updates live as the premium moves — the user never types a price.
+  useEffect(() => {
+    if (!liveLtp || liveLtp <= 0) return;
+    const buffer = ticket.action === 'BUY' ? 1.005 : 0.995;
+    const tickRounded = Math.round((liveLtp * buffer) / 0.05) * 0.05;
+    setLimitPrice(tickRounded.toFixed(2));
+  }, [liveLtp, ticket.action]);
 
   useEffect(() => {
     let isActive = true;
@@ -493,27 +503,6 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
             </div>
           </div>
 
-          {/* Order Type (MARKET vs LIMIT) */}
-          <div>
-            <label className="text-xs font-medium text-muted-foreground block mb-1.5">Order Type</label>
-            <div className="grid grid-cols-2 gap-2 bg-card/40 p-1 rounded-lg border border-0">
-              <button
-                type="button"
-                onClick={() => setOrderType('MARKET')}
-                className={`py-1.5 text-xs font-semibold rounded-md transition-all ${orderType === 'MARKET' ? 'bg-muted text-primary border border-primary/30' : 'text-muted-foreground hover:text-foreground'}`}
-              >
-                Market
-              </button>
-              <button
-                type="button"
-                onClick={() => setOrderType('LIMIT')}
-                className={`py-1.5 text-xs font-semibold rounded-md transition-all ${orderType === 'LIMIT' ? 'bg-muted text-primary border border-primary/30' : 'text-muted-foreground hover:text-foreground'}`}
-              >
-                Limit
-              </button>
-            </div>
-          </div>
-
           {/* Dynamic input blocks based on selection */}
           <div className="flex flex-col gap-4">
              {/* Lot Sizing */}
@@ -572,18 +561,19 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
                 </div>
              </div>
              
-             {/* Price input when LIMIT type */}
+             {/* Auto LIMIT price — live premium ±0.5%, updates live, no manual typing */}
             <div>
-              <label className="text-xs font-medium text-muted-foreground block mb-1">Price</label>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">
+                Price <span className="text-[9px] text-primary/80 font-semibold">(auto · live {ticket.action === 'BUY' ? '+' : '−'}0.5%)</span>
+              </label>
               <input
                 type="number"
                 step="0.05"
-                disabled={orderType === 'MARKET'}
-                value={orderType === 'MARKET' ? liveLtp.toFixed(2) : limitPrice}
-                onChange={(e) => setLimitPrice(e.target.value)}
-                className={`w-full bg-card/60 border border-0 rounded-md text-center text-xs h-9 focus:outline-none focus:border-primary font-mono ${orderType === 'MARKET' ? 'text-muted-foreground cursor-not-allowed bg-background/20' : 'text-foreground'}`}
+                readOnly
+                value={limitPrice}
+                className="w-full bg-card/60 border border-0 rounded-md text-center text-xs h-9 focus:outline-none font-mono text-foreground"
               />
-              <span className="text-[10px] text-muted-foreground block mt-1">Tick size ₹0.05</span>
+              <span className="text-[10px] text-muted-foreground block mt-1">Tick size ₹0.05 · tracks live premium</span>
             </div>
           </div>
 
@@ -4434,23 +4424,8 @@ export function AdvancedChart() {
       lowerSeries.setData(bbData.map(d => ({ time: d.time as any, value: d.lower })));
     }
 
-    // Draw H Levels if enabled
-    if (showHLevels && hLevels) {
-      const colors = ['#ef4444', '#ef4444', '#fbbf24', '#fbbf24', '#22c55e', '#22c55e'];
-      const textLabels = ['RED OUTER', 'RED INNER', 'TRAP UPPER', 'TRAP LOWER', 'GREEN OUTER', 'GREEN INNER'];
-      hLevels.forEach((priceLevel, index) => {
-        if (priceLevel && priceLevel > 0) {
-          mainSeries.createPriceLine({
-            price: priceLevel,
-            color: colors[index],
-            lineWidth: hLevelsWidth as any,
-            lineStyle: hLevelsStyle,
-            axisLabelVisible: false,
-            title: textLabels[index] || '',
-          });
-        }
-      });
-    }
+    // H Levels are now drawn on the canvas overlay (with pill labels) alongside PDH/PDL/SUP/RES,
+    // so their RED OUTER / RED INNER / TRAP / GREEN text shows on the chart lines.
 
     // PDH/PDL Lines are now drawn via canvas in requestAnimationFrame
 
@@ -5009,6 +4984,19 @@ export function AdvancedChart() {
                  }
               }
 
+              // H Levels — drawn here (line + pill) so RED OUTER / RED INNER / TRAP UPPER / TRAP LOWER / GREEN OUTER / GREEN INNER text shows on the chart
+              if (showHLevels && hLevels) {
+                 const hColors = ['#ef4444', '#ef4444', '#fbbf24', '#fbbf24', '#22c55e', '#22c55e'];
+                 const hTexts = ['RED OUTER', 'RED INNER', 'TRAP UPPER', 'TRAP LOWER', 'GREEN OUTER', 'GREEN INNER'];
+                 const hDash = hLevelsStyle === 1 ? [5, 5] : hLevelsStyle === 2 ? [2, 4] : [];
+                 hLevels.forEach((lvl, idx) => {
+                   if (lvl && lvl > 0) {
+                     const y = mainSeriesRef.current.priceToCoordinate(lvl);
+                     if (y !== null) linesToDraw.push({ text: hTexts[idx], y, color: hColors[idx], dash: hDash, lineWidth: hLevelsWidth });
+                   }
+                 });
+              }
+
               // Draw Lines
               linesToDraw.forEach(item => {
                  ctx.beginPath();
@@ -5137,7 +5125,7 @@ export function AdvancedChart() {
     draw();
     
     return () => cancelAnimationFrame(animationFrameId);
-  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor]);
+  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth]);
 
   const { data: serverStats } = useQuery({
     queryKey: ["server-diagnostics"],
