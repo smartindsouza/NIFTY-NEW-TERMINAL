@@ -345,19 +345,49 @@ connectTicker();
         return res.status(400).json({ success: false, error: "Missing tradingsymbol or quantity" });
       }
 
+      // Kite Connect rejects plain MARKET orders ("Market orders without market
+      // protection are not allowed via API"). So we ALWAYS submit a LIMIT order,
+      // priced at the live price with a small buffer (above market for a BUY,
+      // below for a SELL) so it fills almost immediately, rounded to the NSE
+      // option tick size of 0.05 which Kite also requires.
+      const incomingType = String(order_type || "MARKET").toUpperCase();
+      const isBuy = String(action).toUpperCase() === "BUY";
+      const fullSymbol = `${exchange || "NFO"}:${tradingsymbol}`;
+
+      // Base price: use the price the client sent if valid, otherwise fetch the
+      // current live price from Kite so the user never has to type one.
+      let basePrice = parseFloat(price);
+      if (!basePrice || isNaN(basePrice) || basePrice <= 0) {
+        try {
+          const quoteClient = getKiteClient();
+          // @ts-ignore
+          if (quoteClient && quoteClient.access_token) {
+            const q = await quoteClient.getQuote([fullSymbol]);
+            basePrice = q?.[fullSymbol]?.last_price;
+          }
+        } catch (e) {
+          console.error(`[Order API] Failed to fetch live price for ${fullSymbol}:`, e);
+        }
+      }
+
+      if (!basePrice || isNaN(basePrice) || basePrice <= 0) {
+        return res.status(400).json({ success: false, error: "Could not determine a live price to place the order. Please try again." });
+      }
+
+      // Explicit LIMIT order: use the user's price as-is. MARKET: buffer it 0.5%.
+      const buffer = incomingType === "LIMIT" ? 1 : (isBuy ? 1.005 : 0.995);
+      const limitPrice = parseFloat((Math.round((basePrice * buffer) / 0.05) * 0.05).toFixed(2));
+
       const payloadObj: any = {
         exchange: exchange || "NFO",
         tradingsymbol: tradingsymbol,
         transaction_type: action,
         quantity: parseInt(quantity, 10),
         product: product || "MIS",
-        order_type: order_type || "MARKET",
+        order_type: "LIMIT",
+        price: limitPrice,
         validity: "DAY"
       };
-
-      if (payloadObj.order_type === "LIMIT" && price) {
-          payloadObj.price = parseFloat(price);
-      }
 
       console.log(`[Order API] POST /api/orders request payload:`, JSON.stringify(req.body));
       console.log(`[Order API] Built Kite place_order payload:`, JSON.stringify(payloadObj));
