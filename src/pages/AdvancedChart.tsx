@@ -4855,13 +4855,20 @@ export function AdvancedChart() {
       const rect = canvas.parentElement.getBoundingClientRect();
       
       try {
-        // Update canvas logical size to match CSS layout
+        // Update canvas size to match CSS layout, scaled for high-DPI (retina) sharpness
+        const dpr = window.devicePixelRatio || 1;
         const cw = Math.floor(rect.width);
         const ch = Math.floor(rect.height);
-        if (canvas.width !== cw) canvas.width = cw;
-        if (canvas.height !== ch) canvas.height = ch;
-        
-        ctx.clearRect(0,0, canvas.width, canvas.height);
+        const bw = Math.floor(cw * dpr);
+        const bh = Math.floor(ch * dpr);
+        if (canvas.width !== bw) canvas.width = bw;
+        if (canvas.height !== bh) canvas.height = bh;
+        if (canvas.style.width !== `${cw}px`) canvas.style.width = `${cw}px`;
+        if (canvas.style.height !== `${ch}px`) canvas.style.height = `${ch}px`;
+        // Draw using logical (CSS) pixels; the transform maps them to device pixels for crisp output
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        ctx.clearRect(0, 0, cw, ch);
         
         // 1. Draw Bollinger Bands fill if active
         if (showBB && bbData && bbData.length > 0) {
@@ -4914,12 +4921,12 @@ export function AdvancedChart() {
           
           // Draw from right edge (strike price line) towards the left
           const priceScaleWidth = mainChartRef.current ? mainChartRef.current.priceScale('right').width() : 60;
-          const rightEdge = canvas.width - priceScaleWidth - oiBarGap;
+          const rightEdge = cw - priceScaleWidth - oiBarGap;
           const maxBarWidth = oiMaxBarWidth; // max length of bars
           
           optionRows.forEach((row: any) => {
               const y = mainSeriesRef.current!.priceToCoordinate(row.strike);
-              if (y === null || y < 0 || y > canvas.height) return;
+              if (y === null || y < 0 || y > ch) return;
               
               const callWidth = (row.call_oi / maxOI) * maxBarWidth;
               const putWidth = (row.put_oi / maxOI) * maxBarWidth;
@@ -4945,10 +4952,10 @@ export function AdvancedChart() {
         const lastCandle = lastCandleDataRef.current || (chartData && chartData.candles && chartData.candles.length > 0 ? chartData.candles[chartData.candles.length - 1] : null);
         if (lastCandle) {
           const y = mainSeriesRef.current!.priceToCoordinate(lastCandle.close);
-          if (y !== null && y >= 0 && y <= canvas.height) {
+          if (y !== null && y >= 0 && y <= ch) {
             const priceScaleWidth = mainChartRef.current ? mainChartRef.current.priceScale('right').width() : 60;
             const badgeWidth = priceScaleWidth;
-            const x = canvas.width - priceScaleWidth;
+            const x = cw - priceScaleWidth;
             const badgeHeight = 18;
             const spotY = y - badgeHeight / 2;
             const badgeY = y + badgeHeight / 2; 
@@ -4976,7 +4983,7 @@ export function AdvancedChart() {
             ctx.textBaseline = 'middle';
             ctx.fillText(lastCandle.close.toFixed(2), x + badgeWidth / 2, spotY + badgeHeight / 2);
 
-            if (badgeY + badgeHeight <= canvas.height) {
+            if (badgeY + badgeHeight <= ch) {
               const nowMs = Date.now();
               const istMs = nowMs + (5.5 * 60 * 60 * 1000);
               const ist = new Date(istMs);
@@ -5013,7 +5020,7 @@ export function AdvancedChart() {
            
            // We want text to stay flushed right on the chart area, just left of right price scale
            const priceScaleWidth = mainChartRef.current.priceScale('right').width() || 60;
-           const textAlignX = canvas.width - priceScaleWidth;
+           const textAlignX = cw - priceScaleWidth;
            
            const endXCoordinate = mainChartRef.current.timeScale().timeToCoordinate(lastCandle.time as any);
            const startXCoordinate = mainChartRef.current.timeScale().timeToCoordinate(firstCandle.time as any);
@@ -5147,9 +5154,9 @@ export function AdvancedChart() {
           const crossX = crosshairInfoRef.current.x;
           const crossPrice = crosshairInfoRef.current.price;
           
-          if (crossY >= 0 && crossY <= canvas.height && mainChartRef.current) {
+          if (crossY >= 0 && crossY <= ch && mainChartRef.current) {
             const priceScaleWidth = mainChartRef.current.priceScale('right').width() || 60;
-            const x = canvas.width - priceScaleWidth;
+            const x = cw - priceScaleWidth;
 
             if (isHoveringButtonRef && isHoveringButtonRef.current) {
               ctx.beginPath();
@@ -5162,7 +5169,7 @@ export function AdvancedChart() {
               ctx.lineTo(x, crossY);
 
               // Vertical line
-              const chartHeight = Math.max(0, canvas.height - (mainChartRef.current.timeScale().height() || 26));
+              const chartHeight = Math.max(0, ch - (mainChartRef.current.timeScale().height() || 26));
               if (crossX >= 0 && crossX <= x) {
                 ctx.moveTo(crossX, 0);
                 ctx.lineTo(crossX, chartHeight);
