@@ -5546,49 +5546,6 @@ export function AdvancedChart() {
         </div>
       ) : (
         <div className="flex flex-col flex-grow gap-2">
-          {/* Active Positions Sell/Exit One-Click Button Bar */}
-          {activePositions.length > 0 && (
-            <div className={`p-2.5 px-4 mb-1 border rounded-xl flex items-center justify-between transition-all duration-300 animate-in slide-in-from-top-2 select-none z-30 ${
-              activePositions.some(p => p.side === 'BUY') 
-                ? 'border-emerald-500/20 bg-emerald-950/20 text-emerald-300' 
-                : 'border-rose-500/20 bg-rose-950/20 text-rose-300'
-            }`}>
-              <div className="flex items-center gap-3">
-                <span className="flex h-2.5 w-2.5 relative">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
-                </span>
-                <span className="text-sm font-bold tracking-wide font-sans">
-                  Active Trades: {activePositions.length} position(s) placed
-                </span>
-                <div className="hidden sm:flex flex-wrap items-center gap-1 text-[11px] font-mono opacity-80 border-l border-white/10 pl-3">
-                  {activePositions.map((pos) => (
-                    <span key={pos.id} className="bg-black/35 px-1.5 py-0.5 rounded mr-1">
-                      {pos.symbol} ({pos.qty} Qty @ ₹{pos.entryPrice.toFixed(1)})
-                    </span>
-                  ))}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleExitAllTrades}
-                disabled={isExitingAllTrades}
-                className="flex items-center gap-2 px-5 py-2 font-bold rounded-lg border border-rose-500 bg-rose-600 hover:bg-rose-750 active:scale-95 text-white text-xs transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed select-none shadow-[0_0_15px_rgba(239,68,68,0.2)] hover:shadow-[0_0_20px_rgba(239,68,68,0.45)]"
-              >
-                {isExitingAllTrades ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    Exiting All Positions...
-                  </>
-                ) : (
-                  <>
-                    <X className="w-3.5 h-3.5" />
-                    1-Click SELL / EXIT ALL TRADES
-                  </>
-                )}
-              </button>
-            </div>
-          )}
 
           {/* Main Chart (Price & Volume) */}
           <div className="relative flex-grow flex w-full bg-card rounded-xl" style={{ minHeight: "450px" }} onMouseLeave={() => setCrosshairInfo(null)}>
