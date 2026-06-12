@@ -22,6 +22,9 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 
 const KITE_DATA_DIR = process.env.KITE_DATA_DIR || '.';
 const db = new Database(`${KITE_DATA_DIR}/kite_session.db`);
+// WAL lets readers and a writer work concurrently; busy_timeout makes writes wait
+// instead of failing with "database is locked" (the two DB connections share one file).
+try { db.pragma('journal_mode = WAL'); db.pragma('busy_timeout = 5000'); } catch (e) { console.error('DB pragma error', e); }
 db.pragma('journal_mode = WAL');
 
 // Simple Token Table
@@ -93,6 +96,27 @@ async function placeKiteLimitExit(opts: { exchange: string; tradingsymbol: strin
     const resp = await kc.placeOrder('regular', payload);
     const orderId = typeof resp === 'string' ? resp : (resp as any).order_id;
     return { ok: true, orderId };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
+// Closes the ACTUAL open position for a symbol: reads its real product, quantity and
+// direction from Kite and places a matching closing order. This guarantees the order
+// flattens the position (no product mismatch, no accidental new short).
+async function closePositionBySymbol(tradingsymbol: string): Promise<{ ok: boolean; orderId?: string; error?: string }> {
+  try {
+    const kc = getKiteClient();
+    // @ts-ignore
+    if (!kc || !kc.access_token) return { ok: false, error: 'No active Kite session — please log in to Zerodha today.' };
+    let positions: any;
+    try { positions = await kc.getPositions(); } catch (e: any) { return { ok: false, error: 'Could not read positions: ' + (e?.message || e) }; }
+    const net = (positions && positions.net) || [];
+    const pos = net.find((p: any) => p.tradingsymbol === tradingsymbol && p.quantity !== 0);
+    if (!pos) return { ok: false, error: `No open position found for ${tradingsymbol} on Zerodha (it may already be closed).` };
+    const qty = Math.abs(pos.quantity);
+    const side = pos.quantity > 0 ? 'SELL' : 'BUY'; // long -> sell to close; short -> buy to close
+    return await placeKiteLimitExit({ exchange: pos.exchange || 'NFO', tradingsymbol, qty, product: pos.product || 'NRML', side });
   } catch (e: any) {
     return { ok: false, error: e?.message || String(e) };
   }
@@ -221,7 +245,7 @@ connectTicker();
     // Atomic claim prevents double-firing across overlapping loops
     const claim = db.prepare("UPDATE exit_rules SET status='TRIGGERING', detail=? WHERE id=? AND status='ACTIVE'").run(reason, rule.id);
     if (claim.changes === 0) return;
-    const result = await placeKiteLimitExit({ exchange: rule.exchange, tradingsymbol: rule.tradingsymbol, qty: rule.qty, product: rule.product, side: rule.exit_side });
+    const result = await closePositionBySymbol(rule.tradingsymbol);
     if (result.ok) {
       db.prepare("UPDATE exit_rules SET status='TRIGGERED', detail=? WHERE id=?").run(`${reason} | exit order ${result.orderId}`, rule.id);
       console.log(`[ExitWatcher] EXITED ${rule.tradingsymbol}: ${reason} (order ${result.orderId})`);
@@ -293,6 +317,19 @@ connectTicker();
   });
 
   // ===== Auto-Exit Rules API =====
+  app.post('/api/exit-position', async (req, res) => {
+    try {
+      const { tradingsymbol } = req.body || {};
+      if (!tradingsymbol) return res.status(400).json({ success: false, error: 'Missing tradingsymbol' });
+      const result = await closePositionBySymbol(tradingsymbol);
+      if (result.ok) return res.json({ success: true, orderId: result.orderId });
+      return res.json({ success: false, error: result.error }); // business error, not a crash
+    } catch (e: any) {
+      console.error('[exit-position]', e);
+      return res.status(500).json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
   app.post('/api/exit-rules', (req, res) => {
     try {
       const { tradingsymbol, exchange, qty, product, positionSide, spotLower, spotUpper, spotMode, rsiLower, rsiUpper, timeframe } = req.body;
@@ -309,8 +346,9 @@ connectTicker();
       const kc = getKiteClient();
       // @ts-ignore
       const armed = !!(kc && kc.access_token);
-      return res.json({ success: true, id: info.lastInsertRowid, armed });
+      return res.json({ success: true, id: Number(info.lastInsertRowid), armed });
     } catch (e: any) {
+      console.error('[exit-rules POST]', e);
       return res.status(500).json({ success: false, error: e?.message || String(e) });
     }
   });
