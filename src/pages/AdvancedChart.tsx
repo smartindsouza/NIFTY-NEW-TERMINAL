@@ -5369,6 +5369,25 @@ export function AdvancedChart() {
               LIVE TICK: {lastTickMessage}
              </span>
           )}
+          {oiData && oiData.strikes && (() => {
+            let ceChg = 0, peChg = 0;
+            oiData.strikes.forEach((s: number) => {
+              ceChg += oiData.ceData?.[s]?.chgOi || 0;
+              peChg += oiData.peData?.[s]?.chgOi || 0;
+            });
+            const net = peChg - ceChg; // puts adding (support/bullish) minus calls adding (resistance/bearish)
+            const total = Math.abs(ceChg) + Math.abs(peChg);
+            const strength = total > 0 ? Math.abs(net) / total : 0;
+            let label = 'NEUTRAL', color = 'bg-slate-500/20 text-slate-300', detail = 'balanced OI flow';
+            if (strength > 0.15 && net > 0) { label = 'BULLISH'; color = 'bg-emerald-500/20 text-emerald-400'; detail = 'puts writing faster than calls (support building)'; }
+            else if (strength > 0.15 && net < 0) { label = 'BEARISH'; color = 'bg-rose-500/20 text-rose-400'; detail = 'calls writing faster than puts (resistance building)'; }
+            return (
+              <span className={`px-3 py-1 rounded-md text-xs font-mono font-bold whitespace-nowrap ${color}`}
+                title={`OI-change flow heuristic: ${detail}. Net Put−Call OI change: ${net.toFixed(2)}L. Read alongside price.`}>
+                OI BIAS: {label}
+              </span>
+            );
+          })()}
           {wsError && (
              <span className="bg-red-500/20 text-red-400 px-3 py-1 rounded-md text-xs font-mono font-bold animate-pulse whitespace-nowrap">
               WS ERROR: {wsError}
