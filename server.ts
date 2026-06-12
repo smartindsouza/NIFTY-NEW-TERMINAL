@@ -366,6 +366,28 @@ connectTicker();
   });
 
   // ===== Auto-Exit Rules API =====
+  // Live position data straight from Kite — real avg fill price, real LTP, Zerodha's own P&L
+  app.get('/api/positions-live', async (_req, res) => {
+    try {
+      const kc = getKiteClient();
+      // @ts-ignore
+      if (!kc || !kc.access_token) return res.json({ success: false, error: 'No active Kite session' });
+      const positions = await kc.getPositions();
+      const net = (positions && positions.net) || [];
+      const out = net.map((p: any) => ({
+        tradingsymbol: p.tradingsymbol,
+        quantity: p.quantity,
+        product: p.product,
+        average_price: p.average_price,
+        last_price: p.last_price,
+        pnl: p.pnl,
+      }));
+      return res.json({ success: true, positions: out });
+    } catch (e: any) {
+      return res.json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
   app.post('/api/exit-position', express.json(), async (req, res) => {
     try {
       const { tradingsymbol } = req.body || {};
