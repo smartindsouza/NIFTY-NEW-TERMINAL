@@ -1710,15 +1710,8 @@ function HLevelsEditorModal({
 
         <div className="p-4 space-y-4 max-h-[60vh] overflow-y-auto">
           {spotPrice && spotPrice > 0 ? (
-            <div className="flex items-center justify-between bg-card/40 border border-0 rounded p-2 text-xs">
+            <div className="flex items-center bg-card/40 border border-0 rounded p-2 text-xs">
               <span className="text-muted-foreground font-sans">Spot price: <span className="font-mono text-foreground/90 font-medium">{spotPrice.toFixed(2)}</span></span>
-              <button 
-                onClick={autoAlign}
-                className="px-2 py-1 bg-cyan-600 hover:bg-cyan-500 hover:text-foreground rounded text-foreground text-[11px] font-medium transition-colors font-sans"
-                title="Automatically calculate levels centered around current price"
-              >
-                Auto-align to Spot
-              </button>
             </div>
           ) : null}
 
@@ -1799,7 +1792,7 @@ function HLevelsEditorModal({
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground uppercase font-sans">GREEN OUTER</label>
+                  <label className="text-[10px] text-muted-foreground uppercase font-sans">GREEN INNER</label>
                   <input
                     type="number"
                     step="1"
@@ -1811,7 +1804,7 @@ function HLevelsEditorModal({
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground uppercase font-sans">GREEN INNER</label>
+                  <label className="text-[10px] text-muted-foreground uppercase font-sans">GREEN OUTER</label>
                   <input
                     type="number"
                     step="1"
@@ -5065,7 +5058,7 @@ export function AdvancedChart() {
               // H Levels — drawn here (line + pill) so RED OUTER / RED INNER / TRAP UPPER / TRAP LOWER / GREEN OUTER / GREEN INNER text shows on the chart
               if (showHLevels && hLevels) {
                  const hColors = ['#ef4444', '#ef4444', '#fbbf24', '#fbbf24', '#22c55e', '#22c55e'];
-                 const hTexts = ['RED OUTER', 'RED INNER', 'TRAP UPPER', 'TRAP LOWER', 'GREEN OUTER', 'GREEN INNER'];
+                 const hTexts = ['RED OUTER', 'RED INNER', 'TRAP UPPER', 'TRAP LOWER', 'GREEN INNER', 'GREEN OUTER'];
                  const hDash = hLevelsStyle === 1 ? [5, 5] : hLevelsStyle === 2 ? [2, 4] : [];
                  hLevels.forEach((lvl, idx) => {
                    if (lvl && lvl > 0) {
