@@ -4,6 +4,7 @@ import { generateSimulatedChain } from './simulate_data';
 
 const KITE_DATA_DIR = process.env.KITE_DATA_DIR || '.';
 const db = new Database(`${KITE_DATA_DIR}/kite_session.db`);
+try { db.pragma('busy_timeout = 5000'); } catch (e) { console.error('DB pragma error', e); }
 db.pragma('journal_mode = WAL');
 
 db.prepare(`
