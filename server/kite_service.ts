@@ -294,7 +294,7 @@ export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot
                 strikePrice: strike,
                 type: 'CE',
                 ltp: q.last_price,
-                chgLtp: q.net_change !== undefined ? q.net_change : (q.last_price - (q.ohlc?.close || q.last_price)),
+                chgLtp: ((q.net_change !== undefined && q.net_change !== 0) ? q.net_change : ((q.ohlc && q.ohlc.close > 0) ? (q.last_price - q.ohlc.close) : 0)),
                 oi: q.oi / 100000, // in lakhs
                 chgOi: (q.oi - prevOi) / 100000, 
                 volume: q.volume,
@@ -317,7 +317,7 @@ export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot
                 strikePrice: strike,
                 type: 'PE',
                 ltp: q.last_price,
-                chgLtp: q.net_change !== undefined ? q.net_change : (q.last_price - (q.ohlc?.close || q.last_price)),
+                chgLtp: ((q.net_change !== undefined && q.net_change !== 0) ? q.net_change : ((q.ohlc && q.ohlc.close > 0) ? (q.last_price - q.ohlc.close) : 0)),
                 oi: q.oi / 100000,
                 chgOi: (q.oi - prevOi) / 100000,
                 volume: q.volume,
