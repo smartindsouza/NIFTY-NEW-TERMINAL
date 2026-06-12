@@ -172,33 +172,31 @@ export function ActivePositions() {
       return next;
     });
 
-    const oppositeAction = pos.side === "BUY" ? "SELL" : "BUY";
     const toastId = toast.loading(`Exiting position ${pos.symbol}...`, {
-      description: `Selling matches: Placing ${oppositeAction} for ${pos.qty} qty`
+      description: `Closing ${pos.qty} qty of ${pos.symbol}`
     });
 
     try {
-      // 1. Send the exit counter-order to /api/orders
-      const response = await fetch("/api/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: oppositeAction,
-          tradingsymbol: pos.symbol,
-          quantity: pos.qty,
-          product: "MIS", // Standard Intraday
-          orderType: "MARKET",
-          test_mode: !!pos.testMode
-        })
-      });
-
-      const result = await response.json();
-
-      if (!response.ok || !result.success) {
-         console.warn("Exit order mocked or failed, proceeding with local close", result);
+      // For real positions, close the ACTUAL Zerodha position: the server reads its real
+      // product / quantity / side and places a matching closing order. Only clear the card if it works.
+      if (!pos.testMode) {
+        const response = await fetch("/api/exit-position", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tradingsymbol: pos.symbol })
+        });
+        const result = await response.json().catch(() => ({ success: false, error: "Bad response from server" }));
+        if (!result.success) {
+          toast.error("Could not exit position", {
+            id: toastId,
+            description: (result.error || "The order was rejected.") + " Your position is still OPEN — please check Zerodha."
+          });
+          setExitingIds((prev) => { const next = new Set(prev); next.delete(pos.id); return next; });
+          return; // keep the card — the position is still live
+        }
       }
 
-      // Calculate final P&L
+      // Success (or test-mode): compute P&L for the local ledger
       const finalPrice = lastPrices[pos.id]?.price || pos.currentPrice || pos.entryPrice;
       const pnl = pos.side === "BUY"
         ? (finalPrice - pos.entryPrice) * pos.qty
@@ -209,17 +207,17 @@ export function ActivePositions() {
         currency: "INR"
       }).format(pnl);
 
-      toast.success(`Position Closed Successfully!`, {
+      toast.success(`Exit order placed for ${pos.symbol}`, {
         id: toastId,
-        description: `Exited ${pos.symbol} at ₹${finalPrice.toFixed(2)}. Realized P&L: ${pnl >= 0 ? "+" : ""}${formattedPnl}`
+        description: `Closing at ~₹${finalPrice.toFixed(2)}. Realized P&L: ${pnl >= 0 ? "+" : ""}${formattedPnl}`
       });
 
-      // 2. Remove from active positions and save remaining
+      // Remove from active positions and save remaining
       const currentActive = JSON.parse(localStorage.getItem("active_positions") || "[]");
       const filtered = currentActive.filter((item: any) => item.id !== pos.id);
       localStorage.setItem("active_positions", JSON.stringify(filtered));
 
-      // Append to local ledger / reports if desired so it reflects in the app session
+      // Append to local ledger / reports so it reflects in the app session
       try {
         const closedHistory = JSON.parse(localStorage.getItem("closed_positions_history") || "[]");
         closedHistory.unshift({
