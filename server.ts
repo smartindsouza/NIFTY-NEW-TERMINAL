@@ -104,7 +104,7 @@ async function placeKiteLimitExit(opts: { exchange: string; tradingsymbol: strin
 // Closes the ACTUAL open position for a symbol: reads its real product, quantity and
 // direction from Kite and places a matching closing order. This guarantees the order
 // flattens the position (no product mismatch, no accidental new short).
-async function closePositionBySymbol(tradingsymbol: string): Promise<{ ok: boolean; orderId?: string; error?: string }> {
+async function closePositionBySymbol(tradingsymbol: string): Promise<{ ok: boolean; orderId?: string; error?: string; alreadyClosed?: boolean }> {
   try {
     const kc = getKiteClient();
     // @ts-ignore
@@ -113,7 +113,7 @@ async function closePositionBySymbol(tradingsymbol: string): Promise<{ ok: boole
     try { positions = await kc.getPositions(); } catch (e: any) { return { ok: false, error: 'Could not read positions: ' + (e?.message || e) }; }
     const net = (positions && positions.net) || [];
     const pos = net.find((p: any) => p.tradingsymbol === tradingsymbol && p.quantity !== 0);
-    if (!pos) return { ok: false, error: `No open position found for ${tradingsymbol} on Zerodha (it may already be closed).` };
+    if (!pos) return { ok: false, alreadyClosed: true, error: `No open position found for ${tradingsymbol} on Zerodha (it may already be closed).` };
     const qty = Math.abs(pos.quantity);
     const side = pos.quantity > 0 ? 'SELL' : 'BUY'; // long -> sell to close; short -> buy to close
     return await placeKiteLimitExit({ exchange: pos.exchange || 'NFO', tradingsymbol, qty, product: pos.product || 'NRML', side });
@@ -182,6 +182,7 @@ async function startServer() {
   }, 30000);
 
 let latestSpot = 22000;
+let lastRealSpotTickAt = 0; // ms timestamp of the last REAL spot tick (for watcher safety)
 let latestChainData: any = null;
 let latestAnalytics: any = null;
 
@@ -226,6 +227,7 @@ function connectTicker() {
   startTicker(apiKey, token, (tick) => {
     if (tick.token === 256265) {
       latestSpot = tick.ltp;
+      lastRealSpotTickAt = Date.now();
       const ts = Math.floor(Date.now() / 1000);
       broadcast({ type: 'tick', symbol: 'NSE:NIFTY 50', price: tick.ltp, timestamp: ts,
         candle: { time: ts, open: tick.ltp, high: tick.ltp, low: tick.ltp, close: tick.ltp } });
@@ -249,6 +251,9 @@ connectTicker();
     if (result.ok) {
       db.prepare("UPDATE exit_rules SET status='TRIGGERED', detail=? WHERE id=?").run(`${reason} | exit order ${result.orderId}`, rule.id);
       console.log(`[ExitWatcher] EXITED ${rule.tradingsymbol}: ${reason} (order ${result.orderId})`);
+    } else if (result.alreadyClosed) {
+      db.prepare("UPDATE exit_rules SET status='CANCELLED', detail=? WHERE id=?").run(`${reason} | position already closed, rule auto-cancelled`, rule.id);
+      console.log(`[ExitWatcher] Rule auto-cancelled (already closed): ${rule.tradingsymbol}`);
     } else {
       db.prepare("UPDATE exit_rules SET status='ERROR', detail=? WHERE id=?").run(`${reason} | FAILED: ${result.error}`, rule.id);
       console.error(`[ExitWatcher] EXIT FAILED ${rule.tradingsymbol}: ${result.error}`);
@@ -258,7 +263,9 @@ connectTicker();
   // Fast loop (2s): live spot TOUCH triggers
   setInterval(async () => {
     try {
+      if (!isNSEMarketOpen()) return; // only act during live market hours
       if (!latestSpot || latestSpot <= 0) return;
+      if (Date.now() - lastRealSpotTickAt > 30000) return; // require a fresh real tick (no stale/sim spot)
       const rules = db.prepare("SELECT * FROM exit_rules WHERE status='ACTIVE' AND spot_mode='TOUCH'").all() as any[];
       for (const r of rules) {
         let hit = '';
@@ -272,6 +279,7 @@ connectTicker();
   // Slow loop (15s): candle-close triggers — spot CLOSE mode + RSI — only on a newly-closed candle
   setInterval(async () => {
     try {
+      if (!isNSEMarketOpen()) return; // only act during live market hours
       const rules = db.prepare("SELECT * FROM exit_rules WHERE status='ACTIVE' AND (spot_mode='CLOSE' OR rsi_lower IS NOT NULL OR rsi_upper IS NOT NULL)").all() as any[];
       if (!rules.length) return;
       const timeframes = Array.from(new Set(rules.map(r => String(r.timeframe || '5'))));
@@ -323,7 +331,7 @@ connectTicker();
       if (!tradingsymbol) return res.status(400).json({ success: false, error: 'Missing tradingsymbol' });
       const result = await closePositionBySymbol(tradingsymbol);
       if (result.ok) return res.json({ success: true, orderId: result.orderId });
-      return res.json({ success: false, error: result.error }); // business error, not a crash
+      return res.json({ success: false, error: result.error, alreadyClosed: !!result.alreadyClosed });
     } catch (e: any) {
       console.error('[exit-position]', e);
       return res.status(500).json({ success: false, error: e?.message || String(e) });
