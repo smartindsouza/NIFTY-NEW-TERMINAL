@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { X, RefreshCw, Sparkles, TrendingUp, TrendingDown, Shield } from "lucide-react";
 import { toast } from "sonner";
 
@@ -13,6 +13,8 @@ export interface ActiveTrade {
   strike?: number;
   timestamp: string;
   testMode?: boolean;
+  kitePnl?: number;   // Zerodha's own P&L for this position (matches the Kite app exactly)
+  product?: string;
 }
 
 export function ActivePositions() {
@@ -81,6 +83,8 @@ export function ActivePositions() {
   };
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
   const [lastPrices, setLastPrices] = useState<Record<string, { price: number; dir: "up" | "down" | "flat" }>>({});
+  const lastPricesRef = useRef<Record<string, { price: number; dir: "up" | "down" | "flat" }>>({});
+  useEffect(() => { lastPricesRef.current = lastPrices; }, [lastPrices]);
 
   // Fetch active positions from localStorage
   const loadPositions = () => {
@@ -121,44 +125,78 @@ export function ActivePositions() {
     };
   }, []);
 
-  // Price ticks simulation for the option contracts
+  // Live prices: poll REAL Kite position data (avg fill, LTP, Zerodha P&L).
+  // Test-mode positions keep a small simulation; real positions never use fake ticks.
   useEffect(() => {
     if (positions.length === 0) return;
 
-    const timer = setInterval(() => {
-      setPositions((prevPositions) => {
-        const updated = prevPositions.map((pos) => {
-          // Exiting positions don't tick
-          if (exitingIds.has(pos.id)) return pos;
+    const pollReal = async () => {
+      const hasReal = positions.some(p => !p.testMode);
+      if (!hasReal) return;
+      try {
+        const res = await fetch('/api/positions-live');
+        const data = await res.json();
+        if (!data?.success || !Array.isArray(data.positions)) return;
+        const bySymbol: Record<string, any> = {};
+        data.positions.forEach((kp: any) => { bySymbol[kp.tradingsymbol] = kp; });
 
-          // Introduce a small random walk to simulate live option price fluctuations (±0.4%)
+        setPositions((prevPositions) => {
+          let changed = false;
+          const updated = prevPositions.map((pos) => {
+            if (pos.testMode || exitingIds.has(pos.id)) return pos;
+            const kp = bySymbol[pos.symbol];
+            if (!kp) return pos;
+            const next: any = { ...pos };
+            // Reconcile entry to the ACTUAL average fill price from Zerodha
+            if (kp.average_price > 0 && Math.abs((pos.entryPrice || 0) - kp.average_price) > 0.009) {
+              next.entryPrice = kp.average_price;
+              changed = true;
+            }
+            if (kp.last_price > 0 && kp.last_price !== pos.currentPrice) {
+              next.currentPrice = kp.last_price;
+              changed = true;
+            }
+            if (typeof kp.pnl === 'number' && kp.pnl !== (pos as any).kitePnl) {
+              next.kitePnl = kp.pnl;
+              changed = true;
+            }
+            const prevLtp = lastPricesRef.current[pos.id]?.price || pos.entryPrice;
+            const dir: "up" | "down" | "flat" = kp.last_price > prevLtp ? "up" : kp.last_price < prevLtp ? "down" : "flat";
+            setLastPrices((prev) => ({ ...prev, [pos.id]: { price: kp.last_price || prevLtp, dir } }));
+            return next;
+          });
+          if (changed) localStorage.setItem("active_positions", JSON.stringify(updated));
+          return changed ? updated : prevPositions;
+        });
+      } catch { /* keep last real values; never fall back to simulation */ }
+    };
+
+    pollReal();
+    const realTimer = setInterval(pollReal, 3000);
+
+    // Simulation strictly for test-mode cards
+    const simTimer = setInterval(() => {
+      setPositions((prevPositions) => {
+        const anyTest = prevPositions.some(p => p.testMode && !exitingIds.has(p.id));
+        if (!anyTest) return prevPositions;
+        const updated = prevPositions.map((pos) => {
+          if (!pos.testMode || exitingIds.has(pos.id)) return pos;
           const current = pos.currentPrice || pos.entryPrice;
           const fluctuationPercent = (Math.random() * 0.8 - 0.4) / 100;
           const delta = current * fluctuationPercent;
           const nextPrice = parseFloat(Math.max(0.5, current + delta).toFixed(2));
-
           let dir: "up" | "down" | "flat" = "flat";
           if (nextPrice > current) dir = "up";
           else if (nextPrice < current) dir = "down";
-
-          setLastPrices((prev) => ({
-            ...prev,
-            [pos.id]: { price: nextPrice, dir }
-          }));
-
-          return {
-            ...pos,
-            currentPrice: nextPrice
-          };
+          setLastPrices((prev) => ({ ...prev, [pos.id]: { price: nextPrice, dir } }));
+          return { ...pos, currentPrice: nextPrice };
         });
-
-        // Persist the fluctuation
         localStorage.setItem("active_positions", JSON.stringify(updated));
         return updated;
       });
     }, 2000);
 
-    return () => clearInterval(timer);
+    return () => { clearInterval(realTimer); clearInterval(simTimer); };
   }, [positions.length, exitingIds]);
 
   // One-click exit function
@@ -200,9 +238,10 @@ export function ActivePositions() {
 
       // Exit order placed, or Zerodha confirms it's already closed — clear the card either way.
       const finalPrice = lastPrices[pos.id]?.price || pos.currentPrice || pos.entryPrice;
-      const pnl = pos.side === "BUY"
+      const computedExitPnl = pos.side === "BUY"
         ? (finalPrice - pos.entryPrice) * pos.qty
         : (pos.entryPrice - finalPrice) * pos.qty;
+      const pnl = (!pos.testMode && typeof pos.kitePnl === 'number') ? pos.kitePnl : computedExitPnl;
 
       const formattedPnl = new Intl.NumberFormat("en-IN", {
         style: "currency",
@@ -285,10 +324,12 @@ export function ActivePositions() {
           const ltp = ltpInfo.price;
           const dir = ltpInfo.dir;
 
-          // Calculate cumulative runtime performance
-          const pnl = pos.side === "BUY"
+          // P&L: for real positions, use Zerodha's own number (matches the Kite app exactly);
+          // computed fallback for test-mode or before the first poll lands
+          const computedPnl = pos.side === "BUY"
             ? (ltp - pos.entryPrice) * pos.qty
             : (pos.entryPrice - ltp) * pos.qty;
+          const pnl = (!pos.testMode && typeof pos.kitePnl === 'number') ? pos.kitePnl : computedPnl;
           const isProfit = pnl >= 0;
 
           // Fancy class for pricing flashes
