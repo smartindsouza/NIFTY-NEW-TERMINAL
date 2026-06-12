@@ -179,6 +179,7 @@ export function ActivePositions() {
     try {
       // For real positions, close the ACTUAL Zerodha position: the server reads its real
       // product / quantity / side and places a matching closing order. Only clear the card if it works.
+      let alreadyClosed = false;
       if (!pos.testMode) {
         const response = await fetch("/api/exit-position", {
           method: "POST",
@@ -186,7 +187,7 @@ export function ActivePositions() {
           body: JSON.stringify({ tradingsymbol: pos.symbol })
         });
         const result = await response.json().catch(() => ({ success: false, error: "Bad response from server" }));
-        if (!result.success) {
+        if (!result.success && !result.alreadyClosed) {
           toast.error("Could not exit position", {
             id: toastId,
             description: (result.error || "The order was rejected.") + " Your position is still OPEN — please check Zerodha."
@@ -194,9 +195,10 @@ export function ActivePositions() {
           setExitingIds((prev) => { const next = new Set(prev); next.delete(pos.id); return next; });
           return; // keep the card — the position is still live
         }
+        alreadyClosed = !!result.alreadyClosed;
       }
 
-      // Success (or test-mode): compute P&L for the local ledger
+      // Exit order placed, or Zerodha confirms it's already closed — clear the card either way.
       const finalPrice = lastPrices[pos.id]?.price || pos.currentPrice || pos.entryPrice;
       const pnl = pos.side === "BUY"
         ? (finalPrice - pos.entryPrice) * pos.qty
@@ -207,10 +209,14 @@ export function ActivePositions() {
         currency: "INR"
       }).format(pnl);
 
-      toast.success(`Exit order placed for ${pos.symbol}`, {
-        id: toastId,
-        description: `Closing at ~₹${finalPrice.toFixed(2)}. Realized P&L: ${pnl >= 0 ? "+" : ""}${formattedPnl}`
-      });
+      if (alreadyClosed) {
+        toast.success(`${pos.symbol} was already closed — cleared it.`, { id: toastId });
+      } else {
+        toast.success(`Exit order placed for ${pos.symbol}`, {
+          id: toastId,
+          description: `Closing at ~₹${finalPrice.toFixed(2)}. Realized P&L: ${pnl >= 0 ? "+" : ""}${formattedPnl}`
+        });
+      }
 
       // Remove from active positions and save remaining
       const currentActive = JSON.parse(localStorage.getItem("active_positions") || "[]");
