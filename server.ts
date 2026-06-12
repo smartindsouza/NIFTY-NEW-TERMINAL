@@ -317,7 +317,7 @@ connectTicker();
   });
 
   // ===== Auto-Exit Rules API =====
-  app.post('/api/exit-position', async (req, res) => {
+  app.post('/api/exit-position', express.json(), async (req, res) => {
     try {
       const { tradingsymbol } = req.body || {};
       if (!tradingsymbol) return res.status(400).json({ success: false, error: 'Missing tradingsymbol' });
@@ -330,7 +330,7 @@ connectTicker();
     }
   });
 
-  app.post('/api/exit-rules', (req, res) => {
+  app.post('/api/exit-rules', express.json(), (req, res) => {
     try {
       const { tradingsymbol, exchange, qty, product, positionSide, spotLower, spotUpper, spotMode, rsiLower, rsiUpper, timeframe } = req.body;
       if (!tradingsymbol || !qty) return res.status(400).json({ success: false, error: 'Missing tradingsymbol or qty' });
