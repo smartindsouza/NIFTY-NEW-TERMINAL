@@ -58,6 +58,18 @@ db.prepare(`
   )
 `).run();
 
+// Migration: add trailing-stop columns if they don't exist yet
+for (const [col, def] of ([
+  ['trail_enabled', 'INTEGER DEFAULT 0'],
+  ['trail_candles', 'INTEGER DEFAULT 3'],
+  ['target_price', 'REAL'],
+  ['trail_dir', 'TEXT'],
+  ['trail_active', 'INTEGER DEFAULT 0'],
+  ['trail_stop', 'REAL'],
+] as [string, string][])) {
+  try { db.prepare(`ALTER TABLE exit_rules ADD COLUMN ${col} ${def}`).run(); } catch (e) { /* column already exists */ }
+}
+
 function getTodayAccessToken(): string | null {
   try {
     const today = new Date().toISOString().split('T')[0];
@@ -280,7 +292,7 @@ connectTicker();
   setInterval(async () => {
     try {
       if (!isNSEMarketOpen()) return; // only act during live market hours
-      const rules = db.prepare("SELECT * FROM exit_rules WHERE status='ACTIVE' AND (spot_mode='CLOSE' OR rsi_lower IS NOT NULL OR rsi_upper IS NOT NULL)").all() as any[];
+      const rules = db.prepare("SELECT * FROM exit_rules WHERE status='ACTIVE' AND (spot_mode='CLOSE' OR rsi_lower IS NOT NULL OR rsi_upper IS NOT NULL OR trail_enabled=1)").all() as any[];
       if (!rules.length) return;
       const timeframes = Array.from(new Set(rules.map(r => String(r.timeframe || '5'))));
       for (const tf of timeframes) {
@@ -303,6 +315,35 @@ connectTicker();
           if (!hit && typeof closeRsi === 'number') {
             if (r.rsi_lower && closeRsi <= r.rsi_lower) hit = `RSI ${closeRsi.toFixed(1)} reached ${r.rsi_lower} on close`;
             else if (r.rsi_upper && closeRsi >= r.rsi_upper) hit = `RSI ${closeRsi.toFixed(1)} reached ${r.rsi_upper} on close`;
+          }
+          // Trailing stop-loss (3-candle, candle-close basis): activates once target is achieved, then trails
+          if (!hit && r.trail_enabled && r.trail_dir) {
+            const N = r.trail_candles || 3;
+            const window = candles.slice(Math.max(0, candles.length - 1 - N), candles.length - 1); // last N closed candles
+            const lows = window.map((c: any) => c.low).filter((x: any) => typeof x === 'number');
+            const highs = window.map((c: any) => c.high).filter((x: any) => typeof x === 'number');
+            const lowestLow = lows.length ? Math.min(...lows) : null;
+            const highestHigh = highs.length ? Math.max(...highs) : null;
+            if (!r.trail_active) {
+              // Not trailing yet — has the target been achieved on this close?
+              const targetHit = r.target_price && ((r.trail_dir === 'LONG' && closePrice >= r.target_price) || (r.trail_dir === 'SHORT' && closePrice <= r.target_price));
+              if (targetHit) {
+                const initStop = r.trail_dir === 'LONG' ? lowestLow : highestHigh;
+                if (initStop !== null) {
+                  db.prepare("UPDATE exit_rules SET trail_active=1, trail_stop=? WHERE id=?").run(initStop, r.id);
+                  r.trail_active = 1; r.trail_stop = initStop;
+                  console.log(`[ExitWatcher] Trailing activated for ${r.tradingsymbol}: target ${r.target_price} reached, initial 3-candle trail = ${initStop}`);
+                }
+              }
+            } else {
+              // Trailing live — ratchet the stop in the favourable direction only
+              let newStop = r.trail_stop;
+              if (r.trail_dir === 'LONG' && lowestLow !== null) newStop = Math.max(r.trail_stop, lowestLow);
+              if (r.trail_dir === 'SHORT' && highestHigh !== null) newStop = Math.min(r.trail_stop, highestHigh);
+              if (newStop !== r.trail_stop) { db.prepare("UPDATE exit_rules SET trail_stop=? WHERE id=?").run(newStop, r.id); r.trail_stop = newStop; }
+              if (r.trail_dir === 'LONG' && closePrice < r.trail_stop) hit = `Trailing stop: closed ${closePrice} below ${N}-candle trail ${r.trail_stop}`;
+              if (r.trail_dir === 'SHORT' && closePrice > r.trail_stop) hit = `Trailing stop: closed ${closePrice} above ${N}-candle trail ${r.trail_stop}`;
+            }
           }
           if (hit) await triggerRuleExit(r, hit);
         }
@@ -342,14 +383,16 @@ connectTicker();
     try {
       const { tradingsymbol, exchange, qty, product, positionSide, spotLower, spotUpper, spotMode, rsiLower, rsiUpper, timeframe } = req.body;
       if (!tradingsymbol || !qty) return res.status(400).json({ success: false, error: 'Missing tradingsymbol or qty' });
+      const { trailEnabled, trailCandles, targetPrice, trailDir } = req.body || {};
       const exitSide = String(positionSide).toUpperCase() === 'BUY' ? 'SELL' : 'BUY';
       db.prepare("UPDATE exit_rules SET status='CANCELLED' WHERE tradingsymbol=? AND status='ACTIVE'").run(tradingsymbol);
       const info = db.prepare(`INSERT INTO exit_rules
-        (tradingsymbol, exchange, qty, product, exit_side, spot_lower, spot_upper, spot_mode, rsi_lower, rsi_upper, timeframe, underlying_token, status, detail, created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'ACTIVE', '', ?)`).run(
+        (tradingsymbol, exchange, qty, product, exit_side, spot_lower, spot_upper, spot_mode, rsi_lower, rsi_upper, timeframe, underlying_token, status, detail, created_at, trail_enabled, trail_candles, target_price, trail_dir, trail_active, trail_stop)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'ACTIVE', '', ?, ?,?,?,?, 0, NULL)`).run(
           tradingsymbol, exchange || 'NFO', parseInt(qty, 10), product || 'MIS', exitSide,
           spotLower || null, spotUpper || null, (spotMode === 'CLOSE' ? 'CLOSE' : 'TOUCH'),
-          rsiLower || null, rsiUpper || null, String(timeframe || '5'), '256265', Math.floor(Date.now() / 1000)
+          rsiLower || null, rsiUpper || null, String(timeframe || '5'), '256265', Math.floor(Date.now() / 1000),
+          trailEnabled ? 1 : 0, parseInt(trailCandles, 10) || 3, targetPrice || null, (trailDir === 'SHORT' ? 'SHORT' : (trailDir === 'LONG' ? 'LONG' : null))
         );
       const kc = getKiteClient();
       // @ts-ignore
