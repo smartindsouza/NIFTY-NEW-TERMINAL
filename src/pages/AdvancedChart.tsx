@@ -3285,13 +3285,34 @@ export function AdvancedChart() {
   const manualLinesRef = useRef<any[]>([]);
   const pdhPdlLinesRef = useRef<{ pdh: any; pdl: any } | null>(null);
   const isHoveringButtonRef = useRef(false);
-  const draggingLineRef = useRef<{ id: number, startY: number, dragged: boolean } | null>(null);
+  const draggingLineRef = useRef<{ id: number, startY: number, dragged: boolean, sl?: 'upper' | 'lower' } | null>(null);
+
+  // ===== Phase 2: draggable SL/Target lines feeding the server-side auto-exit watcher =====
+  const slLinesRef = useRef<{ kind: 'upper' | 'lower', price: number, instance: any }[]>([]);
+  const [slActivePos, setSlActivePos] = useState<any>(null);
+  const [slLevels, setSlLevels] = useState<{ upper: number | null, lower: number | null }>({ upper: null, lower: null });
+  const [slMode, setSlMode] = useState<'TOUCH' | 'CLOSE'>('TOUCH');
+  const [slRsiLower, setSlRsiLower] = useState<string>('');
+  const [slRsiUpper, setSlRsiUpper] = useState<string>('');
+  const [slArmedRule, setSlArmedRule] = useState<any>(null);
+  const [slSaving, setSlSaving] = useState(false);
+  const [slPanelOpen, setSlPanelOpen] = useState(false);
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (!chartContainerRef.current || !mainSeriesRef.current || !mainChartRef.current) return;
     const rect = chartContainerRef.current.getBoundingClientRect();
     const y = e.clientY - rect.top;
-    
+
+    // SL/Target lines take priority for dragging
+    for (const sl of slLinesRef.current) {
+        const lineY = mainSeriesRef.current.priceToCoordinate(sl.price);
+        if (lineY !== null && Math.abs(lineY - y) < 15) {
+            draggingLineRef.current = { id: -1, startY: y, dragged: false, sl: sl.kind };
+            mainChartRef.current.applyOptions({ handleScroll: false, handleScale: false });
+            return;
+        }
+    }
+
     let foundLineId = null;
     for (let i = 0; i < manualLinesRef.current.length; i++) {
         const line = manualLinesRef.current[i];
@@ -3318,6 +3339,18 @@ export function AdvancedChart() {
     }
 
     const newPrice = mainSeriesRef.current.coordinateToPrice(y);
+
+    // SL/Target line drag — move the line and update the live readout
+    if (draggingLineRef.current.sl) {
+       if (newPrice !== null) {
+          const kind = draggingLineRef.current.sl;
+          const sl = slLinesRef.current.find(s => s.kind === kind);
+          if (sl) { sl.price = newPrice; sl.instance.applyOptions({ price: newPrice }); }
+          setSlLevels(prev => ({ ...prev, [kind]: Math.round(newPrice) }));
+       }
+       return;
+    }
+
     if (newPrice !== null) {
        const lineObj = manualLinesRef.current.find((l: any) => l.id === draggingLineRef.current!.id);
        if (lineObj) {
@@ -3328,6 +3361,18 @@ export function AdvancedChart() {
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
+    // SL/Target line release — restore scroll and clear (levels already synced during move)
+    if (draggingLineRef.current && draggingLineRef.current.sl) {
+        if (mainChartRef.current) {
+           mainChartRef.current.applyOptions({
+              handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
+              handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true }
+           });
+        }
+        setTimeout(() => { draggingLineRef.current = null; }, 150);
+        return;
+    }
+
     if (draggingLineRef.current && mainChartRef.current) {
         const id = draggingLineRef.current.id;
         const lineObj = manualLinesRef.current.find((l: any) => l.id === id);
@@ -3362,6 +3407,143 @@ export function AdvancedChart() {
         setManualLineIds(prev => [...prev, { id, price, color: '#facc15', lineWidth: 2, axisLabelVisible: true, lineStyle: 0 }]);
         setCrosshairInfo(null);
     }
+  };
+
+  // ===== Phase 2: SL/Target auto-exit lines =====
+
+  // Track the active position (first one); only update state when it actually changes
+  useEffect(() => {
+    const readPos = () => {
+      let next: any = null;
+      try {
+        const raw = localStorage.getItem('active_positions');
+        const arr = raw ? JSON.parse(raw) : [];
+        next = (Array.isArray(arr) && arr.length > 0) ? arr[0] : null;
+      } catch { next = null; }
+      setSlActivePos((prev: any) => {
+        if (!prev && !next) return prev;
+        if (prev && next && prev.symbol === next.symbol && prev.qty === next.qty) return prev;
+        return next;
+      });
+    };
+    readPos();
+    window.addEventListener('active_positions_updated', readPos);
+    window.addEventListener('storage', readPos);
+    const iv = setInterval(readPos, 4000);
+    return () => {
+      window.removeEventListener('active_positions_updated', readPos);
+      window.removeEventListener('storage', readPos);
+      clearInterval(iv);
+    };
+  }, []);
+
+  // Poll the server for an armed auto-exit rule on the active position
+  useEffect(() => {
+    if (!slActivePos) { setSlArmedRule(null); return; }
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/exit-rules');
+        const data = await res.json();
+        if (cancelled) return;
+        const rule = (data?.rules || []).find((r: any) => r.tradingsymbol === slActivePos.symbol && r.status === 'ACTIVE');
+        setSlArmedRule(rule || null);
+      } catch { /* ignore */ }
+    };
+    poll();
+    const iv = setInterval(poll, 5000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [slActivePos]);
+
+  // Create / destroy the two draggable lines for the active position
+  useEffect(() => {
+    if (!slActivePos) { setSlPanelOpen(false); return; }
+    setSlPanelOpen(true);
+    const ensure = () => {
+      const s = mainSeriesRef.current;
+      if (!s || slLinesRef.current.length > 0) return;
+      const cd = chartDataRef.current;
+      const spot = cd?.spot || (cd?.candles?.length ? cd.candles[cd.candles.length - 1].close : 0);
+      if (!spot) return;
+      const upper = (slArmedRule?.spot_upper) || Math.round(spot * 1.01);
+      const lower = (slArmedRule?.spot_lower) || Math.round(spot * 0.99);
+      const uInst = s.createPriceLine({ price: upper, color: '#f43f5e', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: 'EXIT \u25B2' });
+      const lInst = s.createPriceLine({ price: lower, color: '#10b981', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: 'EXIT \u25BC' });
+      slLinesRef.current = [{ kind: 'upper', price: upper, instance: uInst }, { kind: 'lower', price: lower, instance: lInst }];
+      setSlLevels({ upper, lower });
+    };
+    ensure();
+    const iv = setInterval(ensure, 1000);
+    return () => {
+      clearInterval(iv);
+      const s = mainSeriesRef.current;
+      slLinesRef.current.forEach(l => { try { s && s.removePriceLine(l.instance); } catch {} });
+      slLinesRef.current = [];
+    };
+  }, [slActivePos]);
+
+  // When an armed rule is (re)discovered, snap the lines + panel to its values
+  useEffect(() => {
+    if (!slArmedRule || slLinesRef.current.length === 0) return;
+    const u = slLinesRef.current.find(l => l.kind === 'upper');
+    const lo = slLinesRef.current.find(l => l.kind === 'lower');
+    if (u && slArmedRule.spot_upper) { u.price = slArmedRule.spot_upper; try { u.instance.applyOptions({ price: slArmedRule.spot_upper }); } catch {} }
+    if (lo && slArmedRule.spot_lower) { lo.price = slArmedRule.spot_lower; try { lo.instance.applyOptions({ price: slArmedRule.spot_lower }); } catch {} }
+    setSlLevels({ upper: slArmedRule.spot_upper || (u ? u.price : null), lower: slArmedRule.spot_lower || (lo ? lo.price : null) });
+    setSlMode(slArmedRule.spot_mode === 'CLOSE' ? 'CLOSE' : 'TOUCH');
+    setSlRsiLower(slArmedRule.rsi_lower ? String(slArmedRule.rsi_lower) : '');
+    setSlRsiUpper(slArmedRule.rsi_upper ? String(slArmedRule.rsi_upper) : '');
+  }, [slArmedRule?.id]);
+
+  const armSlRule = async () => {
+    if (!slActivePos) return;
+    const upper = slLevels.upper, lower = slLevels.lower;
+    const rl = slRsiLower ? parseFloat(slRsiLower) : null;
+    const ru = slRsiUpper ? parseFloat(slRsiUpper) : null;
+    if (!upper && !lower && !rl && !ru) { toast.error('Set at least one level before arming.'); return; }
+    setSlSaving(true);
+    try {
+      const res = await fetch('/api/exit-rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tradingsymbol: slActivePos.symbol,
+          exchange: 'NFO',
+          qty: slActivePos.qty,
+          product: slActivePos.product || 'NRML',
+          positionSide: slActivePos.side,
+          spotLower: lower || null,
+          spotUpper: upper || null,
+          spotMode: slMode,
+          rsiLower: rl,
+          rsiUpper: ru,
+          timeframe: timeframe || '5',
+        })
+      });
+      const data = await res.json();
+      if (data?.success) {
+        toast.success(`Auto-exit armed for ${slActivePos.symbol}`, {
+          description: `${slMode === 'CLOSE' ? 'On candle close' : 'On touch'} \u00B7 \u25B2${upper || '\u2014'}  \u25BC${lower || '\u2014'}${(rl || ru) ? `  RSI ${rl || '\u2014'}/${ru || '\u2014'}` : ''}`
+        });
+        setSlArmedRule({ id: data.id, tradingsymbol: slActivePos.symbol, spot_upper: upper, spot_lower: lower, spot_mode: slMode, rsi_lower: rl, rsi_upper: ru, status: 'ACTIVE' });
+      } else {
+        toast.error('Could not arm auto-exit', { description: data?.error || 'Unknown error' });
+      }
+    } catch (e: any) {
+      toast.error('Could not arm auto-exit', { description: e?.message || String(e) });
+    } finally { setSlSaving(false); }
+  };
+
+  const cancelSlRule = async () => {
+    if (!slArmedRule?.id) { setSlArmedRule(null); return; }
+    setSlSaving(true);
+    try {
+      await fetch(`/api/exit-rules/${slArmedRule.id}`, { method: 'DELETE' });
+      setSlArmedRule(null);
+      toast.success('Auto-exit cancelled');
+    } catch (e: any) {
+      toast.error('Could not cancel', { description: e?.message || String(e) });
+    } finally { setSlSaving(false); }
   };
 
   const resolveStrikeDetails = async (action: 'BUY' | 'SELL', optionType: 'CE' | 'PE', strikePrice: number, targetExpiry?: string) => {
@@ -5648,6 +5830,47 @@ export function AdvancedChart() {
               >
                 <Plus size={14} />
               </button>
+            )}
+            {slPanelOpen && slActivePos && (
+              <div className="absolute top-3 left-3 z-[70] w-64 bg-card/95 backdrop-blur border border-border rounded-xl shadow-xl p-3 text-xs">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-bold text-foreground">Auto-Exit</span>
+                  {slArmedRule
+                    ? <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold text-[10px]">ARMED</span>
+                    : <span className="px-2 py-0.5 rounded bg-slate-500/20 text-slate-300 font-bold text-[10px]">NOT ARMED</span>}
+                </div>
+                <div className="text-[10px] text-muted-foreground mb-2 truncate">{slActivePos.symbol} · {slActivePos.qty} qty</div>
+
+                <div className="flex items-center justify-between mb-1">
+                  <span className="flex items-center gap-1.5 text-rose-400"><span className="inline-block w-3 h-0.5 bg-rose-400" />Upper exit</span>
+                  <span className="font-mono font-bold text-foreground">{slLevels.upper ?? '—'}</span>
+                </div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="flex items-center gap-1.5 text-emerald-400"><span className="inline-block w-3 h-0.5 bg-emerald-400" />Lower exit</span>
+                  <span className="font-mono font-bold text-foreground">{slLevels.lower ?? '—'}</span>
+                </div>
+                <div className="text-[10px] text-muted-foreground mb-2 leading-tight">Drag the red / green dashed lines on the chart to set levels.</div>
+
+                <div className="flex items-center gap-1 mb-2">
+                  <button onClick={() => setSlMode('TOUCH')} className={`flex-1 py-1 rounded ${slMode === 'TOUCH' ? 'bg-primary text-primary-foreground font-bold' : 'bg-muted text-foreground/70'}`}>On Touch</button>
+                  <button onClick={() => setSlMode('CLOSE')} className={`flex-1 py-1 rounded ${slMode === 'CLOSE' ? 'bg-primary text-primary-foreground font-bold' : 'bg-muted text-foreground/70'}`}>On Candle Close</button>
+                </div>
+
+                <div className="flex items-center gap-1 mb-2">
+                  <input value={slRsiLower} onChange={e => setSlRsiLower(e.target.value)} placeholder="RSI ≤" inputMode="decimal" className="w-1/2 bg-muted rounded px-2 py-1 text-foreground placeholder:text-muted-foreground" />
+                  <input value={slRsiUpper} onChange={e => setSlRsiUpper(e.target.value)} placeholder="RSI ≥" inputMode="decimal" className="w-1/2 bg-muted rounded px-2 py-1 text-foreground placeholder:text-muted-foreground" />
+                </div>
+
+                {slArmedRule ? (
+                  <div className="flex gap-1">
+                    <button disabled={slSaving} onClick={armSlRule} className="flex-1 py-1.5 rounded bg-amber-500/90 hover:bg-amber-500 text-black font-bold disabled:opacity-50">Update</button>
+                    <button disabled={slSaving} onClick={cancelSlRule} className="flex-1 py-1.5 rounded bg-rose-500/90 hover:bg-rose-500 text-white font-bold disabled:opacity-50">Cancel</button>
+                  </div>
+                ) : (
+                  <button disabled={slSaving} onClick={armSlRule} className="w-full py-1.5 rounded bg-emerald-500/90 hover:bg-emerald-500 text-white font-bold disabled:opacity-50">{slSaving ? 'Arming…' : 'Arm Auto-Exit'}</button>
+                )}
+                <div className="text-[9px] text-muted-foreground mt-2 leading-tight">Fires a full-position exit when spot {slMode === 'CLOSE' ? 'closes beyond' : 'touches'} a line{(slRsiLower || slRsiUpper) ? ' or RSI hits your level' : ''}. Watch the first triggers live.</div>
+              </div>
             )}
             <canvas
               ref={overlayCanvasRef}
