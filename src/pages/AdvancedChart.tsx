@@ -5340,11 +5340,13 @@ export function AdvancedChart() {
                  ctx.fill();
                  
                  // Draw the text in the chart's background color
+                 // (smaller font for the text only — pill size above is still measured at 12px)
                  const isDark = document.documentElement.classList.contains('dark');
                  ctx.fillStyle = isDark ? '#0d1117' : '#ffffff';
+                 ctx.font = '10px sans-serif';
                  ctx.fillText(displayText, currentX, label.y);
                  
-                 // Restore font for next inline label
+                 // Restore font for next inline label's measurements
                  ctx.font = '12px sans-serif';
               });
            }
