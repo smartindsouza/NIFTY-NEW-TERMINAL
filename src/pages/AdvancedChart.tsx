@@ -3297,6 +3297,8 @@ export function AdvancedChart() {
   const [slArmedRule, setSlArmedRule] = useState<any>(null);
   const [slSaving, setSlSaving] = useState(false);
   const [slPanelOpen, setSlPanelOpen] = useState(false);
+  const [slTrail, setSlTrail] = useState(false);
+  const [slTrailCandles, setSlTrailCandles] = useState<string>('3');
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (!chartContainerRef.current || !mainSeriesRef.current || !mainChartRef.current) return;
@@ -3487,13 +3489,21 @@ export function AdvancedChart() {
     if (!slArmedRule || slLinesRef.current.length === 0) return;
     const u = slLinesRef.current.find(l => l.kind === 'upper');
     const lo = slLinesRef.current.find(l => l.kind === 'lower');
-    if (u && slArmedRule.spot_upper) { u.price = slArmedRule.spot_upper; try { u.instance.applyOptions({ price: slArmedRule.spot_upper }); } catch {} }
-    if (lo && slArmedRule.spot_lower) { lo.price = slArmedRule.spot_lower; try { lo.instance.applyOptions({ price: slArmedRule.spot_lower }); } catch {} }
-    setSlLevels({ upper: slArmedRule.spot_upper || (u ? u.price : null), lower: slArmedRule.spot_lower || (lo ? lo.price : null) });
+    const isLong = slArmedRule.trail_dir === 'LONG';
+    const isShort = slArmedRule.trail_dir === 'SHORT';
+    const upperVal = slArmedRule.trail_enabled ? (isLong ? slArmedRule.target_price : slArmedRule.spot_upper) : slArmedRule.spot_upper;
+    const lowerVal = slArmedRule.trail_enabled ? (isShort ? slArmedRule.target_price : slArmedRule.spot_lower) : slArmedRule.spot_lower;
+    if (u && upperVal) { u.price = upperVal; try { u.instance.applyOptions({ price: upperVal }); } catch {} }
+    if (lo && lowerVal) { lo.price = lowerVal; try { lo.instance.applyOptions({ price: lowerVal }); } catch {} }
+    setSlLevels({ upper: upperVal || (u ? u.price : null), lower: lowerVal || (lo ? lo.price : null) });
     setSlMode(slArmedRule.spot_mode === 'CLOSE' ? 'CLOSE' : 'TOUCH');
     setSlRsiLower(slArmedRule.rsi_lower ? String(slArmedRule.rsi_lower) : '');
     setSlRsiUpper(slArmedRule.rsi_upper ? String(slArmedRule.rsi_upper) : '');
+    setSlTrail(!!slArmedRule.trail_enabled);
+    setSlTrailCandles(slArmedRule.trail_candles ? String(slArmedRule.trail_candles) : '3');
   }, [slArmedRule?.id]);
+
+  const slIsBullish = slActivePos ? ((slActivePos.side === 'BUY' && slActivePos.optionType === 'CE') || (slActivePos.side === 'SELL' && slActivePos.optionType === 'PE')) : true;
 
   const armSlRule = async () => {
     if (!slActivePos) return;
@@ -3501,6 +3511,18 @@ export function AdvancedChart() {
     const rl = slRsiLower ? parseFloat(slRsiLower) : null;
     const ru = slRsiUpper ? parseFloat(slRsiUpper) : null;
     if (!upper && !lower && !rl && !ru) { toast.error('Set at least one level before arming.'); return; }
+
+    // Trailing maps the two lines to a target (profit side) + an initial stop (loss side)
+    let spotLower: number | null = lower || null;
+    let spotUpper: number | null = upper || null;
+    let trailEnabled = false, trailDir: 'LONG' | 'SHORT' | null = null, targetPrice: number | null = null;
+    if (slTrail) {
+      trailEnabled = true;
+      if (slIsBullish) { trailDir = 'LONG'; targetPrice = upper || null; spotLower = lower || null; spotUpper = null; }
+      else { trailDir = 'SHORT'; targetPrice = lower || null; spotUpper = upper || null; spotLower = null; }
+      if (!targetPrice) { toast.error(`Set the ${slIsBullish ? 'upper' : 'lower'} (target) line before arming a trailing stop.`); return; }
+    }
+
     setSlSaving(true);
     try {
       const res = await fetch('/api/exit-rules', {
@@ -3512,20 +3534,25 @@ export function AdvancedChart() {
           qty: slActivePos.qty,
           product: slActivePos.product || 'NRML',
           positionSide: slActivePos.side,
-          spotLower: lower || null,
-          spotUpper: upper || null,
+          spotLower, spotUpper,
           spotMode: slMode,
           rsiLower: rl,
           rsiUpper: ru,
           timeframe: timeframe || '5',
+          trailEnabled,
+          trailCandles: parseInt(slTrailCandles, 10) || 3,
+          targetPrice,
+          trailDir,
         })
       });
       const data = await res.json();
       if (data?.success) {
         toast.success(`Auto-exit armed for ${slActivePos.symbol}`, {
-          description: `${slMode === 'CLOSE' ? 'On candle close' : 'On touch'} \u00B7 \u25B2${upper || '\u2014'}  \u25BC${lower || '\u2014'}${(rl || ru) ? `  RSI ${rl || '\u2014'}/${ru || '\u2014'}` : ''}`
+          description: trailEnabled
+            ? `${parseInt(slTrailCandles, 10) || 3}-candle trail (on close) after target ${targetPrice}. Initial stop ${(slIsBullish ? lower : upper) || '\u2014'}.`
+            : `${slMode === 'CLOSE' ? 'On candle close' : 'On touch'} \u00B7 \u25B2${upper || '\u2014'}  \u25BC${lower || '\u2014'}${(rl || ru) ? `  RSI ${rl || '\u2014'}/${ru || '\u2014'}` : ''}`
         });
-        setSlArmedRule({ id: data.id, tradingsymbol: slActivePos.symbol, spot_upper: upper, spot_lower: lower, spot_mode: slMode, rsi_lower: rl, rsi_upper: ru, status: 'ACTIVE' });
+        setSlArmedRule({ id: data.id, tradingsymbol: slActivePos.symbol, spot_upper: spotUpper, spot_lower: spotLower, spot_mode: slMode, rsi_lower: rl, rsi_upper: ru, trail_enabled: trailEnabled ? 1 : 0, trail_candles: parseInt(slTrailCandles, 10) || 3, target_price: targetPrice, trail_dir: trailDir, status: 'ACTIVE' });
       } else {
         toast.error('Could not arm auto-exit', { description: data?.error || 'Unknown error' });
       }
@@ -5842,19 +5869,38 @@ export function AdvancedChart() {
                 <div className="text-[10px] text-muted-foreground mb-2 truncate">{slActivePos.symbol} · {slActivePos.qty} qty</div>
 
                 <div className="flex items-center justify-between mb-1">
-                  <span className="flex items-center gap-1.5 text-rose-400"><span className="inline-block w-3 h-0.5 bg-rose-400" />Upper exit</span>
+                  <span className="flex items-center gap-1.5 text-rose-400"><span className="inline-block w-3 h-0.5 bg-rose-400" />{slTrail ? (slIsBullish ? 'Target ▲' : 'Stop ▲') : 'Upper exit'}</span>
                   <span className="font-mono font-bold text-foreground">{slLevels.upper ?? '—'}</span>
                 </div>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="flex items-center gap-1.5 text-emerald-400"><span className="inline-block w-3 h-0.5 bg-emerald-400" />Lower exit</span>
+                  <span className="flex items-center gap-1.5 text-emerald-400"><span className="inline-block w-3 h-0.5 bg-emerald-400" />{slTrail ? (slIsBullish ? 'Stop ▼' : 'Target ▼') : 'Lower exit'}</span>
                   <span className="font-mono font-bold text-foreground">{slLevels.lower ?? '—'}</span>
                 </div>
                 <div className="text-[10px] text-muted-foreground mb-2 leading-tight">Drag the red / green dashed lines on the chart to set levels.</div>
 
-                <div className="flex items-center gap-1 mb-2">
+                <div className="flex items-center justify-between mb-2 p-1.5 rounded bg-muted/50">
+                  <span className="text-foreground/90 font-medium">Trailing SL</span>
+                  <button onClick={() => setSlTrail(v => !v)} className={`relative w-9 h-5 rounded-full transition-colors ${slTrail ? 'bg-emerald-500' : 'bg-slate-600'}`}>
+                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${slTrail ? 'translate-x-4' : ''}`} />
+                  </button>
+                </div>
+                {slTrail && (
+                  <div className="mb-2 p-1.5 rounded bg-muted/30 text-[10px] text-muted-foreground leading-tight">
+                    <div className="flex items-center gap-2 mb-1 text-foreground/90">
+                      <span>Trail</span>
+                      <input value={slTrailCandles} onChange={e => setSlTrailCandles(e.target.value)} inputMode="numeric" className="w-10 bg-muted rounded px-1.5 py-0.5 text-foreground text-center" />
+                      <span>candles · on close</span>
+                    </div>
+                    Once spot {slIsBullish ? 'closes above' : 'closes below'} your <b className="text-foreground">target</b> ({slIsBullish ? 'upper' : 'lower'} line), the stop trails the {slTrailCandles || '3'}-candle {slIsBullish ? 'low' : 'high'} and exits on a close back through it.
+                  </div>
+                )}
+
+                <div className="flex items-center gap-1 mb-1">
                   <button onClick={() => setSlMode('TOUCH')} className={`flex-1 py-1 rounded ${slMode === 'TOUCH' ? 'bg-primary text-primary-foreground font-bold' : 'bg-muted text-foreground/70'}`}>On Touch</button>
                   <button onClick={() => setSlMode('CLOSE')} className={`flex-1 py-1 rounded ${slMode === 'CLOSE' ? 'bg-primary text-primary-foreground font-bold' : 'bg-muted text-foreground/70'}`}>On Candle Close</button>
                 </div>
+                {slTrail && <div className="text-[9px] text-muted-foreground mb-2">(applies to the initial stop · the trail itself is always on close)</div>}
+                {!slTrail && <div className="mb-1" />}
 
                 <div className="flex items-center gap-1 mb-2">
                   <input value={slRsiLower} onChange={e => setSlRsiLower(e.target.value)} placeholder="RSI ≤" inputMode="decimal" className="w-1/2 bg-muted rounded px-2 py-1 text-foreground placeholder:text-muted-foreground" />
@@ -5869,7 +5915,9 @@ export function AdvancedChart() {
                 ) : (
                   <button disabled={slSaving} onClick={armSlRule} className="w-full py-1.5 rounded bg-emerald-500/90 hover:bg-emerald-500 text-white font-bold disabled:opacity-50">{slSaving ? 'Arming…' : 'Arm Auto-Exit'}</button>
                 )}
-                <div className="text-[9px] text-muted-foreground mt-2 leading-tight">Fires a full-position exit when spot {slMode === 'CLOSE' ? 'closes beyond' : 'touches'} a line{(slRsiLower || slRsiUpper) ? ' or RSI hits your level' : ''}. Watch the first triggers live.</div>
+                <div className="text-[9px] text-muted-foreground mt-2 leading-tight">{slTrail
+                  ? `Trails ${slTrailCandles || '3'}-candle stop after target, exits on close. Watch the first triggers live.`
+                  : `Fires a full-position exit when spot ${slMode === 'CLOSE' ? 'closes beyond' : 'touches'} a line${(slRsiLower || slRsiUpper) ? ' or RSI hits your level' : ''}. Watch the first triggers live.`}</div>
               </div>
             )}
             <canvas
