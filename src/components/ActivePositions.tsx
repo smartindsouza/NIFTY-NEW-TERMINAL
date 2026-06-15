@@ -86,6 +86,7 @@ export function ActivePositions() {
   const lastPricesRef = useRef<Record<string, { price: number; dir: "up" | "down" | "flat" }>>({});
   useEffect(() => { lastPricesRef.current = lastPrices; }, [lastPrices]);
   const confirmedOpenRef = useRef<Set<string>>(new Set()); // symbols Kite has confirmed as open this session
+  const [netPnl, setNetPnl] = useState<number | null>(null); // day net P&L: realized today + live unrealized
 
   // Fetch active positions from localStorage
   const loadPositions = () => {
@@ -138,6 +139,7 @@ export function ActivePositions() {
         const res = await fetch('/api/positions-live');
         const data = await res.json();
         if (!data?.success || !Array.isArray(data.positions)) return;
+        if (typeof data.netPnl === 'number') setNetPnl(data.netPnl);
         const bySymbol: Record<string, any> = {};
         data.positions.forEach((kp: any) => { bySymbol[kp.tradingsymbol] = kp; });
 
@@ -339,8 +341,18 @@ export function ActivePositions() {
             <Sparkles className="w-3.5 h-3.5 animate-pulse text-primary" />
           </span>
         </div>
-        <div className="text-[10px] text-emerald-400/60 font-mono">
-          Click "Exit" to place instant reversing MARKET order
+        <div className="flex items-center gap-3">
+          {netPnl !== null && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-sans">Net P&amp;L (today)</span>
+              <span className={`text-sm font-bold font-mono ${netPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {netPnl >= 0 ? '+' : ''}{new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(netPnl)}
+              </span>
+            </div>
+          )}
+          <div className="text-[10px] text-emerald-400/60 font-mono hidden sm:block">
+            Click "Exit" to place instant reversing MARKET order
+          </div>
         </div>
       </div>
 
