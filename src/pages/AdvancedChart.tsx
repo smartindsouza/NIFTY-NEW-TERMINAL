@@ -3289,15 +3289,18 @@ export function AdvancedChart() {
 
   // ===== Phase 2: draggable SL/Target lines feeding the server-side auto-exit watcher =====
   const slLinesRef = useRef<{ kind: 'upper' | 'lower', price: number, instance: any }[]>([]);
+  const chartLevelsRef = useRef<number[]>([]); // all chart levels (H-levels, 50%, PDH/PDL, S/R) for default target
   const [slActivePos, setSlActivePos] = useState<any>(null);
+  const slIsBullish = slActivePos ? ((slActivePos.side === 'BUY' && slActivePos.optionType === 'CE') || (slActivePos.side === 'SELL' && slActivePos.optionType === 'PE')) : true;
   const [slLevels, setSlLevels] = useState<{ upper: number | null, lower: number | null }>({ upper: null, lower: null });
-  const [slMode, setSlMode] = useState<'TOUCH' | 'CLOSE'>('TOUCH');
+  const [slStopMode, setSlStopMode] = useState<'TOUCH' | 'CLOSE'>('CLOSE');
+  const [slTargetMode, setSlTargetMode] = useState<'TOUCH' | 'CLOSE'>('CLOSE');
   const [slRsiLower, setSlRsiLower] = useState<string>('');
   const [slRsiUpper, setSlRsiUpper] = useState<string>('');
   const [slArmedRule, setSlArmedRule] = useState<any>(null);
   const [slSaving, setSlSaving] = useState(false);
   const [slPanelOpen, setSlPanelOpen] = useState(false);
-  const [slTrail, setSlTrail] = useState(false);
+  const [slTrail, setSlTrail] = useState(true);
   const [slTrailCandles, setSlTrailCandles] = useState<string>('3');
 
   const handlePointerDown = (e: React.PointerEvent) => {
@@ -3465,10 +3468,37 @@ export function AdvancedChart() {
       const s = mainSeriesRef.current;
       if (!s || slLinesRef.current.length > 0) return;
       const cd = chartDataRef.current;
-      const spot = cd?.spot || (cd?.candles?.length ? cd.candles[cd.candles.length - 1].close : 0);
+      const candles = cd?.candles || [];
+      const spot = cd?.spot || (candles.length ? candles[candles.length - 1].close : 0);
       if (!spot) return;
-      const upper = (slArmedRule?.spot_upper) || Math.round(spot * 1.01);
-      const lower = (slArmedRule?.spot_lower) || Math.round(spot * 0.99);
+
+      let upper: number, lower: number;
+      if (slArmedRule) {
+        // Restore from an existing armed rule
+        const isLong = slArmedRule.trail_dir === 'LONG';
+        const upVal = slArmedRule.trail_enabled ? (isLong ? slArmedRule.target_price : slArmedRule.spot_upper) : slArmedRule.spot_upper;
+        const loVal = slArmedRule.trail_enabled ? (slArmedRule.trail_dir === 'SHORT' ? slArmedRule.target_price : slArmedRule.spot_lower) : slArmedRule.spot_lower;
+        upper = upVal || Math.round(spot * 1.01);
+        lower = loVal || Math.round(spot * 0.99);
+      } else {
+        // Defaults: STOP = previous candle low (bullish) / high (bearish);
+        //           TARGET = nearest chart level in the profit direction (H-level / 50% / PDH-PDL / S-R)
+        const prev = candles.length >= 2 ? candles[candles.length - 2] : (candles.length ? candles[candles.length - 1] : null);
+        const levels = chartLevelsRef.current || [];
+        let stopLevel: number, targetLevel: number;
+        if (slIsBullish) {
+          stopLevel = prev && typeof prev.low === 'number' ? Math.round(prev.low) : Math.round(spot * 0.99);
+          const above = levels.filter(v => v > spot + 1).sort((a, b) => a - b);
+          targetLevel = above.length ? above[0] : Math.round(spot * 1.01);
+          upper = targetLevel; lower = stopLevel;
+        } else {
+          stopLevel = prev && typeof prev.high === 'number' ? Math.round(prev.high) : Math.round(spot * 1.01);
+          const below = levels.filter(v => v < spot - 1).sort((a, b) => b - a);
+          targetLevel = below.length ? below[0] : Math.round(spot * 0.99);
+          upper = stopLevel; lower = targetLevel;
+        }
+      }
+
       const uInst = s.createPriceLine({ price: upper, color: '#f43f5e', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: 'EXIT \u25B2' });
       const lInst = s.createPriceLine({ price: lower, color: '#10b981', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: 'EXIT \u25BC' });
       slLinesRef.current = [{ kind: 'upper', price: upper, instance: uInst }, { kind: 'lower', price: lower, instance: lInst }];
@@ -3496,14 +3526,13 @@ export function AdvancedChart() {
     if (u && upperVal) { u.price = upperVal; try { u.instance.applyOptions({ price: upperVal }); } catch {} }
     if (lo && lowerVal) { lo.price = lowerVal; try { lo.instance.applyOptions({ price: lowerVal }); } catch {} }
     setSlLevels({ upper: upperVal || (u ? u.price : null), lower: lowerVal || (lo ? lo.price : null) });
-    setSlMode(slArmedRule.spot_mode === 'CLOSE' ? 'CLOSE' : 'TOUCH');
+    setSlStopMode(slArmedRule.stop_mode === 'TOUCH' ? 'TOUCH' : 'CLOSE');
+    setSlTargetMode(slArmedRule.target_mode === 'TOUCH' ? 'TOUCH' : 'CLOSE');
     setSlRsiLower(slArmedRule.rsi_lower ? String(slArmedRule.rsi_lower) : '');
     setSlRsiUpper(slArmedRule.rsi_upper ? String(slArmedRule.rsi_upper) : '');
     setSlTrail(!!slArmedRule.trail_enabled);
     setSlTrailCandles(slArmedRule.trail_candles ? String(slArmedRule.trail_candles) : '3');
   }, [slArmedRule?.id]);
-
-  const slIsBullish = slActivePos ? ((slActivePos.side === 'BUY' && slActivePos.optionType === 'CE') || (slActivePos.side === 'SELL' && slActivePos.optionType === 'PE')) : true;
 
   const armSlRule = async () => {
     if (!slActivePos) return;
@@ -3512,16 +3541,14 @@ export function AdvancedChart() {
     const ru = slRsiUpper ? parseFloat(slRsiUpper) : null;
     if (!upper && !lower && !rl && !ru) { toast.error('Set at least one level before arming.'); return; }
 
-    // Trailing maps the two lines to a target (profit side) + an initial stop (loss side)
-    let spotLower: number | null = lower || null;
-    let spotUpper: number | null = upper || null;
-    let trailEnabled = false, trailDir: 'LONG' | 'SHORT' | null = null, targetPrice: number | null = null;
-    if (slTrail) {
-      trailEnabled = true;
-      if (slIsBullish) { trailDir = 'LONG'; targetPrice = upper || null; spotLower = lower || null; spotUpper = null; }
-      else { trailDir = 'SHORT'; targetPrice = lower || null; spotUpper = upper || null; spotLower = null; }
-      if (!targetPrice) { toast.error(`Set the ${slIsBullish ? 'upper' : 'lower'} (target) line before arming a trailing stop.`); return; }
-    }
+    // Unified model: one line is the STOP (loss side), the other is the TARGET (profit side)
+    const trailDir: 'LONG' | 'SHORT' = slIsBullish ? 'LONG' : 'SHORT';
+    const stopPrice = slIsBullish ? (lower || null) : (upper || null);   // loss side
+    const targetPrice = slIsBullish ? (upper || null) : (lower || null); // profit side
+    const spotLower = slIsBullish ? stopPrice : null;  // bullish stop = lower line
+    const spotUpper = slIsBullish ? null : stopPrice;  // bearish stop = upper line
+    const trailEnabled = slTrail;
+    if (!stopPrice && !rl && !ru) { toast.error('Set the stop line before arming.'); return; }
 
     setSlSaving(true);
     try {
@@ -3535,7 +3562,9 @@ export function AdvancedChart() {
           product: slActivePos.product || 'NRML',
           positionSide: slActivePos.side,
           spotLower, spotUpper,
-          spotMode: slMode,
+          spotMode: slStopMode, // legacy/compat
+          stopMode: slStopMode,
+          targetMode: slTargetMode,
           rsiLower: rl,
           rsiUpper: ru,
           timeframe: timeframe || '5',
@@ -3548,11 +3577,9 @@ export function AdvancedChart() {
       const data = await res.json();
       if (data?.success) {
         toast.success(`Auto-exit armed for ${slActivePos.symbol}`, {
-          description: trailEnabled
-            ? `${parseInt(slTrailCandles, 10) || 3}-candle trail (on close) after target ${targetPrice}. Initial stop ${(slIsBullish ? lower : upper) || '\u2014'}.`
-            : `${slMode === 'CLOSE' ? 'On candle close' : 'On touch'} \u00B7 \u25B2${upper || '\u2014'}  \u25BC${lower || '\u2014'}${(rl || ru) ? `  RSI ${rl || '\u2014'}/${ru || '\u2014'}` : ''}`
+          description: `Stop ${stopPrice || '\u2014'} (${slStopMode === 'CLOSE' ? 'close' : 'touch'}) \u00B7 Target ${targetPrice || '\u2014'} (${slTargetMode === 'CLOSE' ? 'close' : 'touch'})${trailEnabled ? ` \u2192 ${parseInt(slTrailCandles, 10) || 3}-candle trail` : ''}`
         });
-        setSlArmedRule({ id: data.id, tradingsymbol: slActivePos.symbol, spot_upper: spotUpper, spot_lower: spotLower, spot_mode: slMode, rsi_lower: rl, rsi_upper: ru, trail_enabled: trailEnabled ? 1 : 0, trail_candles: parseInt(slTrailCandles, 10) || 3, target_price: targetPrice, trail_dir: trailDir, status: 'ACTIVE' });
+        setSlArmedRule({ id: data.id, tradingsymbol: slActivePos.symbol, spot_upper: spotUpper, spot_lower: spotLower, stop_mode: slStopMode, target_mode: slTargetMode, spot_mode: slStopMode, rsi_lower: rl, rsi_upper: ru, trail_enabled: trailEnabled ? 1 : 0, trail_candles: parseInt(slTrailCandles, 10) || 3, target_price: targetPrice, trail_dir: trailDir, status: 'ACTIVE' });
       } else {
         toast.error('Could not arm auto-exit', { description: data?.error || 'Unknown error' });
       }
@@ -4187,7 +4214,7 @@ export function AdvancedChart() {
            mainSeriesRef.current.update(updatedCandle);
 
            if (volumeSeriesRef.current) {
-             const vol = latestCandle.volume || Math.floor(Math.abs(latestCandle.close - latestCandle.open) * 1000) + 100;
+             const vol = latestCandle.volume || 0; // real volume only (NIFTY uses current-month futures volume)
              volumeSeriesRef.current.update({
                time: updateTime,
                value: vol,
@@ -4265,7 +4292,7 @@ export function AdvancedChart() {
         uniqueCandles.push({
           ...c,
           time: timeSec, // Override time with unix seconds
-          volume: c.volume || Math.floor(Math.abs(c.close - c.open) * 1000) + 100
+          volume: c.volume || 0 // real volume only (NIFTY uses current-month futures volume)
         });
       }
     }
@@ -4329,6 +4356,20 @@ export function AdvancedChart() {
     }
     return { pdhPrice: null, pdlPrice: null, pStartTime: null };
   }, [chartData, showPdhPdl]);
+
+  // Collect every chart level (H-levels, their 50% midpoints, PDH/PDL, OI support/resistance)
+  // so the SL/Target tool can default the target to the nearest upcoming level.
+  useEffect(() => {
+    const levels: number[] = [];
+    (hLevels || []).forEach(v => { if (v > 0) levels.push(v); });
+    const active = (hLevels || []).filter(v => v > 0).sort((a, b) => b - a);
+    for (let i = 0; i < active.length - 1; i++) levels.push(Math.round((active[i] + active[i + 1]) / 2));
+    if (pdhPdlData?.pdhPrice) levels.push(pdhPdlData.pdhPrice);
+    if (pdhPdlData?.pdlPrice) levels.push(pdhPdlData.pdlPrice);
+    if (localAnalytics?.supportZone?.strikePrice) levels.push(localAnalytics.supportZone.strikePrice);
+    if (localAnalytics?.resistanceZone?.strikePrice) levels.push(localAnalytics.resistanceZone.strikePrice);
+    chartLevelsRef.current = levels.filter(v => typeof v === 'number' && v > 0);
+  }, [hLevels, pdhPdlData, localAnalytics]);
 
   const bbData = useMemo(() => {
     if (!chartData || !chartData.candles || !showBB) return [];
@@ -5871,17 +5912,33 @@ export function AdvancedChart() {
                 <div className="text-[10px] text-muted-foreground mb-2 truncate">{slActivePos.symbol} · {slActivePos.qty} qty</div>
 
                 <div className="flex items-center justify-between mb-1">
-                  <span className="flex items-center gap-1.5 text-rose-400"><span className="inline-block w-3 h-0.5 bg-rose-400" />{slTrail ? (slIsBullish ? 'Target ▲' : 'Stop ▲') : 'Upper exit'}</span>
+                  <span className="flex items-center gap-1.5 text-rose-400"><span className="inline-block w-3 h-0.5 bg-rose-400" />{slIsBullish ? 'Target ▲' : 'Stop ▲'}</span>
                   <span className="font-mono font-bold text-foreground">{slLevels.upper ?? '—'}</span>
                 </div>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="flex items-center gap-1.5 text-emerald-400"><span className="inline-block w-3 h-0.5 bg-emerald-400" />{slTrail ? (slIsBullish ? 'Stop ▼' : 'Target ▼') : 'Lower exit'}</span>
+                  <span className="flex items-center gap-1.5 text-emerald-400"><span className="inline-block w-3 h-0.5 bg-emerald-400" />{slIsBullish ? 'Stop ▼' : 'Target ▼'}</span>
                   <span className="font-mono font-bold text-foreground">{slLevels.lower ?? '—'}</span>
                 </div>
-                <div className="text-[10px] text-muted-foreground mb-2 leading-tight">Drag the red / green dashed lines on the chart to set levels.</div>
+                <div className="text-[10px] text-muted-foreground mb-2 leading-tight">Defaults: stop = previous candle {slIsBullish ? 'low' : 'high'}, target = nearest chart level. Drag the lines to adjust.</div>
+
+                <div className="mb-2">
+                  <div className="text-[10px] text-rose-400 font-medium mb-1">Stop-Loss trigger</div>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setSlStopMode('TOUCH')} className={`flex-1 py-1 rounded ${slStopMode === 'TOUCH' ? 'bg-primary text-primary-foreground font-bold' : 'bg-muted text-foreground/70'}`}>On Touch</button>
+                    <button onClick={() => setSlStopMode('CLOSE')} className={`flex-1 py-1 rounded ${slStopMode === 'CLOSE' ? 'bg-primary text-primary-foreground font-bold' : 'bg-muted text-foreground/70'}`}>On Candle Close</button>
+                  </div>
+                </div>
+
+                <div className="mb-2">
+                  <div className="text-[10px] text-emerald-400 font-medium mb-1">Target trigger</div>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setSlTargetMode('TOUCH')} className={`flex-1 py-1 rounded ${slTargetMode === 'TOUCH' ? 'bg-primary text-primary-foreground font-bold' : 'bg-muted text-foreground/70'}`}>On Touch</button>
+                    <button onClick={() => setSlTargetMode('CLOSE')} className={`flex-1 py-1 rounded ${slTargetMode === 'CLOSE' ? 'bg-primary text-primary-foreground font-bold' : 'bg-muted text-foreground/70'}`}>On Candle Close</button>
+                  </div>
+                </div>
 
                 <div className="flex items-center justify-between mb-2 p-1.5 rounded bg-muted/50">
-                  <span className="text-foreground/90 font-medium">Trailing SL</span>
+                  <span className="text-foreground/90 font-medium">Trailing SL after target</span>
                   <button onClick={() => setSlTrail(v => !v)} className={`relative w-9 h-5 rounded-full transition-colors ${slTrail ? 'bg-emerald-500' : 'bg-slate-600'}`}>
                     <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${slTrail ? 'translate-x-4' : ''}`} />
                   </button>
@@ -5893,16 +5950,9 @@ export function AdvancedChart() {
                       <input value={slTrailCandles} onChange={e => setSlTrailCandles(e.target.value)} inputMode="numeric" className="w-10 bg-muted rounded px-1.5 py-0.5 text-foreground text-center" />
                       <span>candles · on close</span>
                     </div>
-                    Once spot {slIsBullish ? 'closes above' : 'closes below'} your <b className="text-foreground">target</b> ({slIsBullish ? 'upper' : 'lower'} line), the stop trails the {slTrailCandles || '3'}-candle {slIsBullish ? 'low' : 'high'} and exits on a close back through it.
+                    On reaching target, the stop trails the {slTrailCandles || '3'}-candle {slIsBullish ? 'low' : 'high'} and exits when price closes back through it.
                   </div>
                 )}
-
-                <div className="flex items-center gap-1 mb-1">
-                  <button onClick={() => setSlMode('TOUCH')} className={`flex-1 py-1 rounded ${slMode === 'TOUCH' ? 'bg-primary text-primary-foreground font-bold' : 'bg-muted text-foreground/70'}`}>On Touch</button>
-                  <button onClick={() => setSlMode('CLOSE')} className={`flex-1 py-1 rounded ${slMode === 'CLOSE' ? 'bg-primary text-primary-foreground font-bold' : 'bg-muted text-foreground/70'}`}>On Candle Close</button>
-                </div>
-                {slTrail && <div className="text-[9px] text-muted-foreground mb-2">(applies to the initial stop · the trail itself is always on close)</div>}
-                {!slTrail && <div className="mb-1" />}
 
                 <div className="flex items-center gap-1 mb-2">
                   <input value={slRsiLower} onChange={e => setSlRsiLower(e.target.value)} placeholder="RSI ≤" inputMode="decimal" className="w-1/2 bg-muted rounded px-2 py-1 text-foreground placeholder:text-muted-foreground" />
@@ -5918,8 +5968,8 @@ export function AdvancedChart() {
                   <button disabled={slSaving} onClick={armSlRule} className="w-full py-1.5 rounded bg-emerald-500/90 hover:bg-emerald-500 text-white font-bold disabled:opacity-50">{slSaving ? 'Arming…' : 'Arm Auto-Exit'}</button>
                 )}
                 <div className="text-[9px] text-muted-foreground mt-2 leading-tight">{slTrail
-                  ? `Trails ${slTrailCandles || '3'}-candle stop after target, exits on close. Watch the first triggers live.`
-                  : `Fires a full-position exit when spot ${slMode === 'CLOSE' ? 'closes beyond' : 'touches'} a line${(slRsiLower || slRsiUpper) ? ' or RSI hits your level' : ''}. Watch the first triggers live.`}</div>
+                  ? `Stop ${slStopMode === 'CLOSE' ? 'on close' : 'on touch'}; on hitting target (${slTargetMode === 'CLOSE' ? 'close' : 'touch'}) the ${slTrailCandles || '3'}-candle trail takes over. Watch the first triggers live.`
+                  : `Stop ${slStopMode === 'CLOSE' ? 'on close' : 'on touch'}, target ${slTargetMode === 'CLOSE' ? 'on close' : 'on touch'} — both exit the full position. Watch the first triggers live.`}</div>
               </div>
             )}
             <canvas
