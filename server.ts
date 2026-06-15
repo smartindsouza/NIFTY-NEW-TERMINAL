@@ -381,12 +381,14 @@ connectTicker();
       if (instruments.length > 0) {
         try { quotes = await kc.getQuote(instruments); } catch (e) { quotes = {}; }
       }
+      let openUnrealised = 0;
       const out = open.map((p: any) => {
         const key = `${p.exchange}:${p.tradingsymbol}`;
         const q = quotes[key];
         const ltp = (q && q.last_price > 0) ? q.last_price : (p.last_price || p.average_price);
         // quantity is signed by Kite (+ for long, − for short), so this works for both
         const pnl = (ltp - p.average_price) * p.quantity;
+        openUnrealised += pnl;
         return {
           tradingsymbol: p.tradingsymbol,
           quantity: p.quantity,
@@ -396,7 +398,16 @@ connectTicker();
           pnl: Math.round(pnl * 100) / 100,
         };
       });
-      return res.json({ success: true, positions: out });
+      // Net day P&L: everything booked so far today (incl. already-closed trades) + live unrealised on open legs
+      const realisedTotal = net.reduce((s: number, p: any) => s + (p.realised || 0), 0);
+      const netPnl = Math.round((realisedTotal + openUnrealised) * 100) / 100;
+      return res.json({
+        success: true,
+        positions: out,
+        netPnl,
+        realisedPnl: Math.round(realisedTotal * 100) / 100,
+        openPnl: Math.round(openUnrealised * 100) / 100,
+      });
     } catch (e: any) {
       return res.json({ success: false, error: e?.message || String(e) });
     }
