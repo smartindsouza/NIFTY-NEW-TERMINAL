@@ -374,14 +374,28 @@ connectTicker();
       if (!kc || !kc.access_token) return res.json({ success: false, error: 'No active Kite session' });
       const positions = await kc.getPositions();
       const net = (positions && positions.net) || [];
-      const out = net.map((p: any) => ({
-        tradingsymbol: p.tradingsymbol,
-        quantity: p.quantity,
-        product: p.product,
-        average_price: p.average_price,
-        last_price: p.last_price,
-        pnl: p.pnl,
-      }));
+      const open = net.filter((p: any) => p.quantity !== 0);
+      // getPositions() last_price is often stale / previous close — pull a LIVE quote per symbol instead
+      const instruments = open.map((p: any) => `${p.exchange}:${p.tradingsymbol}`);
+      let quotes: any = {};
+      if (instruments.length > 0) {
+        try { quotes = await kc.getQuote(instruments); } catch (e) { quotes = {}; }
+      }
+      const out = open.map((p: any) => {
+        const key = `${p.exchange}:${p.tradingsymbol}`;
+        const q = quotes[key];
+        const ltp = (q && q.last_price > 0) ? q.last_price : (p.last_price || p.average_price);
+        // quantity is signed by Kite (+ for long, − for short), so this works for both
+        const pnl = (ltp - p.average_price) * p.quantity;
+        return {
+          tradingsymbol: p.tradingsymbol,
+          quantity: p.quantity,
+          product: p.product,
+          average_price: p.average_price,
+          last_price: ltp,
+          pnl: Math.round(pnl * 100) / 100,
+        };
+      });
       return res.json({ success: true, positions: out });
     } catch (e: any) {
       return res.json({ success: false, error: e?.message || String(e) });
