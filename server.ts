@@ -66,6 +66,8 @@ for (const [col, def] of ([
   ['trail_dir', 'TEXT'],
   ['trail_active', 'INTEGER DEFAULT 0'],
   ['trail_stop', 'REAL'],
+  ['stop_mode', "TEXT DEFAULT 'CLOSE'"],
+  ['target_mode', "TEXT DEFAULT 'CLOSE'"],
 ] as [string, string][])) {
   try { db.prepare(`ALTER TABLE exit_rules ADD COLUMN ${col} ${def}`).run(); } catch (e) { /* column already exists */ }
 }
@@ -272,27 +274,59 @@ connectTicker();
     }
   }
 
-  // Fast loop (2s): live spot TOUCH triggers
+  // Fast loop (2s): live TOUCH triggers — stop, target activation, and trailing-stop exits whose mode is TOUCH
   setInterval(async () => {
     try {
       if (!isNSEMarketOpen()) return; // only act during live market hours
       if (!latestSpot || latestSpot <= 0) return;
       if (Date.now() - lastRealSpotTickAt > 30000) return; // require a fresh real tick (no stale/sim spot)
-      const rules = db.prepare("SELECT * FROM exit_rules WHERE status='ACTIVE' AND spot_mode='TOUCH'").all() as any[];
+      const rules = db.prepare("SELECT * FROM exit_rules WHERE status='ACTIVE'").all() as any[];
       for (const r of rules) {
         let hit = '';
-        if (r.spot_lower && latestSpot <= r.spot_lower) hit = `Spot ${latestSpot.toFixed(2)} hit lower ${r.spot_lower}`;
-        else if (r.spot_upper && latestSpot >= r.spot_upper) hit = `Spot ${latestSpot.toFixed(2)} hit upper ${r.spot_upper}`;
+        const dir = r.trail_dir as ('LONG' | 'SHORT' | null);
+        const stopMode = r.stop_mode || r.spot_mode || 'CLOSE';
+        const targetMode = r.target_mode || r.spot_mode || 'CLOSE';
+        if (!dir) {
+          // Legacy rule (no direction): both lines are hard touch stops when spot_mode = TOUCH
+          if ((r.spot_mode || 'CLOSE') === 'TOUCH') {
+            if (r.spot_lower && latestSpot <= r.spot_lower) hit = `Spot ${latestSpot.toFixed(2)} hit lower ${r.spot_lower}`;
+            else if (r.spot_upper && latestSpot >= r.spot_upper) hit = `Spot ${latestSpot.toFixed(2)} hit upper ${r.spot_upper}`;
+          }
+          if (hit) await triggerRuleExit(r, hit);
+          continue;
+        }
+        const stopLevel = dir === 'LONG' ? r.spot_lower : r.spot_upper;
+        if (!r.trail_active) {
+          if (stopMode === 'TOUCH' && stopLevel) {
+            if (dir === 'LONG' && latestSpot <= stopLevel) hit = `Spot ${latestSpot.toFixed(2)} touched stop ${stopLevel}`;
+            if (dir === 'SHORT' && latestSpot >= stopLevel) hit = `Spot ${latestSpot.toFixed(2)} touched stop ${stopLevel}`;
+          }
+          if (!hit && r.target_price && targetMode === 'TOUCH') {
+            const reached = (dir === 'LONG' && latestSpot >= r.target_price) || (dir === 'SHORT' && latestSpot <= r.target_price);
+            if (reached) {
+              if (r.trail_enabled) {
+                db.prepare("UPDATE exit_rules SET trail_active=1 WHERE id=? AND trail_active=0").run(r.id);
+                r.trail_active = 1; // trail level gets set on the next candle close
+                console.log(`[ExitWatcher] Target touched ${r.target_price} for ${r.tradingsymbol} — trailing armed`);
+              } else {
+                hit = `Target ${r.target_price} touched`;
+              }
+            }
+          }
+        } else if (stopMode === 'TOUCH' && r.trail_stop) {
+          if (dir === 'LONG' && latestSpot <= r.trail_stop) hit = `Spot ${latestSpot.toFixed(2)} touched trailing stop ${r.trail_stop}`;
+          if (dir === 'SHORT' && latestSpot >= r.trail_stop) hit = `Spot ${latestSpot.toFixed(2)} touched trailing stop ${r.trail_stop}`;
+        }
         if (hit) await triggerRuleExit(r, hit);
       }
     } catch (e) { /* keep watcher alive */ }
   }, 2000);
 
-  // Slow loop (15s): candle-close triggers — spot CLOSE mode + RSI — only on a newly-closed candle
+  // Slow loop (15s): candle-close triggers — close-mode stop/target, trailing init+ratchet+exit, and RSI
   setInterval(async () => {
     try {
       if (!isNSEMarketOpen()) return; // only act during live market hours
-      const rules = db.prepare("SELECT * FROM exit_rules WHERE status='ACTIVE' AND (spot_mode='CLOSE' OR rsi_lower IS NOT NULL OR rsi_upper IS NOT NULL OR trail_enabled=1)").all() as any[];
+      const rules = db.prepare("SELECT * FROM exit_rules WHERE status='ACTIVE'").all() as any[];
       if (!rules.length) return;
       const timeframes = Array.from(new Set(rules.map(r => String(r.timeframe || '5'))));
       for (const tf of timeframes) {
@@ -308,42 +342,65 @@ connectTicker();
         const closeRsi = closed.rsi14;
         for (const r of rules.filter(rr => String(rr.timeframe || '5') === tf)) {
           let hit = '';
-          if (r.spot_mode === 'CLOSE') {
-            if (r.spot_lower && closePrice <= r.spot_lower) hit = `Candle closed ${closePrice} below lower ${r.spot_lower}`;
-            else if (r.spot_upper && closePrice >= r.spot_upper) hit = `Candle closed ${closePrice} above upper ${r.spot_upper}`;
+          const dir = r.trail_dir as ('LONG' | 'SHORT' | null);
+          const stopMode = r.stop_mode || r.spot_mode || 'CLOSE';
+          const targetMode = r.target_mode || r.spot_mode || 'CLOSE';
+          const N = r.trail_candles || 3;
+          const win = candles.slice(Math.max(0, candles.length - 1 - N), candles.length - 1); // last N closed candles
+          const lows = win.map((c: any) => c.low).filter((x: any) => typeof x === 'number');
+          const highs = win.map((c: any) => c.high).filter((x: any) => typeof x === 'number');
+          const lowestLow = lows.length ? Math.min(...lows) : null;
+          const highestHigh = highs.length ? Math.max(...highs) : null;
+
+          if (!dir) {
+            // Legacy rule: both lines are hard close stops when spot_mode = CLOSE
+            if ((r.spot_mode || 'CLOSE') === 'CLOSE') {
+              if (r.spot_lower && closePrice <= r.spot_lower) hit = `Candle closed ${closePrice} below lower ${r.spot_lower}`;
+              else if (r.spot_upper && closePrice >= r.spot_upper) hit = `Candle closed ${closePrice} above upper ${r.spot_upper}`;
+            }
+          } else {
+            const stopLevel = dir === 'LONG' ? r.spot_lower : r.spot_upper;
+            if (!r.trail_active) {
+              if (stopMode === 'CLOSE' && stopLevel) {
+                if (dir === 'LONG' && closePrice <= stopLevel) hit = `Candle closed ${closePrice} below stop ${stopLevel}`;
+                if (dir === 'SHORT' && closePrice >= stopLevel) hit = `Candle closed ${closePrice} above stop ${stopLevel}`;
+              }
+              if (!hit && r.target_price && targetMode === 'CLOSE') {
+                const reached = (dir === 'LONG' && closePrice >= r.target_price) || (dir === 'SHORT' && closePrice <= r.target_price);
+                if (reached) {
+                  if (r.trail_enabled) {
+                    const initStop = dir === 'LONG' ? lowestLow : highestHigh;
+                    db.prepare("UPDATE exit_rules SET trail_active=1, trail_stop=? WHERE id=?").run(initStop, r.id);
+                    r.trail_active = 1; r.trail_stop = initStop;
+                    console.log(`[ExitWatcher] Target closed ${r.target_price} for ${r.tradingsymbol} — trailing activated, trail=${initStop}`);
+                  } else {
+                    hit = `Target ${r.target_price} reached on close`;
+                  }
+                }
+              }
+            }
+            if (!hit && r.trail_active) {
+              // initialise the trail level if it was armed via a TOUCH target in the fast loop
+              if (r.trail_stop === null || r.trail_stop === undefined) {
+                const initStop = dir === 'LONG' ? lowestLow : highestHigh;
+                if (initStop !== null) { db.prepare("UPDATE exit_rules SET trail_stop=? WHERE id=?").run(initStop, r.id); r.trail_stop = initStop; }
+              }
+              if (r.trail_stop !== null && r.trail_stop !== undefined) {
+                let newStop = r.trail_stop;
+                if (dir === 'LONG' && lowestLow !== null) newStop = Math.max(r.trail_stop, lowestLow);
+                if (dir === 'SHORT' && highestHigh !== null) newStop = Math.min(r.trail_stop, highestHigh);
+                if (newStop !== r.trail_stop) { db.prepare("UPDATE exit_rules SET trail_stop=? WHERE id=?").run(newStop, r.id); r.trail_stop = newStop; }
+                if (stopMode === 'CLOSE') {
+                  if (dir === 'LONG' && closePrice < r.trail_stop) hit = `Trailing stop: closed ${closePrice} below ${N}-candle trail ${r.trail_stop}`;
+                  if (dir === 'SHORT' && closePrice > r.trail_stop) hit = `Trailing stop: closed ${closePrice} above ${N}-candle trail ${r.trail_stop}`;
+                }
+              }
+            }
           }
+
           if (!hit && typeof closeRsi === 'number') {
             if (r.rsi_lower && closeRsi <= r.rsi_lower) hit = `RSI ${closeRsi.toFixed(1)} reached ${r.rsi_lower} on close`;
             else if (r.rsi_upper && closeRsi >= r.rsi_upper) hit = `RSI ${closeRsi.toFixed(1)} reached ${r.rsi_upper} on close`;
-          }
-          // Trailing stop-loss (3-candle, candle-close basis): activates once target is achieved, then trails
-          if (!hit && r.trail_enabled && r.trail_dir) {
-            const N = r.trail_candles || 3;
-            const window = candles.slice(Math.max(0, candles.length - 1 - N), candles.length - 1); // last N closed candles
-            const lows = window.map((c: any) => c.low).filter((x: any) => typeof x === 'number');
-            const highs = window.map((c: any) => c.high).filter((x: any) => typeof x === 'number');
-            const lowestLow = lows.length ? Math.min(...lows) : null;
-            const highestHigh = highs.length ? Math.max(...highs) : null;
-            if (!r.trail_active) {
-              // Not trailing yet — has the target been achieved on this close?
-              const targetHit = r.target_price && ((r.trail_dir === 'LONG' && closePrice >= r.target_price) || (r.trail_dir === 'SHORT' && closePrice <= r.target_price));
-              if (targetHit) {
-                const initStop = r.trail_dir === 'LONG' ? lowestLow : highestHigh;
-                if (initStop !== null) {
-                  db.prepare("UPDATE exit_rules SET trail_active=1, trail_stop=? WHERE id=?").run(initStop, r.id);
-                  r.trail_active = 1; r.trail_stop = initStop;
-                  console.log(`[ExitWatcher] Trailing activated for ${r.tradingsymbol}: target ${r.target_price} reached, initial 3-candle trail = ${initStop}`);
-                }
-              }
-            } else {
-              // Trailing live — ratchet the stop in the favourable direction only
-              let newStop = r.trail_stop;
-              if (r.trail_dir === 'LONG' && lowestLow !== null) newStop = Math.max(r.trail_stop, lowestLow);
-              if (r.trail_dir === 'SHORT' && highestHigh !== null) newStop = Math.min(r.trail_stop, highestHigh);
-              if (newStop !== r.trail_stop) { db.prepare("UPDATE exit_rules SET trail_stop=? WHERE id=?").run(newStop, r.id); r.trail_stop = newStop; }
-              if (r.trail_dir === 'LONG' && closePrice < r.trail_stop) hit = `Trailing stop: closed ${closePrice} below ${N}-candle trail ${r.trail_stop}`;
-              if (r.trail_dir === 'SHORT' && closePrice > r.trail_stop) hit = `Trailing stop: closed ${closePrice} above ${N}-candle trail ${r.trail_stop}`;
-            }
           }
           if (hit) await triggerRuleExit(r, hit);
         }
@@ -430,16 +487,19 @@ connectTicker();
     try {
       const { tradingsymbol, exchange, qty, product, positionSide, spotLower, spotUpper, spotMode, rsiLower, rsiUpper, timeframe } = req.body;
       if (!tradingsymbol || !qty) return res.status(400).json({ success: false, error: 'Missing tradingsymbol or qty' });
-      const { trailEnabled, trailCandles, targetPrice, trailDir } = req.body || {};
+      const { trailEnabled, trailCandles, targetPrice, trailDir, stopMode, targetMode } = req.body || {};
       const exitSide = String(positionSide).toUpperCase() === 'BUY' ? 'SELL' : 'BUY';
+      const sMode = (stopMode === 'TOUCH' ? 'TOUCH' : 'CLOSE');
+      const tMode = (targetMode === 'TOUCH' ? 'TOUCH' : 'CLOSE');
       db.prepare("UPDATE exit_rules SET status='CANCELLED' WHERE tradingsymbol=? AND status='ACTIVE'").run(tradingsymbol);
       const info = db.prepare(`INSERT INTO exit_rules
-        (tradingsymbol, exchange, qty, product, exit_side, spot_lower, spot_upper, spot_mode, rsi_lower, rsi_upper, timeframe, underlying_token, status, detail, created_at, trail_enabled, trail_candles, target_price, trail_dir, trail_active, trail_stop)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'ACTIVE', '', ?, ?,?,?,?, 0, NULL)`).run(
+        (tradingsymbol, exchange, qty, product, exit_side, spot_lower, spot_upper, spot_mode, rsi_lower, rsi_upper, timeframe, underlying_token, status, detail, created_at, trail_enabled, trail_candles, target_price, trail_dir, trail_active, trail_stop, stop_mode, target_mode)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'ACTIVE', '', ?, ?,?,?,?, 0, NULL, ?, ?)`).run(
           tradingsymbol, exchange || 'NFO', parseInt(qty, 10), product || 'MIS', exitSide,
-          spotLower || null, spotUpper || null, (spotMode === 'CLOSE' ? 'CLOSE' : 'TOUCH'),
+          spotLower || null, spotUpper || null, sMode,
           rsiLower || null, rsiUpper || null, String(timeframe || '5'), '256265', Math.floor(Date.now() / 1000),
-          trailEnabled ? 1 : 0, parseInt(trailCandles, 10) || 3, targetPrice || null, (trailDir === 'SHORT' ? 'SHORT' : (trailDir === 'LONG' ? 'LONG' : null))
+          trailEnabled ? 1 : 0, parseInt(trailCandles, 10) || 3, targetPrice || null, (trailDir === 'SHORT' ? 'SHORT' : (trailDir === 'LONG' ? 'LONG' : null)),
+          sMode, tMode
         );
       const kc = getKiteClient();
       // @ts-ignore
