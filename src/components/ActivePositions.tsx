@@ -85,6 +85,7 @@ export function ActivePositions() {
   const [lastPrices, setLastPrices] = useState<Record<string, { price: number; dir: "up" | "down" | "flat" }>>({});
   const lastPricesRef = useRef<Record<string, { price: number; dir: "up" | "down" | "flat" }>>({});
   useEffect(() => { lastPricesRef.current = lastPrices; }, [lastPrices]);
+  const confirmedOpenRef = useRef<Set<string>>(new Set()); // symbols Kite has confirmed as open this session
 
   // Fetch active positions from localStorage
   const loadPositions = () => {
@@ -140,9 +141,29 @@ export function ActivePositions() {
         const bySymbol: Record<string, any> = {};
         data.positions.forEach((kp: any) => { bySymbol[kp.tradingsymbol] = kp; });
 
+        // Remember every symbol Kite currently reports as open
+        Object.keys(bySymbol).forEach(sym => confirmedOpenRef.current.add(sym));
+
         setPositions((prevPositions) => {
           let changed = false;
-          const updated = prevPositions.map((pos) => {
+          const removed: string[] = [];
+          const kept = prevPositions.filter((pos) => {
+            if (pos.testMode || exitingIds.has(pos.id)) return true; // never auto-remove test cards or in-flight exits
+            if (bySymbol[pos.symbol]) return true; // still open on Kite
+            // Absent from Kite. Drop it if it was open before (closed by watcher/manually)
+            // or if it's an old stale card (>25s) — but keep freshly-placed cards still lagging into Kite.
+            const ageMs = Date.now() - new Date(pos.timestamp).getTime();
+            const wasOpen = confirmedOpenRef.current.has(pos.symbol);
+            if (wasOpen || ageMs > 25000) {
+              confirmedOpenRef.current.delete(pos.symbol);
+              removed.push(pos.symbol);
+              changed = true;
+              return false; // remove the card
+            }
+            return true; // just-opened, not in Kite yet — keep
+          });
+
+          const updated = kept.map((pos) => {
             if (pos.testMode || exitingIds.has(pos.id)) return pos;
             const kp = bySymbol[pos.symbol];
             if (!kp) return pos;
@@ -165,7 +186,13 @@ export function ActivePositions() {
             setLastPrices((prev) => ({ ...prev, [pos.id]: { price: kp.last_price || prevLtp, dir } }));
             return next;
           });
+
           if (changed) localStorage.setItem("active_positions", JSON.stringify(updated));
+          if (removed.length > 0) {
+            // Cascade to the chart's Arm Auto-Exit panel and let the user know
+            window.dispatchEvent(new Event('active_positions_updated'));
+            removed.forEach(sym => toast.info(`${sym} is no longer open on Zerodha — cleared from the banner.`, { id: `closed-${sym}` }));
+          }
           return changed ? updated : prevPositions;
         });
       } catch { /* keep last real values; never fall back to simulation */ }
