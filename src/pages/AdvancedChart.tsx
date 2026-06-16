@@ -230,36 +230,33 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
   let maxAffordableLots = 0;
   let calculationSource = 'Unavailable';
 
-  if (lots > 0) {
-    if (isKite) {
-      costPerLot = (reqAmount / lots) + (charges / lots);
+  if (isKite && marginPreview.data && lotSize) {
+    // Derive per-lot cost from the quantity the margin DATA was actually computed for —
+    // NOT the current `lots`. The margin response lags lot changes by a fetch; dividing a
+    // stale total by an ever-growing `lots` is what made the figures explode and then settle.
+    // Using the data's own quantity keeps per-lot stable even while a new fetch is in flight.
+    const dataQty = marginPreview.dataQuantity || quantity;
+    const dataLots = dataQty / lotSize;
+    if (dataLots > 0) {
+      costPerLot = (marginPreview.data.total + marginPreview.data.charges.total) / dataLots;
       calculationSource = 'Kite Margin API';
-    } else if (isLocalFallback) {
-      costPerLot = (reqAmount / lots) + (charges / lots);
-      calculationSource = 'Local Estimate';
     }
+  } else if (isLocalFallback && lots > 0) {
+    costPerLot = (reqAmount / lots) + (charges / lots); // local estimate is linear in lots, so already stable
+    calculationSource = 'Local Estimate';
   }
 
   if (costPerLot > 0) {
     maxAffordableLots = Math.floor(availBalance / costPerLot);
   }
 
-  const [oscillationGuard, setOscillationGuard] = useState<{prev: number, curr: number}>({prev: 0, curr: 0});
-  
   useEffect(() => {
     if (lotSizingMode !== 'AUTO MAX') return;
     if (costPerLot <= 0) return;
-    
-    let targetLots = maxAffordableLots >= 1 ? maxAffordableLots : 1;
-    
-    if (lots !== targetLots) {
-       if (oscillationGuard.prev === targetLots && oscillationGuard.curr === lots) {
-          targetLots = Math.min(oscillationGuard.prev, oscillationGuard.curr);
-          if (lots === targetLots) return;
-       }
-       setOscillationGuard({prev: oscillationGuard.curr, curr: targetLots});
-       setLots(targetLots);
-    }
+    // costPerLot is now stable, so the target is a fixed point — it converges in one step
+    // and no longer oscillates or runs away.
+    const targetLots = maxAffordableLots >= 1 ? maxAffordableLots : 1;
+    if (lots !== targetLots) setLots(targetLots);
   }, [lotSizingMode, costPerLot, maxAffordableLots, lots]);
 
   const handleRefreshInstruments = async () => {
