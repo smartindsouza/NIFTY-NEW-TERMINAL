@@ -101,7 +101,7 @@ export function SymbolSearch({ onSelect, currentSymbol }: Props) {
   };
 
   return (
-    <div className="relative w-[250px] shrink-0" ref={containerRef}>
+    <div className="relative w-full sm:w-[250px] sm:shrink-0" ref={containerRef}>
       <div 
         className="flex items-center bg-card border border-0 rounded-full transition-all cursor-text group w-full px-3 h-9"
         onClick={() => {
@@ -145,7 +145,7 @@ export function SymbolSearch({ onSelect, currentSymbol }: Props) {
       </div>
 
       {isOpen && (query.length > 0 || recent.length > 0) && (
-        <div className="absolute top-full left-0 mt-1 w-[350px] sm:w-[450px] max-h-[400px] overflow-y-auto bg-card border border-0 rounded-2xl z-[100] flex flex-col custom-scrollbar">
+        <div className="absolute top-full left-0 mt-1 w-full sm:w-[450px] max-h-[400px] overflow-y-auto bg-card border border-0 rounded-2xl z-[100] flex flex-col custom-scrollbar">
           {!query && recent.length > 0 && (
             <div className="py-2">
               <div className="px-4 pb-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
