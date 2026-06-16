@@ -1,96 +1,83 @@
 /**
- * NIFTY Quant Analytics Terminal Service Worker
- * Implements high-performance offline caching, shell storage, and fallback strategies.
+ * NIFTY Quant Analytics Terminal — Service Worker (v2)
+ *
+ * Trading app => FRESH CODE and LIVE DATA matter more than offline support.
+ *  - /api, /ws, /socket, /auth   -> pass straight through (never cached, never faked)
+ *  - app shell / HTML            -> NETWORK-FIRST (a new deploy is always picked up online)
+ *  - hashed build assets (js/css)-> cache-first (filenames change each build, so this is safe)
  */
 
-const CACHE_NAME = 'quant-terminal-v1';
-const OFFLINE_URL = '/';
+const CACHE_NAME = 'quant-terminal-v2';
+const ASSET_RE = /\.(?:js|mjs|css|woff2?|ttf|otf|png|jpe?g|svg|webp|ico|gif)$/i;
 
-// Pre-cache primary assets
-const PRECACHE_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/icon.svg',
-];
-
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      console.log('[Service Worker] Pre-caching terminal shell');
-      return cache.addAll(PRECACHE_ASSETS);
-    }).then(() => self.skipWaiting())
-  );
+self.addEventListener('install', () => {
+  // Take over as soon as the new worker is installed (don't wait for all tabs to close)
+  self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            console.log('[Service Worker] Purging legacy cache:', cacheName);
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    }).then(() => self.clients.claim())
-  );
+  event.waitUntil((async () => {
+    // Purge every older cache (this also clears the old, unsafe cache-first shell from v1)
+    const names = await caches.keys();
+    await Promise.all(names.filter((n) => n !== CACHE_NAME).map((n) => caches.delete(n)));
+    await self.clients.claim();
+  })());
 });
 
-// Cache-First (with Network Fallback) for assets, Network-First for API and WebSocket
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Skip non-GET requests or requests to non-http/s protocols
-  if (request.method !== 'GET' || !request.url.startsWith(self.location.origin)) {
+  // Only same-origin GET requests are ever eligible for handling.
+  if (request.method !== 'GET' || url.origin !== self.location.origin) return;
+
+  // Live endpoints: do NOT intercept. Let the browser fetch normally so real errors surface
+  // and stale/offline data is never served on a real-money screen.
+  if (
+    url.pathname.startsWith('/api') ||
+    url.pathname.startsWith('/ws') ||
+    url.pathname.startsWith('/socket') ||
+    url.pathname.startsWith('/auth')
+  ) {
     return;
   }
 
-  // API and WS requests: Use dynamic network fetch and do not cache, as live data contains fresh metrics
-  if (url.pathname.startsWith('/api')) {
-    event.respondWith(
-      fetch(request).catch(() => {
-        // Return a mock offline response for API routes if completely disconnected
-        return new Response(
-          JSON.stringify({ error: 'Disconnected from trading terminal API', offline: true }), 
-          { headers: { 'Content-Type': 'application/json' } }
-        );
-      })
-    );
-    return;
-  }
-
-  // Shell assets, HTML, and other assets: Cache-First, fallback to Network, then index.html (SPA Fallback)
-  event.respondWith(
-    caches.match(request).then((cachedResponse) => {
-      if (cachedResponse) {
-        // Serve from cache, and optionally update in the background
-        fetch(request).then((freshResponse) => {
-          if (freshResponse && freshResponse.status === 200) {
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, freshResponse));
-          }
-        }).catch(() => {/* Ignore background sync failures */});
-        
-        return cachedResponse;
+  // Hashed static build assets: cache-first (safe — every build emits new filenames).
+  if (ASSET_RE.test(url.pathname)) {
+    event.respondWith((async () => {
+      const cached = await caches.match(request);
+      if (cached) return cached;
+      try {
+        const res = await fetch(request);
+        if (res && res.status === 200 && res.type === 'basic') {
+          const cache = await caches.open(CACHE_NAME);
+          cache.put(request, res.clone());
+        }
+        return res;
+      } catch (e) {
+        return cached || Response.error();
       }
+    })());
+    return;
+  }
 
-      return fetch(request).then((response) => {
-        // Cache dynamic non-API assets on the fly
-        if (response && response.status === 200 && response.type === 'basic') {
-          const responseToCache = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(request, responseToCache);
-          });
-        }
-        return response;
-      }).catch(() => {
-        // Fallback for HTML request failures
-        if (request.headers.get('accept').includes('text/html')) {
-          return caches.match(OFFLINE_URL);
-        }
-      });
-    })
-  );
+  // Navigations / HTML (the app shell): NETWORK-FIRST so freshly deployed code is always used
+  // when online; fall back to the cached shell only when the device is offline.
+  if (request.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html')) {
+    event.respondWith((async () => {
+      try {
+        const res = await fetch(request);
+        const cache = await caches.open(CACHE_NAME);
+        cache.put('/', res.clone());
+        return res;
+      } catch (e) {
+        const cached = (await caches.match(request)) || (await caches.match('/'));
+        return cached || Response.error();
+      }
+    })());
+    return;
+  }
+
+  // Everything else: network-first, no caching.
+  event.respondWith(fetch(request).catch(() => caches.match(request)));
 });
