@@ -3289,6 +3289,7 @@ export function AdvancedChart() {
 
   // ===== Phase 2: draggable SL/Target lines feeding the server-side auto-exit watcher =====
   const slLinesRef = useRef<{ kind: 'upper' | 'lower', price: number, instance: any, label: string, color: string }[]>([]);
+  const slSeriesRef = useRef<any>(null); // the series instance the SL lines were created on (to detect recreation)
   const chartLevelsRef = useRef<number[]>([]); // all chart levels (H-levels, 50%, PDH/PDL, S/R) for default target
   const oiGlowRef = useRef<Record<number, { call: number, put: number }>>({}); // strike -> last time call/put OI grew (ms)
   const [slActivePos, setSlActivePos] = useState<any>(null);
@@ -3467,7 +3468,13 @@ export function AdvancedChart() {
     setSlPanelOpen(true);
     const ensure = () => {
       const s = mainSeriesRef.current;
-      if (!s || slLinesRef.current.length > 0) return;
+      if (!s) return;
+      if (slLinesRef.current.length > 0) {
+        if (slSeriesRef.current === s) return; // lines already exist on the current series
+        // Series was recreated (timeframe/symbol change). The old price lines are orphaned
+        // with the removed series, so drop the stale entries and rebuild on the new series.
+        slLinesRef.current = [];
+      }
       const cd = chartDataRef.current;
       const candles = cd?.candles || [];
       const spot = cd?.spot || (candles.length ? candles[candles.length - 1].close : 0);
@@ -3515,6 +3522,7 @@ export function AdvancedChart() {
         { kind: 'upper', price: upper, instance: uInst, label: slIsBullish ? 'TARGET' : 'SL', color: '#f43f5e' },
         { kind: 'lower', price: lower, instance: lInst, label: slIsBullish ? 'SL' : 'TARGET', color: '#10b981' },
       ];
+      slSeriesRef.current = s; // remember which series these lines belong to (for recreation detection)
       setSlLevels({ upper, lower });
     };
     ensure();
@@ -3524,6 +3532,7 @@ export function AdvancedChart() {
       const s = mainSeriesRef.current;
       slLinesRef.current.forEach(l => { try { s && s.removePriceLine(l.instance); } catch {} });
       slLinesRef.current = [];
+      slSeriesRef.current = null;
     };
   }, [slActivePos]);
 
@@ -4075,6 +4084,7 @@ export function AdvancedChart() {
   }, [localAnalytics, liveTa, taInfo, fiiDiiData]);
 
   const [lastTickMessage, setLastTickMessage] = useState<string>('');
+  const lastTickAtRef = useRef(0); // ms timestamp of the last live tick (to know when ticks are fresh)
 
   // Enforce ONLY the active selected instrument receives dynamic WS price updates
   // Directly updates the lightweight chart series, avoiding full component teardowns/re-renders
@@ -4159,6 +4169,7 @@ export function AdvancedChart() {
             lastCandleTimeRef.current = updateTime;
           }
           lastCandleDataRef.current = updatedCandle;
+          lastTickAtRef.current = Date.now();
 
           try {
             mainSeriesRef.current.update(updatedCandle);
@@ -4227,14 +4238,32 @@ export function AdvancedChart() {
              return; // Older than tick
            }
 
-           const updatedCandle = {
-             time: updateTime,
-             open: latestCandle.open,
-             high: latestCandle.high,
-             low: latestCandle.low,
-             close: latestCandle.close,
-             rsi14: latestCandle.rsi14,
-           };
+           const live = lastCandleDataRef.current;
+           const ticksFresh = (Date.now() - lastTickAtRef.current) < 10000;
+           let updatedCandle;
+           if (live && live.time === updateTime && ticksFresh) {
+             // Same forming candle, live ticks still flowing: keep the live OHLC.
+             // The 15s server snapshot lags the ticks, so don't let it retract the
+             // tick-extended high/low or reset the live close (that caused the jump vs Zerodha/TV).
+             updatedCandle = {
+               time: updateTime,
+               open: live.open,
+               high: Math.max(live.high, latestCandle.high),
+               low: Math.min(live.low, latestCandle.low),
+               close: live.close,
+               rsi14: latestCandle.rsi14, // server RSI is authoritative
+             };
+           } else {
+             // A new/closed candle, or ticks are stale: trust the server snapshot fully.
+             updatedCandle = {
+               time: updateTime,
+               open: latestCandle.open,
+               high: latestCandle.high,
+               low: latestCandle.low,
+               close: latestCandle.close,
+               rsi14: latestCandle.rsi14,
+             };
+           }
            lastCandleTimeRef.current = updateTime;
            lastCandleDataRef.current = updatedCandle;
            mainSeriesRef.current.update(updatedCandle);
@@ -4255,9 +4284,9 @@ export function AdvancedChart() {
              });
            }
 
-           // Keep the live closes buffer aligned with the server's latest close
+           // Keep the live closes buffer aligned with the close we actually drew
            if (rsiClosesRef.current.length > 0) {
-             rsiClosesRef.current[rsiClosesRef.current.length - 1] = latestCandle.close;
+             rsiClosesRef.current[rsiClosesRef.current.length - 1] = updatedCandle.close;
            }
            // Refresh the SMA from server-computed RSI values (authoritative, every 15s)
            if (rsiSmaSeriesRef.current && data.candles.length >= 14) {
