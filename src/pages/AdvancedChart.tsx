@@ -927,7 +927,7 @@ function TVStylePicker({
             <div className="space-y-1.5">
               <div className="text-[11px] text-muted-foreground font-medium">Thickness</div>
               <div className="flex border border-0 rounded overflow-hidden h-8">
-                {[1, 2, 3, 4].map((lw) => (
+                {[1, 2, 3].map((lw) => (
                   <button 
                     key={`lw-${lw}`}
                     onClick={() => onThicknessChange(lw)}
@@ -1822,7 +1822,7 @@ function HLevelsEditorModal({
             <div className="space-y-2 pt-1">
               <div className="text-xs text-muted-foreground uppercase tracking-wider font-sans text-muted-foreground">Line thickness</div>
               <div className="flex border border-0 rounded overflow-hidden">
-                {[1, 2, 3, 4].map((width) => (
+                {[1, 2, 3].map((width) => (
                   <div 
                     key={`lw-${width}`}
                     onClick={() => setLineWidth(width)}
