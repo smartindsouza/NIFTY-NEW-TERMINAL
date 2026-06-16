@@ -3488,12 +3488,20 @@ export function AdvancedChart() {
         const levels = chartLevelsRef.current || [];
         let stopLevel: number, targetLevel: number;
         if (slIsBullish) {
-          stopLevel = prev && typeof prev.low === 'number' ? Math.round(prev.low) : Math.round(spot * 0.99);
+          // CALL: stop sits below spot. Default = previous candle low; if that low is above spot, use spot − 15.
+          const prevLow = prev && typeof prev.low === 'number' ? prev.low : null;
+          stopLevel = prevLow !== null
+            ? (prevLow > spot ? Math.round(spot - 15) : Math.round(prevLow))
+            : Math.round(spot * 0.99);
           const above = levels.filter(v => v > spot + 1).sort((a, b) => a - b);
           targetLevel = above.length ? above[0] : Math.round(spot * 1.01);
           upper = targetLevel; lower = stopLevel;
         } else {
-          stopLevel = prev && typeof prev.high === 'number' ? Math.round(prev.high) : Math.round(spot * 1.01);
+          // PUT: stop sits above spot. Default = previous candle high; if that high is below spot, use spot + 15.
+          const prevHigh = prev && typeof prev.high === 'number' ? prev.high : null;
+          stopLevel = prevHigh !== null
+            ? (prevHigh < spot ? Math.round(spot + 15) : Math.round(prevHigh))
+            : Math.round(spot * 1.01);
           const below = levels.filter(v => v < spot - 1).sort((a, b) => b - a);
           targetLevel = below.length ? below[0] : Math.round(spot * 0.99);
           upper = stopLevel; lower = targetLevel;
