@@ -1,7 +1,7 @@
 import { Link, useLocation } from 'wouter';
-import { Home, List, TrendingUp, Newspaper, Activity, LogIn, CheckCircle2, BarChart2, PlayCircle, FileText, Sparkles, LineChart, Settings2, Bell } from 'lucide-react';
+import { Home, List, TrendingUp, Newspaper, Activity, LogIn, CheckCircle2, BarChart2, PlayCircle, FileText, Sparkles, LineChart, Settings2, Bell, Menu } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import { useGlobalWebSocket } from '../hooks/useWebSocket';
@@ -11,6 +11,7 @@ export function Header() {
   const [location] = useLocation();
   const { status: wsStatus } = useGlobalWebSocket();
   const { unreadCount } = useNotifications();
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const { data: authStatus } = useQuery({
     queryKey: ['auth-status'],
@@ -81,8 +82,19 @@ export function Header() {
     { href: '/notifications', label: 'Notifications', icon: Bell },
   ];
 
+  // Mobile bottom-bar groupings: 4 primary tabs + a "More" sheet for the rest
+  const primaryHrefs = ['/', '/advanced-chart', '/option-chain', '/notifications'];
+  const shortLabels: Record<string, string> = {
+    '/': 'Home', '/advanced-chart': 'Chart', '/option-chain': 'Chain', '/notifications': 'Alerts',
+  };
+  const primaryLinks = primaryHrefs
+    .map((h) => links.find((l) => l.href === h))
+    .filter(Boolean) as typeof links;
+  const moreLinks = links.filter((l) => !primaryHrefs.includes(l.href));
+
   return (
-    <header className="fixed top-0 left-0 z-50 w-16 h-screen py-6 bg-sidebar border-r border-sidebar-border flex flex-col items-center gap-5 shrink-0 transition-all duration-300 select-none">
+    <>
+    <header className="fixed top-0 left-0 z-50 w-16 h-screen py-6 bg-sidebar border-r border-sidebar-border hidden md:flex flex-col items-center gap-5 shrink-0 transition-all duration-300 select-none">
       {/* Brand Logo */}
       <Link href="/" className="flex flex-col items-center gap-2 cursor-pointer group pb-4 border-b border-sidebar-border shrink-0 w-full">
         <div className="w-9 h-9 flex items-center justify-center rounded-lg bg-primary/20 text-primary transition-transform duration-300 group-hover:scale-105">
@@ -176,5 +188,97 @@ export function Header() {
         </div>
       </div>
     </header>
+
+    {/* ===== Mobile bottom navigation (TradingView-style) — small screens only ===== */}
+    {moreOpen && (
+      <div className="md:hidden fixed inset-0 z-[60]" onClick={() => setMoreOpen(false)}>
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-in fade-in duration-150" />
+        <div
+          className="absolute bottom-16 left-0 right-0 bg-sidebar border-t border-sidebar-border rounded-t-2xl p-4 pb-5 animate-in slide-in-from-bottom duration-200"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="w-10 h-1 rounded-full bg-muted-foreground/30 mx-auto mb-4" />
+          <div className="grid grid-cols-4 gap-3">
+            {moreLinks.map((link) => {
+              const Icon = link.icon;
+              const active = location === link.href;
+              const showBlink = (link.href === '/news' && hasUnseenNiftyNews);
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  onClick={() => setMoreOpen(false)}
+                  className={cn(
+                    'flex flex-col items-center gap-1.5 p-2.5 rounded-xl border border-transparent relative',
+                    active ? 'text-primary bg-primary/10 border-primary/20' : 'text-muted-foreground'
+                  )}
+                >
+                  {showBlink && <span className="absolute top-1.5 right-3 w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />}
+                  <Icon className="w-5 h-5" />
+                  <span className="text-[9px] font-medium text-center leading-tight">{link.label}</span>
+                </Link>
+              );
+            })}
+            <Link
+              href="/kite-login"
+              onClick={() => setMoreOpen(false)}
+              className={cn(
+                'flex flex-col items-center gap-1.5 p-2.5 rounded-xl border border-transparent',
+                authStatus?.status === 'connected' ? 'text-emerald-500' : 'text-rose-500'
+              )}
+            >
+              {authStatus?.status === 'connected' ? <CheckCircle2 className="w-5 h-5" /> : <LogIn className="w-5 h-5" />}
+              <span className="text-[9px] font-medium">Kite</span>
+            </Link>
+          </div>
+          {/* Live status row */}
+          <div className="flex items-center justify-center gap-5 mt-4 pt-3 border-t border-sidebar-border text-[10px] font-mono uppercase tracking-wider">
+            <span className={cn('flex items-center gap-1.5', isProxyAlive ? 'text-emerald-500' : 'text-rose-500')}>
+              <span className={cn('w-1.5 h-1.5 rounded-full', isProxyAlive ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500')} /> Proxy
+            </span>
+            <span className={cn('flex items-center gap-1.5', wsStatus === 'Connected' ? 'text-emerald-500' : 'text-rose-500')}>
+              <span className={cn('w-1.5 h-1.5 rounded-full', wsStatus === 'Connected' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500')} /> Feed
+            </span>
+          </div>
+        </div>
+      </div>
+    )}
+
+    <nav
+      className="md:hidden fixed bottom-0 left-0 right-0 z-50 h-16 bg-sidebar border-t border-sidebar-border flex items-stretch justify-around px-1"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+    >
+      {primaryLinks.map((link) => {
+        const Icon = link.icon;
+        const active = location === link.href;
+        const showBlink = (link.href === '/notifications' && unreadCount > 0);
+        return (
+          <Link
+            key={link.href}
+            href={link.href}
+            className={cn(
+              'flex-1 flex flex-col items-center justify-center gap-1 relative transition-colors',
+              active ? 'text-primary' : 'text-muted-foreground'
+            )}
+          >
+            {showBlink && <span className="absolute top-2.5 left-1/2 translate-x-2.5 w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse z-10" />}
+            <Icon className={cn('w-5 h-5 transition-transform', active && 'scale-110')} />
+            <span className="text-[9px] font-medium">{shortLabels[link.href] || link.label}</span>
+          </Link>
+        );
+      })}
+      <button
+        type="button"
+        onClick={() => setMoreOpen((v) => !v)}
+        className={cn(
+          'flex-1 flex flex-col items-center justify-center gap-1 transition-colors',
+          moreOpen ? 'text-primary' : 'text-muted-foreground'
+        )}
+      >
+        <Menu className="w-5 h-5" />
+        <span className="text-[9px] font-medium">More</span>
+      </button>
+    </nav>
+    </>
   );
 }
