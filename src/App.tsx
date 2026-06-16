@@ -120,7 +120,7 @@ export default function App() {
           ` : ''}
         `}</style>
         <Header />
-        <main className="flex-1 overflow-y-auto w-full relative bg-transparent pl-[80px] pt-6 md:pt-8 pb-12 pr-4 md:pr-6 lg:pr-8">
+        <main className="flex-1 overflow-y-auto w-full relative bg-transparent pl-0 md:pl-[80px] pt-2 md:pt-8 pb-24 md:pb-12 pr-0 md:pr-6 lg:pr-8">
           <ActivePositions />
           <Suspense fallback={<TerminalLoader />}>
             <Switch>
@@ -146,7 +146,7 @@ export default function App() {
         {/* Global floating telemetry toggle button */}
         <button
           onClick={() => setShowDiagnostics(!showDiagnostics)}
-          className={`fixed bottom-6 right-6 z-50 p-3.5 rounded-full border transition-all duration-300 flex items-center justify-center cursor-pointer ${
+          className={`fixed bottom-20 right-4 md:bottom-6 md:right-6 z-50 p-3.5 rounded-full border transition-all duration-300 flex items-center justify-center cursor-pointer ${
             showDiagnostics 
               ? 'bg-emerald-500 text-black border-emerald-400 hover:bg-emerald-400' 
               : 'bg-card text-foreground/80 border-0 hover:text-foreground hover:bg-accent hover:text-accent-foreground'
@@ -158,7 +158,7 @@ export default function App() {
 
         {/* Floating live diagnostics view */}
         {showDiagnostics && (
-          <div className="fixed bottom-20 right-6 z-50 w-80 md:w-96 max-h-[70vh] overflow-y-auto animate-in slide-in-from-bottom-5 duration-300 rounded-2xl ">
+          <div className="fixed bottom-36 right-3 md:bottom-20 md:right-6 z-50 w-80 md:w-96 max-h-[70vh] overflow-y-auto animate-in slide-in-from-bottom-5 duration-300 rounded-2xl ">
             <DiagnosticsPanel />
           </div>
         )}
