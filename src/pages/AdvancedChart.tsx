@@ -3290,6 +3290,7 @@ export function AdvancedChart() {
   // ===== Phase 2: draggable SL/Target lines feeding the server-side auto-exit watcher =====
   const slLinesRef = useRef<{ kind: 'upper' | 'lower', price: number, instance: any, label: string, color: string }[]>([]);
   const chartLevelsRef = useRef<number[]>([]); // all chart levels (H-levels, 50%, PDH/PDL, S/R) for default target
+  const oiGlowRef = useRef<Record<number, { call: number, put: number }>>({}); // strike -> last time call/put OI grew (ms)
   const [slActivePos, setSlActivePos] = useState<any>(null);
   const slIsBullish = slActivePos ? ((slActivePos.side === 'BUY' && slActivePos.optionType === 'CE') || (slActivePos.side === 'SELL' && slActivePos.optionType === 'PE')) : true;
   const [slLevels, setSlLevels] = useState<{ upper: number | null, lower: number | null }>({ upper: null, lower: null });
@@ -4024,6 +4025,19 @@ export function AdvancedChart() {
 
   useEffect(() => {
     if (oiData && oiData !== oiHistoryRef.current.current) {
+      const prev = oiHistoryRef.current.current; // previous snapshot (before we overwrite it)
+      if (prev && prev.ceData && prev.peData && oiData.strikes) {
+        const now = Date.now();
+        oiData.strikes.forEach((strike: number) => {
+          const curC = oiData.ceData[strike]?.oi || 0;
+          const curP = oiData.peData[strike]?.oi || 0;
+          const prevC = prev.ceData[strike]?.oi || 0;
+          const prevP = prev.peData[strike]?.oi || 0;
+          if (!oiGlowRef.current[strike]) oiGlowRef.current[strike] = { call: 0, put: 0 };
+          if (curC > prevC + 0.01) oiGlowRef.current[strike].call = now; // call OI grew
+          if (curP > prevP + 0.01) oiGlowRef.current[strike].put = now;  // put OI grew
+        });
+      }
       oiHistoryRef.current.prev = oiHistoryRef.current.current;
       oiHistoryRef.current.current = oiData;
     }
@@ -5172,7 +5186,14 @@ export function AdvancedChart() {
           const priceScaleWidth = mainChartRef.current ? mainChartRef.current.priceScale('right').width() : 60;
           const rightEdge = cw - priceScaleWidth - oiBarGap;
           const maxBarWidth = oiMaxBarWidth; // max length of bars
-          
+
+          // Glow setup: bars near the spot price that have just grown in OI pulse with a colored halo
+          const glowSpot = oiData.spot || (chartDataRef.current?.spot) || 0;
+          const glowBand = glowSpot > 0 ? glowSpot * 0.006 : 0; // ~0.6% around spot ≈ a few strikes
+          const GLOW_MS = 20000; // glow lasts until the next couple of updates
+          const nowMs = Date.now();
+          const glowBlur = 8 + 6 * (0.5 + 0.5 * Math.sin(nowMs / 350)); // gentle pulse 8–14px
+
           optionRows.forEach((row: any) => {
               const y = mainSeriesRef.current!.priceToCoordinate(row.strike);
               if (y === null || y < 0 || y > ch) return;
@@ -5181,19 +5202,29 @@ export function AdvancedChart() {
               const putWidth = (row.put_oi / maxOI) * maxBarWidth;
               
               const barHeight = oiBarThickness;
+
+              const nearSpot = glowBand > 0 && Math.abs(row.strike - glowSpot) <= glowBand;
+              const g = oiGlowRef.current[row.strike];
+              const callGlow = nearSpot && !!g && (nowMs - g.call < GLOW_MS);
+              const putGlow = nearSpot && !!g && (nowMs - g.put < GLOW_MS);
               
               // Call (Red) goes slightly above
-              ctx.fillStyle = hexToRgba(oiCallColor, 0.75);
-              // Draw leftwards from the right edge
+              ctx.save();
+              if (callGlow) { ctx.shadowColor = oiCallColor; ctx.shadowBlur = glowBlur; }
+              ctx.fillStyle = hexToRgba(oiCallColor, callGlow ? 0.95 : 0.75);
               ctx.beginPath();
               ctx.roundRect(rightEdge - callWidth, y - barHeight/2, callWidth, barHeight/2, [4, 0, 0, 4]);
               ctx.fill();
+              ctx.restore();
               
               // Put (Green) goes slightly below
-              ctx.fillStyle = hexToRgba(oiPutColor, 0.75);
+              ctx.save();
+              if (putGlow) { ctx.shadowColor = oiPutColor; ctx.shadowBlur = glowBlur; }
+              ctx.fillStyle = hexToRgba(oiPutColor, putGlow ? 0.95 : 0.75);
               ctx.beginPath();
               ctx.roundRect(rightEdge - putWidth, y, putWidth, barHeight/2, [4, 0, 0, 4]);
               ctx.fill();
+              ctx.restore();
           });
         };
         
@@ -5400,22 +5431,44 @@ export function AdvancedChart() {
                  ctx.font = '12px sans-serif';
               });
 
-              // SL / TARGET — centered pill on each line: chart-background fill, outline in the line's colour
+              // SL / TARGET — centered pill on each line: chart-background fill, outline in the line's colour.
+              // Uses the same collision system as the other labels so it never sits on top of another label.
               if (slLinesRef.current && slLinesRef.current.length > 0) {
                  const isDarkPill = document.documentElement.classList.contains('dark');
                  const pillBg = isDarkPill ? '#0d1117' : '#ffffff';
                  ctx.textAlign = 'center';
                  ctx.textBaseline = 'middle';
-                 slLinesRef.current.forEach((sl) => {
-                    const yy = mainSeriesRef.current!.priceToCoordinate(sl.price);
-                    if (yy === null || yy < 0 || yy > ch) return;
+                 // sort by y so stacking is stable
+                 const slSorted = [...slLinesRef.current]
+                   .map(sl => ({ sl, y: mainSeriesRef.current!.priceToCoordinate(sl.price) }))
+                   .filter(o => o.y !== null && (o.y as number) >= 0 && (o.y as number) <= ch)
+                   .sort((a, b) => (a.y as number) - (b.y as number));
+                 slSorted.forEach(({ sl, y }) => {
+                    const yy = y as number;
                     const txt = sl.label || (sl.kind === 'upper' ? 'TARGET' : 'SL');
                     const lineColor = sl.color || (sl.kind === 'upper' ? '#f43f5e' : '#10b981');
                     ctx.font = 'bold 10px sans-serif';
                     const tw = ctx.measureText(txt).width;
+
+                    // Find a non-colliding X (shift sideways if another label shares this row)
+                    let currentX = baseCenterX;
+                    let collision = true;
+                    let offsetMultiplier = 1;
+                    while (collision) {
+                       collision = assignedPositions.some(pos =>
+                          Math.abs(pos.y - yy) < 20 && Math.abs(pos.x - currentX) < Math.max(120, tw + 30)
+                       );
+                       if (collision) {
+                          const offset = (offsetMultiplier % 2 === 0 ? -1 : 1) * Math.ceil(offsetMultiplier / 2) * 140;
+                          currentX = baseCenterX + offset;
+                          offsetMultiplier++;
+                       }
+                    }
+                    assignedPositions.push({ x: currentX, y: yy });
+
                     const w = tw + 16;
                     const h = 18;
-                    const x0 = baseCenterX - w / 2;
+                    const x0 = currentX - w / 2;
                     const y0 = yy - h / 2;
                     ctx.beginPath();
                     ctx.roundRect(x0, y0, w, h, h / 2);
@@ -5425,7 +5478,7 @@ export function AdvancedChart() {
                     ctx.strokeStyle = lineColor;
                     ctx.stroke();
                     ctx.fillStyle = lineColor;
-                    ctx.fillText(txt, baseCenterX, yy);
+                    ctx.fillText(txt, currentX, yy);
                  });
                  ctx.font = '12px sans-serif';
               }
