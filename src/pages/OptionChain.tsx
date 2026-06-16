@@ -266,7 +266,7 @@ export function OptionChain() {
       </div>
 
       {/* Writers Chart (Visual Layout Mockup) */}
-      <div className="grid grid-cols-2 gap-px bg-card backdrop-blur-xl border border-0 rounded-2xl overflow-hidden">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-card backdrop-blur-xl border border-0 rounded-2xl overflow-hidden">
         
         {/* Call Writers */}
         <div className="bg-transparent p-5 pb-8 relative">
@@ -276,21 +276,21 @@ export function OptionChain() {
               <p className="text-[11px] text-muted-foreground">5 strikes</p>
            </div>
            
-           <div className="space-y-1.5 relative pr-[40px]">
+           <div className="space-y-2 relative">
               {topCeStrikes.map((s: any, idx: number) => {
                  const maxOi = topCeStrikes[0]?.oi || 1;
                  const pct = ((s?.oi || 0) / maxOi) * 100;
+                 const isATM = s?.strikePrice === resistanceZone?.strikePrice;
                  return (
-                 <div key={s?.strikePrice} className="flex flex-row-reverse justify-start items-center h-[28px] relative group cursor-pointer">
-                    <div className="bg-red-500/10 border border-red-500/20 h-full rounded-l-full transition-all group-hover:bg-red-500/20 absolute right-0" style={{ width: `${pct}%` }}></div>
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2 text-right">
-                       <p className="text-[11px] text-red-400 font-mono mb-[1px] leading-none">{(s?.oi || 0).toFixed(1)}L OI</p>
-                       <p className="text-[10px] text-muted-foreground leading-none text-right">IV —%</p>
-                    </div>
-                    <div className="flex items-center gap-2 absolute left-[-20px] top-1/2 -translate-y-1/2 font-mono text-[11px] font-bold text-muted-foreground z-10 w-[140px] pl-6">
-                       <span className="text-muted-foreground w-3">{idx + 1}.</span> 
-                       <span className="text-red-400 text-[11px]">{s?.strikePrice}</span>
-                       {s?.strikePrice === resistanceZone?.strikePrice && <Badge className="h-3.5 text-[10px] px-1 rounded-[2px] bg-popover border border-0 text-muted-foreground ml-1">ATM zone</Badge>}
+                 <div key={s?.strikePrice} className="relative h-8 flex items-center group cursor-pointer">
+                    <div className="absolute right-0 top-0 h-full bg-red-500/10 border border-red-500/20 rounded-l-md transition-all group-hover:bg-red-500/20" style={{ width: `${Math.max(pct, 6)}%` }}></div>
+                    <div className="relative z-10 flex items-center justify-between w-full px-2.5 gap-2">
+                       <span className="flex items-center gap-1.5 font-mono text-[11px] font-bold whitespace-nowrap">
+                          <span className="text-muted-foreground">{idx + 1}.</span>
+                          <span className="text-red-400">{s?.strikePrice}</span>
+                          {isATM && <Badge className="h-3.5 text-[9px] px-1 rounded-[2px] bg-popover border border-0 text-muted-foreground">ATM</Badge>}
+                       </span>
+                       <span className="text-[11px] text-red-400 font-mono whitespace-nowrap">{(s?.oi || 0).toFixed(1)}L</span>
                     </div>
                  </div>
               )})}
@@ -300,27 +300,26 @@ export function OptionChain() {
         {/* Put Writers */}
         <div className="bg-transparent p-5 pb-8 relative">
            <div className="absolute inset-0 bg-gradient-to-l from-green-500/5 to-transparent opacity-50"></div>
-           <div className="flex justify-between items-center mb-6 pl-[40px]">
+           <div className="flex justify-between items-center mb-6">
               <p className="text-[11px] font-bold uppercase tracking-widest text-green-500 flex gap-1.5 items-center"><Target className="w-3 h-3" /> PUT WRITERS (SUPPORT)</p>
               <p className="text-[11px] text-muted-foreground">5 strikes</p>
            </div>
            
-           <div className="space-y-1.5 relative pl-[40px]">
+           <div className="space-y-2 relative">
               {topPeStrikes.map((s: any, idx: number) => {
                  const maxOi = topPeStrikes[0]?.oi || 1;
                  const pct = ((s?.oi || 0) / maxOi) * 100;
+                 const isATM = s?.strikePrice === supportZone?.strikePrice;
                  return (
-                 <div key={s?.strikePrice} className="flex justify-start items-center h-[28px] relative group cursor-pointer">
-                    <div className="bg-green-500/10 border border-green-500/20 h-full rounded-r-full transition-all group-hover:bg-green-500/20 absolute left-0" style={{ width: `${pct}%` }}></div>
-                    <div className="absolute left-3 top-1/2 -translate-y-1/2 text-left">
-                       <p className="text-[11px] text-green-400 font-mono mb-[1px] leading-none">{(s?.oi || 0).toFixed(1)}L OI</p>
-                       <p className="text-[10px] text-muted-foreground leading-none">IV —%</p>
-                    </div>
-                    
-                    <div className="flex flex-row-reverse items-center justify-end gap-2 absolute right-[-20px] top-1/2 -translate-y-1/2 font-mono text-[11px] text-muted-foreground font-bold z-10 w-[140px] pr-6">
-                       <span className="text-muted-foreground w-3 text-right">.{idx + 1}</span> 
-                       <span className="text-green-400 text-[11px]">{s?.strikePrice}</span>
-                       {s?.strikePrice === supportZone?.strikePrice && <Badge className="h-3.5 text-[10px] px-1 rounded-[2px] bg-popover border border-0 text-muted-foreground mr-1">ATM zone</Badge>}
+                 <div key={s?.strikePrice} className="relative h-8 flex items-center group cursor-pointer">
+                    <div className="absolute left-0 top-0 h-full bg-green-500/10 border border-green-500/20 rounded-r-md transition-all group-hover:bg-green-500/20" style={{ width: `${Math.max(pct, 6)}%` }}></div>
+                    <div className="relative z-10 flex flex-row-reverse items-center justify-between w-full px-2.5 gap-2">
+                       <span className="flex flex-row-reverse items-center gap-1.5 font-mono text-[11px] font-bold whitespace-nowrap">
+                          <span className="text-muted-foreground">{idx + 1}.</span>
+                          <span className="text-green-400">{s?.strikePrice}</span>
+                          {isATM && <Badge className="h-3.5 text-[9px] px-1 rounded-[2px] bg-popover border border-0 text-muted-foreground">ATM</Badge>}
+                       </span>
+                       <span className="text-[11px] text-green-400 font-mono whitespace-nowrap">{(s?.oi || 0).toFixed(1)}L</span>
                     </div>
                  </div>
               )})}

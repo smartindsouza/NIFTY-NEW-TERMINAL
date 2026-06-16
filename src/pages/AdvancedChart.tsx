@@ -5737,9 +5737,9 @@ export function AdvancedChart() {
         </div>
       )}
 
-      <div className="flex justify-between items-center pb-2 mb-4">
-        <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-bold text-foreground tracking-tight whitespace-nowrap">
+      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 pb-2 mb-2 md:mb-4">
+        <div className="flex items-center gap-2 md:gap-4 flex-wrap">
+          <h1 className="text-lg md:text-2xl font-bold text-foreground tracking-tight whitespace-nowrap">
             Advanced Trading Chart
           </h1>
           {lastTickMessage && (
@@ -5772,7 +5772,7 @@ export function AdvancedChart() {
              </span>
           )}
         </div>
-        <div className="flex items-center gap-4 flex-wrap justify-end">
+        <div className="flex items-center gap-2 md:gap-4 flex-wrap md:justify-end w-full md:w-auto">
           <SymbolSearch 
             onSelect={setSelectedInstrument} 
             currentSymbol={selectedInstrument ? selectedInstrument.tradingsymbol : "NIFTY 50"} 
