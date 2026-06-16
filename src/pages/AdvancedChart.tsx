@@ -3288,7 +3288,7 @@ export function AdvancedChart() {
   const draggingLineRef = useRef<{ id: number, startY: number, dragged: boolean, sl?: 'upper' | 'lower' } | null>(null);
 
   // ===== Phase 2: draggable SL/Target lines feeding the server-side auto-exit watcher =====
-  const slLinesRef = useRef<{ kind: 'upper' | 'lower', price: number, instance: any }[]>([]);
+  const slLinesRef = useRef<{ kind: 'upper' | 'lower', price: number, instance: any, label: string, color: string }[]>([]);
   const chartLevelsRef = useRef<number[]>([]); // all chart levels (H-levels, 50%, PDH/PDL, S/R) for default target
   const [slActivePos, setSlActivePos] = useState<any>(null);
   const slIsBullish = slActivePos ? ((slActivePos.side === 'BUY' && slActivePos.optionType === 'CE') || (slActivePos.side === 'SELL' && slActivePos.optionType === 'PE')) : true;
@@ -3499,9 +3499,13 @@ export function AdvancedChart() {
         }
       }
 
-      const uInst = s.createPriceLine({ price: upper, color: '#f43f5e', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: 'EXIT \u25B2' });
-      const lInst = s.createPriceLine({ price: lower, color: '#10b981', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: 'EXIT \u25BC' });
-      slLinesRef.current = [{ kind: 'upper', price: upper, instance: uInst }, { kind: 'lower', price: lower, instance: lInst }];
+      const uInst = s.createPriceLine({ price: upper, color: '#f43f5e', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: '' });
+      const lInst = s.createPriceLine({ price: lower, color: '#10b981', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: '' });
+      // For bullish: upper = TARGET, lower = SL (stop). For bearish: mirrored.
+      slLinesRef.current = [
+        { kind: 'upper', price: upper, instance: uInst, label: slIsBullish ? 'TARGET' : 'SL', color: '#f43f5e' },
+        { kind: 'lower', price: lower, instance: lInst, label: slIsBullish ? 'SL' : 'TARGET', color: '#10b981' },
+      ];
       setSlLevels({ upper, lower });
     };
     ensure();
@@ -5148,8 +5152,10 @@ export function AdvancedChart() {
           }
         }
 
-        // 2. Draw OI Bars if active
-        if (showOiBars && oiData && oiData.strikes && oiData.ceData && oiData.peData) {
+        // 2. OI Bars — defined as a function here, but drawn AFTER the horizontal lines below,
+        //    so the bars always sit clearly on top of S&R / PDH-PDL / H-Level lines.
+        const drawOiBars = () => {
+          if (!(showOiBars && oiData && oiData.strikes && oiData.ceData && oiData.peData)) return;
           const optionRows = oiData.strikes.map((strike: number) => ({
             strike,
             call_oi: oiData.ceData[strike]?.oi || 0,
@@ -5189,7 +5195,7 @@ export function AdvancedChart() {
               ctx.roundRect(rightEdge - putWidth, y, putWidth, barHeight/2, [4, 0, 0, 4]);
               ctx.fill();
           });
-        }
+        };
         
         // 3. Draw Spot Price and Countdown to bar close on Y axis
         const lastCandle = lastCandleDataRef.current || (chartData && chartData.candles && chartData.candles.length > 0 ? chartData.candles[chartData.candles.length - 1] : null);
@@ -5330,6 +5336,9 @@ export function AdvancedChart() {
                  ctx.setLineDash([]);
               });
 
+              // Draw OI bars on top of the horizontal lines so they stay clearly visible
+              drawOiBars();
+
               ctx.font = '12px sans-serif';
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
@@ -5390,6 +5399,36 @@ export function AdvancedChart() {
                  // Restore font for next inline label's measurements
                  ctx.font = '12px sans-serif';
               });
+
+              // SL / TARGET — centered pill on each line: chart-background fill, outline in the line's colour
+              if (slLinesRef.current && slLinesRef.current.length > 0) {
+                 const isDarkPill = document.documentElement.classList.contains('dark');
+                 const pillBg = isDarkPill ? '#0d1117' : '#ffffff';
+                 ctx.textAlign = 'center';
+                 ctx.textBaseline = 'middle';
+                 slLinesRef.current.forEach((sl) => {
+                    const yy = mainSeriesRef.current!.priceToCoordinate(sl.price);
+                    if (yy === null || yy < 0 || yy > ch) return;
+                    const txt = sl.label || (sl.kind === 'upper' ? 'TARGET' : 'SL');
+                    const lineColor = sl.color || (sl.kind === 'upper' ? '#f43f5e' : '#10b981');
+                    ctx.font = 'bold 10px sans-serif';
+                    const tw = ctx.measureText(txt).width;
+                    const w = tw + 16;
+                    const h = 18;
+                    const x0 = baseCenterX - w / 2;
+                    const y0 = yy - h / 2;
+                    ctx.beginPath();
+                    ctx.roundRect(x0, y0, w, h, h / 2);
+                    ctx.fillStyle = pillBg;
+                    ctx.fill();
+                    ctx.lineWidth = 1.5;
+                    ctx.strokeStyle = lineColor;
+                    ctx.stroke();
+                    ctx.fillStyle = lineColor;
+                    ctx.fillText(txt, baseCenterX, yy);
+                 });
+                 ctx.font = '12px sans-serif';
+              }
            }
         }
 
