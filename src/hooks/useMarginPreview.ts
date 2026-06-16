@@ -32,6 +32,7 @@ export interface MarginPreviewState {
   loading: boolean;
   error: string | null;
   data: KiteMarginResponse | null;
+  dataQuantity?: number; // the quantity `data` was computed for — lets callers derive a stable per-lot cost
   cacheHit?: boolean;
   isKiteApiAvailable?: boolean;
 }
@@ -140,6 +141,7 @@ export function useMarginPreview(params: {
         loading: false,
         error: null,
         data: cached.data,
+        dataQuantity: params.quantity,
         cacheHit: true,
         isKiteApiAvailable: true
       });
@@ -219,6 +221,7 @@ export function useMarginPreview(params: {
             loading: false,
             error: null,
             data,
+            dataQuantity: params.quantity,
             cacheHit: false,
             isKiteApiAvailable: true
           });
