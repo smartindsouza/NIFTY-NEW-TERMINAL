@@ -5587,7 +5587,7 @@ export function AdvancedChart() {
   });
 
   return (
-    <div className="p-6 md:p-8 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto pb-20 flex flex-col min-h-screen relative">
+    <div className="px-1 py-2 md:p-8 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto pb-20 flex flex-col min-h-screen relative">
       
       {showDiagnostic && (
         <div className="fixed bottom-6 right-6 z-50 bg-card/95 backdrop-blur-md border border-0 p-4 rounded-lg text-xs font-mono w-[340px] max-h-[80vh] overflow-y-auto">
