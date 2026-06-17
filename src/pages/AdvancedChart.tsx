@@ -4428,6 +4428,14 @@ export function AdvancedChart() {
     return calculateBollingerBands(chartData.candles, bbPeriod, bbStdDev);
   }, [chartData, showBB, bbPeriod, bbStdDev]);
 
+  // Live BB plumbing: the series above are seeded from closed candles, but must extend to the
+  // forming candle on every tick (otherwise the bands freeze at the last server candle).
+  const bbUpperSeriesRef = useRef<any>(null);
+  const bbMiddleSeriesRef = useRef<any>(null);
+  const bbLowerSeriesRef = useRef<any>(null);
+  const bbDataRef = useRef<any[]>([]); // latest live BB (incl. forming candle) for the canvas fill
+  const bbSigRef = useRef<string>(''); // change-signature so we only recompute when the candle moves
+
   const lastAlertedDivergenceRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -4754,6 +4762,9 @@ export function AdvancedChart() {
       focusRecentCandles(mainChart, chartData.candles);
     }
 
+    bbUpperSeriesRef.current = null;
+    bbMiddleSeriesRef.current = null;
+    bbLowerSeriesRef.current = null;
     if (showBB && bbData && bbData.length > 0) {
       const upperSeries = mainChart.addSeries(LineSeries, {
         color: hexToRgba(bbColor, 0.75),
@@ -4764,6 +4775,7 @@ export function AdvancedChart() {
         title: ''
       });
       upperSeries.setData(bbData.map(d => ({ time: d.time as any, value: d.upper })));
+      bbUpperSeriesRef.current = upperSeries;
 
       const middleSeries = mainChart.addSeries(LineSeries, {
         color: hexToRgba(bbColor, 0.45),
@@ -4775,6 +4787,7 @@ export function AdvancedChart() {
         title: ''
       });
       middleSeries.setData(bbData.map(d => ({ time: d.time as any, value: d.middle })));
+      bbMiddleSeriesRef.current = middleSeries;
 
       const lowerSeries = mainChart.addSeries(LineSeries, {
         color: hexToRgba(bbColor, 0.75),
@@ -4785,6 +4798,7 @@ export function AdvancedChart() {
         title: ''
       });
       lowerSeries.setData(bbData.map(d => ({ time: d.time as any, value: d.lower })));
+      bbLowerSeriesRef.current = lowerSeries;
     }
 
     // H Levels are now drawn on the canvas overlay (with pill labels) alongside PDH/PDL/SUP/RES,
@@ -5166,12 +5180,41 @@ export function AdvancedChart() {
         ctx.clearRect(0, 0, cw, ch);
         
         // 1. Draw Bollinger Bands fill if active
-        if (showBB && bbData && bbData.length > 0) {
+        // Recompute the bands LIVE so they track the forming candle and advance with new candles,
+        // instead of freezing at the last closed/server candle.
+        if (showBB) {
+          const baseC = chartDataRef.current?.candles || [];
+          const liveC = lastCandleDataRef.current;
+          const sig = `${baseC.length}|${liveC?.time || 0}|${liveC?.close ?? 0}|${liveC?.high ?? 0}|${liveC?.low ?? 0}|${bbPeriod}|${bbStdDev}`;
+          if (sig !== bbSigRef.current) {
+            let candlesForBB: any[] = baseC;
+            if (liveC && baseC.length) {
+              const lastT = baseC[baseC.length - 1].time;
+              if (liveC.time === lastT) candlesForBB = [...baseC.slice(0, -1), liveC];
+              else if (liveC.time > lastT) candlesForBB = [...baseC, liveC];
+            }
+            const live = calculateBollingerBands(candlesForBB, bbPeriod, bbStdDev);
+            bbDataRef.current = live;
+            bbSigRef.current = sig;
+            // Extend the line series to the latest point (update = upsert on the most recent bar)
+            if (live.length) {
+              const lp = live[live.length - 1];
+              try { bbUpperSeriesRef.current?.update({ time: lp.time as any, value: lp.upper }); } catch (e) {}
+              try { bbMiddleSeriesRef.current?.update({ time: lp.time as any, value: lp.middle }); } catch (e) {}
+              try { bbLowerSeriesRef.current?.update({ time: lp.time as any, value: lp.lower }); } catch (e) {}
+            }
+          }
+        } else {
+          bbDataRef.current = [];
+        }
+
+        const liveBB = bbDataRef.current;
+        if (showBB && liveBB && liveBB.length > 0) {
           ctx.beginPath();
           let first = true;
           
-          for (let i = 0; i < bbData.length; i++) {
-            const p = bbData[i];
+          for (let i = 0; i < liveBB.length; i++) {
+            const p = liveBB[i];
             const x = mainChartRef.current!.timeScale().timeToCoordinate(p.time as any);
             const yUpper = mainSeriesRef.current!.priceToCoordinate(p.upper);
             if (x !== null && yUpper !== null) {
@@ -5184,8 +5227,8 @@ export function AdvancedChart() {
             }
           }
           
-          for (let i = bbData.length - 1; i >= 0; i--) {
-            const p = bbData[i];
+          for (let i = liveBB.length - 1; i >= 0; i--) {
+            const p = liveBB[i];
             const x = mainChartRef.current!.timeScale().timeToCoordinate(p.time as any);
             const yLower = mainSeriesRef.current!.priceToCoordinate(p.lower);
             if (x !== null && yLower !== null) {
