@@ -28,6 +28,7 @@ const AiAnalysis = lazy(() => import('./pages/AiAnalysis'));
 const HistoricalAnalytics = lazy(() => import('./pages/HistoricalAnalytics'));
 const TerminalControl = lazy(() => import('./pages/TerminalControl'));
 const Notifications = lazy(() => import('./pages/Notifications'));
+const TradeJournal = lazy(() => import('./pages/TradeJournal'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -136,6 +137,7 @@ export default function App() {
               <Route path="/historical-analytics" component={HistoricalAnalytics} />
               <Route path="/terminal-control" component={TerminalControl} />
               <Route path="/notifications" component={Notifications} />
+              <Route path="/journal" component={TradeJournal} />
               <Route>
                  <div className="p-8 text-center text-muted-foreground animate-pulse">404 - Not Found</div>
               </Route>
