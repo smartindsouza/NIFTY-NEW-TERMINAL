@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'wouter';
-import { Home, List, TrendingUp, Newspaper, Activity, LogIn, CheckCircle2, BarChart2, PlayCircle, FileText, Sparkles, LineChart, Settings2, Bell, Menu, BookOpen } from 'lucide-react';
+import { Home, List, TrendingUp, Newspaper, Activity, LogIn, CheckCircle2, BarChart2, PlayCircle, FileText, Sparkles, LineChart, Settings2, Bell, Menu, BookOpen, Gauge } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -81,6 +81,7 @@ export function Header() {
     { href: '/terminal-control', label: 'Control', icon: Settings2 },
     { href: '/notifications', label: 'Notifications', icon: Bell },
     { href: '/journal', label: 'Trade Journal', icon: BookOpen },
+    { href: '/gap-risk', label: 'Gap Risk', icon: Gauge },
   ];
 
   // Mobile bottom-bar groupings: 4 primary tabs + a "More" sheet for the rest
