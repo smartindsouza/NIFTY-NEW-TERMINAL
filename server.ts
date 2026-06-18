@@ -11,6 +11,7 @@ import { computeAnalytics } from './server/analytics_engine';
 import { getTechnicalAnalysis, kiteDiagnostics } from './server/technical_analysis';
 import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData } from './server/kite_service';
 import { getHistoricalAnalytics } from './server/analytics_service';
+import { runRsiBacktest } from './server/rsi_backtest';
 import { getFiiData } from './server/fii_service';
 import { evaluateQuantSignals } from './server/quant_engine';
 import { generateGamePlan } from './server/game_plan_service';
@@ -779,6 +780,24 @@ connectTicker();
       return res.json({ success: true, spot, atmStrike, straddle, impliedMovePct, expiry, vix, asOf: Date.now() });
     } catch (e: any) {
       console.error('[gap-risk]', e);
+      return res.status(500).json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
+  // RSI zone-oscillator strategy backtest (signal tested on the NIFTY index, in points).
+  app.get('/api/backtest/rsi', async (req, res) => {
+    try {
+      const q = req.query;
+      const num = (v: any, d: number) => { const n = parseFloat(String(v)); return isNaN(n) ? d : n; };
+      const result = await runRsiBacktest({
+        days: num(q.days, 60),
+        rsiPeriod: num(q.rsiPeriod, 14),
+        obLow: num(q.obLow, 60), obHigh: num(q.obHigh, 65),
+        osLow: num(q.osLow, 38), osHigh: num(q.osHigh, 40),
+      });
+      return res.json(result);
+    } catch (e: any) {
+      console.error('[backtest/rsi]', e);
       return res.status(500).json({ success: false, error: e?.message || String(e) });
     }
   });
