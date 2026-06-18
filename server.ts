@@ -58,6 +58,34 @@ db.prepare(`
   )
 `).run();
 
+// Trade Journal (Phase 1 of AI analysis): every trade recorded with its market context,
+// so Claude can later review them for patterns. Append-only history, separate from live positions.
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS trade_journal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tradingsymbol TEXT,
+    exchange TEXT,
+    option_type TEXT,
+    strike REAL,
+    side TEXT,
+    qty INTEGER,
+    product TEXT,
+    entry_price REAL,
+    entry_time INTEGER,
+    entry_spot REAL,
+    context TEXT,
+    test_mode INTEGER DEFAULT 0,
+    simulated INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'OPEN',
+    exit_price REAL,
+    exit_time INTEGER,
+    exit_reason TEXT,
+    pnl REAL,
+    created_at INTEGER,
+    updated_at INTEGER
+  )
+`).run();
+
 // Migration: add trailing-stop columns if they don't exist yet
 for (const [col, def] of ([
   ['trail_enabled', 'INTEGER DEFAULT 0'],
@@ -118,7 +146,37 @@ async function placeKiteLimitExit(opts: { exchange: string; tradingsymbol: strin
 // Closes the ACTUAL open position for a symbol: reads its real product, quantity and
 // direction from Kite and places a matching closing order. This guarantees the order
 // flattens the position (no product mismatch, no accidental new short).
-async function closePositionBySymbol(tradingsymbol: string): Promise<{ ok: boolean; orderId?: string; error?: string; alreadyClosed?: boolean }> {
+// ===== Trade Journal helpers (Phase 1) =====
+function journalOpenTrade(o: {
+  tradingsymbol: string; exchange?: string; side: string; qty: number; product?: string;
+  entryPrice?: number; entrySpot?: number; optionType?: string; strike?: number;
+  context?: any; testMode?: boolean; simulated?: boolean;
+}) {
+  try {
+    const now = Date.now();
+    db.prepare(`INSERT INTO trade_journal
+      (tradingsymbol, exchange, option_type, strike, side, qty, product, entry_price, entry_time, entry_spot, context, test_mode, simulated, status, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'OPEN', ?, ?)`)
+      .run(
+        o.tradingsymbol, o.exchange || 'NFO', o.optionType || null, (o.strike ?? null) as any,
+        o.side, o.qty, o.product || 'MIS', (o.entryPrice ?? null) as any, now, (o.entrySpot ?? null) as any,
+        o.context ? JSON.stringify(o.context) : null, o.testMode ? 1 : 0, o.simulated ? 1 : 0, now, now
+      );
+  } catch (e) { console.error('[Journal] open insert failed', e); }
+}
+
+function journalCloseTrade(tradingsymbol: string, c: { exitPrice?: number; pnl?: number; reason?: string }) {
+  try {
+    const now = Date.now();
+    // Close the most recent still-open row for this symbol (no-op if none — keeps double-close safe)
+    const row = db.prepare(`SELECT id FROM trade_journal WHERE tradingsymbol = ? AND status = 'OPEN' ORDER BY entry_time DESC LIMIT 1`).get(tradingsymbol) as any;
+    if (!row) return;
+    db.prepare(`UPDATE trade_journal SET status='CLOSED', exit_price=?, exit_time=?, exit_reason=?, pnl=?, updated_at=? WHERE id=?`)
+      .run((c.exitPrice ?? null) as any, now, c.reason || 'MANUAL', (c.pnl ?? null) as any, now, row.id);
+  } catch (e) { console.error('[Journal] close update failed', e); }
+}
+
+async function closePositionBySymbol(tradingsymbol: string, reason: string = 'MANUAL'): Promise<{ ok: boolean; orderId?: string; error?: string; alreadyClosed?: boolean }> {
   try {
     const kc = getKiteClient();
     // @ts-ignore
@@ -130,7 +188,12 @@ async function closePositionBySymbol(tradingsymbol: string): Promise<{ ok: boole
     if (!pos) return { ok: false, alreadyClosed: true, error: `No open position found for ${tradingsymbol} on Zerodha (it may already be closed).` };
     const qty = Math.abs(pos.quantity);
     const side = pos.quantity > 0 ? 'SELL' : 'BUY'; // long -> sell to close; short -> buy to close
-    return await placeKiteLimitExit({ exchange: pos.exchange || 'NFO', tradingsymbol, qty, product: pos.product || 'NRML', side });
+    const exitResult = await placeKiteLimitExit({ exchange: pos.exchange || 'NFO', tradingsymbol, qty, product: pos.product || 'NRML', side });
+    if (exitResult.ok) {
+      // Record the close in the trade journal (Kite's own last price + P&L for this leg)
+      journalCloseTrade(tradingsymbol, { exitPrice: pos.last_price, pnl: pos.pnl, reason });
+    }
+    return exitResult;
   } catch (e: any) {
     return { ok: false, error: e?.message || String(e) };
   }
@@ -261,7 +324,7 @@ connectTicker();
     // Atomic claim prevents double-firing across overlapping loops
     const claim = db.prepare("UPDATE exit_rules SET status='TRIGGERING', detail=? WHERE id=? AND status='ACTIVE'").run(reason, rule.id);
     if (claim.changes === 0) return;
-    const result = await closePositionBySymbol(rule.tradingsymbol);
+    const result = await closePositionBySymbol(rule.tradingsymbol, `AUTO: ${reason}`);
     if (result.ok) {
       db.prepare("UPDATE exit_rules SET status='TRIGGERED', detail=? WHERE id=?").run(`${reason} | exit order ${result.orderId}`, rule.id);
       console.log(`[ExitWatcher] EXITED ${rule.tradingsymbol}: ${reason} (order ${result.orderId})`);
@@ -472,9 +535,9 @@ connectTicker();
 
   app.post('/api/exit-position', express.json(), async (req, res) => {
     try {
-      const { tradingsymbol } = req.body || {};
+      const { tradingsymbol, reason } = req.body || {};
       if (!tradingsymbol) return res.status(400).json({ success: false, error: 'Missing tradingsymbol' });
-      const result = await closePositionBySymbol(tradingsymbol);
+      const result = await closePositionBySymbol(tradingsymbol, reason || 'MANUAL');
       if (result.ok) return res.json({ success: true, orderId: result.orderId });
       return res.json({ success: false, error: result.error, alreadyClosed: !!result.alreadyClosed });
     } catch (e: any) {
@@ -507,6 +570,49 @@ connectTicker();
       return res.json({ success: true, id: Number(info.lastInsertRowid), armed });
     } catch (e: any) {
       console.error('[exit-rules POST]', e);
+      return res.status(500).json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
+  // ===== Trade Journal endpoints (Phase 1) =====
+  // List journaled trades (most recent first). Optional ?status=OPEN|CLOSED and ?limit=N.
+  app.get('/api/journal', (req, res) => {
+    try {
+      const status = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : null;
+      const limit = Math.min(parseInt(String(req.query.limit || '500'), 10) || 500, 2000);
+      const rows = (status === 'OPEN' || status === 'CLOSED')
+        ? db.prepare(`SELECT * FROM trade_journal WHERE status = ? ORDER BY entry_time DESC LIMIT ?`).all(status, limit)
+        : db.prepare(`SELECT * FROM trade_journal ORDER BY entry_time DESC LIMIT ?`).all(limit);
+      const trades = (rows as any[]).map((r) => ({ ...r, context: r.context ? JSON.parse(r.context) : null }));
+      return res.json({ success: true, trades });
+    } catch (e: any) {
+      console.error('[journal GET]', e);
+      return res.status(500).json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
+  // Client-driven close (e.g. "Exit All", which closes via opposite orders rather than the
+  // server-side close path). Safe to call repeatedly — only the latest OPEN row is updated.
+  app.post('/api/journal/close', express.json(), (req, res) => {
+    try {
+      const { tradingsymbol, exitPrice, pnl, reason } = req.body || {};
+      if (!tradingsymbol) return res.status(400).json({ success: false, error: 'Missing tradingsymbol' });
+      journalCloseTrade(tradingsymbol, { exitPrice, pnl, reason: reason || 'MANUAL' });
+      return res.json({ success: true });
+    } catch (e: any) {
+      console.error('[journal close]', e);
+      return res.status(500).json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.delete('/api/journal/:id', (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!id) return res.status(400).json({ success: false, error: 'Bad id' });
+      db.prepare(`DELETE FROM trade_journal WHERE id = ?`).run(id);
+      return res.json({ success: true });
+    } catch (e: any) {
+      console.error('[journal DELETE]', e);
       return res.status(500).json({ success: false, error: e?.message || String(e) });
     }
   });
@@ -753,6 +859,24 @@ connectTicker();
       console.log(`[Order API] POST /api/orders request payload:`, JSON.stringify(req.body));
       console.log(`[Order API] Built Kite place_order payload:`, JSON.stringify(payloadObj));
 
+      // Trade-journal entry capture (Phase 1). Only when the client explicitly flags this as an
+      // opening trade (`journal: true`), so closing orders (e.g. "Exit All") are never mis-recorded
+      // as new entries. Fully isolated in try/catch so it can never affect order placement.
+      const recordJournalEntry = (simulated: boolean, testMode: boolean) => {
+        try {
+          if (!req.body || !req.body.journal) return;
+          const ctx = req.body.context || {};
+          const sym = String(tradingsymbol);
+          const ot = ctx.optionType || (sym.endsWith('PE') ? 'PE' : sym.endsWith('CE') ? 'CE' : undefined);
+          journalOpenTrade({
+            tradingsymbol, exchange, side: action, qty: parseInt(String(quantity), 10), product,
+            entryPrice: basePrice, entrySpot: (typeof ctx.spot === 'number' ? ctx.spot : latestSpot),
+            optionType: ot, strike: (typeof ctx.strike === 'number' ? ctx.strike : undefined),
+            context: ctx, testMode, simulated,
+          });
+        } catch (e) { console.error('[Journal] entry capture failed', e); }
+      };
+
       if (test_mode) {
         const testResponse = {
           success: true,
@@ -765,6 +889,7 @@ connectTicker();
           status: 'TEST_SUCCESS'
         };
         console.log(`[Order API] POST /api/orders response payload:`, JSON.stringify(testResponse));
+        recordJournalEntry(false, true);
         return res.json(testResponse);
       }
 
@@ -787,6 +912,7 @@ connectTicker();
             message: `Placed order ${orderId} successfully on Kite.` 
           };
           console.log(`[Order API] POST /api/orders success response:`, JSON.stringify(responsePayload));
+          recordJournalEntry(false, false);
           return res.json(responsePayload);
         } catch (kiteErr: any) {
           console.error("[Order API] Kite error placing order:", kiteErr);
@@ -839,6 +965,7 @@ connectTicker();
           message: `Order for ${quantity} qty of ${tradingsymbol} (${action}) placed successfully (Simulated mode).`
         };
         console.log(`[Order API] POST /api/orders response payload:`, JSON.stringify(responsePayload));
+        recordJournalEntry(true, false);
         return res.json(responsePayload);
       }
     } catch (err: any) {
