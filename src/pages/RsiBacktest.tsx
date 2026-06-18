@@ -16,7 +16,7 @@ function Stat({ label, value, tone, hint }: { label: string; value: string; tone
   );
 }
 
-const fmtTime = (s: string) => { try { return new Date(s).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return s; } };
+const fmtTime = (s: string) => { try { return new Date(s).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }); } catch { return s; } };
 
 export default function RsiBacktest() {
   const [days, setDays] = useState(60);
@@ -161,7 +161,7 @@ export default function RsiBacktest() {
                   <thead>
                     <tr className="text-muted-foreground border-b border-border">
                       <th className="text-left px-3 py-2 font-medium">Dir</th>
-                      <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Entry</th>
+                      <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Entry (IST)</th>
                       <th className="text-right px-3 py-2 font-medium">RSI</th>
                       <th className="text-right px-3 py-2 font-medium">Exit</th>
                       <th className="text-left px-3 py-2 font-medium">Why</th>

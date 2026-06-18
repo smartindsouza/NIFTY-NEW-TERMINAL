@@ -151,7 +151,7 @@ export default function GapRisk() {
         </div>
         <p className="mb-2">
           The ATM straddle is the option market's own estimate of the move into expiry
-          {data?.expiry ? <> ({sameDayExpiry ? 'today' : new Date(data.expiry).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })})</> : ''}.
+          {data?.expiry ? <> ({sameDayExpiry ? 'today' : new Date(data.expiry).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata' })})</> : ''}.
           A bigger number means a bigger expected swing. India VIX is the broader volatility read.
         </p>
         <p className="mb-2 flex items-start gap-1.5">

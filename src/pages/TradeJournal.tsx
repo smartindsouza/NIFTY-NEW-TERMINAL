@@ -31,7 +31,7 @@ const inr = (v: number | null | undefined) =>
 const fmtTime = (ms: number | null) => {
   if (!ms) return '—';
   try {
-    return new Date(ms).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    return new Date(ms).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
   } catch { return '—'; }
 };
 
