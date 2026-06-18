@@ -3744,6 +3744,16 @@ export function AdvancedChart() {
               : (pos.entryPrice - finalPrice) * pos.qty;
             finalTotalPnl += pnl;
 
+            // Record the close in the Trade Journal (Exit-All closes via opposite orders, so it
+            // doesn't pass through the server-side close path). Fire-and-forget, never blocks.
+            try {
+              fetch('/api/journal/close', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tradingsymbol: pos.symbol, exitPrice: finalPrice, pnl, reason: 'MANUAL (Exit All)' })
+              }).catch(() => {});
+            } catch (e) { /* ignore */ }
+
             try {
               const closedHistory = JSON.parse(localStorage.getItem('closed_positions_history') || '[]');
               closedHistory.unshift({
@@ -3866,10 +3876,42 @@ export function AdvancedChart() {
         lastOrderPayload: JSON.stringify({...data, test_mode: testOrderMode}, null, 2)
       });
 
+      // Build a market-context snapshot for the Trade Journal (Phase 1). Fully optional/defensive —
+      // it never blocks the order; the server stores it for later AI review.
+      let journalContext: any = null;
+      try {
+        let oiBias = 'NEUTRAL';
+        if (oiData?.strikes) {
+          let ceChg = 0, peChg = 0;
+          oiData.strikes.forEach((s: number) => { ceChg += oiData.ceData?.[s]?.chgOi || 0; peChg += oiData.peData?.[s]?.chgOi || 0; });
+          const net = peChg - ceChg; const total = Math.abs(ceChg) + Math.abs(peChg);
+          const strength = total > 0 ? Math.abs(net) / total : 0;
+          if (strength > 0.15 && net > 0) oiBias = 'BULLISH';
+          else if (strength > 0.15 && net < 0) oiBias = 'BEARISH';
+        }
+        const candlesNow = chartDataRef.current?.candles || [];
+        const lastCandle = candlesNow.length ? candlesNow[candlesNow.length - 1] : null;
+        const lastBB = (bbDataRef.current && bbDataRef.current.length) ? bbDataRef.current[bbDataRef.current.length - 1] : null;
+        journalContext = {
+          optionType: ticketData?.optionType ?? null,
+          strike: ticketData?.strike ?? null,
+          spot: (chartDataRef.current as any)?.spot ?? null,
+          timeframe,
+          entryPrice: currentPrice,
+          rsi: lastCandle?.rsi14 ?? null,
+          bb: lastBB ? { upper: lastBB.upper, middle: lastBB.middle, lower: lastBB.lower } : null,
+          oiBias,
+          support: (localAnalytics as any)?.supportZone?.strikePrice ?? null,
+          resistance: (localAnalytics as any)?.resistanceZone?.strikePrice ?? null,
+          pdh: (pdhPdlData as any)?.pdhPrice ?? null,
+          pdl: (pdhPdlData as any)?.pdlPrice ?? null,
+        };
+      } catch (e) { journalContext = null; }
+
       const res = await fetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({...data, test_mode: testOrderMode})
+        body: JSON.stringify({...data, test_mode: testOrderMode, journal: true, context: journalContext})
       });
       const result = await res.json();
       
