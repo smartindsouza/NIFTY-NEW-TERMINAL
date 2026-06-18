@@ -738,6 +738,51 @@ connectTicker();
     res.json(latestChainData);
   });
 
+  // Gap Risk Gauge: pre-close estimate of EXPECTED OVERNIGHT MAGNITUDE (not direction).
+  // Combines India VIX with the nearest-expiry ATM straddle (the option market's own
+  // expected-move number). Direction is deliberately not predicted.
+  app.get('/api/gap-risk', async (req, res) => {
+    try {
+      const chain = latestChainData;
+      let spot: number | null = chain?.spot ?? (latestSpot || null);
+      let atmStrike: number | null = null;
+      let straddle: number | null = null;
+      let impliedMovePct: number | null = null;
+      let expiry: string | null = chain?.expiryDate ?? null;
+
+      if (chain && Array.isArray(chain.strikes) && chain.strikes.length && spot) {
+        // ATM = strike nearest to spot
+        atmStrike = chain.strikes.reduce((best: number, s: number) =>
+          Math.abs(s - (spot as number)) < Math.abs(best - (spot as number)) ? s : best, chain.strikes[0]);
+        const ce = chain.ceData?.[atmStrike as number];
+        const pe = chain.peData?.[atmStrike as number];
+        const ceLtp = (ce && ce.ltp > 0) ? ce.ltp : 0;
+        const peLtp = (pe && pe.ltp > 0) ? pe.ltp : 0;
+        if (ceLtp > 0 && peLtp > 0) {
+          straddle = +(ceLtp + peLtp).toFixed(2);
+          impliedMovePct = +((straddle / (spot as number)) * 100).toFixed(3);
+        }
+      }
+
+      // India VIX (live quote via Kite, if logged in)
+      let vix: number | null = null;
+      try {
+        const kc = getKiteClient();
+        // @ts-ignore
+        if (kc && kc.access_token) {
+          const q = await kc.getQuote(['NSE:INDIA VIX']);
+          const v = q?.['NSE:INDIA VIX']?.last_price;
+          if (typeof v === 'number' && v > 0) vix = +v.toFixed(2);
+        }
+      } catch (e) { /* VIX optional */ }
+
+      return res.json({ success: true, spot, atmStrike, straddle, impliedMovePct, expiry, vix, asOf: Date.now() });
+    } catch (e: any) {
+      console.error('[gap-risk]', e);
+      return res.status(500).json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
   app.get('/api/historical-analytics', async (req, res) => {
     const data = await getHistoricalAnalytics();
     res.json(data);
