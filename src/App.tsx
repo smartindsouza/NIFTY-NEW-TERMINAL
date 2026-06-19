@@ -31,6 +31,7 @@ const Notifications = lazy(() => import('./pages/Notifications'));
 const TradeJournal = lazy(() => import('./pages/TradeJournal'));
 const GapRisk = lazy(() => import('./pages/GapRisk'));
 const RsiBacktest = lazy(() => import('./pages/RsiBacktest'));
+const LiveSignal = lazy(() => import('./pages/LiveSignal'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -142,6 +143,7 @@ export default function App() {
               <Route path="/journal" component={TradeJournal} />
               <Route path="/gap-risk" component={GapRisk} />
               <Route path="/rsi-backtest" component={RsiBacktest} />
+              <Route path="/live-signal" component={LiveSignal} />
               <Route>
                  <div className="p-8 text-center text-muted-foreground animate-pulse">404 - Not Found</div>
               </Route>
