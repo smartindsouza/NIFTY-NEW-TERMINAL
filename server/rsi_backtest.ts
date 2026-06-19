@@ -78,12 +78,23 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
   const highs = candles.map((c) => c.high);
   const lows = candles.map((c) => c.low);
   const rsi = wilderRSI(closes, period);
+  // Slow EMA → simple trend/range regime per entry (with-trend vs counter-trend vs range)
+  const emaSlow: number[] = new Array(closes.length).fill(0);
+  { const k = 2 / (50 + 1); let prev = closes[0]; for (let i = 0; i < closes.length; i++) { prev = i === 0 ? closes[0] : closes[i] * k + prev * (1 - k); emaSlow[i] = prev; } }
+  const regimeAt = (i: number, dir: 'LONG' | 'SHORT'): 'withTrend' | 'counterTrend' | 'range' => {
+    const slope = emaSlow[i] - emaSlow[Math.max(0, i - 6)]; // ~30-min EMA slope
+    const thr = closes[i] * 0.0005; // 0.05% of price
+    const tdir = slope > thr ? 'up' : slope < -thr ? 'down' : 'flat';
+    if (tdir === 'flat') return 'range';
+    if ((dir === 'LONG' && tdir === 'up') || (dir === 'SHORT' && tdir === 'down')) return 'withTrend';
+    return 'counterTrend';
+  };
   const dayOf = (c: any) => String(c.date).slice(0, 10);
 
   interface Trade {
     dir: 'LONG' | 'SHORT'; entryTime: string; entryPrice: number; entryRsi: number;
     exitTime: string; exitPrice: number; exitRsi: number; reason: string;
-    pnl: number; bars: number; mae: number; mfe: number;
+    pnl: number; bars: number; mae: number; mfe: number; regime: 'withTrend' | 'counterTrend' | 'range';
   }
   const trades: Trade[] = [];
   let pos: any = null;
@@ -117,7 +128,7 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
         trades.push({
           dir: pos.dir, entryTime: pos.entryTime, entryPrice: pos.entryPrice, entryRsi: +pos.entryRsi.toFixed(1),
           exitTime: String(candles[i].date), exitPrice: +exitPrice.toFixed(2), exitRsi: +r.toFixed(1), reason,
-          pnl: +pnl.toFixed(2), bars: i - pos.entryIdx, mae: +pos.mae.toFixed(2), mfe: +pos.mfe.toFixed(2),
+          pnl: +pnl.toFixed(2), bars: i - pos.entryIdx, mae: +pos.mae.toFixed(2), mfe: +pos.mfe.toFixed(2), regime: pos.regime,
         });
         pos = null;
         flatPeak = r; flatTrough = r;
@@ -132,12 +143,12 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
 
     // SHORT: RSI went DEEP into overbought (peak >= deepOb), then a candle closes back below obLow
     if (flatPeak >= deepOb && rPrev >= obLow && r < obLow) {
-      pos = { dir: 'SHORT', entryIdx: i, entryTime: String(candles[i].date), entryPrice: closes[i], entryRsi: r, mae: 0, mfe: 0 };
+      pos = { dir: 'SHORT', entryIdx: i, entryTime: String(candles[i].date), entryPrice: closes[i], entryRsi: r, mae: 0, mfe: 0, regime: regimeAt(i, 'SHORT') };
       flatPeak = r; flatTrough = r;
     }
     // LONG: RSI went DEEP into oversold (trough <= deepOs), then a candle closes back above osHigh
     else if (flatTrough <= deepOs && rPrev <= osHigh && r > osHigh) {
-      pos = { dir: 'LONG', entryIdx: i, entryTime: String(candles[i].date), entryPrice: closes[i], entryRsi: r, mae: 0, mfe: 0 };
+      pos = { dir: 'LONG', entryIdx: i, entryTime: String(candles[i].date), entryPrice: closes[i], entryRsi: r, mae: 0, mfe: 0, regime: regimeAt(i, 'LONG') };
       flatPeak = r; flatTrough = r;
     }
   }
@@ -172,6 +183,26 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
     maxMae: n ? +Math.max(...trades.map((t) => t.mae)).toFixed(1) : 0,
   };
 
+  // ---- loss / performance breakdown (computed over ALL trades) ----
+  const agg = (list: Trade[]) => {
+    const m = list.length; const net = sum(list.map((t) => t.pnl)); const w = list.filter((t) => t.pnl > 0).length;
+    return { n: m, net: +net.toFixed(1), winRate: m ? +((w / m) * 100).toFixed(0) : 0, avg: m ? +(net / m).toFixed(1) : 0 };
+  };
+  const hourOf = (iso: string) => iso.slice(11, 13); // IST hour (candle stamps carry +0530)
+  const hoursPresent = Array.from(new Set(trades.map((t) => hourOf(t.entryTime)))).sort();
+  const winT = trades.filter((t) => t.pnl > 0); const lossT = trades.filter((t) => t.pnl <= 0);
+  const breakdown = {
+    byReason: ['TARGET', 'EOD'].map((k) => ({ key: k, ...agg(trades.filter((t) => t.reason === k)) })),
+    byDir: ['LONG', 'SHORT'].map((k) => ({ key: k, ...agg(trades.filter((t) => t.dir === k)) })),
+    byRegime: ['withTrend', 'counterTrend', 'range'].map((k) => ({ key: k, ...agg(trades.filter((t) => t.regime === k)) })),
+    byHour: hoursPresent.map((h) => ({ key: h, ...agg(trades.filter((t) => hourOf(t.entryTime) === h)) })),
+    holding: {
+      avgBarsWin: winT.length ? +(sum(winT.map((t) => t.bars)) / winT.length).toFixed(1) : 0,
+      avgBarsLoss: lossT.length ? +(sum(lossT.map((t) => t.bars)) / lossT.length).toFixed(1) : 0,
+    },
+    worst: [...trades].sort((a, b) => a.pnl - b.pnl).slice(0, 5).map((t) => ({ entryTime: t.entryTime, dir: t.dir, reason: t.reason, pnl: t.pnl, mae: t.mae, regime: t.regime })),
+  };
+
   return {
     success: true,
     params: { days, rsiPeriod: period, obLow, obHigh, osLow, osHigh, deepOb, deepOs },
@@ -179,6 +210,7 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
     to: candles[candles.length - 1]?.date || null,
     candles: candles.length,
     stats,
+    breakdown,
     equity,
     trades: trades.slice(-300), // cap payload; stats are over all trades
   };
