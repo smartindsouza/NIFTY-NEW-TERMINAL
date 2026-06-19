@@ -794,6 +794,7 @@ connectTicker();
         rsiPeriod: num(q.rsiPeriod, 14),
         obLow: num(q.obLow, 60), obHigh: num(q.obHigh, 65),
         osLow: num(q.osLow, 38), osHigh: num(q.osHigh, 40),
+        deepOb: num(q.deepOb, 70), deepOs: num(q.deepOs, 30),
       });
       return res.json(result);
     } catch (e: any) {
