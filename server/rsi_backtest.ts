@@ -53,6 +53,7 @@ async function fetchCandles(days: number): Promise<any[]> {
 export interface RsiBacktestOpts {
   days?: number; rsiPeriod?: number;
   obLow?: number; obHigh?: number; osLow?: number; osHigh?: number;
+  deepOb?: number; deepOs?: number;
 }
 
 export async function runRsiBacktest(opts: RsiBacktestOpts) {
@@ -60,6 +61,9 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
   const period = opts.rsiPeriod || 14;
   const obLow = opts.obLow ?? 60, obHigh = opts.obHigh ?? 65;
   const osLow = opts.osLow ?? 38, osHigh = opts.osHigh ?? 40;
+  // "Deep" penetration required to qualify a setup — filters out shallow bounces off the zone edge.
+  const deepOb = opts.deepOb ?? 70; // short only if RSI first reached at least this (deep overbought)
+  const deepOs = opts.deepOs ?? 30; // long only if RSI first reached at most this (deep oversold)
 
   let candles: any[];
   try {
@@ -79,7 +83,7 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
   interface Trade {
     dir: 'LONG' | 'SHORT'; entryTime: string; entryPrice: number; entryRsi: number;
     exitTime: string; exitPrice: number; exitRsi: number; reason: string;
-    pnl: number; bars: number; mae: number; mfe: number;
+    pnl: number; bars: number; mae: number; mfe: number; stop: number;
   }
   const trades: Trade[] = [];
   let pos: any = null;
@@ -101,17 +105,21 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
         pos.mae = Math.max(pos.mae, pos.entryPrice - lows[i]);
         pos.mfe = Math.max(pos.mfe, highs[i] - pos.entryPrice);
       }
-      let exit = false, reason = '';
-      if (pos.dir === 'SHORT' && r <= osHigh) { exit = true; reason = 'TARGET'; }
+      let exit = false, reason = '', exitPrice = closes[i];
+      // Stop-loss = previous candle's low (long) / high (short), checked intrabar (worst-case first)
+      if (pos.dir === 'LONG' && lows[i] <= pos.stop) { exit = true; reason = 'STOP'; exitPrice = pos.stop; }
+      else if (pos.dir === 'SHORT' && highs[i] >= pos.stop) { exit = true; reason = 'STOP'; exitPrice = pos.stop; }
+      // Target = opposite RSI zone (on close)
+      else if (pos.dir === 'SHORT' && r <= osHigh) { exit = true; reason = 'TARGET'; }
       else if (pos.dir === 'LONG' && r >= obLow) { exit = true; reason = 'TARGET'; }
-      else if (lastOfDay) { exit = true; reason = 'EOD'; } // intraday only — square off, never hold overnight
+      // Intraday only — square off at day end
+      else if (lastOfDay) { exit = true; reason = 'EOD'; }
       if (exit) {
-        const exitPrice = closes[i];
         const pnl = pos.dir === 'SHORT' ? pos.entryPrice - exitPrice : exitPrice - pos.entryPrice;
         trades.push({
           dir: pos.dir, entryTime: pos.entryTime, entryPrice: pos.entryPrice, entryRsi: +pos.entryRsi.toFixed(1),
-          exitTime: String(candles[i].date), exitPrice, exitRsi: +r.toFixed(1), reason,
-          pnl: +pnl.toFixed(2), bars: i - pos.entryIdx, mae: +pos.mae.toFixed(2), mfe: +pos.mfe.toFixed(2),
+          exitTime: String(candles[i].date), exitPrice: +exitPrice.toFixed(2), exitRsi: +r.toFixed(1), reason,
+          pnl: +pnl.toFixed(2), bars: i - pos.entryIdx, mae: +pos.mae.toFixed(2), mfe: +pos.mfe.toFixed(2), stop: +pos.stop.toFixed(2),
         });
         pos = null;
         flatPeak = r; flatTrough = r;
@@ -124,14 +132,14 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
     flatTrough = Math.min(flatTrough, r);
     if (lastOfDay) continue;
 
-    // SHORT: was genuinely overbought (peak >= obHigh), then a candle closes back below obLow
-    if (flatPeak >= obHigh && rPrev >= obLow && r < obLow) {
-      pos = { dir: 'SHORT', entryIdx: i, entryTime: String(candles[i].date), entryPrice: closes[i], entryRsi: r, mae: 0, mfe: 0 };
+    // SHORT: RSI went DEEP into overbought (peak >= deepOb), then a candle closes back below obLow
+    if (flatPeak >= deepOb && rPrev >= obLow && r < obLow) {
+      pos = { dir: 'SHORT', entryIdx: i, entryTime: String(candles[i].date), entryPrice: closes[i], entryRsi: r, mae: 0, mfe: 0, stop: highs[i - 1] };
       flatPeak = r; flatTrough = r;
     }
-    // LONG: was genuinely oversold (trough <= osLow), then a candle closes back above osHigh
-    else if (flatTrough <= osLow && rPrev <= osHigh && r > osHigh) {
-      pos = { dir: 'LONG', entryIdx: i, entryTime: String(candles[i].date), entryPrice: closes[i], entryRsi: r, mae: 0, mfe: 0 };
+    // LONG: RSI went DEEP into oversold (trough <= deepOs), then a candle closes back above osHigh
+    else if (flatTrough <= deepOs && rPrev <= osHigh && r > osHigh) {
+      pos = { dir: 'LONG', entryIdx: i, entryTime: String(candles[i].date), entryPrice: closes[i], entryRsi: r, mae: 0, mfe: 0, stop: lows[i - 1] };
       flatPeak = r; flatTrough = r;
     }
   }
@@ -161,6 +169,7 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
     best: n ? +Math.max(...trades.map((t) => t.pnl)).toFixed(1) : 0,
     worst: n ? +Math.min(...trades.map((t) => t.pnl)).toFixed(1) : 0,
     targetExits: trades.filter((t) => t.reason === 'TARGET').length,
+    stopExits: trades.filter((t) => t.reason === 'STOP').length,
     eodExits: trades.filter((t) => t.reason === 'EOD').length,
     avgMae: n ? +(sum(trades.map((t) => t.mae)) / n).toFixed(1) : 0,
     maxMae: n ? +Math.max(...trades.map((t) => t.mae)).toFixed(1) : 0,
@@ -168,7 +177,7 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
 
   return {
     success: true,
-    params: { days, rsiPeriod: period, obLow, obHigh, osLow, osHigh },
+    params: { days, rsiPeriod: period, obLow, obHigh, osLow, osHigh, deepOb, deepOs },
     from: candles[0]?.date || null,
     to: candles[candles.length - 1]?.date || null,
     candles: candles.length,
