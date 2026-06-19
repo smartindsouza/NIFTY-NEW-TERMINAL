@@ -46,11 +46,10 @@ export default function RsiBacktest() {
     if (s.expectancy > 0) insights.push({ tone: 'good', text: `Positive expectancy: about +${s.expectancy} index points per trade on average across ${s.trades} trades.` });
     else insights.push({ tone: 'bad', text: `Negative expectancy: ${s.expectancy} points per trade — over this window the signal lost on the index even before option costs.` });
     if (s.winRate >= 80 && s.expectancy <= 0) insights.push({ tone: 'bad', text: `The classic trap: a ${s.winRate}% win rate that still doesn't make money, because the losers outweigh the winners.` });
-    if (s.worst < 0 && s.avgWin > 0 && Math.abs(s.worst) > s.avgWin * 5) insights.push({ tone: 'warn', text: `Worst single trade (${s.worst}) was ${(Math.abs(s.worst) / s.avgWin).toFixed(0)}× your average win — even with the stop, a wide prev-candle range can sting.` });
-    if (s.stopExits > 0) insights.push({ tone: 'warn', text: `${s.stopExits} of ${s.trades} trades hit the stop (prev-candle low/high) — that's your risk being capped instead of running to day end.` });
-    if (s.eodExits > 0) insights.push({ tone: 'warn', text: `${s.eodExits} trades neither hit target nor stop and were squared off at day end.` });
-    if (s.targetExits > 0) insights.push({ tone: 'good', text: `${s.targetExits} trades reached the opposite RSI zone (the intended exit).` });
-    if (s.avgMae > 0) insights.push({ tone: 'warn', text: `Average heat against open trades was ${s.avgMae} points (max ${s.maxMae}) — useful for judging whether the prev-candle stop is too tight or too loose.` });
+    if (s.worst < 0 && s.avgWin > 0 && Math.abs(s.worst) > s.avgWin * 5) insights.push({ tone: 'warn', text: `Worst single trade (${s.worst}) was ${(Math.abs(s.worst) / s.avgWin).toFixed(0)}× your average win — with no stop, a trade that never reverts can run a long way.` });
+    if (s.targetExits > 0) insights.push({ tone: 'good', text: `${s.targetExits} of ${s.trades} trades reached the opposite RSI zone (the intended exit).` });
+    if (s.eodExits > 0) insights.push({ tone: 'warn', text: `${s.eodExits} trades never reached the opposite zone and were squared off at day end — with no stop, these carried whatever the move was until the close.` });
+    if (s.avgMae > 0) insights.push({ tone: 'warn', text: `Trades took on average ${s.avgMae} points of heat against them (max ${s.maxMae}) before resolving — the open risk you're carrying without a stop.` });
   }
   const toneClass = (t: string) => t === 'good' ? 'text-emerald-400' : t === 'bad' ? 'text-rose-400' : 'text-amber-400';
 
@@ -61,7 +60,7 @@ export default function RsiBacktest() {
         <h1 className="text-lg md:text-2xl font-bold tracking-tight">RSI Strategy Backtest</h1>
       </div>
       <p className="text-xs text-muted-foreground mb-4">
-        Your RSI zone strategy, tested on real 5-min NIFTY history. Takes only setups where RSI pushes <span className="text-foreground">deep</span> into a zone (≥{deepOb} / ≤{deepOs}) then closes back out; exit at the opposite zone; <span className="text-foreground">stop = previous candle's low/high</span>; intraday only.
+        Your RSI zone strategy, tested on real 5-min NIFTY history. Takes only setups where RSI pushes <span className="text-foreground">deep</span> into a zone (≥{deepOb} / ≤{deepOs}) then closes back out; exit at the opposite zone; no stop-loss; intraday only (squared off at day end).
       </p>
 
       {/* Honest framing banner */}
@@ -128,13 +127,10 @@ export default function RsiBacktest() {
             <Stat label="Worst Trade" value={`${s.worst}`} tone="neg" />
             <Stat label="Max Drawdown" value={`${s.maxDrawdown} pts`} tone="neg" />
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 mb-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 mb-5">
             <Stat label="Trades" value={String(s.trades)} />
             <Stat label="Hit Target" value={String(s.targetExits)} tone="pos" hint="reached opposite zone" />
-            <Stat label="Stopped" value={String(s.stopExits ?? 0)} tone="neg" hint="prev-candle low/high" />
-            <Stat label="Squared off (EOD)" value={String(s.eodExits)} tone="warn" hint="neither target nor stop" />
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 mb-5">
+            <Stat label="Squared off (EOD)" value={String(s.eodExits)} tone="warn" hint="never hit target" />
             <Stat label="Avg / Max Heat" value={`${s.avgMae} / ${s.maxMae}`} tone="neutral" hint="adverse pts (MAE)" />
           </div>
 
@@ -195,7 +191,7 @@ export default function RsiBacktest() {
                         <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{fmtTime(t.entryTime)}</td>
                         <td className="px-3 py-2 text-right text-muted-foreground">{t.entryRsi}→{t.exitRsi}</td>
                         <td className="px-3 py-2 text-right text-muted-foreground">{t.exitPrice}</td>
-                        <td className={cn('px-3 py-2', t.reason === 'TARGET' ? 'text-emerald-400/80' : t.reason === 'STOP' ? 'text-rose-400/80' : 'text-amber-400/80')}>{t.reason}</td>
+                        <td className={cn('px-3 py-2', t.reason === 'TARGET' ? 'text-emerald-400/80' : 'text-amber-400/80')}>{t.reason}</td>
                         <td className={cn('px-3 py-2 text-right font-bold', t.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
                           <span className="inline-flex items-center gap-0.5 justify-end">{t.pnl >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}{t.pnl}</span>
                         </td>
