@@ -12,6 +12,7 @@ import { getTechnicalAnalysis, kiteDiagnostics } from './server/technical_analys
 import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData } from './server/kite_service';
 import { getHistoricalAnalytics } from './server/analytics_service';
 import { runRsiBacktest } from './server/rsi_backtest';
+import { getLiveSignal, runOptionConfirmBacktest } from './server/option_rsi';
 import { getFiiData } from './server/fii_service';
 import { evaluateQuantSignals } from './server/quant_engine';
 import { generateGamePlan } from './server/game_plan_service';
@@ -799,6 +800,35 @@ connectTicker();
       return res.json(result);
     } catch (e: any) {
       console.error('[backtest/rsi]', e);
+      return res.status(500).json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
+  // LIVE: current index signal + ATM CE/PE RSI confirmation
+  app.get('/api/signal/live', async (req, res) => {
+    try {
+      const t = parseFloat(String(req.query.threshold));
+      const result = await getLiveSignal(isNaN(t) ? 40 : t);
+      return res.json(result);
+    } catch (e: any) {
+      console.error('[signal/live]', e);
+      return res.status(500).json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
+  // BACKTEST (recent window): index signal + option-RSI confirmation + real option P&L
+  app.get('/api/backtest/rsi-option', async (req, res) => {
+    try {
+      const q = req.query;
+      const num = (v: any, d: number) => { const n = parseFloat(String(v)); return isNaN(n) ? d : n; };
+      const result = await runOptionConfirmBacktest({
+        optionDays: num(q.optionDays, 12),
+        deepOb: num(q.deepOb, 70), deepOs: num(q.deepOs, 30),
+        threshold: num(q.threshold, 40),
+      });
+      return res.json(result);
+    } catch (e: any) {
+      console.error('[backtest/rsi-option]', e);
       return res.status(500).json({ success: false, error: e?.message || String(e) });
     }
   });
