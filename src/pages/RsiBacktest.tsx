@@ -18,6 +18,32 @@ function Stat({ label, value, tone, hint }: { label: string; value: string; tone
 
 const fmtTime = (s: string) => { try { return new Date(s).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }); } catch { return s; } };
 
+const REGIME_LABEL: Record<string, string> = { withTrend: 'With the trend', counterTrend: 'Counter-trend', range: 'Range / flat' };
+
+function BreakdownGroup({ title, rows, labelMap }: { title: string; rows: any[]; labelMap?: (k: string) => string }) {
+  const maxAbs = Math.max(1, ...rows.map((r) => Math.abs(r.net)));
+  return (
+    <div className="bg-card rounded-2xl p-4">
+      <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">{title}</div>
+      <div className="space-y-2.5">
+        {rows.filter((r) => r.n > 0).map((r) => (
+          <div key={r.key} className="flex items-center gap-3">
+            <div className="w-24 shrink-0 text-xs text-foreground truncate">{labelMap ? labelMap(r.key) : r.key}</div>
+            <div className="flex-1 h-5 bg-muted/40 rounded-md relative overflow-hidden">
+              <div className={cn('absolute top-0 bottom-0 rounded-md', r.net >= 0 ? 'bg-emerald-500/40' : 'bg-rose-500/40')}
+                style={{ width: `${(Math.abs(r.net) / maxAbs) * 100}%`, left: 0 }} />
+              <span className={cn('absolute inset-0 flex items-center px-2 text-[11px] font-mono font-semibold', r.net >= 0 ? 'text-emerald-300' : 'text-rose-300')}>
+                {r.net >= 0 ? '+' : ''}{r.net}
+              </span>
+            </div>
+            <div className="w-20 shrink-0 text-right text-[10px] text-muted-foreground font-mono">{r.n} · {r.winRate}%</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function RsiBacktest() {
   const [days, setDays] = useState(60);
   const [deepOb, setDeepOb] = useState(70);
@@ -179,6 +205,51 @@ export default function RsiBacktest() {
                 ))}
               </ul>
               <p className="text-[11px] text-muted-foreground/70 mt-3 pt-3 border-t border-border">Index-points backtest, no option costs or slippage modelled. Educational — not investment advice.</p>
+            </div>
+          )}
+
+          {/* Loss breakdown */}
+          {data.breakdown && (
+            <div className="mb-5">
+              <div className="text-xs font-semibold uppercase tracking-wider text-foreground mb-2.5">Loss breakdown — where the P&amp;L comes from</div>
+              {(() => {
+                const b = data.breakdown;
+                const worstReg = [...b.byRegime].filter((r: any) => r.n > 0).sort((a: any, c: any) => a.net - c.net)[0];
+                const eod = b.byReason.find((r: any) => r.key === 'EOD');
+                const tgt = b.byReason.find((r: any) => r.key === 'TARGET');
+                const worstHour = [...b.byHour].filter((r: any) => r.n > 0).sort((a: any, c: any) => a.net - c.net)[0];
+                return (
+                  <div className="bg-card/60 rounded-2xl p-4 mb-3 text-[12.5px] leading-relaxed text-muted-foreground space-y-1.5">
+                    {worstReg && worstReg.net < 0 && <p><span className="text-rose-400">•</span> <span className="text-foreground">{REGIME_LABEL[worstReg.key]}</span> trades are the worst bucket: {worstReg.net} pts over {worstReg.n} trades ({worstReg.winRate}% win).{worstReg.key === 'counterTrend' ? ' These fight the prevailing trend — the prime candidate for a trend filter.' : ''}</p>}
+                    {eod && tgt && <p><span className="text-rose-400">•</span> By exit: targets net {tgt.net >= 0 ? '+' : ''}{tgt.net} pts ({tgt.n}), but EOD square-offs net {eod.net} pts ({eod.n}) — the no-reversion trades are the leak.</p>}
+                    {worstHour && worstHour.net < 0 && <p><span className="text-rose-400">•</span> Worst entry hour: {worstHour.key}:00 IST ({worstHour.net} pts, {worstHour.n} trades) — a time-of-day cutoff would target this.</p>}
+                    <p><span className="text-amber-400">•</span> Losers held ~{b.holding.avgBarsLoss} bars vs winners ~{b.holding.avgBarsWin} — {b.holding.avgBarsLoss > b.holding.avgBarsWin ? 'losers drag on longer, so a time-stop could help.' : 'holding times are similar.'}</p>
+                  </div>
+                );
+              })()}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 mb-3">
+                <BreakdownGroup title="By regime (trend vs range)" rows={data.breakdown.byRegime} labelMap={(k) => REGIME_LABEL[k] || k} />
+                <BreakdownGroup title="By exit reason" rows={data.breakdown.byReason} />
+                <BreakdownGroup title="By direction" rows={data.breakdown.byDir} />
+                <BreakdownGroup title="By entry hour (IST)" rows={data.breakdown.byHour} labelMap={(k) => `${k}:00`} />
+              </div>
+              {data.breakdown.worst?.length > 0 && (
+                <div className="bg-card rounded-2xl p-4">
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">5 worst trades</div>
+                  <div className="space-y-1.5">
+                    {data.breakdown.worst.map((w: any, i: number) => (
+                      <div key={i} className="flex items-center justify-between gap-2 text-[12px]">
+                        <span className={cn('font-bold w-4 shrink-0', w.dir === 'LONG' ? 'text-emerald-400' : 'text-rose-400')}>{w.dir === 'LONG' ? 'L' : 'S'}</span>
+                        <span className="flex-1 text-muted-foreground font-mono truncate">{fmtTime(w.entryTime)}</span>
+                        <span className="text-[10px] text-muted-foreground/70 w-20 text-right truncate">{REGIME_LABEL[w.regime]}</span>
+                        <span className="text-[10px] w-12 text-right text-amber-400/80">{w.reason}</span>
+                        <span className="text-rose-400 font-bold font-mono w-14 text-right">{w.pnl}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <p className="text-[11px] text-muted-foreground/70 mt-2">Regime is gauged from a 50-period EMA slope at entry; "counter-trend" = the trade fights the prevailing drift.</p>
             </div>
           )}
 
