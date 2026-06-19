@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
-import { FlaskConical, Play, AlertTriangle, TrendingUp, TrendingDown, Info } from 'lucide-react';
+import { FlaskConical, Play, AlertTriangle, TrendingUp, TrendingDown, Info, CheckCircle2, XCircle } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from 'recharts';
 
 const DAY_OPTIONS = [30, 60, 90, 120, 180];
@@ -25,6 +25,21 @@ export default function RsiBacktest() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<any>(null);
+
+  // Option-RSI confirmation (recent window only)
+  const [optLoading, setOptLoading] = useState(false);
+  const [optError, setOptError] = useState<string | null>(null);
+  const [optData, setOptData] = useState<any>(null);
+  const runOption = async () => {
+    setOptLoading(true); setOptError(null);
+    try {
+      const r = await fetch(`/api/backtest/rsi-option?deepOb=${deepOb}&deepOs=${deepOs}&optionDays=12`);
+      const j = await r.json();
+      if (!j.success) { setOptError(j.error || 'Failed'); setOptData(null); }
+      else setOptData(j);
+    } catch (e: any) { setOptError(e?.message || 'Request failed'); setOptData(null); }
+    finally { setOptLoading(false); }
+  };
 
   const run = async () => {
     setLoading(true); setError(null);
@@ -205,6 +220,82 @@ export default function RsiBacktest() {
           )}
         </>
       )}
+
+      {/* Option-RSI confirmation (recent window) */}
+      <div className="mt-6 pt-5 border-t border-border">
+        <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Option-RSI confirmation <span className="text-muted-foreground normal-case font-normal">(recent only)</span></h2>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Adds the rule: the ATM option you'd buy must have its own 5-min RSI above 40 at entry. Only covers the current weekly expiry (older contracts have expired).</p>
+          </div>
+          <button onClick={runOption} disabled={optLoading}
+            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl bg-card hover:bg-popover text-foreground disabled:opacity-50 transition-colors shrink-0">
+            <Play className={cn('w-3.5 h-3.5', optLoading && 'animate-pulse')} /> {optLoading ? 'Checking options…' : 'Run option check'}
+          </button>
+        </div>
+
+        {optError && <div className="flex items-center gap-2 text-sm text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-2.5 mt-2"><AlertTriangle className="w-4 h-4 shrink-0" /> {optError}</div>}
+        {optLoading && <div className="text-center text-muted-foreground py-6 text-sm">Resolving ATM contracts and pulling option history…</div>}
+
+        {optData && !optLoading && (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5 mb-3 mt-3">
+              <Stat label="Index signals" value={String(optData.totals.indexSignals)} />
+              <Stat label="Option data" value={String(optData.totals.withOptionData)} hint={`${optData.totals.noOptionData} expired/none`} />
+              <Stat label="Confirmed" value={String(optData.totals.confirmed)} tone="pos" hint="option RSI > 40" />
+              <Stat label="Rejected" value={String(optData.totals.rejected)} tone="warn" hint="filter would skip" />
+              <Stat label="Threshold" value={`>${optData.threshold}`} />
+            </div>
+
+            {optData.confirmedOptionStats ? (
+              <>
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Confirmed trades — real option P&amp;L (points of premium)</div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 mb-4">
+                  <Stat label="Win Rate" value={`${optData.confirmedOptionStats.winRate}%`} />
+                  <Stat label="Avg / trade" value={`${optData.confirmedOptionStats.avgOptionPts > 0 ? '+' : ''}${optData.confirmedOptionStats.avgOptionPts}`} tone={optData.confirmedOptionStats.avgOptionPts > 0 ? 'pos' : 'neg'} />
+                  <Stat label="Total" value={`${optData.confirmedOptionStats.totalOptionPts > 0 ? '+' : ''}${optData.confirmedOptionStats.totalOptionPts}`} tone={optData.confirmedOptionStats.totalOptionPts > 0 ? 'pos' : 'neg'} />
+                  <Stat label="Best / Worst" value={`${optData.confirmedOptionStats.best} / ${optData.confirmedOptionStats.worst}`} tone="neutral" />
+                </div>
+              </>
+            ) : (
+              <div className="text-sm text-muted-foreground py-3">No confirmed trades with option data in this window.</div>
+            )}
+
+            {optData.signals?.length > 0 && (
+              <div className="bg-card rounded-2xl overflow-hidden">
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground px-4 pt-3 pb-2">Recent signals (IST)</div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[11px] font-mono">
+                    <thead>
+                      <tr className="text-muted-foreground border-b border-border">
+                        <th className="text-left px-3 py-2 font-medium">Dir</th>
+                        <th className="text-left px-3 py-2 font-medium whitespace-nowrap">Entry</th>
+                        <th className="text-left px-3 py-2 font-medium">Option</th>
+                        <th className="text-right px-3 py-2 font-medium">Opt RSI</th>
+                        <th className="text-center px-3 py-2 font-medium">Conf?</th>
+                        <th className="text-right px-3 py-2 font-medium">Opt P&amp;L</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...optData.signals].reverse().map((sig: any, i: number) => (
+                        <tr key={i} className="border-b border-border/40">
+                          <td className={cn('px-3 py-2 font-bold', sig.dir === 'LONG' ? 'text-emerald-400' : 'text-rose-400')}>{sig.dir === 'LONG' ? 'L' : 'S'}</td>
+                          <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{fmtTime(sig.entryTime)}</td>
+                          <td className="px-3 py-2 text-muted-foreground">{sig.available ? `${sig.strike}${sig.type}` : '—'}</td>
+                          <td className="px-3 py-2 text-right text-muted-foreground">{sig.available ? sig.optRsi : '—'}</td>
+                          <td className="px-3 py-2 text-center">{sig.available ? (sig.confirms ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 inline" /> : <XCircle className="w-3.5 h-3.5 text-muted-foreground inline" />) : '—'}</td>
+                          <td className={cn('px-3 py-2 text-right font-bold', !sig.available ? 'text-muted-foreground/40' : sig.optPnl >= 0 ? 'text-emerald-400' : 'text-rose-400')}>{sig.available ? sig.optPnl : 'n/a'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            <p className="text-[11px] text-muted-foreground/70 mt-3">Option P&amp;L here is real premium movement (entry→exit close of the ATM contract), so it already includes theta — unlike the index-points figures above. Small sample; current expiry only.</p>
+          </>
+        )}
+      </div>
 
       {!s && !loading && !error && (
         <div className="text-center text-muted-foreground py-12 text-sm">
