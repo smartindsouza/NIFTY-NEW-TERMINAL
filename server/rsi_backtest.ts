@@ -53,7 +53,7 @@ async function fetchCandles(days: number): Promise<any[]> {
 export interface RsiBacktestOpts {
   days?: number; rsiPeriod?: number;
   obLow?: number; obHigh?: number; osLow?: number; osHigh?: number;
-  deepOb?: number; deepOs?: number; useStop?: boolean;
+  deepOb?: number; deepOs?: number; useStop?: boolean; useDivergence?: boolean;
 }
 
 export async function runRsiBacktest(opts: RsiBacktestOpts) {
@@ -65,6 +65,8 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
   const deepOb = opts.deepOb ?? 70; // short only if RSI first reached at least this (deep overbought)
   const deepOs = opts.deepOs ?? 30; // long only if RSI first reached at most this (deep oversold)
   const useStop = !!opts.useStop;   // optional: stop at the pre-entry candle's low/high, on a CLOSING basis
+  const useDivergence = !!opts.useDivergence; // optional: require matching RSI divergence
+  const DIVW = 7; // divergence lookback window (candles)
 
   let candles: any[];
   try {
@@ -91,6 +93,31 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
     return 'counterTrend';
   };
   const dayOf = (c: any) => String(c.date).slice(0, 10);
+
+  // RSI divergence over a ≤DIVW-candle window, using RSI swing highs/lows (1-bar pivots) vs price
+  const swingsInWindow = (i: number, kind: 'low' | 'high'): number[] => {
+    const out: number[] = [];
+    const start = Math.max(period + 1, i - DIVW);
+    for (let j = start; j <= i - 1; j++) {
+      const a = rsi[j], pv = rsi[j - 1], nx = rsi[j + 1];
+      if (a == null || pv == null || nx == null) continue;
+      if (kind === 'low' && a < pv && a <= nx) out.push(j);
+      if (kind === 'high' && a > pv && a >= nx) out.push(j);
+    }
+    return out;
+  };
+  const hasBullishDiv = (i: number): boolean => {
+    const s = swingsInWindow(i, 'low');
+    if (s.length < 2) return false;
+    const a = s[s.length - 2], b = s[s.length - 1];
+    return lows[b] < lows[a] && (rsi[b] as number) > (rsi[a] as number); // price lower-low, RSI higher-low
+  };
+  const hasBearishDiv = (i: number): boolean => {
+    const s = swingsInWindow(i, 'high');
+    if (s.length < 2) return false;
+    const a = s[s.length - 2], b = s[s.length - 1];
+    return highs[b] > highs[a] && (rsi[b] as number) < (rsi[a] as number); // price higher-high, RSI lower-high
+  };
 
   interface Trade {
     dir: 'LONG' | 'SHORT'; entryTime: string; entryPrice: number; entryRsi: number;
@@ -146,12 +173,12 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
     if (lastOfDay) continue;
 
     // SHORT: RSI went DEEP into overbought (peak >= deepOb), then a candle closes back below obLow
-    if (flatPeak >= deepOb && rPrev >= obLow && r < obLow) {
+    if (flatPeak >= deepOb && rPrev >= obLow && r < obLow && (!useDivergence || hasBearishDiv(i))) {
       pos = { dir: 'SHORT', entryIdx: i, entryTime: String(candles[i].date), entryPrice: closes[i], entryRsi: r, mae: 0, mfe: 0, regime: regimeAt(i, 'SHORT'), stop: useStop ? highs[i - 1] : null };
       flatPeak = r; flatTrough = r;
     }
     // LONG: RSI went DEEP into oversold (trough <= deepOs), then a candle closes back above osHigh
-    else if (flatTrough <= deepOs && rPrev <= osHigh && r > osHigh) {
+    else if (flatTrough <= deepOs && rPrev <= osHigh && r > osHigh && (!useDivergence || hasBullishDiv(i))) {
       pos = { dir: 'LONG', entryIdx: i, entryTime: String(candles[i].date), entryPrice: closes[i], entryRsi: r, mae: 0, mfe: 0, regime: regimeAt(i, 'LONG'), stop: useStop ? lows[i - 1] : null };
       flatPeak = r; flatTrough = r;
     }
@@ -210,7 +237,7 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
 
   return {
     success: true,
-    params: { days, rsiPeriod: period, obLow, obHigh, osLow, osHigh, deepOb, deepOs, useStop },
+    params: { days, rsiPeriod: period, obLow, obHigh, osLow, osHigh, deepOb, deepOs, useStop, useDivergence },
     from: candles[0]?.date || null,
     to: candles[candles.length - 1]?.date || null,
     candles: candles.length,
