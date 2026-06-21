@@ -13,6 +13,7 @@ import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, se
 import { getHistoricalAnalytics } from './server/analytics_service';
 import { runRsiBacktest } from './server/rsi_backtest';
 import { getLiveSignal, runOptionConfirmBacktest } from './server/option_rsi';
+import { ivAndDelta } from './server/options_math';
 import { getFiiData } from './server/fii_service';
 import { evaluateQuantSignals } from './server/quant_engine';
 import { generateGamePlan } from './server/game_plan_service';
@@ -802,10 +803,24 @@ connectTicker();
         if (type === 'CE') return spot > strike ? 'ITM' : 'OTM';
         return strike > spot ? 'ITM' : 'OTM';
       };
+      // Time to expiry in years (NIFTY options expire 15:30 IST = 10:00 UTC)
+      const r = 0.065;
+      let T = 0;
+      if (chain.expiryDate) {
+        const exp = new Date(chain.expiryDate);
+        const expMs = Date.UTC(exp.getUTCFullYear(), exp.getUTCMonth(), exp.getUTCDate(), 10, 0, 0);
+        T = Math.max((expMs - Date.now()) / (365 * 24 * 3600 * 1000), 0.5 / (365 * 24));
+      }
       const side = (ltp: any, intrinsic: number, type: 'CE' | 'PE', strike: number) => {
         if (ltp == null || ltp <= 0) return null;
         const tv = Math.max(0, ltp - intrinsic);
-        return { ltp: +ltp.toFixed(2), intrinsic: +intrinsic.toFixed(2), timeValue: +tv.toFixed(2), tvPct: +((tv / ltp) * 100).toFixed(0), moneyness: moneyness(type, strike) };
+        const { iv, delta } = T > 0 ? ivAndDelta(type, spot, strike, T, r, ltp) : { iv: null, delta: null };
+        return {
+          ltp: +ltp.toFixed(2), intrinsic: +intrinsic.toFixed(2), timeValue: +tv.toFixed(2),
+          tvPct: +((tv / ltp) * 100).toFixed(0), moneyness: moneyness(type, strike),
+          iv: iv != null ? +(iv * 100).toFixed(1) : null,
+          delta: delta != null ? +delta.toFixed(2) : null,
+        };
       };
       const rows = strikes.filter((s) => Math.abs(s - atm) <= 3 * step).map((strike) => ({
         strike,
