@@ -115,14 +115,14 @@ export async function getLiveSignal(threshold = 40) {
 }
 
 // ---- BACKTEST: recent window only, add option-RSI confirmation + real option P&L ----
-export async function runOptionConfirmBacktest(opts: { optionDays?: number; deepOb?: number; deepOs?: number; threshold?: number }) {
+export async function runOptionConfirmBacktest(opts: { optionDays?: number; deepOb?: number; deepOs?: number; threshold?: number; useStop?: boolean }) {
   const optionDays = Math.min(Math.max(opts.optionDays || 12, 3), 25);
   const threshold = opts.threshold ?? 40;
   const kc = getKiteClient();
   // @ts-ignore
   if (!kc || !kc.access_token) return { success: false, error: 'Not logged in to Kite.' };
 
-  const base = await runRsiBacktest({ days: optionDays, deepOb: opts.deepOb ?? 70, deepOs: opts.deepOs ?? 30 });
+  const base = await runRsiBacktest({ days: optionDays, deepOb: opts.deepOb ?? 70, deepOs: opts.deepOs ?? 30, useStop: !!opts.useStop });
   if (!('success' in base) || !base.success) return base;
   const allTrades = (base as any).trades as any[];
   const instruments = await getNfo(kc);
