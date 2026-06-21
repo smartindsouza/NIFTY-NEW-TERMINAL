@@ -48,6 +48,7 @@ export default function RsiBacktest() {
   const [days, setDays] = useState(60);
   const [deepOb, setDeepOb] = useState(70);
   const [deepOs, setDeepOs] = useState(30);
+  const [useStop, setUseStop] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<any>(null);
@@ -59,7 +60,7 @@ export default function RsiBacktest() {
   const runOption = async () => {
     setOptLoading(true); setOptError(null);
     try {
-      const r = await fetch(`/api/backtest/rsi-option?deepOb=${deepOb}&deepOs=${deepOs}&optionDays=12`);
+      const r = await fetch(`/api/backtest/rsi-option?deepOb=${deepOb}&deepOs=${deepOs}&optionDays=12&useStop=${useStop}`);
       const j = await r.json();
       if (!j.success) { setOptError(j.error || 'Failed'); setOptData(null); }
       else setOptData(j);
@@ -70,7 +71,7 @@ export default function RsiBacktest() {
   const run = async () => {
     setLoading(true); setError(null);
     try {
-      const r = await fetch(`/api/backtest/rsi?days=${days}&deepOb=${deepOb}&deepOs=${deepOs}`);
+      const r = await fetch(`/api/backtest/rsi?days=${days}&deepOb=${deepOb}&deepOs=${deepOs}&useStop=${useStop}`);
       const j = await r.json();
       if (!j.success) { setError(j.error || 'Backtest failed'); setData(null); }
       else setData(j);
@@ -89,6 +90,7 @@ export default function RsiBacktest() {
     if (s.winRate >= 80 && s.expectancy <= 0) insights.push({ tone: 'bad', text: `The classic trap: a ${s.winRate}% win rate that still doesn't make money, because the losers outweigh the winners.` });
     if (s.worst < 0 && s.avgWin > 0 && Math.abs(s.worst) > s.avgWin * 5) insights.push({ tone: 'warn', text: `Worst single trade (${s.worst}) was ${(Math.abs(s.worst) / s.avgWin).toFixed(0)}× your average win — with no stop, a trade that never reverts can run a long way.` });
     if (s.targetExits > 0) insights.push({ tone: 'good', text: `${s.targetExits} of ${s.trades} trades reached the opposite RSI zone (the intended exit).` });
+    if (s.stopExits > 0) insights.push({ tone: 'warn', text: `${s.stopExits} trades were stopped out (closed past the prior candle's low/high) — losses capped early instead of running to day end.` });
     if (s.eodExits > 0) insights.push({ tone: 'warn', text: `${s.eodExits} trades never reached the opposite zone and were squared off at day end — with no stop, these carried whatever the move was until the close.` });
     if (s.avgMae > 0) insights.push({ tone: 'warn', text: `Trades took on average ${s.avgMae} points of heat against them (max ${s.maxMae}) before resolving — the open risk you're carrying without a stop.` });
   }
@@ -101,7 +103,7 @@ export default function RsiBacktest() {
         <h1 className="text-lg md:text-2xl font-bold tracking-tight">RSI Strategy Backtest</h1>
       </div>
       <p className="text-xs text-muted-foreground mb-4">
-        Your RSI zone strategy, tested on real 5-min NIFTY history. Takes only setups where RSI pushes <span className="text-foreground">deep</span> into a zone (≥{deepOb} / ≤{deepOs}) then closes back out; exit at the opposite zone; no stop-loss; intraday only (squared off at day end).
+        Your RSI zone strategy, tested on real 5-min NIFTY history. Takes only setups where RSI pushes <span className="text-foreground">deep</span> into a zone (≥{deepOb} / ≤{deepOs}) then closes back out; exit at the opposite zone; {useStop ? <span className="text-foreground">stop = prev candle low/high on a close beyond it</span> : 'no stop-loss'}; intraday only (squared off at day end).
       </p>
 
       {/* Honest framing banner */}
@@ -136,6 +138,17 @@ export default function RsiBacktest() {
             onChange={(e) => setDeepOs(Math.max(10, Math.min(40, parseInt(e.target.value) || 30)))}
             className="w-16 text-xs font-mono px-2.5 py-1.5 rounded-lg bg-card text-foreground border border-border focus:border-primary outline-none" />
         </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Stop-loss</span>
+          <button onClick={() => setUseStop((v) => !v)}
+            className={cn('flex items-center gap-2 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-colors',
+              useStop ? 'bg-rose-500/15 text-rose-400' : 'bg-card text-muted-foreground hover:text-foreground')}>
+            <span className={cn('relative w-7 h-4 rounded-full transition-colors', useStop ? 'bg-rose-500' : 'bg-muted')}>
+              <span className={cn('absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all', useStop ? 'left-[14px]' : 'left-0.5')} />
+            </span>
+            prev candle (close)
+          </button>
+        </div>
         <button onClick={run} disabled={loading}
           className="flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl bg-primary text-primary-foreground disabled:opacity-50 transition-opacity">
           <Play className={cn('w-4 h-4', loading && 'animate-pulse')} /> {loading ? 'Running…' : 'Run Backtest'}
@@ -168,10 +181,11 @@ export default function RsiBacktest() {
             <Stat label="Worst Trade" value={`${s.worst}`} tone="neg" />
             <Stat label="Max Drawdown" value={`${s.maxDrawdown} pts`} tone="neg" />
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 mb-5">
+          <div className={cn('grid grid-cols-2 gap-2.5 mb-5', s.stopExits > 0 || data.params?.useStop ? 'md:grid-cols-5' : 'md:grid-cols-4')}>
             <Stat label="Trades" value={String(s.trades)} />
             <Stat label="Hit Target" value={String(s.targetExits)} tone="pos" hint="reached opposite zone" />
-            <Stat label="Squared off (EOD)" value={String(s.eodExits)} tone="warn" hint="never hit target" />
+            {(s.stopExits > 0 || data.params?.useStop) && <Stat label="Stopped" value={String(s.stopExits ?? 0)} tone="neg" hint="closed past prev candle" />}
+            <Stat label="Squared off (EOD)" value={String(s.eodExits)} tone="warn" hint="neither target nor stop" />
             <Stat label="Avg / Max Heat" value={`${s.avgMae} / ${s.maxMae}`} tone="neutral" hint="adverse pts (MAE)" />
           </div>
 
@@ -277,7 +291,7 @@ export default function RsiBacktest() {
                         <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{fmtTime(t.entryTime)}</td>
                         <td className="px-3 py-2 text-right text-muted-foreground">{t.entryRsi}→{t.exitRsi}</td>
                         <td className="px-3 py-2 text-right text-muted-foreground">{t.exitPrice}</td>
-                        <td className={cn('px-3 py-2', t.reason === 'TARGET' ? 'text-emerald-400/80' : 'text-amber-400/80')}>{t.reason}</td>
+                        <td className={cn('px-3 py-2', t.reason === 'TARGET' ? 'text-emerald-400/80' : t.reason === 'STOP' ? 'text-rose-400/80' : 'text-amber-400/80')}>{t.reason}</td>
                         <td className={cn('px-3 py-2 text-right font-bold', t.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
                           <span className="inline-flex items-center gap-0.5 justify-end">{t.pnl >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}{t.pnl}</span>
                         </td>
