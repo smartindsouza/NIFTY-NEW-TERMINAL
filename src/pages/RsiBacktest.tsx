@@ -49,6 +49,7 @@ export default function RsiBacktest() {
   const [deepOb, setDeepOb] = useState(70);
   const [deepOs, setDeepOs] = useState(30);
   const [useStop, setUseStop] = useState(false);
+  const [useDiv, setUseDiv] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<any>(null);
@@ -60,7 +61,7 @@ export default function RsiBacktest() {
   const runOption = async () => {
     setOptLoading(true); setOptError(null);
     try {
-      const r = await fetch(`/api/backtest/rsi-option?deepOb=${deepOb}&deepOs=${deepOs}&optionDays=12&useStop=${useStop}`);
+      const r = await fetch(`/api/backtest/rsi-option?deepOb=${deepOb}&deepOs=${deepOs}&optionDays=12&useStop=${useStop}&useDiv=${useDiv}`);
       const j = await r.json();
       if (!j.success) { setOptError(j.error || 'Failed'); setOptData(null); }
       else setOptData(j);
@@ -71,7 +72,7 @@ export default function RsiBacktest() {
   const run = async () => {
     setLoading(true); setError(null);
     try {
-      const r = await fetch(`/api/backtest/rsi?days=${days}&deepOb=${deepOb}&deepOs=${deepOs}&useStop=${useStop}`);
+      const r = await fetch(`/api/backtest/rsi?days=${days}&deepOb=${deepOb}&deepOs=${deepOs}&useStop=${useStop}&useDiv=${useDiv}`);
       const j = await r.json();
       if (!j.success) { setError(j.error || 'Backtest failed'); setData(null); }
       else setData(j);
@@ -103,7 +104,7 @@ export default function RsiBacktest() {
         <h1 className="text-lg md:text-2xl font-bold tracking-tight">RSI Strategy Backtest</h1>
       </div>
       <p className="text-xs text-muted-foreground mb-4">
-        Your RSI zone strategy, tested on real 5-min NIFTY history. Takes only setups where RSI pushes <span className="text-foreground">deep</span> into a zone (≥{deepOb} / ≤{deepOs}) then closes back out; exit at the opposite zone; {useStop ? <span className="text-foreground">stop = prev candle low/high on a close beyond it</span> : 'no stop-loss'}; intraday only (squared off at day end).
+        Your RSI zone strategy, tested on real 5-min NIFTY history. Takes only setups where RSI pushes <span className="text-foreground">deep</span> into a zone (≥{deepOb} / ≤{deepOs}) then closes back out{useDiv ? <span className="text-foreground"> and shows matching RSI divergence (≤7 bars)</span> : ''}; exit at the opposite zone; {useStop ? <span className="text-foreground">stop = prev candle low/high on a close beyond it</span> : 'no stop-loss'}; intraday only (squared off at day end).
       </p>
 
       {/* Honest framing banner */}
@@ -147,6 +148,17 @@ export default function RsiBacktest() {
               <span className={cn('absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all', useStop ? 'left-[14px]' : 'left-0.5')} />
             </span>
             prev candle (close)
+          </button>
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Divergence</span>
+          <button onClick={() => setUseDiv((v) => !v)}
+            className={cn('flex items-center gap-2 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-colors',
+              useDiv ? 'bg-violet-500/15 text-violet-400' : 'bg-card text-muted-foreground hover:text-foreground')}>
+            <span className={cn('relative w-7 h-4 rounded-full transition-colors', useDiv ? 'bg-violet-500' : 'bg-muted')}>
+              <span className={cn('absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all', useDiv ? 'left-[14px]' : 'left-0.5')} />
+            </span>
+            RSI div (7-bar)
           </button>
         </div>
         <button onClick={run} disabled={loading}
