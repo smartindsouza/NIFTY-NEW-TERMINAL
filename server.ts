@@ -796,6 +796,7 @@ connectTicker();
         obLow: num(q.obLow, 60), obHigh: num(q.obHigh, 65),
         osLow: num(q.osLow, 38), osHigh: num(q.osHigh, 40),
         deepOb: num(q.deepOb, 70), deepOs: num(q.deepOs, 30),
+        useStop: q.useStop === 'true' || q.useStop === '1',
       });
       return res.json(result);
     } catch (e: any) {
@@ -825,6 +826,7 @@ connectTicker();
         optionDays: num(q.optionDays, 12),
         deepOb: num(q.deepOb, 70), deepOs: num(q.deepOs, 30),
         threshold: num(q.threshold, 40),
+        useStop: q.useStop === 'true' || q.useStop === '1',
       });
       return res.json(result);
     } catch (e: any) {
