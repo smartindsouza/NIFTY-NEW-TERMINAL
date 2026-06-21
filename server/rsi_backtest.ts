@@ -95,8 +95,9 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
     if ((dir === 'LONG' && tdir === 'up') || (dir === 'SHORT' && tdir === 'down')) return 'withTrend';
     return 'counterTrend';
   };
-  const dayOf = (c: any) => String(c.date).slice(0, 10);
-  const timeOf = (c: any) => String(c.date).slice(11, 16); // 'HH:MM' in IST (candle stamps carry +0530)
+  // Robust IST day/time per candle — Kite returns `date` as a Date object, so slicing a string is unsafe.
+  const istDay = candles.map((c) => new Date(c.date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })); // 'YYYY-MM-DD'
+  const istTime = candles.map((c) => new Date(c.date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' })); // 'HH:MM'
 
   // RSI divergence over a ≤DIVW-candle window, using RSI swing highs/lows (1-bar pivots) vs price
   const swingsInWindow = (i: number, kind: 'low' | 'high'): number[] => {
@@ -135,8 +136,8 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
   for (let i = period + 1; i < candles.length; i++) {
     if (rsi[i] == null || rsi[i - 1] == null) continue;
     const r = rsi[i] as number, rPrev = rsi[i - 1] as number;
-    const firstOfDay = dayOf(candles[i]) !== dayOf(candles[i - 1]);
-    const lastOfDay = (i === candles.length - 1) || (dayOf(candles[i + 1]) !== dayOf(candles[i]));
+    const firstOfDay = istDay[i] !== istDay[i - 1];
+    const lastOfDay = (i === candles.length - 1) || (istDay[i + 1] !== istDay[i]);
     if (firstOfDay) { flatPeak = r; flatTrough = r; } // no overnight carry-over of setups
 
     if (pos) {
@@ -156,7 +157,7 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
       else if (pos.dir === 'SHORT' && r <= osHigh) { exit = true; reason = 'TARGET'; }
       else if (pos.dir === 'LONG' && r >= obLow) { exit = true; reason = 'TARGET'; }
       // Time cutoff: optionally square off open trades at the chosen time
-      else if (exitAtCutoff && noEntryAfter && timeOf(candles[i]) >= noEntryAfter) { exit = true; reason = 'CUTOFF'; }
+      else if (exitAtCutoff && noEntryAfter && istTime[i] >= noEntryAfter) { exit = true; reason = 'CUTOFF'; }
       // Intraday only — square off at day end
       else if (lastOfDay) { exit = true; reason = 'EOD'; }
       if (exit) {
@@ -177,7 +178,7 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
     flatPeak = Math.max(flatPeak, r);
     flatTrough = Math.min(flatTrough, r);
     if (lastOfDay) continue;
-    if (noEntryAfter && timeOf(candles[i]) >= noEntryAfter) continue; // no new entries after the cutoff time
+    if (noEntryAfter && istTime[i] >= noEntryAfter) continue; // no new entries after the cutoff time
 
     // SHORT: RSI went DEEP into overbought (peak >= deepOb), then a candle closes back below obLow
     if (flatPeak >= deepOb && rPrev >= obLow && r < obLow && (!useDivergence || hasBearishDiv(i))) {
@@ -228,7 +229,7 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
     const m = list.length; const net = sum(list.map((t) => t.pnl)); const w = list.filter((t) => t.pnl > 0).length;
     return { n: m, net: +net.toFixed(1), winRate: m ? +((w / m) * 100).toFixed(0) : 0, avg: m ? +(net / m).toFixed(1) : 0 };
   };
-  const hourOf = (iso: string) => iso.slice(11, 13); // IST hour (candle stamps carry +0530)
+  const hourOf = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' }).slice(0, 2); // IST hour
   const hoursPresent = Array.from(new Set(trades.map((t) => hourOf(t.entryTime)))).sort();
   const winT = trades.filter((t) => t.pnl > 0); const lossT = trades.filter((t) => t.pnl <= 0);
   const breakdown = {
