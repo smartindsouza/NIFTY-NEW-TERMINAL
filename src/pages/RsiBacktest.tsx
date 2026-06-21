@@ -50,6 +50,10 @@ export default function RsiBacktest() {
   const [deepOs, setDeepOs] = useState(30);
   const [useStop, setUseStop] = useState(false);
   const [useDiv, setUseDiv] = useState(false);
+  const [divWindow, setDivWindow] = useState(7);
+  const [noEntryAfter, setNoEntryAfter] = useState('');
+  const [exitAtCutoff, setExitAtCutoff] = useState(false);
+  const [reqOptRsi, setReqOptRsi] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<any>(null);
@@ -61,7 +65,7 @@ export default function RsiBacktest() {
   const runOption = async () => {
     setOptLoading(true); setOptError(null);
     try {
-      const r = await fetch(`/api/backtest/rsi-option?deepOb=${deepOb}&deepOs=${deepOs}&optionDays=12&useStop=${useStop}&useDiv=${useDiv}`);
+      const r = await fetch(`/api/backtest/rsi-option?deepOb=${deepOb}&deepOs=${deepOs}&optionDays=12&useStop=${useStop}&useDiv=${useDiv}&divWindow=${divWindow}&noEntryAfter=${encodeURIComponent(noEntryAfter)}&exitAtCutoff=${exitAtCutoff}&reqOptRsi=${reqOptRsi}`);
       const j = await r.json();
       if (!j.success) { setOptError(j.error || 'Failed'); setOptData(null); }
       else setOptData(j);
@@ -72,7 +76,7 @@ export default function RsiBacktest() {
   const run = async () => {
     setLoading(true); setError(null);
     try {
-      const r = await fetch(`/api/backtest/rsi?days=${days}&deepOb=${deepOb}&deepOs=${deepOs}&useStop=${useStop}&useDiv=${useDiv}`);
+      const r = await fetch(`/api/backtest/rsi?days=${days}&deepOb=${deepOb}&deepOs=${deepOs}&useStop=${useStop}&useDiv=${useDiv}&divWindow=${divWindow}&noEntryAfter=${encodeURIComponent(noEntryAfter)}&exitAtCutoff=${exitAtCutoff}`);
       const j = await r.json();
       if (!j.success) { setError(j.error || 'Backtest failed'); setData(null); }
       else setData(j);
@@ -104,7 +108,7 @@ export default function RsiBacktest() {
         <h1 className="text-lg md:text-2xl font-bold tracking-tight">RSI Strategy Backtest</h1>
       </div>
       <p className="text-xs text-muted-foreground mb-4">
-        Your RSI zone strategy, tested on real 5-min NIFTY history. Takes only setups where RSI pushes <span className="text-foreground">deep</span> into a zone (≥{deepOb} / ≤{deepOs}) then closes back out{useDiv ? <span className="text-foreground"> and shows matching RSI divergence (≤7 bars)</span> : ''}; exit at the opposite zone; {useStop ? <span className="text-foreground">stop = prev candle low/high on a close beyond it</span> : 'no stop-loss'}; intraday only (squared off at day end).
+        Your RSI zone strategy, tested on real 5-min NIFTY history. Takes only setups where RSI pushes <span className="text-foreground">deep</span> into a zone (≥{deepOb} / ≤{deepOs}) then closes back out{useDiv ? <span className="text-foreground"> and shows matching RSI divergence (≤{divWindow} bars)</span> : ''}; exit at the opposite zone; {useStop ? <span className="text-foreground">stop = prev candle low/high on a close beyond it</span> : 'no stop-loss'}; intraday{noEntryAfter ? <span className="text-foreground">, no new entries after {noEntryAfter} IST</span> : ''}{exitAtCutoff && noEntryAfter ? <span className="text-foreground">, open trades squared off at {noEntryAfter}</span> : ', squared off at day end'}.
       </p>
 
       {/* Honest framing banner */}
@@ -158,7 +162,30 @@ export default function RsiBacktest() {
             <span className={cn('relative w-7 h-4 rounded-full transition-colors', useDiv ? 'bg-violet-500' : 'bg-muted')}>
               <span className={cn('absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all', useDiv ? 'left-[14px]' : 'left-0.5')} />
             </span>
-            RSI div (7-bar)
+            RSI div ({divWindow}-bar)
+          </button>
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Div candles</span>
+          <select value={divWindow} onChange={(e) => setDivWindow(parseInt(e.target.value))}
+            className="text-xs font-mono px-2 py-1.5 rounded-lg bg-card text-foreground border border-border focus:border-primary outline-none">
+            {[1, 2, 3, 4, 5, 6, 7].map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">No entry after (IST)</span>
+          <input type="time" value={noEntryAfter} onChange={(e) => setNoEntryAfter(e.target.value)}
+            className="text-xs font-mono px-2 py-1.5 rounded-lg bg-card text-foreground border border-border focus:border-primary outline-none" />
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Exit at cutoff</span>
+          <button onClick={() => setExitAtCutoff((v) => !v)} disabled={!noEntryAfter}
+            className={cn('flex items-center gap-2 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-40',
+              exitAtCutoff && noEntryAfter ? 'bg-amber-500/15 text-amber-400' : 'bg-card text-muted-foreground hover:text-foreground')}>
+            <span className={cn('relative w-7 h-4 rounded-full transition-colors', exitAtCutoff && noEntryAfter ? 'bg-amber-500' : 'bg-muted')}>
+              <span className={cn('absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all', exitAtCutoff ? 'left-[14px]' : 'left-0.5')} />
+            </span>
+            square off open
           </button>
         </div>
         <button onClick={run} disabled={loading}
@@ -193,11 +220,12 @@ export default function RsiBacktest() {
             <Stat label="Worst Trade" value={`${s.worst}`} tone="neg" />
             <Stat label="Max Drawdown" value={`${s.maxDrawdown} pts`} tone="neg" />
           </div>
-          <div className={cn('grid grid-cols-2 gap-2.5 mb-5', s.stopExits > 0 || data.params?.useStop ? 'md:grid-cols-5' : 'md:grid-cols-4')}>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 mb-5">
             <Stat label="Trades" value={String(s.trades)} />
             <Stat label="Hit Target" value={String(s.targetExits)} tone="pos" hint="reached opposite zone" />
             {(s.stopExits > 0 || data.params?.useStop) && <Stat label="Stopped" value={String(s.stopExits ?? 0)} tone="neg" hint="closed past prev candle" />}
-            <Stat label="Squared off (EOD)" value={String(s.eodExits)} tone="warn" hint="neither target nor stop" />
+            {(s.cutoffExits > 0 || data.params?.exitAtCutoff) && <Stat label="Cutoff exits" value={String(s.cutoffExits ?? 0)} tone="warn" hint="squared off at cutoff time" />}
+            <Stat label="Squared off (EOD)" value={String(s.eodExits)} tone="warn" hint="held to day end" />
             <Stat label="Avg / Max Heat" value={`${s.avgMae} / ${s.maxMae}`} tone="neutral" hint="adverse pts (MAE)" />
           </div>
 
@@ -323,12 +351,22 @@ export default function RsiBacktest() {
         <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
           <div>
             <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Option-RSI confirmation <span className="text-muted-foreground normal-case font-normal">(recent only)</span></h2>
-            <p className="text-[11px] text-muted-foreground mt-0.5">Adds the rule: the ATM option you'd buy must have its own 5-min RSI above 40 at entry. Only covers the current weekly expiry (older contracts have expired).</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">The ATM option you'd buy must have its own 5-min RSI cross above 40 at entry. Only covers the current weekly expiry (older contracts have expired).</p>
           </div>
-          <button onClick={runOption} disabled={optLoading}
-            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl bg-card hover:bg-popover text-foreground disabled:opacity-50 transition-colors shrink-0">
-            <Play className={cn('w-3.5 h-3.5', optLoading && 'animate-pulse')} /> {optLoading ? 'Checking options…' : 'Run option check'}
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={() => setReqOptRsi((v) => !v)}
+              className={cn('flex items-center gap-2 text-xs font-semibold px-2.5 py-2 rounded-xl transition-colors',
+                reqOptRsi ? 'bg-primary/15 text-primary' : 'bg-card text-muted-foreground hover:text-foreground')}>
+              <span className={cn('relative w-7 h-4 rounded-full transition-colors', reqOptRsi ? 'bg-primary' : 'bg-muted')}>
+                <span className={cn('absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all', reqOptRsi ? 'left-[14px]' : 'left-0.5')} />
+              </span>
+              require &gt;40
+            </button>
+            <button onClick={runOption} disabled={optLoading}
+              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl bg-card hover:bg-popover text-foreground disabled:opacity-50 transition-colors">
+              <Play className={cn('w-3.5 h-3.5', optLoading && 'animate-pulse')} /> {optLoading ? 'Checking options…' : 'Run option check'}
+            </button>
+          </div>
         </div>
 
         {optError && <div className="flex items-center gap-2 text-sm text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-2.5 mt-2"><AlertTriangle className="w-4 h-4 shrink-0" /> {optError}</div>}
@@ -339,23 +377,23 @@ export default function RsiBacktest() {
             <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5 mb-3 mt-3">
               <Stat label="Index signals" value={String(optData.totals.indexSignals)} />
               <Stat label="Option data" value={String(optData.totals.withOptionData)} hint={`${optData.totals.noOptionData} expired/none`} />
-              <Stat label="Confirmed" value={String(optData.totals.confirmed)} tone="pos" hint="option RSI > 40" />
-              <Stat label="Rejected" value={String(optData.totals.rejected)} tone="warn" hint="filter would skip" />
-              <Stat label="Threshold" value={`>${optData.threshold}`} />
+              <Stat label="Confirmed" value={String(optData.totals.confirmed)} tone="pos" hint={`option RSI > ${optData.threshold}`} />
+              <Stat label="Rejected" value={String(optData.totals.rejected)} tone="warn" hint="option RSI fails" />
+              <Stat label="Taken" value={String(optData.totals.taken)} hint={optData.requireOptionRsi ? 'crossover required' : 'crossover off'} />
             </div>
 
-            {optData.confirmedOptionStats ? (
+            {optData.optionStats ? (
               <>
-                <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Confirmed trades — real option P&amp;L (points of premium)</div>
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">{optData.requireOptionRsi ? 'Confirmed' : 'All'} trades — real option P&amp;L (points of premium)</div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 mb-4">
-                  <Stat label="Win Rate" value={`${optData.confirmedOptionStats.winRate}%`} />
-                  <Stat label="Avg / trade" value={`${optData.confirmedOptionStats.avgOptionPts > 0 ? '+' : ''}${optData.confirmedOptionStats.avgOptionPts}`} tone={optData.confirmedOptionStats.avgOptionPts > 0 ? 'pos' : 'neg'} />
-                  <Stat label="Total" value={`${optData.confirmedOptionStats.totalOptionPts > 0 ? '+' : ''}${optData.confirmedOptionStats.totalOptionPts}`} tone={optData.confirmedOptionStats.totalOptionPts > 0 ? 'pos' : 'neg'} />
-                  <Stat label="Best / Worst" value={`${optData.confirmedOptionStats.best} / ${optData.confirmedOptionStats.worst}`} tone="neutral" />
+                  <Stat label="Win Rate" value={`${optData.optionStats.winRate}%`} />
+                  <Stat label="Avg / trade" value={`${optData.optionStats.avgOptionPts > 0 ? '+' : ''}${optData.optionStats.avgOptionPts}`} tone={optData.optionStats.avgOptionPts > 0 ? 'pos' : 'neg'} />
+                  <Stat label="Total" value={`${optData.optionStats.totalOptionPts > 0 ? '+' : ''}${optData.optionStats.totalOptionPts}`} tone={optData.optionStats.totalOptionPts > 0 ? 'pos' : 'neg'} />
+                  <Stat label="Best / Worst" value={`${optData.optionStats.best} / ${optData.optionStats.worst}`} tone="neutral" />
                 </div>
               </>
             ) : (
-              <div className="text-sm text-muted-foreground py-3">No confirmed trades with option data in this window.</div>
+              <div className="text-sm text-muted-foreground py-3">No trades with option data in this window.</div>
             )}
 
             {optData.signals?.length > 0 && (
