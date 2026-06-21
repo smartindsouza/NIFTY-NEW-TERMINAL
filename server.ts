@@ -785,6 +785,41 @@ connectTicker();
     }
   });
 
+  // Option value: decompose premium into intrinsic + time value across strikes around ATM
+  app.get('/api/option-value', (req, res) => {
+    try {
+      const chain = latestChainData;
+      if (!chain || !chain.spot || !Array.isArray(chain.strikes) || !chain.strikes.length) {
+        return res.json({ success: false, error: 'Option chain not loaded yet (needs Kite login + market hours).' });
+      }
+      const spot: number = chain.spot;
+      const strikes: number[] = [...chain.strikes].sort((a: number, b: number) => a - b);
+      const atm = strikes.reduce((b, s) => (Math.abs(s - spot) < Math.abs(b - spot) ? s : b), strikes[0]);
+      const ai = strikes.indexOf(atm);
+      const step = ai + 1 < strikes.length ? strikes[ai + 1] - atm : (ai > 0 ? atm - strikes[ai - 1] : 50);
+      const moneyness = (type: 'CE' | 'PE', strike: number) => {
+        if (strike === atm) return 'ATM';
+        if (type === 'CE') return spot > strike ? 'ITM' : 'OTM';
+        return strike > spot ? 'ITM' : 'OTM';
+      };
+      const side = (ltp: any, intrinsic: number, type: 'CE' | 'PE', strike: number) => {
+        if (ltp == null || ltp <= 0) return null;
+        const tv = Math.max(0, ltp - intrinsic);
+        return { ltp: +ltp.toFixed(2), intrinsic: +intrinsic.toFixed(2), timeValue: +tv.toFixed(2), tvPct: +((tv / ltp) * 100).toFixed(0), moneyness: moneyness(type, strike) };
+      };
+      const rows = strikes.filter((s) => Math.abs(s - atm) <= 3 * step).map((strike) => ({
+        strike,
+        atm: strike === atm,
+        ce: side(chain.ceData?.[strike]?.ltp, Math.max(0, spot - strike), 'CE', strike),
+        pe: side(chain.peData?.[strike]?.ltp, Math.max(0, strike - spot), 'PE', strike),
+      }));
+      return res.json({ success: true, spot: +spot.toFixed(2), atmStrike: atm, step, expiry: chain.expiryDate ?? null, rows, asOf: Date.now() });
+    } catch (e: any) {
+      console.error('[option-value]', e);
+      return res.status(500).json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
   // RSI zone-oscillator strategy backtest (signal tested on the NIFTY index, in points).
   app.get('/api/backtest/rsi', async (req, res) => {
     try {
