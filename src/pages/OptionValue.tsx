@@ -74,6 +74,8 @@ export default function OptionValue() {
                     <th className="text-right px-3 py-2 font-medium">Intrinsic</th>
                     <th className="text-right px-3 py-2 font-medium">Time val</th>
                     <th className="text-right px-3 py-2 font-medium">TV %</th>
+                    <th className="text-right px-3 py-2 font-medium">Delta</th>
+                    <th className="text-right px-3 py-2 font-medium">IV</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -88,6 +90,8 @@ export default function OptionValue() {
                         <td className="px-3 py-2.5 text-right text-emerald-400">{o ? o.intrinsic : '—'}</td>
                         <td className="px-3 py-2.5 text-right text-amber-400">{o ? o.timeValue : '—'}</td>
                         <td className="px-3 py-2.5 text-right text-muted-foreground">{o ? `${o.tvPct}%` : '—'}</td>
+                        <td className="px-3 py-2.5 text-right font-semibold text-foreground">{o && o.delta != null ? o.delta.toFixed(2) : '—'}</td>
+                        <td className="px-3 py-2.5 text-right text-muted-foreground">{o && o.iv != null ? `${o.iv}%` : '—'}</td>
                       </tr>
                     );
                   })}
@@ -99,7 +103,8 @@ export default function OptionValue() {
           <div className="text-[11px] text-muted-foreground/80 mt-3 leading-relaxed space-y-1">
             <p><span className="text-emerald-400">Intrinsic</span> = how deep in-the-money it already is (Spot−Strike for calls, Strike−Spot for puts). <span className="text-amber-400">Time value</span> = the rest, which theta erodes to zero by expiry.</p>
             <p><span className="text-foreground">Reading it:</span> a high <span className="text-amber-400">TV %</span> means most of what you pay is decaying air — fine for a fast in-and-out, costly if the trade drags. For your RSI trades, compare the ATM against one or two strikes ITM: you'll pay more, but a far smaller share is time value.</p>
-            <p className="opacity-70">This shows premium <span className="text-foreground">composition</span>, not whether implied volatility is cheap or expensive — that's a separate question. Educational, not investment advice.</p>
+            <p><span className="text-foreground">Delta</span> ≈ how many points the option moves per 1 point of index — ~0.5 at ATM, toward 1 (or −1 for puts) deeper ITM, toward 0 deep OTM. Higher delta = your index signal translates into option P&amp;L more faithfully. <span className="text-foreground">IV</span> is the implied volatility backed out of the live premium.</p>
+            <p className="opacity-70">Delta/IV from Black-Scholes (≈6.5% rate, expiry 15:30 IST); a model estimate, not the broker's official greeks. Educational, not investment advice.</p>
           </div>
         </>
       )}
