@@ -115,14 +115,18 @@ export async function getLiveSignal(threshold = 40) {
 }
 
 // ---- BACKTEST: recent window only, add option-RSI confirmation + real option P&L ----
-export async function runOptionConfirmBacktest(opts: { optionDays?: number; deepOb?: number; deepOs?: number; threshold?: number; useStop?: boolean; useDivergence?: boolean }) {
+export async function runOptionConfirmBacktest(opts: { optionDays?: number; deepOb?: number; deepOs?: number; threshold?: number; useStop?: boolean; useDivergence?: boolean; divWindow?: number; noEntryAfter?: string; exitAtCutoff?: boolean; requireOptionRsi?: boolean }) {
   const optionDays = Math.min(Math.max(opts.optionDays || 12, 3), 25);
   const threshold = opts.threshold ?? 40;
   const kc = getKiteClient();
   // @ts-ignore
   if (!kc || !kc.access_token) return { success: false, error: 'Not logged in to Kite.' };
 
-  const base = await runRsiBacktest({ days: optionDays, deepOb: opts.deepOb ?? 70, deepOs: opts.deepOs ?? 30, useStop: !!opts.useStop, useDivergence: !!opts.useDivergence });
+  const base = await runRsiBacktest({
+    days: optionDays, deepOb: opts.deepOb ?? 70, deepOs: opts.deepOs ?? 30,
+    useStop: !!opts.useStop, useDivergence: !!opts.useDivergence,
+    divWindow: opts.divWindow, noEntryAfter: opts.noEntryAfter, exitAtCutoff: !!opts.exitAtCutoff,
+  });
   if (!('success' in base) || !base.success) return base;
   const allTrades = (base as any).trades as any[];
   const instruments = await getNfo(kc);
@@ -168,17 +172,19 @@ export async function runOptionConfirmBacktest(opts: { optionDays?: number; deep
     });
   }
 
-  // aggregate over confirmed (and option data available)
+  // aggregate. The option-RSI crossover (>threshold) is an optional filter (requireOptionRsi).
+  const requireOptionRsi = opts.requireOptionRsi !== false; // default ON
   const withData = signals.filter((s) => s.available);
   const confirmed = withData.filter((s) => s.confirms);
   const rejected = withData.filter((s) => !s.confirms);
-  const cp = confirmed.map((s) => s.optPnl);
+  const taken = requireOptionRsi ? confirmed : withData; // when off, the option crossover isn't required
+  const cp = taken.map((s) => s.optPnl);
   const wins = cp.filter((p) => p > 0).length;
   const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
 
   return {
     success: true,
-    optionDays, threshold,
+    optionDays, threshold, requireOptionRsi,
     period: { from: (base as any).from, to: (base as any).to },
     totals: {
       indexSignals: signals.length,
@@ -186,12 +192,13 @@ export async function runOptionConfirmBacktest(opts: { optionDays?: number; deep
       noOptionData: signals.length - withData.length,
       confirmed: confirmed.length,
       rejected: rejected.length,
+      taken: taken.length,
     },
-    confirmedOptionStats: confirmed.length ? {
-      trades: confirmed.length,
-      winRate: +((wins / confirmed.length) * 100).toFixed(1),
+    optionStats: taken.length ? {
+      trades: taken.length,
+      winRate: +((wins / taken.length) * 100).toFixed(1),
       totalOptionPts: +sum(cp).toFixed(2),
-      avgOptionPts: +(sum(cp) / confirmed.length).toFixed(2),
+      avgOptionPts: +(sum(cp) / taken.length).toFixed(2),
       best: +Math.max(...cp).toFixed(2),
       worst: +Math.min(...cp).toFixed(2),
     } : null,

@@ -54,6 +54,7 @@ export interface RsiBacktestOpts {
   days?: number; rsiPeriod?: number;
   obLow?: number; obHigh?: number; osLow?: number; osHigh?: number;
   deepOb?: number; deepOs?: number; useStop?: boolean; useDivergence?: boolean;
+  divWindow?: number; noEntryAfter?: string; exitAtCutoff?: boolean;
 }
 
 export async function runRsiBacktest(opts: RsiBacktestOpts) {
@@ -66,7 +67,9 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
   const deepOs = opts.deepOs ?? 30; // long only if RSI first reached at most this (deep oversold)
   const useStop = !!opts.useStop;   // optional: stop at the pre-entry candle's low/high, on a CLOSING basis
   const useDivergence = !!opts.useDivergence; // optional: require matching RSI divergence
-  const DIVW = 7; // divergence lookback window (candles)
+  const DIVW = Math.min(Math.max(Math.round(opts.divWindow ?? 7), 1), 7); // divergence lookback window (1-7 candles)
+  const noEntryAfter = (opts.noEntryAfter || '').trim(); // 'HH:MM' IST; '' = no cutoff
+  const exitAtCutoff = !!opts.exitAtCutoff; // also square off open trades at the cutoff time
 
   let candles: any[];
   try {
@@ -93,6 +96,7 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
     return 'counterTrend';
   };
   const dayOf = (c: any) => String(c.date).slice(0, 10);
+  const timeOf = (c: any) => String(c.date).slice(11, 16); // 'HH:MM' in IST (candle stamps carry +0530)
 
   // RSI divergence over a ≤DIVW-candle window, using RSI swing highs/lows (1-bar pivots) vs price
   const swingsInWindow = (i: number, kind: 'low' | 'high'): number[] => {
@@ -151,6 +155,8 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
       // Target = opposite RSI zone (on close)
       else if (pos.dir === 'SHORT' && r <= osHigh) { exit = true; reason = 'TARGET'; }
       else if (pos.dir === 'LONG' && r >= obLow) { exit = true; reason = 'TARGET'; }
+      // Time cutoff: optionally square off open trades at the chosen time
+      else if (exitAtCutoff && noEntryAfter && timeOf(candles[i]) >= noEntryAfter) { exit = true; reason = 'CUTOFF'; }
       // Intraday only — square off at day end
       else if (lastOfDay) { exit = true; reason = 'EOD'; }
       if (exit) {
@@ -171,6 +177,7 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
     flatPeak = Math.max(flatPeak, r);
     flatTrough = Math.min(flatTrough, r);
     if (lastOfDay) continue;
+    if (noEntryAfter && timeOf(candles[i]) >= noEntryAfter) continue; // no new entries after the cutoff time
 
     // SHORT: RSI went DEEP into overbought (peak >= deepOb), then a candle closes back below obLow
     if (flatPeak >= deepOb && rPrev >= obLow && r < obLow && (!useDivergence || hasBearishDiv(i))) {
@@ -210,6 +217,7 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
     worst: n ? +Math.min(...trades.map((t) => t.pnl)).toFixed(1) : 0,
     targetExits: trades.filter((t) => t.reason === 'TARGET').length,
     stopExits: trades.filter((t) => t.reason === 'STOP').length,
+    cutoffExits: trades.filter((t) => t.reason === 'CUTOFF').length,
     eodExits: trades.filter((t) => t.reason === 'EOD').length,
     avgMae: n ? +(sum(trades.map((t) => t.mae)) / n).toFixed(1) : 0,
     maxMae: n ? +Math.max(...trades.map((t) => t.mae)).toFixed(1) : 0,
@@ -224,7 +232,7 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
   const hoursPresent = Array.from(new Set(trades.map((t) => hourOf(t.entryTime)))).sort();
   const winT = trades.filter((t) => t.pnl > 0); const lossT = trades.filter((t) => t.pnl <= 0);
   const breakdown = {
-    byReason: ['TARGET', 'STOP', 'EOD'].map((k) => ({ key: k, ...agg(trades.filter((t) => t.reason === k)) })),
+    byReason: ['TARGET', 'STOP', 'CUTOFF', 'EOD'].map((k) => ({ key: k, ...agg(trades.filter((t) => t.reason === k)) })),
     byDir: ['LONG', 'SHORT'].map((k) => ({ key: k, ...agg(trades.filter((t) => t.dir === k)) })),
     byRegime: ['withTrend', 'counterTrend', 'range'].map((k) => ({ key: k, ...agg(trades.filter((t) => t.regime === k)) })),
     byHour: hoursPresent.map((h) => ({ key: h, ...agg(trades.filter((t) => hourOf(t.entryTime) === h)) })),
@@ -237,7 +245,7 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
 
   return {
     success: true,
-    params: { days, rsiPeriod: period, obLow, obHigh, osLow, osHigh, deepOb, deepOs, useStop, useDivergence },
+    params: { days, rsiPeriod: period, obLow, obHigh, osLow, osHigh, deepOb, deepOs, useStop, useDivergence, divWindow: DIVW, noEntryAfter, exitAtCutoff },
     from: candles[0]?.date || null,
     to: candles[candles.length - 1]?.date || null,
     candles: candles.length,
