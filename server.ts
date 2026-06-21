@@ -848,6 +848,9 @@ connectTicker();
         deepOb: num(q.deepOb, 70), deepOs: num(q.deepOs, 30),
         useStop: q.useStop === 'true' || q.useStop === '1',
         useDivergence: q.useDiv === 'true' || q.useDiv === '1',
+        divWindow: num(q.divWindow, 7),
+        noEntryAfter: typeof q.noEntryAfter === 'string' ? q.noEntryAfter : '',
+        exitAtCutoff: q.exitAtCutoff === 'true' || q.exitAtCutoff === '1',
       });
       return res.json(result);
     } catch (e: any) {
@@ -879,6 +882,10 @@ connectTicker();
         threshold: num(q.threshold, 40),
         useStop: q.useStop === 'true' || q.useStop === '1',
         useDivergence: q.useDiv === 'true' || q.useDiv === '1',
+        divWindow: num(q.divWindow, 7),
+        noEntryAfter: typeof q.noEntryAfter === 'string' ? q.noEntryAfter : '',
+        exitAtCutoff: q.exitAtCutoff === 'true' || q.exitAtCutoff === '1',
+        requireOptionRsi: q.reqOptRsi !== 'false' && q.reqOptRsi !== '0',
       });
       return res.json(result);
     } catch (e: any) {
