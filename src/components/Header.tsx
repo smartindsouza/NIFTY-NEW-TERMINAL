@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'wouter';
-import { Home, List, TrendingUp, Newspaper, Activity, LogIn, CheckCircle2, BarChart2, PlayCircle, FileText, Sparkles, LineChart, Settings2, Bell, BellRing, Menu, BookOpen, Gauge, FlaskConical, Radio, Layers } from 'lucide-react';
+import { Home, List, TrendingUp, Newspaper, Activity, LogIn, CheckCircle2, BarChart2, PlayCircle, FileText, Sparkles, LineChart, Settings2, Bell, BellRing, Menu, BookOpen, Gauge, FlaskConical, Radio, Layers, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -86,6 +86,7 @@ export function Header() {
     { href: '/live-signal', label: 'Live Signal', icon: Radio },
     { href: '/signal-alerts', label: 'Signal Alerts', icon: BellRing },
     { href: '/option-value', label: 'Option Value', icon: Layers },
+    { href: '/gamma-blast', label: 'Gamma Blast', icon: Zap },
   ];
 
   // Mobile bottom-bar groupings: 4 primary tabs + a "More" sheet for the rest
