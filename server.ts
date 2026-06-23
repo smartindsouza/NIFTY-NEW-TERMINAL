@@ -14,6 +14,7 @@ import { getHistoricalAnalytics } from './server/analytics_service';
 import { runRsiBacktest } from './server/rsi_backtest';
 import { getLiveSignal, runOptionConfirmBacktest, getAlertSignal } from './server/option_rsi';
 import { ivAndDelta } from './server/options_math';
+import { getGammaBlast } from './server/gamma_blast';
 import { getFiiData } from './server/fii_service';
 import { evaluateQuantSignals } from './server/quant_engine';
 import { generateGamePlan } from './server/game_plan_service';
@@ -782,6 +783,18 @@ connectTicker();
       return res.json({ success: true, spot, atmStrike, straddle, impliedMovePct, expiry, vix, asOf: Date.now() });
     } catch (e: any) {
       console.error('[gap-risk]', e);
+      return res.status(500).json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
+  // Gamma blast monitor: expiry-day convexity + directional catalyst
+  app.get('/api/gamma-blast', async (req, res) => {
+    try {
+      const mp = parseFloat(String(req.query.movePct));
+      const result = await getGammaBlast(latestChainData, { movePct: isNaN(mp) ? undefined : mp });
+      return res.json(result);
+    } catch (e: any) {
+      console.error('[gamma-blast]', e);
       return res.status(500).json({ success: false, error: e?.message || String(e) });
     }
   });
