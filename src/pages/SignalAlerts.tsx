@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
-import { BellRing, Bell, BellOff, TrendingUp, TrendingDown, RefreshCw, Volume2, VolumeX, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { BellRing, Bell, BellOff, TrendingUp, TrendingDown, RefreshCw, Volume2, VolumeX, CheckCircle2, AlertTriangle, Zap } from 'lucide-react';
 
-const LS = { enabled: 'sa_enabled', log: 'sa_log', last: 'sa_last', sound: 'sa_sound', dw: 'sa_dw' };
+const LS = { enabled: 'sa_enabled', log: 'sa_log', last: 'sa_last', sound: 'sa_sound', dw: 'sa_dw', gb: 'sa_gb', gblast: 'sa_gblast' };
 
 const fmtClock = (s: string | number) => { try { return new Date(s).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' }); } catch { return String(s); } };
 
@@ -38,10 +38,14 @@ export default function SignalAlerts() {
   const [enabled, setEnabled] = useState(() => localStorage.getItem(LS.enabled) === '1');
   const [soundOn, setSoundOn] = useState(() => localStorage.getItem(LS.sound) !== '0');
   const [divWindow, setDivWindow] = useState(() => parseInt(localStorage.getItem(LS.dw) || '5') || 5);
+  const [gbOn, setGbOn] = useState(() => localStorage.getItem(LS.gb) === '1');
   const [perm, setPerm] = useState<NotificationPermission>(typeof Notification !== 'undefined' ? Notification.permission : 'denied');
   const [log, setLog] = useState<any[]>(() => { try { return JSON.parse(localStorage.getItem(LS.log) || '[]'); } catch { return []; } });
   const watchStart = useRef<number>(Date.now());
   const lastNotified = useRef<string>(localStorage.getItem(LS.last) || '');
+  const lastGb = useRef<string>(localStorage.getItem(LS.gblast) || '');
+
+  useEffect(() => { localStorage.setItem(LS.gb, gbOn ? '1' : '0'); }, [gbOn]);
 
   useEffect(() => { localStorage.setItem(LS.enabled, enabled ? '1' : '0'); if (enabled) watchStart.current = Date.now(); }, [enabled]);
   useEffect(() => { localStorage.setItem(LS.sound, soundOn ? '1' : '0'); }, [soundOn]);
@@ -72,6 +76,31 @@ export default function SignalAlerts() {
     setLog((prev) => [{ ...s, candleTime: ct, candleIst: data.candleIst, at: Date.now() }, ...prev].slice(0, 50));
   }, [data?.candleTime, data?.signal, enabled, perm, soundOn]);
 
+  const gb = useQuery({
+    queryKey: ['gamma-blast-alert'],
+    queryFn: async () => { const r = await fetch('/api/gamma-blast'); return await r.json(); },
+    refetchInterval: enabled && gbOn ? 60000 : false,
+    refetchOnWindowFocus: true,
+  });
+
+  // Fire when a LOADED + directional-break (SETUP) gamma-blast condition appears
+  useEffect(() => {
+    if (!enabled || !gbOn) return;
+    const d = gb.data;
+    if (!d?.success) return;
+    if (d.level !== 'SETUP') { if (d.catalyst === 'NONE') lastGb.current = ''; return; } // re-arm when the break clears
+    const key = `${d.expiry?.expiryDate || ''}|${d.catalyst}`;
+    if (key === lastGb.current) return;
+    lastGb.current = key; localStorage.setItem(LS.gblast, key);
+    const side = d.catalyst === 'UP' ? 'CE' : 'PE';
+    const gain = d.catalyst === 'UP' ? d.blast?.ceGainPct : d.blast?.peGainPct;
+    if (perm === 'granted') {
+      try { new Notification('Gamma blast setup', { body: `${side}-side · ATM ${d.atmStrike} · ≈+${gain}% on a ${d.blast?.movePts}pt move · ${d.expiry?.minutesToClose}m to close`, tag: key }); } catch { /* ignore */ }
+    }
+    if (soundOn) beep();
+    setLog((prev) => [{ type: 'GAMMA', dir: d.catalyst === 'UP' ? 'LONG' : 'SHORT', side, atm: d.atmStrike, gain, movePts: d.blast?.movePts, candleIst: `${d.expiry?.minutesToClose}m to close`, at: Date.now() }, ...prev].slice(0, 50));
+  }, [gb.data?.level, gb.data?.catalyst, gb.data?.expiry?.expiryDate, enabled, gbOn, perm, soundOn]);
+
   const askPermission = async () => {
     if (typeof Notification === 'undefined') return;
     try { const p = await Notification.requestPermission(); setPerm(p); } catch { /* ignore */ }
@@ -93,7 +122,7 @@ export default function SignalAlerts() {
         <h1 className="text-lg font-bold text-foreground">Signal Alerts</h1>
       </div>
       <p className="text-xs text-muted-foreground mb-4 leading-relaxed">
-        Pings you when the latest closed <span className="text-foreground">5-min NIFTY</span> candle shows an <span className="text-foreground">RSI zone crossover</span> together with <span className="text-foreground">RSI divergence</span> (high-to-high or low-to-low) within ≤{divWindow} candles — the same entry condition as the backtest.
+        Pings you when the latest closed <span className="text-foreground">5-min NIFTY</span> candle shows an <span className="text-foreground">RSI zone crossover</span> together with <span className="text-foreground">RSI divergence</span> (high-to-high or low-to-low) within ≤{divWindow} candles — the same entry condition as the backtest. Turn on <span className="text-amber-400">Gamma blast</span> to also get pinged on expiry-day LOADED-gamma breakouts.
       </p>
 
       {/* Status strip */}
@@ -138,6 +167,10 @@ export default function SignalAlerts() {
             className={cn('flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl transition-colors', soundOn ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground')}>
             {soundOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />} {soundOn ? 'Sound on' : 'Sound off'}
           </button>
+          <button onClick={() => setGbOn((v) => !v)}
+            className={cn('flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl transition-colors', gbOn ? 'bg-amber-500/15 text-amber-400' : 'bg-muted text-muted-foreground hover:text-foreground')}>
+            <Zap className="w-4 h-4" /> {gbOn ? 'Gamma blast on' : 'Gamma blast off'}
+          </button>
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Div ≤</span>
             <select value={divWindow} onChange={(e) => setDivWindow(parseInt(e.target.value))}
@@ -153,6 +186,15 @@ export default function SignalAlerts() {
           <button onClick={sendTest} className="text-xs font-semibold px-3 py-2 rounded-xl bg-popover hover:bg-muted text-foreground transition-colors">Test</button>
         </div>
         {enabled && <div className="text-[11px] text-muted-foreground mt-2.5">Checking every 60s while this page stays open. Keep the tab open (or add the app to your home screen) to keep receiving alerts.</div>}
+        {gbOn && gb.data?.success && (
+          <div className="text-[11px] mt-1.5">
+            <span className="text-muted-foreground">Gamma blast: </span>
+            <span className={cn('font-semibold', gb.data.level === 'SETUP' ? 'text-amber-400' : gb.data.level === 'WATCH' ? 'text-sky-400' : 'text-muted-foreground')}>
+              {gb.data.level === 'SETUP' ? `SETUP (${gb.data.catalyst})` : gb.data.level === 'WATCH' ? 'watching' : 'inactive'}
+            </span>
+            {gb.data.expiry?.isExpiryDay && gb.data.expiry.minutesToClose > 0 && <span className="text-muted-foreground"> · {gb.data.expiry.minutesToClose}m to close</span>}
+          </div>
+        )}
       </div>
 
       {/* Current candle verdict */}
@@ -194,9 +236,19 @@ export default function SignalAlerts() {
             <div key={k} className="rounded-xl bg-card p-3 flex items-center gap-3">
               {a.dir === 'SHORT' ? <TrendingDown className="w-4 h-4 text-rose-400 shrink-0" /> : <TrendingUp className="w-4 h-4 text-emerald-400 shrink-0" />}
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold text-foreground">{a.dir} · RSI {a.rsi} · div {a.divSpanCandles} candles</div>
-                <div className="text-[11px] text-muted-foreground">spot {a.price} · candle {a.candleIst} IST</div>
+                {a.type === 'GAMMA' ? (
+                  <>
+                    <div className="text-sm font-semibold text-foreground">Gamma blast · {a.side}-side · ATM {a.atm}</div>
+                    <div className="text-[11px] text-muted-foreground">≈+{a.gain}% on {a.movePts}pt move · {a.candleIst}</div>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-sm font-semibold text-foreground">{a.dir} · RSI {a.rsi} · div {a.divSpanCandles} candles</div>
+                    <div className="text-[11px] text-muted-foreground">spot {a.price} · candle {a.candleIst} IST</div>
+                  </>
+                )}
               </div>
+              {a.type === 'GAMMA' && <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
             </div>
           ))}
         </div>
