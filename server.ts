@@ -12,7 +12,7 @@ import { getTechnicalAnalysis, kiteDiagnostics } from './server/technical_analys
 import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData } from './server/kite_service';
 import { getHistoricalAnalytics } from './server/analytics_service';
 import { runRsiBacktest } from './server/rsi_backtest';
-import { getLiveSignal, runOptionConfirmBacktest } from './server/option_rsi';
+import { getLiveSignal, runOptionConfirmBacktest, getAlertSignal } from './server/option_rsi';
 import { ivAndDelta } from './server/options_math';
 import { getFiiData } from './server/fii_service';
 import { evaluateQuantSignals } from './server/quant_engine';
@@ -867,6 +867,18 @@ connectTicker();
       return res.json(result);
     } catch (e: any) {
       console.error('[signal/live]', e);
+      return res.status(500).json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
+  // LIVE ALERT: crossover + RSI divergence (≤W candles) on the latest closed 5-min candle
+  app.get('/api/signal/alert', async (req, res) => {
+    try {
+      const dw = parseInt(String(req.query.divWindow));
+      const result = await getAlertSignal({ divWindow: isNaN(dw) ? 5 : dw });
+      return res.json(result);
+    } catch (e: any) {
+      console.error('[signal/alert]', e);
       return res.status(500).json({ success: false, error: e?.message || String(e) });
     }
   });
