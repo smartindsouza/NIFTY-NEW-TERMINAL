@@ -75,6 +75,73 @@ function detectIndexSignal(candles: any[], period = 14, obLow = 60, osHigh = 40,
   };
 }
 
+// RSI divergence over a ≤W-candle window (1-bar RSI pivots vs price). Mirrors the backtest engine.
+function divAt(rsi: (number | null)[], highs: number[], lows: number[], i: number, kind: 'low' | 'high', W: number) {
+  const out: number[] = [];
+  const start = Math.max(15, i - W);
+  for (let j = start; j <= i - 1; j++) {
+    const a = rsi[j], pv = rsi[j - 1], nx = rsi[j + 1];
+    if (a == null || pv == null || nx == null) continue;
+    if (kind === 'low' && a < pv && a <= nx) out.push(j);
+    if (kind === 'high' && a > pv && a >= nx) out.push(j);
+  }
+  if (out.length < 2) return null;
+  const a = out[out.length - 2], b = out[out.length - 1];
+  if (kind === 'low') return (lows[b] < lows[a] && (rsi[b] as number) > (rsi[a] as number)) ? { a, b } : null; // price lower-low, RSI higher-low
+  return (highs[b] > highs[a] && (rsi[b] as number) < (rsi[a] as number)) ? { a, b } : null; // price higher-high, RSI lower-high
+}
+
+// ---- LIVE ALERT: crossover + divergence (≤W candles) on the latest CLOSED 5-min candle ----
+export async function getAlertSignal(opts?: { divWindow?: number; deepOb?: number; deepOs?: number }) {
+  const W = Math.min(Math.max(Math.round(opts?.divWindow ?? 5), 1), 7);
+  const deepOb = opts?.deepOb ?? 70, deepOs = opts?.deepOs ?? 30;
+  const obLow = 60, osHigh = 40, period = 14;
+  const kc = getKiteClient();
+  // @ts-ignore
+  if (!kc || !kc.access_token) return { success: false, error: 'Not logged in to Kite.' };
+
+  const from = fmtDate(new Date(Date.now() - 5 * 86400000));
+  const to = fmtDate(new Date(Date.now() + 86400000));
+  let candles: any[] = [];
+  try { candles = (await kc.getHistoricalData(256265, '5minute', from, to)) || []; }
+  catch (e: any) { return { success: false, error: e?.message || 'Index history failed' }; }
+  if (candles.length < period + 4) return { success: false, error: 'Not enough candles (market hours?)' };
+
+  // Use the latest CLOSED candle — skip the still-forming one if present.
+  let lastIdx = candles.length - 1;
+  if (new Date(candles[lastIdx].date).getTime() + 5 * 60000 > Date.now()) lastIdx = Math.max(0, lastIdx - 1);
+  const cc = candles.slice(0, lastIdx + 1);
+  const closes = cc.map((c) => c.close), highs = cc.map((c) => c.high), lows = cc.map((c) => c.low);
+  const rsi = wilderRSI(closes, period);
+  const idx = detectIndexSignal(cc, period, obLow, osHigh, deepOb, deepOs);
+  const i = cc.length - 1;
+
+  const candleTime = new Date(cc[i].date).toISOString();
+  const candleIst = new Date(cc[i].date).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' });
+
+  let signal: any = null;
+  if (idx.firedOnLast && idx.lastSignal) {
+    const dir = idx.lastSignal.dir;
+    const div = dir === 'SHORT' ? divAt(rsi, highs, lows, i, 'high', W) : divAt(rsi, highs, lows, i, 'low', W);
+    if (div) {
+      const span = i - div.a;
+      signal = {
+        dir, price: +closes[i].toFixed(2), rsi: idx.lastSignal.rsi, divSpanCandles: span,
+        priceFrom: dir === 'SHORT' ? +highs[div.a].toFixed(2) : +lows[div.a].toFixed(2),
+        priceTo: dir === 'SHORT' ? +highs[div.b].toFixed(2) : +lows[div.b].toFixed(2),
+        rsiFrom: +(rsi[div.a] as number).toFixed(1), rsiTo: +(rsi[div.b] as number).toFixed(1),
+      };
+    }
+  }
+
+  return {
+    success: true, asOf: Date.now(), divWindow: W,
+    candleTime, candleIst, currentRsi: idx.currentRsi, spot: +closes[i].toFixed(2),
+    signal, // null unless crossover AND divergence both present on this closed candle
+    crossover: idx.lastSignal ? { dir: idx.lastSignal.dir, barsAgo: idx.lastSignal.barsAgo, onLast: idx.firedOnLast } : null,
+  };
+}
+
 // ---- LIVE: index signal + ATM CE & PE confirmation ----
 export async function getLiveSignal(threshold = 40) {
   const kc = getKiteClient();
