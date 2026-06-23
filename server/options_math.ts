@@ -14,6 +14,18 @@ function d1d2(S: number, K: number, T: number, r: number, sig: number): [number,
   return [d1, d1 - vsqrt];
 }
 
+// Standard normal PDF
+export function normPDF(x: number): number {
+  return 0.3989422804014327 * Math.exp((-x * x) / 2);
+}
+
+// Black-Scholes gamma (identical for calls and puts): rate of change of delta per 1 point of spot.
+export function bsGamma(S: number, K: number, T: number, r: number, sig: number): number {
+  if (T <= 0 || sig <= 0 || S <= 0) return 0;
+  const [d1] = d1d2(S, K, T, r, sig);
+  return normPDF(d1) / (S * sig * Math.sqrt(T));
+}
+
 export function bsPrice(type: 'CE' | 'PE', S: number, K: number, T: number, r: number, sig: number): number {
   const [d1, d2] = d1d2(S, K, T, r, sig);
   if (type === 'CE') return S * normCDF(d1) - K * Math.exp(-r * T) * normCDF(d2);
