@@ -1,7 +1,7 @@
 import { Link, useLocation } from 'wouter';
-import { Home, List, TrendingUp, Newspaper, Activity, LogIn, CheckCircle2, BarChart2, PlayCircle, FileText, Sparkles, LineChart, Settings2, Bell, BellRing, Menu, BookOpen, Gauge, FlaskConical, Radio, Layers, Zap, Wind } from 'lucide-react';
+import { Home, List, TrendingUp, Newspaper, Activity, LogIn, CheckCircle2, BarChart2, PlayCircle, FileText, Sparkles, LineChart, Settings2, Bell, BellRing, Menu, BookOpen, Gauge, FlaskConical, Radio, Layers, Zap, Wind, ArrowUpDown, RotateCcw, GripVertical, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import { useGlobalWebSocket } from '../hooks/useWebSocket';
@@ -12,6 +12,12 @@ export function Header() {
   const { status: wsStatus } = useGlobalWebSocket();
   const { unreadCount } = useNotifications();
   const [moreOpen, setMoreOpen] = useState(false);
+  const [editNav, setEditNav] = useState(false);
+  const [overHref, setOverHref] = useState<string | null>(null);
+  const [navOrder, setNavOrder] = useState<string[]>(() => {
+    try { const s = JSON.parse(localStorage.getItem('navOrder') || '[]'); return Array.isArray(s) ? s : []; } catch { return []; }
+  });
+  const dragHref = useRef<string | null>(null);
 
   const { data: authStatus } = useQuery({
     queryKey: ['auth-status'],
@@ -90,15 +96,34 @@ export function Header() {
     { href: '/premium-pulse', label: 'Premium Pulse', icon: Wind },
   ];
 
+  // Apply the user's saved tab order; any tab not in the saved list (e.g. newly added features) is appended.
+  const applyOrder = (base: typeof links) => {
+    const map = new Map(base.map((l) => [l.href, l] as const));
+    const out: typeof links = [];
+    for (const h of navOrder) { const l = map.get(h); if (l) { out.push(l); map.delete(h); } }
+    for (const l of base) if (map.has(l.href)) out.push(l);
+    return out;
+  };
+  const orderedLinks = applyOrder(links);
+  const reorder = (from: string, to: string) => {
+    if (from === to) return;
+    const arr = orderedLinks.map((l) => l.href);
+    const fi = arr.indexOf(from); if (fi < 0) return; arr.splice(fi, 1);
+    const ti = arr.indexOf(to); arr.splice(ti < 0 ? arr.length : ti, 0, from);
+    setNavOrder(arr);
+    try { localStorage.setItem('navOrder', JSON.stringify(arr)); } catch { /* ignore */ }
+  };
+  const resetNav = () => { setNavOrder([]); try { localStorage.removeItem('navOrder'); } catch { /* ignore */ } };
+
   // Mobile bottom-bar groupings: 4 primary tabs + a "More" sheet for the rest
   const primaryHrefs = ['/', '/advanced-chart', '/option-chain', '/notifications'];
   const shortLabels: Record<string, string> = {
     '/': 'Home', '/advanced-chart': 'Chart', '/option-chain': 'Chain', '/notifications': 'Alerts',
   };
   const primaryLinks = primaryHrefs
-    .map((h) => links.find((l) => l.href === h))
+    .map((h) => orderedLinks.find((l) => l.href === h))
     .filter(Boolean) as typeof links;
-  const moreLinks = links.filter((l) => !primaryHrefs.includes(l.href));
+  const moreLinks = orderedLinks.filter((l) => !primaryHrefs.includes(l.href));
 
   return (
     <>
@@ -113,38 +138,78 @@ export function Header() {
         </div>
       </Link>
 
+      {/* Rearrange tabs toggle */}
+      <div className="flex flex-col items-center gap-1.5 shrink-0">
+        <button type="button" onClick={() => { setEditNav((v) => !v); setMoreOpen(false); }}
+          className={cn("flex items-center justify-center w-10 h-9 rounded-lg transition-all relative group border",
+            editNav ? "text-primary bg-primary/10 border-primary/20" : "text-muted-foreground hover:text-foreground hover:bg-accent border-transparent")}>
+          {editNav ? <Check className="w-4 h-4" /> : <ArrowUpDown className="w-4 h-4" />}
+          <span className="absolute left-full ml-4 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-popover rounded-lg text-[10px] font-bold tracking-wider uppercase font-mono whitespace-nowrap opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300 pointer-events-none z-[100] text-popover-foreground">
+            {editNav ? 'Done' : 'Rearrange tabs'}
+          </span>
+        </button>
+        {editNav && (
+          <button type="button" onClick={resetNav}
+            className="flex items-center justify-center w-10 h-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-all relative group border border-transparent">
+            <RotateCcw className="w-4 h-4" />
+            <span className="absolute left-full ml-4 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-popover rounded-lg text-[10px] font-bold tracking-wider uppercase font-mono whitespace-nowrap opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300 pointer-events-none z-[100] text-popover-foreground">
+              Reset order
+            </span>
+          </button>
+        )}
+      </div>
+
       {/* Navigation tabs with vertical scrollability & exact-fitting contents */}
       <div className="overflow-visible px-1 flex-1 flex justify-center w-full">
         <nav className="flex flex-col items-center gap-1.5 w-full">
-          {links.map((link) => {
+          {orderedLinks.map((link) => {
             const active = location === link.href;
             const Icon = link.icon;
             const isNewsTab = link.href === '/news';
             const isNotifTab = link.href === '/notifications';
             const showBlink = (isNewsTab && hasUnseenNiftyNews) || (isNotifTab && unreadCount > 0);
-            return (
-              <Link 
-                key={link.href} 
-                href={link.href} 
-                className={cn(
-                  "flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-500 ease-in-out relative group shrink-0 cursor-pointer select-none border border-transparent",
-                  active 
-                    ? "text-primary bg-primary/10 border-primary/20" 
-                    : "text-muted-foreground hover:text-foreground hover:bg-accent hover:text-accent-foreground"
-                )}
-              >
+            const baseCls = cn(
+              "flex items-center justify-center w-10 h-10 rounded-lg transition-all duration-300 relative group shrink-0 select-none border",
+              active
+                ? "text-primary bg-primary/10 border-primary/20"
+                : "text-muted-foreground hover:text-foreground hover:bg-accent hover:text-accent-foreground border-transparent",
+              editNav ? "cursor-grab active:cursor-grabbing border-dashed border-muted-foreground/40" : "cursor-pointer",
+              overHref === link.href && dragHref.current && dragHref.current !== link.href && "ring-2 ring-primary ring-offset-1 ring-offset-sidebar"
+            );
+            const inner = (
+              <>
                 {showBlink && !active && (
                   <div className="absolute top-1 right-1 w-1.5 rounded-full bg-red-500 animate-ping z-20" />
                 )}
-                <Icon className={cn("w-5 h-5 relative z-10 transition-all duration-500 ease-in-out", active && "scale-110", showBlink && !active && "text-red-400 animate-pulse")} />
+                <Icon className={cn("w-5 h-5 relative z-10 transition-all duration-300", active && "scale-110", showBlink && !active && "text-red-400 animate-pulse")} />
+                {editNav && <GripVertical className="absolute left-0 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground/50 z-20" />}
                 {showBlink && !active && (
                   <span className="absolute top-1 right-1 w-1 h-1 bg-red-500 rounded-full border border-sidebar z-20"></span>
                 )}
-                
-                {/* Clean, high-fidelity hover tooltip showing the tab's label - changed from top to right */}
                 <span className="absolute left-full ml-4 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-popover border border-0 rounded-lg text-[10px] font-bold tracking-wider uppercase font-mono whitespace-nowrap opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300 pointer-events-none z-[100] text-popover-foreground ">
                   {link.label}
                 </span>
+              </>
+            );
+            if (editNav) {
+              return (
+                <div
+                  key={link.href}
+                  className={baseCls}
+                  draggable
+                  onDragStart={() => { dragHref.current = link.href; }}
+                  onDragEnter={() => setOverHref(link.href)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => { e.preventDefault(); if (dragHref.current) reorder(dragHref.current, link.href); dragHref.current = null; setOverHref(null); }}
+                  onDragEnd={() => { dragHref.current = null; setOverHref(null); }}
+                >
+                  {inner}
+                </div>
+              );
+            }
+            return (
+              <Link key={link.href} href={link.href} className={baseCls}>
+                {inner}
               </Link>
             );
           })}
