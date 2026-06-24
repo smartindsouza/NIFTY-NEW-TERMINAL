@@ -15,6 +15,7 @@ import { runRsiBacktest } from './server/rsi_backtest';
 import { getLiveSignal, runOptionConfirmBacktest, getAlertSignal } from './server/option_rsi';
 import { ivAndDelta } from './server/options_math';
 import { getGammaBlast } from './server/gamma_blast';
+import { getPremiumPulse } from './server/premium_pulse';
 import { getFiiData } from './server/fii_service';
 import { evaluateQuantSignals } from './server/quant_engine';
 import { generateGamePlan } from './server/game_plan_service';
@@ -783,6 +784,19 @@ connectTicker();
       return res.json({ success: true, spot, atmStrike, straddle, impliedMovePct, expiry, vix, asOf: Date.now() });
     } catch (e: any) {
       console.error('[gap-risk]', e);
+      return res.status(500).json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
+  // Premium responsiveness: realized ₹/point vs theoretical delta + intraday IV trend
+  app.get('/api/premium-pulse', async (req, res) => {
+    try {
+      const side = String(req.query.side) === 'PE' ? 'PE' : 'CE';
+      const w = parseInt(String(req.query.window));
+      const result = await getPremiumPulse(latestChainData, { side, window: isNaN(w) ? undefined : w });
+      return res.json(result);
+    } catch (e: any) {
+      console.error('[premium-pulse]', e);
       return res.status(500).json({ success: false, error: e?.message || String(e) });
     }
   });
