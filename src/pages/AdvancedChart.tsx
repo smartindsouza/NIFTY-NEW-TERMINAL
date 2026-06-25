@@ -4182,7 +4182,28 @@ export function AdvancedChart() {
             return;
           }
 
-          const updateTime = getMarketAlignedCandleStart(tickTime, tfMin);
+          const currentChartData = chartDataRef.current;
+          const seededLastCandle = lastCandleDataRef.current ||
+            (currentChartData?.candles?.length ? currentChartData.candles[currentChartData.candles.length - 1] : null);
+
+          // Daily/Weekly/Monthly: a live tick always belongs to the CURRENT (last) bar.
+          // A new bar only appears when the server rolls to the next day/week/month, which the
+          // background REST poll introduces. getMarketAlignedCandleStart is a no-op for any
+          // timeframe >= 24h, so aligning to the raw tick time would push today's tick past the
+          // stored daily bar and spawn a fresh phantom bar on EVERY tick (advancing intraday
+          // timestamps) — a dense cluster of phantom candles and matching phantom RSI points at
+          // the right edge. Pinning to the current bar's time makes every tick update in place.
+          const isIntradayTf = tfMin < 1440;
+          let updateTime: number;
+          if (isIntradayTf) {
+            updateTime = getMarketAlignedCandleStart(tickTime, tfMin);
+          } else if (lastCandleTimeRef.current !== null) {
+            updateTime = lastCandleTimeRef.current;
+          } else if (seededLastCandle) {
+            updateTime = seededLastCandle.time;
+          } else {
+            updateTime = getMarketAlignedCandleStart(tickTime, tfMin);
+          }
 
           if (lastCandleTimeRef.current !== null) {
             if (updateTime < lastCandleTimeRef.current) {
@@ -4190,10 +4211,6 @@ export function AdvancedChart() {
               return;
             }
           }
-
-          const currentChartData = chartDataRef.current;
-          const seededLastCandle = lastCandleDataRef.current ||
-            (currentChartData?.candles?.length ? currentChartData.candles[currentChartData.candles.length - 1] : null);
 
           let updatedCandle;
           const sameCandle = !!(seededLastCandle && seededLastCandle.time === updateTime);
