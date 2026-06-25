@@ -4067,6 +4067,17 @@ export function AdvancedChart() {
     gcTime: 10 * 60000,
   });
 
+  const { data: pulseBias } = useQuery({
+    queryKey: ["premium-pulse-bias"],
+    queryFn: async () => {
+      const res = await fetch(`/api/premium-pulse/bias`);
+      return res.json();
+    },
+    refetchInterval: () => document.visibilityState === 'visible' ? 60 * 1000 : false,
+    staleTime: 45000,
+    gcTime: 10 * 60000,
+  });
+
   const { data: fiiDiiData } = useQuery({
     queryKey: ["fii-dii"],
     queryFn: async () => {
@@ -5848,6 +5859,17 @@ export function AdvancedChart() {
               <span className={`px-3 py-1 rounded-md text-xs font-mono font-bold whitespace-nowrap ${color}`}
                 title={`OI-change flow heuristic: ${detail}. Net Put−Call OI change: ${net.toFixed(2)}L. Read alongside price.`}>
                 OI BIAS: {label}
+              </span>
+            );
+          })()}
+          {pulseBias?.success && pulseBias.dir && (() => {
+            const color = pulseBias.dir === 'UP' ? 'bg-emerald-500/20 text-emerald-400'
+              : pulseBias.dir === 'DOWN' ? 'bg-rose-500/20 text-rose-400'
+              : 'bg-slate-500/20 text-slate-300';
+            return (
+              <span className={`px-3 py-1 rounded-md text-xs font-mono font-bold whitespace-nowrap ${color}`}
+                title={`Premium Pulse direction lean (${pulseBias.confidence} confidence) — which side's premium is being bid up. ${pulseBias.reason}. Soft read from option premium behaviour, not a hard signal; weigh alongside price.`}>
+                PULSE: {pulseBias.label}
               </span>
             );
           })()}
