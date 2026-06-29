@@ -2519,6 +2519,7 @@ export function AdvancedChart() {
   const rsiContainerRef = useRef<HTMLDivElement>(null);
   const mainChartRef = useRef<IChartApi | null>(null);
   const mainSeriesRef = useRef<any>(null);
+  const orLinesRef = useRef<any[]>([]);
   const rsiSeriesRef = useRef<any>(null);
   const rsiSmaSeriesRef = useRef<any>(null);
   const rsiClosesRef = useRef<number[]>([]);
@@ -4079,6 +4080,26 @@ export function AdvancedChart() {
     staleTime: 45000,
     gcTime: 10 * 60000,
   });
+
+  // First-15-minute opening range: draw white horizontal lines at today's 09:15–09:30 high/low.
+  useEffect(() => {
+    const s = mainSeriesRef.current;
+    if (!s) return;
+    orLinesRef.current.forEach((l) => { try { s.removePriceLine(l); } catch {} });
+    orLinesRef.current = [];
+    const or = (taInfo as any)?.openingRange;
+    if (!or || typeof or.high !== "number" || typeof or.low !== "number") return;
+    try {
+      const hi = s.createPriceLine({ price: or.high, color: "#ffffff", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "15m High" });
+      const lo = s.createPriceLine({ price: or.low, color: "#ffffff", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "15m Low" });
+      orLinesRef.current = [hi, lo];
+    } catch {}
+    return () => {
+      const ss = mainSeriesRef.current;
+      orLinesRef.current.forEach((l) => { try { ss && ss.removePriceLine(l); } catch {} });
+      orLinesRef.current = [];
+    };
+  }, [(taInfo as any)?.openingRange?.high, (taInfo as any)?.openingRange?.low, (taInfo as any)?.openingRange?.date, timeframe]);
 
   const { data: fiiDiiData } = useQuery({
     queryKey: ["fii-dii"],

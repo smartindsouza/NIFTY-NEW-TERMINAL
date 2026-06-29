@@ -113,6 +113,30 @@ function calculateEMA(values: number[], period: number): number[] {
   return out;
 }
 
+// First-15-minutes opening range: high/low of 09:15–09:30 IST on the most recent trading
+// day in the data. Works on any intraday base interval (candle START times 09:15/09:20/09:25
+// for 5m, the single 09:15 bar for 15m, etc.). Returns null when there are no intraday bars
+// in that window (e.g. daily/weekly timeframes), so the chart simply won't draw the lines.
+function computeOpeningRange(raw: any[]): { high: number; low: number; date: string } | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const toIst = (d: any) => new Date(new Date(d).getTime() + 5.5 * 60 * 60 * 1000);
+  let maxDay = "";
+  for (const c of raw) { const day = toIst(c.date).toISOString().slice(0, 10); if (day > maxDay) maxDay = day; }
+  let hi = -Infinity, lo = Infinity, cnt = 0;
+  for (const c of raw) {
+    const ist = toIst(c.date);
+    if (ist.toISOString().slice(0, 10) !== maxDay) continue;
+    const mins = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+    if (mins >= 9 * 60 + 15 && mins < 9 * 60 + 30) {
+      hi = Math.max(hi, c.high);
+      lo = Math.min(lo, c.low);
+      cnt++;
+    }
+  }
+  if (cnt === 0 || hi === -Infinity) return null;
+  return { high: hi, low: lo, date: maxDay };
+}
+
 const cacheMap = new Map<string, { data: any, lastUpdate: number }>();
 const inFlightRequests = new Map<string, Promise<any>>();
 
@@ -392,6 +416,8 @@ export async function getTechnicalAnalysis(
             rsi: rsiValues, adx: adxRes.adx, plusDI: adxRes.plusDI, minusDI: adxRes.minusDI,
           }, lastIdx);
 
+          const openingRange = computeOpeningRange(rawHist);
+
           const rsiMap = hist
             .map((h: any, i: number) => ({ ...h, rsi14: rsiValues[i] }));
 
@@ -438,6 +464,7 @@ export async function getTechnicalAnalysis(
             vwap: realVwap,
             ema20: realEma20,
             bounce,
+            openingRange,
             candles,
             rawTop5: rawHist.slice(0, 5),
             rawVolumeStats: { max: maxVol, min: minVol, avg: avgVol },
