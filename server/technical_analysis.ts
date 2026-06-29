@@ -1,5 +1,6 @@
 import { getKiteClient, getIndexFuturesTokens } from "./kite_service.js";
 import { aggregateCandles } from "./aggregator.js";
+import { scoreBounceAt } from "./bounce_conviction.js";
 
 function calculateRSI(closes: number[], period: number = 14) {
   if (closes.length <= period) return new Array(closes.length).fill(50);
@@ -384,6 +385,13 @@ export async function getTechnicalAnalysis(
           }
           const realVwap = Math.round(lastVwap * 100) / 100;
 
+          // Bounce Conviction (technical core) — reuses the exact series we just built.
+          const volSeries = hist.map((h: any) => h.volume || 0);
+          const bounce = scoreBounceAt({
+            high: highs, low: lows, close: closes, volume: volSeries,
+            rsi: rsiValues, adx: adxRes.adx, plusDI: adxRes.plusDI, minusDI: adxRes.minusDI,
+          }, lastIdx);
+
           const rsiMap = hist
             .map((h: any, i: number) => ({ ...h, rsi14: rsiValues[i] }));
 
@@ -429,6 +437,7 @@ export async function getTechnicalAnalysis(
                 : actualSpot,
             vwap: realVwap,
             ema20: realEma20,
+            bounce,
             candles,
             rawTop5: rawHist.slice(0, 5),
             rawVolumeStats: { max: maxVol, min: minVol, avg: avgVol },
