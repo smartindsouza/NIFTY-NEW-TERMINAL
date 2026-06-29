@@ -1,4 +1,4 @@
-import { getKiteClient } from "./kite_service.js";
+import { getKiteClient, getIndexFuturesTokens } from "./kite_service.js";
 import { aggregateCandles } from "./aggregator.js";
 
 function calculateRSI(closes: number[], period: number = 14) {
@@ -291,6 +291,47 @@ export async function getTechnicalAnalysis(
         
         console.log(`[Kite API Request] Symbol: ${symbol}, Token: ${instrument_token}, Timeframe: ${timeframeMin}m, Candles: ${rawHist?.length || 0}`);
 
+        // The NIFTY spot index (256265) has no traded volume. Borrow it from the MOST-ACTIVE
+        // NIFTY futures contract. We pull the two nearest expiries and pick whichever carried
+        // more total volume over the window — this auto-handles the expiry roll (near expiry,
+        // volume migrates to next month), which is what TradingView's continuous future shows.
+        if (String(instrument_token) === '256265' && rawHist && rawHist.length > 0) {
+          try {
+            const futs = await getIndexFuturesTokens('NIFTY');
+            let bestVolByTime: Map<number, number> | null = null;
+            let bestTotal = -1;
+            let bestExpiry = '';
+            for (const fut of futs) {
+              const futHist = await throttleRequest(() => kc.getHistoricalData(
+                fut.token,
+                intervalName as any,
+                fromDate,
+                toDate,
+              ), `historical_fut_${intervalName}`);
+              if (!futHist || futHist.length === 0) continue;
+              const m = new Map<number, number>();
+              let total = 0;
+              for (const f of futHist) {
+                const t = new Date(f.date).getTime();
+                const v = f.volume || 0;
+                m.set(t, v);
+                total += v;
+              }
+              if (total > bestTotal) { bestTotal = total; bestVolByTime = m; bestExpiry = fut.expiry; }
+            }
+            if (bestVolByTime) {
+              let matched = 0;
+              for (const r of rawHist) {
+                const t = new Date(r.date).getTime();
+                if (bestVolByTime.has(t)) { r.volume = bestVolByTime.get(t); matched++; }
+              }
+              console.log(`[Volume Merge] NIFTY futures volume (most-active expiry ${bestExpiry}) mapped onto ${matched}/${rawHist.length} candles`);
+            }
+          } catch (e) {
+            console.error('[Volume Merge] failed, continuing without volume:', e);
+          }
+        }
+
         if (rawHist && rawHist.length > 0) {
           const hist = aggregateCandles(rawHist, timeframeMin, baseIntervalMin);
           
@@ -327,6 +368,21 @@ export async function getTechnicalAnalysis(
           const emaArr = calculateEMA(closes, 20);
           const ema20Val = emaArr[lastIdx];
           const realEma20 = Number.isFinite(ema20Val) ? Math.round(ema20Val * 100) / 100 : actualSpot;
+
+          // Real session VWAP, resetting each IST trading day. Typical price x volume.
+          // Falls back to close when a session has no merged volume (avoids divide-by-zero).
+          let cumPV = 0, cumV = 0, curDay = "";
+          let lastVwap = actualSpot;
+          for (const h of hist) {
+            const istDay = new Date(new Date(h.date).getTime() + 5.5 * 3600000).toISOString().slice(0, 10);
+            if (istDay !== curDay) { curDay = istDay; cumPV = 0; cumV = 0; }
+            const tp = (h.high + h.low + h.close) / 3;
+            const v = h.volume || 0;
+            cumPV += tp * v;
+            cumV += v;
+            lastVwap = cumV > 0 ? cumPV / cumV : h.close;
+          }
+          const realVwap = Math.round(lastVwap * 100) / 100;
 
           const rsiMap = hist
             .map((h: any, i: number) => ({ ...h, rsi14: rsiValues[i] }));
@@ -371,7 +427,7 @@ export async function getTechnicalAnalysis(
               Math.abs(cachedItem?.data?.baseSpot - actualSpot) < (actualSpot * 0.05)
                 ? cachedItem?.data?.baseSpot
                 : actualSpot,
-            vwap: actualSpot,
+            vwap: realVwap,
             ema20: realEma20,
             candles,
             rawTop5: rawHist.slice(0, 5),
