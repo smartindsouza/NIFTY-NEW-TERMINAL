@@ -812,6 +812,91 @@ connectTicker();
     }
   });
 
+  // AI Market Read: Claude synthesises the already-computed indicators into a plain-English
+  // read (bias label + reasoning + risks). Commentary only — never a trade signal. Requires
+  // ANTHROPIC_API_KEY in the environment (set it in Railway). Uses Node's built-in fetch.
+  app.post('/api/ai-read', express.json({ limit: '256kb' }), async (req, res) => {
+    try {
+      const key = process.env.ANTHROPIC_API_KEY;
+      if (!key) {
+        return res.status(503).json({ success: false, error: 'AI read not configured — add ANTHROPIC_API_KEY in your Railway variables.' });
+      }
+      const snapshot = req.body?.snapshot;
+      if (!snapshot || typeof snapshot !== 'object') {
+        return res.status(400).json({ success: false, error: 'No market snapshot provided.' });
+      }
+      // Whitelist models so the client can't request arbitrary ones.
+      const requested = String(req.body?.model || '');
+      const model = requested === 'claude-haiku-4-5' ? 'claude-haiku-4-5' : 'claude-sonnet-4-6';
+
+      const system = [
+        'You are a markets analyst embedded in a NIFTY options trading dashboard.',
+        'You are given a snapshot of ALREADY-COMPUTED indicators (RSI, ADX, VWAP/EMA, recent candles, the OI chain with CE/PE buildup, and a premium-pulse bias). Your job is to INTERPRET and SYNTHESISE them into one coherent read.',
+        'Hard rules:',
+        '- Do NOT predict a price target or future price. Do NOT give buy/sell/entry/exit instructions, position sizing, or anything that reads as a trade recommendation. This is commentary, not financial advice.',
+        '- Stay strictly grounded in the numbers provided. If the data is thin or conflicting, say so and lean towards NEUTRAL / low confidence.',
+        '- Be concise and concrete. Tie every point to a specific value in the snapshot.',
+        'Respond with ONLY a JSON object (no markdown, no backticks, no preamble) with exactly these keys:',
+        '{"bias": one of "BULLISH"|"MILD BULLISH"|"NEUTRAL"|"MILD BEARISH"|"BEARISH", "confidence": one of "low"|"medium"|"high", "summary": a single plain-English sentence, "reasoning": array of 2-4 short strings, "risks": array of 1-3 short strings describing what would invalidate this read or what to watch}.',
+      ].join('\n');
+
+      const userContent = 'Current market snapshot (NIFTY options):\n\n' + JSON.stringify(snapshot) + '\n\nReturn the JSON read now.';
+
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 30000);
+      let apiResp: any;
+      try {
+        apiResp = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-api-key': key,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model,
+            max_tokens: 700,
+            system,
+            messages: [{ role: 'user', content: userContent }],
+          }),
+          signal: ac.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+
+      if (!apiResp.ok) {
+        const detail = await apiResp.text().catch(() => '');
+        console.error('[ai-read] provider error', apiResp.status, detail.slice(0, 500));
+        const msg = apiResp.status === 401
+          ? 'AI provider rejected the API key (check ANTHROPIC_API_KEY).'
+          : `AI provider error (${apiResp.status}).`;
+        return res.status(502).json({ success: false, error: msg });
+      }
+
+      const data: any = await apiResp.json();
+      const text = (data?.content || [])
+        .filter((b: any) => b?.type === 'text')
+        .map((b: any) => b.text)
+        .join('\n')
+        .trim();
+
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
+      } catch { /* fall through to raw */ }
+
+      if (parsed && typeof parsed === 'object') {
+        return res.json({ success: true, ...parsed, asOf: Date.now(), model });
+      }
+      return res.json({ success: true, raw: text, asOf: Date.now(), model });
+    } catch (e: any) {
+      const aborted = e?.name === 'AbortError';
+      console.error('[ai-read]', e);
+      return res.status(aborted ? 504 : 500).json({ success: false, error: aborted ? 'AI read timed out.' : (e?.message || String(e)) });
+    }
+  });
+
   // Gamma blast monitor: expiry-day convexity + directional catalyst
   app.get('/api/gamma-blast', async (req, res) => {
     try {

@@ -7,6 +7,7 @@ import { getDivergences } from "../lib/divergence";
 import { calculateBollingerBands } from "../indicators/bollingerBands";
 import { format } from "date-fns";
 import { SymbolSearch } from "../components/SymbolSearch";
+import AiMarketRead from "../components/AiMarketRead";
 import { Instrument } from "../hooks/useSymbolSearch";
 import { 
   createChart, 
@@ -5890,6 +5891,7 @@ export function AdvancedChart() {
               </span>
             );
           })()}
+          <AiMarketRead taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} model="claude-sonnet-4-6" />
           {wsError && (
              <span className="bg-red-500/20 text-red-400 px-3 py-1 rounded-md text-xs font-mono font-bold animate-pulse whitespace-nowrap">
               WS ERROR: {wsError}
