@@ -34,6 +34,84 @@ function calculateRSI(closes: number[], period: number = 14) {
   return rsiArray;
 }
 
+// Wilder's ADX with directional indicators. Returns full series so callers can
+// read the latest value and detect whether ADX is rising. Mirrors the standard
+// TradingView/Wilder calculation: TR + directional movement, Wilder-smoothed over
+// `period`, DX = |+DI − −DI| / (+DI + −DI), ADX = Wilder-smoothed DX.
+function calculateADX(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  period: number = 14,
+): { adx: number[]; plusDI: number[]; minusDI: number[] } {
+  const n = highs.length;
+  const adx = new Array(n).fill(0);
+  const plusDI = new Array(n).fill(0);
+  const minusDI = new Array(n).fill(0);
+  if (n < period * 2) return { adx, plusDI, minusDI };
+
+  const tr = new Array(n).fill(0);
+  const plusDM = new Array(n).fill(0);
+  const minusDM = new Array(n).fill(0);
+
+  for (let i = 1; i < n; i++) {
+    const upMove = highs[i] - highs[i - 1];
+    const downMove = lows[i - 1] - lows[i];
+    plusDM[i] = upMove > downMove && upMove > 0 ? upMove : 0;
+    minusDM[i] = downMove > upMove && downMove > 0 ? downMove : 0;
+    const hl = highs[i] - lows[i];
+    const hc = Math.abs(highs[i] - closes[i - 1]);
+    const lc = Math.abs(lows[i] - closes[i - 1]);
+    tr[i] = Math.max(hl, hc, lc);
+  }
+
+  // Wilder smoothing of TR / +DM / −DM (seed = sum of first `period` values).
+  let trS = 0, pdmS = 0, mdmS = 0;
+  for (let i = 1; i <= period; i++) { trS += tr[i]; pdmS += plusDM[i]; mdmS += minusDM[i]; }
+
+  const dx = new Array(n).fill(0);
+  for (let i = period + 1; i < n; i++) {
+    trS = trS - trS / period + tr[i];
+    pdmS = pdmS - pdmS / period + plusDM[i];
+    mdmS = mdmS - mdmS / period + minusDM[i];
+    const pDI = trS === 0 ? 0 : (100 * pdmS) / trS;
+    const mDI = trS === 0 ? 0 : (100 * mdmS) / trS;
+    plusDI[i] = pDI;
+    minusDI[i] = mDI;
+    const sum = pDI + mDI;
+    dx[i] = sum === 0 ? 0 : (100 * Math.abs(pDI - mDI)) / sum;
+  }
+
+  // ADX = Wilder-smoothed DX. First ADX value seeds at index (period*2) as the
+  // simple average of the first `period` DX values, then Wilder-smooths.
+  const firstAdxIdx = period * 2;
+  if (firstAdxIdx < n) {
+    let dxSum = 0;
+    for (let i = period + 1; i <= firstAdxIdx; i++) dxSum += dx[i];
+    adx[firstAdxIdx] = dxSum / period;
+    for (let i = firstAdxIdx + 1; i < n; i++) {
+      adx[i] = (adx[i - 1] * (period - 1) + dx[i]) / period;
+    }
+  }
+  return { adx, plusDI, minusDI };
+}
+
+// Standard EMA. Seeds with the SMA of the first `period` values.
+function calculateEMA(values: number[], period: number): number[] {
+  const n = values.length;
+  const out = new Array(n).fill(NaN);
+  if (n < period) return out;
+  const k = 2 / (period + 1);
+  let sma = 0;
+  for (let i = 0; i < period; i++) sma += values[i];
+  sma /= period;
+  out[period - 1] = sma;
+  for (let i = period; i < n; i++) {
+    out[i] = values[i] * k + out[i - 1] * (1 - k);
+  }
+  return out;
+}
+
 const cacheMap = new Map<string, { data: any, lastUpdate: number }>();
 const inFlightRequests = new Map<string, Promise<any>>();
 
@@ -231,6 +309,25 @@ export async function getTechnicalAnalysis(
           const closes = hist.map((h: any) => h.close);
           const rsiValues = calculateRSI(closes, 14);
 
+          // Real Wilder ADX/DI and EMA20 from the (timeframe-aggregated) candles.
+          const highs = hist.map((h: any) => h.high);
+          const lows = hist.map((h: any) => h.low);
+          const adxRes = calculateADX(highs, lows, closes, 14);
+          const lastIdx = closes.length - 1;
+          const adxNow = Math.round((adxRes.adx[lastIdx] || 0) * 10) / 10;
+          const adxPrev = adxRes.adx[lastIdx - 1] || 0;
+          const plusDiNow = Math.round((adxRes.plusDI[lastIdx] || 0) * 10) / 10;
+          const minusDiNow = Math.round((adxRes.minusDI[lastIdx] || 0) * 10) / 10;
+          const adxRising = adxNow > adxPrev;
+          let realAdxTrend = "Balanced";
+          if (adxNow >= 25) realAdxTrend = plusDiNow >= minusDiNow ? "Bulls dominant" : "Bears dominant";
+          else if (adxNow < 20) realAdxTrend = "No trend";
+          else realAdxTrend = "Building";
+
+          const emaArr = calculateEMA(closes, 20);
+          const ema20Val = emaArr[lastIdx];
+          const realEma20 = Number.isFinite(ema20Val) ? Math.round(ema20Val * 100) / 100 : actualSpot;
+
           const rsiMap = hist
             .map((h: any, i: number) => ({ ...h, rsi14: rsiValues[i] }));
 
@@ -261,8 +358,11 @@ export async function getTechnicalAnalysis(
             isMock: false,
             rsi: latestRsi,
             rsiZoneShift,
-            adx: 25,
-            adxTrend: "TRENDING",
+            adx: adxNow,
+            adxTrend: realAdxTrend,
+            plusDi: plusDiNow,
+            minusDi: minusDiNow,
+            adxRising,
             currentPattern: "REAL DATA",
             timeframe: timeframeMin,
             instrument_token,
@@ -272,7 +372,7 @@ export async function getTechnicalAnalysis(
                 ? cachedItem?.data?.baseSpot
                 : actualSpot,
             vwap: actualSpot,
-            ema20: actualSpot,
+            ema20: realEma20,
             candles,
             rawTop5: rawHist.slice(0, 5),
             rawVolumeStats: { max: maxVol, min: minVol, avg: avgVol },
