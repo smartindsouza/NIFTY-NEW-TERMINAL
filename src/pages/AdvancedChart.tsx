@@ -2585,6 +2585,13 @@ export function AdvancedChart() {
     } catch(e) {}
     return false;
   });
+  const [showOpeningRange, setShowOpeningRange] = useState(() => {
+    try {
+      const v = localStorage.getItem('showOpeningRange');
+      return v === null ? true : v === 'true'; // default on (preserves current behaviour)
+    } catch(e) {}
+    return true;
+  });
   const [pdhColor, setPdhColor] = useState(() => {
     try {
       return localStorage.getItem('pdhColor') || '#22c55e';
@@ -2652,6 +2659,12 @@ export function AdvancedChart() {
       localStorage.setItem('showPdhPdl', String(showPdhPdl));
     } catch(e) {}
   }, [showPdhPdl]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('showOpeningRange', String(showOpeningRange));
+    } catch(e) {}
+  }, [showOpeningRange]);
 
   useEffect(() => {
     try {
@@ -4088,7 +4101,7 @@ export function AdvancedChart() {
     orLinesRef.current.forEach((l) => { try { s.removePriceLine(l); } catch {} });
     orLinesRef.current = [];
     const or = (taInfo as any)?.openingRange;
-    if (!or || typeof or.high !== "number" || typeof or.low !== "number") return;
+    if (!or || typeof or.high !== "number" || typeof or.low !== "number" || !showOpeningRange) return;
     try {
       const hi = s.createPriceLine({ price: or.high, color: "#ffffff", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "15m High" });
       const lo = s.createPriceLine({ price: or.low, color: "#ffffff", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "15m Low" });
@@ -4099,7 +4112,7 @@ export function AdvancedChart() {
       orLinesRef.current.forEach((l) => { try { ss && ss.removePriceLine(l); } catch {} });
       orLinesRef.current = [];
     };
-  }, [(taInfo as any)?.openingRange?.high, (taInfo as any)?.openingRange?.low, (taInfo as any)?.openingRange?.date, timeframe]);
+  }, [(taInfo as any)?.openingRange?.high, (taInfo as any)?.openingRange?.low, (taInfo as any)?.openingRange?.date, timeframe, showOpeningRange]);
 
   const { data: fiiDiiData } = useQuery({
     queryKey: ["fii-dii"],
@@ -5982,6 +5995,19 @@ export function AdvancedChart() {
                       title="PDH/PDL Settings"
                     >
                       <Settings size={13} />
+                    </button>
+                  </div>
+
+                  {/* 15m Opening Range (first-15-min high/low lines) */}
+                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                    <button
+                      onClick={() => setShowOpeningRange(!showOpeningRange)}
+                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
+                    >
+                      <div className="w-4 flex items-center justify-center">
+                        {showOpeningRange && <Check size={14} className="text-emerald-400" />}
+                      </div>
+                      <span>15m Opening Range (High/Low)</span>
                     </button>
                   </div>
 
