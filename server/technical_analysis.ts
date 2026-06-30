@@ -411,8 +411,21 @@ export async function getTechnicalAnalysis(
 
           // Bounce Conviction (technical core) — reuses the exact series we just built.
           const volSeries = hist.map((h: any) => h.volume || 0);
+          // Pace-adjust the forming (last) candle's volume so the score's volume
+          // component isn't understated mid-candle: project the partial volume to a
+          // full-bar equivalent by the fraction of the bar that has elapsed. Only
+          // intraday, and only while the last bar is genuinely still forming
+          // (2%–98% elapsed) — completed bars and out-of-session data are left as-is.
+          const volForScore = volSeries.slice();
+          if (timeframeMin < 1440 && hist.length > 0) {
+            const lastStartMs = new Date(hist[lastIdx].date).getTime();
+            const fracElapsed = (Date.now() - lastStartMs) / (timeframeMin * 60000);
+            if (fracElapsed > 0.02 && fracElapsed < 0.98) {
+              volForScore[lastIdx] = volSeries[lastIdx] / Math.max(fracElapsed, 0.15);
+            }
+          }
           const bounce = scoreBounceAt({
-            high: highs, low: lows, close: closes, volume: volSeries,
+            high: highs, low: lows, close: closes, volume: volForScore,
             rsi: rsiValues, adx: adxRes.adx, plusDI: adxRes.plusDI, minusDI: adxRes.minusDI,
           }, lastIdx);
 

@@ -2519,7 +2519,6 @@ export function AdvancedChart() {
   const rsiContainerRef = useRef<HTMLDivElement>(null);
   const mainChartRef = useRef<IChartApi | null>(null);
   const mainSeriesRef = useRef<any>(null);
-  const orLinesRef = useRef<any[]>([]);
   const rsiSeriesRef = useRef<any>(null);
   const rsiSmaSeriesRef = useRef<any>(null);
   const rsiClosesRef = useRef<number[]>([]);
@@ -4094,25 +4093,9 @@ export function AdvancedChart() {
     gcTime: 10 * 60000,
   });
 
-  // First-15-minute opening range: draw white horizontal lines at today's 09:15–09:30 high/low.
-  useEffect(() => {
-    const s = mainSeriesRef.current;
-    if (!s) return;
-    orLinesRef.current.forEach((l) => { try { s.removePriceLine(l); } catch {} });
-    orLinesRef.current = [];
-    const or = (taInfo as any)?.openingRange;
-    if (!or || typeof or.high !== "number" || typeof or.low !== "number" || !showOpeningRange) return;
-    try {
-      const hi = s.createPriceLine({ price: or.high, color: "#ffffff", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "15m High" });
-      const lo = s.createPriceLine({ price: or.low, color: "#ffffff", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "15m Low" });
-      orLinesRef.current = [hi, lo];
-    } catch {}
-    return () => {
-      const ss = mainSeriesRef.current;
-      orLinesRef.current.forEach((l) => { try { ss && ss.removePriceLine(l); } catch {} });
-      orLinesRef.current = [];
-    };
-  }, [(taInfo as any)?.openingRange?.high, (taInfo as any)?.openingRange?.low, (taInfo as any)?.openingRange?.date, timeframe, showOpeningRange]);
+  // First-15-minute opening range lines are drawn on the canvas overlay
+  // (alongside PDH/PDL/S&R) so the labels are centered and no value shows on
+  // the Y axis. See the "Draw S&R / PDH / PDL text and lines" block below.
 
   const { data: fiiDiiData } = useQuery({
     queryKey: ["fii-dii"],
@@ -5514,6 +5497,20 @@ export function AdvancedChart() {
                  const y = mainSeriesRef.current.priceToCoordinate(pdlPrice);
                  if (y !== null) linesToDraw.push({ text: `PDL ${pdlPrice}`, y, color: pdlColor, dash: pdhPdlDash, lineWidth: pdhPdlWidth });
               }
+              // 15m Opening Range (first 15 min high/low) — centered labels, no Y-axis value
+              {
+                const or = (taInfo as any)?.openingRange;
+                if (showOpeningRange && or) {
+                  if (typeof or.high === 'number') {
+                    const y = mainSeriesRef.current.priceToCoordinate(or.high);
+                    if (y !== null) linesToDraw.push({ text: `15M HIGH`, y, color: '#ffffff', dash: [], lineWidth: 1 });
+                  }
+                  if (typeof or.low === 'number') {
+                    const y = mainSeriesRef.current.priceToCoordinate(or.low);
+                    if (y !== null) linesToDraw.push({ text: `15M LOW`, y, color: '#ffffff', dash: [], lineWidth: 1 });
+                  }
+                }
+              }
               if (showFiftyPercentLevels && hLevels) {
                  const activeLevels = hLevels.filter(v => v > 0).sort((a, b) => b - a);
                  for (let i = 0; i < activeLevels.length - 1; i++) {
@@ -5723,7 +5720,7 @@ export function AdvancedChart() {
     draw();
     
     return () => cancelAnimationFrame(animationFrameId);
-  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth]);
+  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth, taInfo, showOpeningRange]);
 
   const { data: serverStats } = useQuery({
     queryKey: ["server-diagnostics"],
@@ -5927,7 +5924,6 @@ export function AdvancedChart() {
             );
           })()}
           <AiMarketRead taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} model="claude-sonnet-4-6" />
-          <BounceConviction taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} />
           {wsError && (
              <span className="bg-red-500/20 text-red-400 px-3 py-1 rounded-md text-xs font-mono font-bold animate-pulse whitespace-nowrap">
               WS ERROR: {wsError}
@@ -6165,6 +6161,7 @@ export function AdvancedChart() {
               <option value="10080">1W</option>
               <option value="43200">1M</option>
             </select>
+            <BounceConviction taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} />
           </div>
         </div>
       </div>
