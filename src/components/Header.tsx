@@ -14,6 +14,9 @@ export function Header() {
   const [moreOpen, setMoreOpen] = useState(false);
   const [editNav, setEditNav] = useState(false);
   const [overHref, setOverHref] = useState<string | null>(null);
+  // Lifted hover label: rendered as one fixed element so it isn't clipped by the
+  // now-scrollable nav container.
+  const [hoverLabel, setHoverLabel] = useState<{ text: string; y: number } | null>(null);
   const [navOrder, setNavOrder] = useState<string[]>(() => {
     try { const s = JSON.parse(localStorage.getItem('navOrder') || '[]'); return Array.isArray(s) ? s : []; } catch { return []; }
   });
@@ -105,15 +108,51 @@ export function Header() {
     return out;
   };
   const orderedLinks = applyOrder(links);
+  // Persist the tab order locally AND to the server so it syncs across every
+  // logged-in device (single-user app → one shared server copy).
+  const pushNavOrder = (arr: string[]) => {
+    try { localStorage.setItem('navOrder', JSON.stringify(arr)); } catch { /* ignore */ }
+    fetch('/api/settings/sidebar_order', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: arr }),
+    }).catch(() => { /* offline: localStorage still holds it */ });
+  };
   const reorder = (from: string, to: string) => {
     if (from === to) return;
     const arr = orderedLinks.map((l) => l.href);
     const fi = arr.indexOf(from); if (fi < 0) return; arr.splice(fi, 1);
     const ti = arr.indexOf(to); arr.splice(ti < 0 ? arr.length : ti, 0, from);
     setNavOrder(arr);
-    try { localStorage.setItem('navOrder', JSON.stringify(arr)); } catch { /* ignore */ }
+    pushNavOrder(arr);
   };
-  const resetNav = () => { setNavOrder([]); try { localStorage.removeItem('navOrder'); } catch { /* ignore */ } };
+  const resetNav = () => { setNavOrder([]); pushNavOrder([]); };
+
+  // On mount, pull the server's saved tab order so it matches across devices.
+  // If the server has none yet, seed it from this device's local order.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch('/api/settings/sidebar_order');
+        const d = await r.json();
+        const v = d?.value;
+        if (!cancelled && Array.isArray(v)) {
+          setNavOrder(v);
+          try { localStorage.setItem('navOrder', JSON.stringify(v)); } catch { /* ignore */ }
+        } else if (!cancelled) {
+          let local: string[] = [];
+          try { local = JSON.parse(localStorage.getItem('navOrder') || '[]'); } catch { /* ignore */ }
+          if (Array.isArray(local) && local.length) {
+            fetch('/api/settings/sidebar_order', {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ value: local }),
+            }).catch(() => { /* ignore */ });
+          }
+        }
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Mobile bottom-bar groupings: 4 primary tabs + a "More" sheet for the rest
   const primaryHrefs = ['/', '/advanced-chart', '/option-chain', '/notifications'];
@@ -160,7 +199,7 @@ export function Header() {
       </div>
 
       {/* Navigation tabs with vertical scrollability & exact-fitting contents */}
-      <div className="overflow-visible px-1 flex-1 flex justify-center w-full">
+      <div className="overflow-y-auto overflow-x-hidden px-1 flex-1 min-h-0 flex justify-center w-full [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <nav className="flex flex-col items-center gap-1.5 w-full">
           {orderedLinks.map((link) => {
             const active = location === link.href;
@@ -186,9 +225,7 @@ export function Header() {
                 {showBlink && !active && (
                   <span className="absolute top-1 right-1 w-1 h-1 bg-red-500 rounded-full border border-sidebar z-20"></span>
                 )}
-                <span className="absolute left-full ml-4 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-popover border border-0 rounded-lg text-[10px] font-bold tracking-wider uppercase font-mono whitespace-nowrap opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300 pointer-events-none z-[100] text-popover-foreground ">
-                  {link.label}
-                </span>
+                {/* Hover label is rendered once, fixed-position, outside the scroll clip (see hoverLabel) */}
               </>
             );
             if (editNav) {
@@ -197,7 +234,9 @@ export function Header() {
                   key={link.href}
                   className={baseCls}
                   draggable
-                  onDragStart={() => { dragHref.current = link.href; }}
+                  onMouseEnter={(e) => setHoverLabel({ text: link.label, y: e.currentTarget.getBoundingClientRect().top + e.currentTarget.clientHeight / 2 })}
+                  onMouseLeave={() => setHoverLabel(null)}
+                  onDragStart={() => { dragHref.current = link.href; setHoverLabel(null); }}
                   onDragEnter={() => setOverHref(link.href)}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => { e.preventDefault(); if (dragHref.current) reorder(dragHref.current, link.href); dragHref.current = null; setOverHref(null); }}
@@ -208,13 +247,25 @@ export function Header() {
               );
             }
             return (
-              <Link key={link.href} href={link.href} className={baseCls}>
+              <Link key={link.href} href={link.href} className={baseCls}
+                onMouseEnter={(e) => setHoverLabel({ text: link.label, y: (e.currentTarget as HTMLElement).getBoundingClientRect().top + (e.currentTarget as HTMLElement).clientHeight / 2 })}
+                onMouseLeave={() => setHoverLabel(null)}>
                 {inner}
               </Link>
             );
           })}
         </nav>
       </div>
+
+      {/* Lifted hover label — fixed so it shows beside the now-scrollable rail without being clipped */}
+      {hoverLabel && (
+        <div
+          style={{ position: 'fixed', left: '72px', top: hoverLabel.y, transform: 'translateY(-50%)' }}
+          className="px-3 py-1.5 bg-popover rounded-lg text-[10px] font-bold tracking-wider uppercase font-mono whitespace-nowrap z-[100] text-popover-foreground pointer-events-none shadow-lg"
+        >
+          {hoverLabel.text}
+        </div>
+      )}
 
       {/* Connection metrics on the bottom */}
       <div className="flex flex-col items-center gap-2 pt-4 border-t border-sidebar-border shrink-0 w-full">
