@@ -1,4 +1,5 @@
 import { getKiteClient } from './kite_service';
+import { scoreBounceAt, computeADX } from './bounce_conviction';
 
 // Wilder's RSI (matches the chart's live RSI), returns one value per candle (null until warmed up)
 function wilderRSI(closes: number[], period = 14): (number | null)[] {
@@ -99,6 +100,18 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
   const istDay = candles.map((c) => new Date(c.date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })); // 'YYYY-MM-DD'
   const istTime = candles.map((c) => new Date(c.date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' })); // 'HH:MM'
 
+  // Bounce Conviction inputs: ADX/DI from OHLC + RSI. Volume is excluded (index history has
+  // none), so the score here is the technical confluence only (thrust + reclaim + ADX + close
+  // strength) — the same function that runs live, with the volume input switched off.
+  const adxSeries = computeADX(highs, lows, closes, 14);
+  const rsiNums = rsi.map((x) => (x == null ? 50 : x));
+  const bounceSeries = {
+    high: highs, low: lows, close: closes,
+    volume: candles.map((c) => c.volume || 0),
+    rsi: rsiNums, adx: adxSeries.adx, plusDI: adxSeries.plusDI, minusDI: adxSeries.minusDI,
+  };
+  const bounceOpts = { excludeVolume: true, forceContext: true, oversoldLookback: 20 };
+
   // RSI divergence over a ≤DIVW-candle window, using RSI swing highs/lows (1-bar pivots) vs price
   const swingsInWindow = (i: number, kind: 'low' | 'high'): number[] => {
     const out: number[] = [];
@@ -128,6 +141,7 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
     dir: 'LONG' | 'SHORT'; entryTime: string; entryPrice: number; entryRsi: number;
     exitTime: string; exitPrice: number; exitRsi: number; reason: string;
     pnl: number; bars: number; mae: number; mfe: number; regime: 'withTrend' | 'counterTrend' | 'range'; stop: number | null;
+    bounceScore: number | null;
   }
   const trades: Trade[] = [];
   let pos: any = null;
@@ -167,6 +181,7 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
           dir: pos.dir, entryTime: pos.entryTime, entryPrice: pos.entryPrice, entryRsi: +pos.entryRsi.toFixed(1),
           exitTime: String(candles[i].date), exitPrice: +exitPrice.toFixed(2), exitRsi: +r.toFixed(1), reason,
           pnl: +pnl.toFixed(2), bars: i - pos.entryIdx, mae: +pos.mae.toFixed(2), mfe: +pos.mfe.toFixed(2), regime: pos.regime, stop: pos.stop != null ? +pos.stop.toFixed(2) : null,
+          bounceScore: pos.bounceScore ?? null,
         });
         pos = null;
         flatPeak = r; flatTrough = r;
@@ -187,7 +202,8 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
     }
     // LONG: RSI went DEEP into oversold (trough <= deepOs), then a candle closes back above osHigh
     else if (flatTrough <= deepOs && rPrev <= osHigh && r > osHigh && (!useDivergence || hasBullishDiv(i))) {
-      pos = { dir: 'LONG', entryIdx: i, entryTime: String(candles[i].date), entryPrice: closes[i], entryRsi: r, mae: 0, mfe: 0, regime: regimeAt(i, 'LONG'), stop: useStop ? lows[i - 1] : null };
+      const bs = scoreBounceAt(bounceSeries, i, bounceOpts);
+      pos = { dir: 'LONG', entryIdx: i, entryTime: String(candles[i].date), entryPrice: closes[i], entryRsi: r, mae: 0, mfe: 0, regime: regimeAt(i, 'LONG'), stop: useStop ? lows[i - 1] : null, bounceScore: bs.score };
       flatPeak = r; flatTrough = r;
     }
   }
@@ -244,6 +260,39 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
     worst: [...trades].sort((a, b) => a.pnl - b.pnl).slice(0, 5).map((t) => ({ entryTime: t.entryTime, dir: t.dir, reason: t.reason, pnl: t.pnl, mae: t.mae, regime: t.regime })),
   };
 
+  // ---- Bounce Conviction study: does requiring confluence improve the LONG (oversold-bounce)
+  // entries vs taking them all? LONG-only, since the bounce score is a bullish-bounce gate. ----
+  const aggB = (list: Trade[]) => {
+    const m = list.length;
+    const net = sum(list.map((t) => t.pnl));
+    const w = list.filter((t) => t.pnl > 0).length;
+    const gw = sum(list.filter((t) => t.pnl > 0).map((t) => t.pnl));
+    const gl = Math.abs(sum(list.filter((t) => t.pnl <= 0).map((t) => t.pnl)));
+    return {
+      n: m, net: +net.toFixed(1), winRate: m ? +((w / m) * 100).toFixed(0) : 0,
+      avg: m ? +(net / m).toFixed(1) : 0,
+      profitFactor: gl > 0 ? +(gw / gl).toFixed(2) : (gw > 0 ? null : 0),
+    };
+  };
+  const longs = trades.filter((t) => t.dir === 'LONG' && t.bounceScore != null);
+  const inBucket = (lo: number, hi: number) => longs.filter((t) => (t.bounceScore as number) >= lo && (t.bounceScore as number) < hi);
+  const atLeast = (thr: number) => longs.filter((t) => (t.bounceScore as number) >= thr);
+  const bounceStudy = {
+    note: 'LONG (oversold-bounce) entries only. Score = technical confluence (RSI thrust + 50-reclaim + rising ADX/DI + close strength), volume excluded — index history has no volume to replay.',
+    allLongs: aggB(longs),
+    byBucket: [
+      { key: 'LOW 0-39', ...aggB(inBucket(0, 40)) },
+      { key: 'BUILDING 40-69', ...aggB(inBucket(40, 70)) },
+      { key: 'STRONG 70+', ...aggB(atLeast(70)) },
+    ],
+    byThreshold: [
+      { key: 'All longs', ...aggB(longs) },
+      { key: 'Score >= 40', ...aggB(atLeast(40)) },
+      { key: 'Score >= 50', ...aggB(atLeast(50)) },
+      { key: 'Score >= 70', ...aggB(atLeast(70)) },
+    ],
+  };
+
   return {
     success: true,
     params: { days, rsiPeriod: period, obLow, obHigh, osLow, osHigh, deepOb, deepOs, useStop, useDivergence, divWindow: DIVW, noEntryAfter, exitAtCutoff },
@@ -252,6 +301,7 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
     candles: candles.length,
     stats,
     breakdown,
+    bounceStudy,
     equity,
     trades: trades.slice(-300), // cap payload; stats are over all trades
   };

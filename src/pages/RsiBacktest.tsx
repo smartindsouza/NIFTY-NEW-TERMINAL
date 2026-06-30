@@ -287,6 +287,53 @@ export default function RsiBacktest() {
                 <BreakdownGroup title="By direction" rows={data.breakdown.byDir} />
                 <BreakdownGroup title="By entry hour (IST)" rows={data.breakdown.byHour} labelMap={(k) => `${k}:00`} />
               </div>
+
+              {data.bounceStudy && (() => {
+                const bs = data.bounceStudy;
+                const row = (r: any, key: string, highlight = false) => (
+                  <div key={key} className={cn('grid grid-cols-5 gap-2 px-3 py-2 text-[12px] font-mono items-center', highlight ? 'bg-primary/10' : '')}>
+                    <span className="text-foreground truncate">{r.key}</span>
+                    <span className="text-right text-muted-foreground">{r.n}</span>
+                    <span className={cn('text-right', r.winRate >= 50 ? 'text-emerald-400' : 'text-rose-400')}>{r.winRate}%</span>
+                    <span className={cn('text-right', r.avg >= 0 ? 'text-emerald-400' : 'text-rose-400')}>{r.avg >= 0 ? '+' : ''}{r.avg}</span>
+                    <span className="text-right text-foreground/80">{r.profitFactor == null ? '\u221e' : r.profitFactor}</span>
+                  </div>
+                );
+                const header = (firstCol: string) => (
+                  <div className="grid grid-cols-5 gap-2 px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground bg-muted/30">
+                    <span>{firstCol}</span><span className="text-right">Trades</span><span className="text-right">Win%</span><span className="text-right">Avg pts</span><span className="text-right">PF</span>
+                  </div>
+                );
+                const allA = bs.allLongs?.avg ?? 0;
+                const strong = bs.byThreshold?.find((x: any) => x.key === 'Score >= 70');
+                const strongA = strong?.avg ?? 0;
+                const enough = strong && strong.n >= 5;
+                const helps = enough && strongA > allA;
+                return (
+                  <div className="bg-card rounded-2xl p-4 mb-3">
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">Bounce Conviction filter · LONG entries</div>
+                    <div className="text-[11px] text-muted-foreground mb-3 leading-relaxed">{bs.note}</div>
+                    <div className="rounded-lg overflow-hidden border border-border mb-4">
+                      {header('Filter')}
+                      {bs.byThreshold.map((r: any) => row(r, 't-' + r.key, r.key === 'Score >= 70'))}
+                    </div>
+                    <div className="rounded-lg overflow-hidden border border-border">
+                      {header('Score bucket')}
+                      {bs.byBucket.map((r: any) => row(r, 'b-' + r.key))}
+                    </div>
+                    <div className={cn('flex items-start gap-2 text-[12px] mt-3 rounded-xl px-3 py-2.5 leading-relaxed', helps ? 'bg-emerald-500/10 text-emerald-200' : 'bg-muted/40 text-muted-foreground')}>
+                      <Info className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>
+                        {enough
+                          ? (helps
+                              ? `High-conviction bounces (score \u226570) averaged ${strongA >= 0 ? '+' : ''}${strongA} pts vs ${allA >= 0 ? '+' : ''}${allA} for all bounces over this window — the confluence filter added edge.`
+                              : `Over this window the \u226570 filter did not beat taking all bounces (${strongA >= 0 ? '+' : ''}${strongA} vs ${allA >= 0 ? '+' : ''}${allA} pts avg). Don't trust it on this read alone — try a longer lookback.`)
+                          : 'Too few high-conviction bounces here to judge — widen the lookback (more days) for a meaningful sample.'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
               {data.breakdown.worst?.length > 0 && (
                 <div className="bg-card rounded-2xl p-4">
                   <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">5 worst trades</div>

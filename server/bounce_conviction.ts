@@ -25,6 +25,10 @@ export interface BounceParams {
   volAvgPeriod?: number;     // lookback for the average-volume baseline
   volFull?: number;          // volume / avg ratio that counts as full expansion
   weights?: { thrust: number; reclaim: number; trend: number; expansion: number };
+  excludeVolume?: boolean;   // backtest mode: volume can't be replayed on index history,
+                             // so expansion uses close-strength only (no volume ratio)
+  forceContext?: boolean;    // score even if the natural oversold-context gate is false
+                             // (used by the backtest, where the engine already qualified the entry)
 }
 
 export interface BounceResult {
@@ -46,6 +50,8 @@ const DEFAULTS: Required<Omit<BounceParams, "weights">> & { weights: NonNullable
   volAvgPeriod: 20,
   volFull: 2,
   weights: { thrust: 0.3, reclaim: 0.2, trend: 0.25, expansion: 0.25 },
+  excludeVolume: false,
+  forceContext: false,
 };
 
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
@@ -65,7 +71,7 @@ export function scoreBounceAt(s: BounceSeries, i: number, params?: BounceParams)
   for (let k = from; k <= i; k++) recentMinRsi = Math.min(recentMinRsi, s.rsi[k]);
   const rsiNow = s.rsi[i];
   const inBounceContext = recentMinRsi <= p.oversoldLevel && rsiNow > recentMinRsi;
-  if (!inBounceContext) return { ...empty, detail: { ...empty.detail, rsi: rsiNow, recentMinRsi } };
+  if (!inBounceContext && !params?.forceContext) return { ...empty, detail: { ...empty.detail, rsi: rsiNow, recentMinRsi } };
 
   // 2) RSI thrust: how far/fast RSI has risen off its recent low.
   const rsiThrust = clamp((rsiNow - recentMinRsi) / p.thrustFull, 0, 1);
@@ -87,7 +93,7 @@ export function scoreBounceAt(s: BounceSeries, i: number, params?: BounceParams)
   const volPart = clamp((volRatio - 1) / Math.max(0.01, p.volFull - 1), 0, 1);
   const rng = s.high[i] - s.low[i];
   const closePos = rng > 0 ? clamp((s.close[i] - s.low[i]) / rng, 0, 1) : 0.5;
-  const expansion = 0.6 * volPart + 0.4 * closePos;
+  const expansion = params?.excludeVolume ? closePos : 0.6 * volPart + 0.4 * closePos;
 
   const w = p.weights;
   const raw = rsiThrust * w.thrust + rsiReclaim * w.reclaim + trend * w.trend + expansion * w.expansion;
@@ -115,4 +121,39 @@ export function scoreBounceAt(s: BounceSeries, i: number, params?: BounceParams)
       closePos: Math.round(closePos * 100) / 100,
     },
   };
+}
+
+// Wilder ADX/+DI/−DI from OHLC, exported for the backtest (the live path computes its own
+// in technical_analysis.ts). Same formula, validated identical to the technicalindicators lib.
+export function computeADX(
+  highs: number[], lows: number[], closes: number[], period = 14,
+): { adx: number[]; plusDI: number[]; minusDI: number[] } {
+  const n = highs.length;
+  const adx = new Array(n).fill(0), plusDI = new Array(n).fill(0), minusDI = new Array(n).fill(0);
+  if (n < period * 2) return { adx, plusDI, minusDI };
+  const tr = new Array(n).fill(0), pdm = new Array(n).fill(0), mdm = new Array(n).fill(0);
+  for (let i = 1; i < n; i++) {
+    const up = highs[i] - highs[i - 1], dn = lows[i - 1] - lows[i];
+    pdm[i] = up > dn && up > 0 ? up : 0;
+    mdm[i] = dn > up && dn > 0 ? dn : 0;
+    tr[i] = Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i - 1]), Math.abs(lows[i] - closes[i - 1]));
+  }
+  let trS = 0, pS = 0, mS = 0;
+  for (let i = 1; i <= period; i++) { trS += tr[i]; pS += pdm[i]; mS += mdm[i]; }
+  const dx = new Array(n).fill(0);
+  for (let i = period + 1; i < n; i++) {
+    trS = trS - trS / period + tr[i]; pS = pS - pS / period + pdm[i]; mS = mS - mS / period + mdm[i];
+    const pDI = trS === 0 ? 0 : (100 * pS) / trS;
+    const mDI = trS === 0 ? 0 : (100 * mS) / trS;
+    plusDI[i] = pDI; minusDI[i] = mDI;
+    const sum = pDI + mDI;
+    dx[i] = sum === 0 ? 0 : (100 * Math.abs(pDI - mDI)) / sum;
+  }
+  const f = period * 2;
+  if (f < n) {
+    let ds = 0; for (let i = period + 1; i <= f; i++) ds += dx[i];
+    adx[f] = ds / period;
+    for (let i = f + 1; i < n; i++) adx[i] = (adx[i - 1] * (period - 1) + dx[i]) / period;
+  }
+  return { adx, plusDI, minusDI };
 }
