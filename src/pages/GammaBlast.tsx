@@ -89,12 +89,12 @@ export default function GammaBlast() {
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-3">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400 mb-1"><TrendingUp className="w-3.5 h-3.5" /> CE (up move)</div>
-                <div className="text-sm font-mono text-foreground">\u20b9{data.ce ?? '—'} → \u20b9{blast?.ceAfter ?? '—'}</div>
+                <div className="text-sm font-mono text-foreground">{'\u20b9'}{data.ce ?? '—'} → {'\u20b9'}{blast?.ceAfter ?? '—'}</div>
                 <div className="text-lg font-bold font-mono text-emerald-400">{blast?.ceGainPct != null ? `+${blast.ceGainPct}%` : '—'}</div>
               </div>
               <div className="rounded-xl bg-rose-500/5 border border-rose-500/20 p-3">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-400 mb-1"><TrendingDown className="w-3.5 h-3.5" /> PE (down move)</div>
-                <div className="text-sm font-mono text-foreground">\u20b9{data.pe ?? '—'} → \u20b9{blast?.peAfter ?? '—'}</div>
+                <div className="text-sm font-mono text-foreground">{'\u20b9'}{data.pe ?? '—'} → {'\u20b9'}{blast?.peAfter ?? '—'}</div>
                 <div className="text-lg font-bold font-mono text-rose-400">{blast?.peGainPct != null ? `+${blast.peGainPct}%` : '—'}</div>
               </div>
             </div>
