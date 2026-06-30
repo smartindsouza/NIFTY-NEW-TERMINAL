@@ -2934,6 +2934,39 @@ export function AdvancedChart() {
 
   const [isEditingHLevels, setIsEditingHLevels] = useState(false);
 
+  // H-levels sync across devices. On mount, pull the server copy (shared by all
+  // logged-in devices). If the server has none yet, seed it from this device's
+  // local copy so existing levels aren't lost. hLevelsHydratedRef gates the
+  // write-back effect so we don't clobber the server before the pull resolves.
+  const hLevelsHydratedRef = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch('/api/settings/h_levels');
+        const d = await r.json();
+        const serverVal = d?.value;
+        if (!cancelled && Array.isArray(serverVal) && serverVal.length === 6) {
+          const norm = serverVal.map((v: any) => Math.round(Number(v) || 0));
+          setHLevels(norm);
+          try { localStorage.setItem('hLevels', JSON.stringify(norm)); } catch {}
+        } else if (!cancelled) {
+          // server empty — seed from whatever this device already has
+          let local: number[] = [];
+          try { local = JSON.parse(localStorage.getItem('hLevels') || '[]'); } catch {}
+          if (Array.isArray(local) && local.length === 6 && local.some(v => v > 0)) {
+            fetch('/api/settings/h_levels', {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ value: local }),
+            }).catch(() => {});
+          }
+        }
+      } catch {}
+      if (!cancelled) hLevelsHydratedRef.current = true;
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   useEffect(() => {
     try {
       localStorage.setItem('showHLevels', String(showHLevels));
@@ -2944,6 +2977,17 @@ export function AdvancedChart() {
     try {
       localStorage.setItem('hLevels', JSON.stringify(hLevels));
     } catch(e) {}
+    // Mirror to the server so the levels sync to the user's other devices.
+    // Gated on hydration so the initial local value can't overwrite a freshly
+    // pulled server copy. Debounced to coalesce rapid edits.
+    if (!hLevelsHydratedRef.current) return;
+    const t = setTimeout(() => {
+      fetch('/api/settings/h_levels', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: hLevels }),
+      }).catch(() => {});
+    }, 600);
+    return () => clearTimeout(t);
   }, [hLevels]);
 
   useEffect(() => {

@@ -105,6 +105,17 @@ for (const [col, def] of ([
   try { db.prepare(`ALTER TABLE exit_rules ADD COLUMN ${col} ${def}`).run(); } catch (e) { /* column already exists */ }
 }
 
+// Generic synced-settings store. This app is single-user, so one row per key is
+// shared by all of the user's logged-in devices (they all hit this same server +
+// DB). Used for sidebar order, H-levels, and any future cross-device preference.
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at INTEGER
+  )
+`).run();
+
 function getTodayAccessToken(): string | null {
   try {
     const today = new Date().toISOString().split('T')[0];
@@ -535,6 +546,35 @@ connectTicker();
       });
     } catch (e: any) {
       return res.json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
+  // --- Synced settings (shared across all of the user's devices) ---
+  // GET  /api/settings/:key  -> { value }  (value is null when unset)
+  // PUT  /api/settings/:key  body { value } -> { ok }
+  app.get('/api/settings/:key', (req, res) => {
+    try {
+      const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(req.params.key) as any;
+      if (!row) return res.json({ value: null });
+      let value: any = null;
+      try { value = JSON.parse(row.value); } catch { value = row.value; }
+      return res.json({ value });
+    } catch (e: any) {
+      return res.status(500).json({ value: null, error: e?.message || 'settings read failed' });
+    }
+  });
+
+  app.put('/api/settings/:key', express.json({ limit: '256kb' }), (req, res) => {
+    try {
+      const value = (req.body && typeof req.body === 'object' && 'value' in req.body) ? req.body.value : req.body;
+      const serialized = JSON.stringify(value);
+      db.prepare(`
+        INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+      `).run(req.params.key, serialized, Date.now());
+      return res.json({ ok: true });
+    } catch (e: any) {
+      return res.status(500).json({ ok: false, error: e?.message || 'settings write failed' });
     }
   });
 
