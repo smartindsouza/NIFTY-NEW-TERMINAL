@@ -101,6 +101,7 @@ for (const [col, def] of ([
   ['trail_stop', 'REAL'],
   ['stop_mode', "TEXT DEFAULT 'CLOSE'"],
   ['target_mode', "TEXT DEFAULT 'CLOSE'"],
+  ['structure_stop', 'TEXT'],
 ] as [string, string][])) {
   try { db.prepare(`ALTER TABLE exit_rules ADD COLUMN ${col} ${def}`).run(); } catch (e) { /* column already exists */ }
 }
@@ -477,6 +478,25 @@ connectTicker();
             }
           }
 
+          // Structure stop (opt-in): auto-exit when the candle CLOSES beyond a
+          // dynamic reference — session VWAP, or today's opening-range low/high.
+          // LONG exits below the ref; SHORT exits above it.
+          if (!hit && r.structure_stop && dir) {
+            let ref: number | null = null;
+            let label = '';
+            if (r.structure_stop === 'VWAP') {
+              ref = (typeof ta.vwap === 'number' ? ta.vwap : null);
+              label = 'VWAP';
+            } else if (r.structure_stop === 'OR' && ta.openingRange) {
+              ref = dir === 'LONG' ? ta.openingRange.low : ta.openingRange.high;
+              label = dir === 'LONG' ? 'opening-range low' : 'opening-range high';
+            }
+            if (typeof ref === 'number' && ref > 0) {
+              if (dir === 'LONG' && closePrice < ref) hit = `Closed ${closePrice} below ${label} ${ref.toFixed(1)}`;
+              if (dir === 'SHORT' && closePrice > ref) hit = `Closed ${closePrice} above ${label} ${ref.toFixed(1)}`;
+            }
+          }
+
           if (!hit && typeof closeRsi === 'number') {
             if (r.rsi_lower && closeRsi <= r.rsi_lower) hit = `RSI ${closeRsi.toFixed(1)} reached ${r.rsi_lower} on close`;
             else if (r.rsi_upper && closeRsi >= r.rsi_upper) hit = `RSI ${closeRsi.toFixed(1)} reached ${r.rsi_upper} on close`;
@@ -595,19 +615,20 @@ connectTicker();
     try {
       const { tradingsymbol, exchange, qty, product, positionSide, spotLower, spotUpper, spotMode, rsiLower, rsiUpper, timeframe } = req.body;
       if (!tradingsymbol || !qty) return res.status(400).json({ success: false, error: 'Missing tradingsymbol or qty' });
-      const { trailEnabled, trailCandles, targetPrice, trailDir, stopMode, targetMode } = req.body || {};
+      const { trailEnabled, trailCandles, targetPrice, trailDir, stopMode, targetMode, structureStop } = req.body || {};
       const exitSide = String(positionSide).toUpperCase() === 'BUY' ? 'SELL' : 'BUY';
       const sMode = (stopMode === 'TOUCH' ? 'TOUCH' : 'CLOSE');
       const tMode = (targetMode === 'TOUCH' ? 'TOUCH' : 'CLOSE');
+      const structStop = (structureStop === 'VWAP' || structureStop === 'OR') ? structureStop : null;
       db.prepare("UPDATE exit_rules SET status='CANCELLED' WHERE tradingsymbol=? AND status='ACTIVE'").run(tradingsymbol);
       const info = db.prepare(`INSERT INTO exit_rules
-        (tradingsymbol, exchange, qty, product, exit_side, spot_lower, spot_upper, spot_mode, rsi_lower, rsi_upper, timeframe, underlying_token, status, detail, created_at, trail_enabled, trail_candles, target_price, trail_dir, trail_active, trail_stop, stop_mode, target_mode)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'ACTIVE', '', ?, ?,?,?,?, 0, NULL, ?, ?)`).run(
+        (tradingsymbol, exchange, qty, product, exit_side, spot_lower, spot_upper, spot_mode, rsi_lower, rsi_upper, timeframe, underlying_token, status, detail, created_at, trail_enabled, trail_candles, target_price, trail_dir, trail_active, trail_stop, stop_mode, target_mode, structure_stop)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'ACTIVE', '', ?, ?,?,?,?, 0, NULL, ?, ?, ?)`).run(
           tradingsymbol, exchange || 'NFO', parseInt(qty, 10), product || 'MIS', exitSide,
           spotLower || null, spotUpper || null, sMode,
           rsiLower || null, rsiUpper || null, String(timeframe || '5'), '256265', Math.floor(Date.now() / 1000),
           trailEnabled ? 1 : 0, parseInt(trailCandles, 10) || 3, targetPrice || null, (trailDir === 'SHORT' ? 'SHORT' : (trailDir === 'LONG' ? 'LONG' : null)),
-          sMode, tMode
+          sMode, tMode, structStop
         );
       const kc = getKiteClient();
       // @ts-ignore

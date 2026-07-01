@@ -3360,6 +3360,7 @@ export function AdvancedChart() {
   const [slPanelOpen, setSlPanelOpen] = useState(false);
   const [slTrail, setSlTrail] = useState(true);
   const [slTrailCandles, setSlTrailCandles] = useState<string>('3');
+  const [slStructureStop, setSlStructureStop] = useState<'' | 'VWAP' | 'OR'>('');
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (!chartContainerRef.current || !mainSeriesRef.current || !mainChartRef.current) return;
@@ -3610,6 +3611,7 @@ export function AdvancedChart() {
     setSlRsiUpper(slArmedRule.rsi_upper ? String(slArmedRule.rsi_upper) : '');
     setSlTrail(!!slArmedRule.trail_enabled);
     setSlTrailCandles(slArmedRule.trail_candles ? String(slArmedRule.trail_candles) : '3');
+    setSlStructureStop(slArmedRule.structure_stop === 'VWAP' || slArmedRule.structure_stop === 'OR' ? slArmedRule.structure_stop : '');
   }, [slArmedRule?.id]);
 
   const armSlRule = async () => {
@@ -3650,6 +3652,7 @@ export function AdvancedChart() {
           trailCandles: parseInt(slTrailCandles, 10) || 3,
           targetPrice,
           trailDir,
+          structureStop: slStructureStop || null,
         })
       });
       const data = await res.json();
@@ -3657,7 +3660,7 @@ export function AdvancedChart() {
         toast.success(`Auto-exit armed for ${slActivePos.symbol}`, {
           description: `Stop ${stopPrice || '\u2014'} (${slStopMode === 'CLOSE' ? 'close' : 'touch'}) \u00B7 Target ${targetPrice || '\u2014'} (${slTargetMode === 'CLOSE' ? 'close' : 'touch'})${trailEnabled ? ` \u2192 ${parseInt(slTrailCandles, 10) || 3}-candle trail` : ''}`
         });
-        setSlArmedRule({ id: data.id, tradingsymbol: slActivePos.symbol, spot_upper: spotUpper, spot_lower: spotLower, stop_mode: slStopMode, target_mode: slTargetMode, spot_mode: slStopMode, rsi_lower: rl, rsi_upper: ru, trail_enabled: trailEnabled ? 1 : 0, trail_candles: parseInt(slTrailCandles, 10) || 3, target_price: targetPrice, trail_dir: trailDir, status: 'ACTIVE' });
+        setSlArmedRule({ id: data.id, tradingsymbol: slActivePos.symbol, spot_upper: spotUpper, spot_lower: spotLower, stop_mode: slStopMode, target_mode: slTargetMode, spot_mode: slStopMode, rsi_lower: rl, rsi_upper: ru, trail_enabled: trailEnabled ? 1 : 0, trail_candles: parseInt(slTrailCandles, 10) || 3, target_price: targetPrice, trail_dir: trailDir, structure_stop: slStructureStop || null, status: 'ACTIVE' });
       } else {
         toast.error('Could not arm auto-exit', { description: data?.error || 'Unknown error' });
       }
@@ -6295,6 +6298,24 @@ export function AdvancedChart() {
                     On reaching target, the stop trails the {slTrailCandles || '3'}-candle {slIsBullish ? 'low' : 'high'} and exits when price closes back through it.
                   </div>
                 )}
+
+                <div className="mb-2 p-1.5 rounded bg-muted/50">
+                  <div className="text-foreground/90 font-medium mb-1">Structure stop · on close</div>
+                  <div className="flex items-center gap-1">
+                    {([['', 'Off'], ['VWAP', 'VWAP'], ['OR', 'Op.Range']] as const).map(([val, lbl]) => (
+                      <button
+                        key={val || 'off'}
+                        onClick={() => setSlStructureStop(val)}
+                        className={`flex-1 py-1 rounded text-[10px] font-bold transition-colors ${slStructureStop === val ? 'bg-emerald-500 text-white' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
+                      >{lbl}</button>
+                    ))}
+                  </div>
+                  {slStructureStop && (
+                    <div className="text-[9px] text-muted-foreground mt-1 leading-tight">
+                      Auto-exits when a candle closes {slIsBullish ? 'below' : 'above'} {slStructureStop === 'VWAP' ? 'VWAP' : `the opening-range ${slIsBullish ? 'low' : 'high'}`}.
+                    </div>
+                  )}
+                </div>
 
                 <div className="flex items-center gap-1 mb-2">
                   <input value={slRsiLower} onChange={e => setSlRsiLower(e.target.value)} placeholder="RSI ≤" inputMode="decimal" className="w-1/2 bg-muted rounded px-2 py-1 text-foreground placeholder:text-muted-foreground" />
