@@ -137,7 +137,7 @@ function computeOpeningRange(raw: any[]): { high: number; low: number; date: str
   return { high: hi, low: lo, date: maxDay };
 }
 
-const cacheMap = new Map<string, { data: any, lastUpdate: number }>();
+const cacheMap = new Map<string, { data: any, lastUpdate: number, lastFullFetch?: number }>();
 const inFlightRequests = new Map<string, Promise<any>>();
 
 let nextAvailableTime = Date.now();
@@ -224,11 +224,15 @@ export async function getTechnicalAnalysis(
         }
       }
       
-      // If valid cache exists within 60 seconds (but spot update diff is within 500 for NIFTY)
+      // Serve cache only if the last FULL fetch (which re-pulls futures volume)
+      // was within 60s. We intentionally check lastFullFetch, not lastUpdate:
+      // the price-touch branch below bumps lastUpdate every hit, which would
+      // otherwise keep the cache alive forever and freeze volume for the whole
+      // candle. Falling back to lastUpdate keeps older cache entries valid.
       if (
         cachedItem &&
         !cachedItem.data.isMock &&
-        now - cachedItem.lastUpdate <= 60000 &&
+        now - (cachedItem.lastFullFetch ?? cachedItem.lastUpdate) <= 60000 &&
         (instrument_token !== "256265" || Math.abs(cachedItem.data.baseSpot - resolvedSpot) <= 500)
       ) {
          if (
@@ -483,7 +487,7 @@ export async function getTechnicalAnalysis(
             rawVolumeStats: { max: maxVol, min: minVol, avg: avgVol },
           };
           
-          cacheMap.set(cacheKey, { data: resultData, lastUpdate: Date.now() });
+          cacheMap.set(cacheKey, { data: resultData, lastUpdate: Date.now(), lastFullFetch: Date.now() });
           return resultData;
         }
         throw new Error("Empty history format");
@@ -619,7 +623,7 @@ export async function getTechnicalAnalysis(
       candles: candlesData,
     };
 
-  cacheMap.set(cacheKey, { data: result, lastUpdate: now });
+  cacheMap.set(cacheKey, { data: result, lastUpdate: now, lastFullFetch: now });
 
   return result;
 }
