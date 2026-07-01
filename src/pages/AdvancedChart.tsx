@@ -5959,6 +5959,18 @@ export function AdvancedChart() {
               </span>
             );
           })()}
+          {decision && (() => {
+            const biasText = decision.bullScore > decision.bearScore ? 'BULLISH' : decision.bearScore > decision.bullScore ? 'BEARISH' : 'NEUTRAL';
+            const color = biasText === 'BULLISH' ? 'bg-emerald-500/20 text-emerald-400'
+              : biasText === 'BEARISH' ? 'bg-rose-500/20 text-rose-400'
+              : 'bg-slate-500/20 text-slate-300';
+            return (
+              <span className={`px-3 py-1 rounded-md text-xs font-mono font-bold whitespace-nowrap ${color}`}
+                title={`Master Signal — composite bias. Roughly half its weight is OI-derived support/resistance levels + PCR, the rest technicals (RSI/DI/pattern), VWAP, and FII/DII flow. Bull ${decision.bullScore} vs Bear ${decision.bearScore} · regime ${decision.regime}. Being OI-heavy, it lags price much like the OI bias — weigh against price.`}>
+                SIGNAL: {biasText}
+              </span>
+            );
+          })()}
           {pulseBias?.success && pulseBias.dir && (() => {
             const color = pulseBias.dir === 'UP' ? 'bg-emerald-500/20 text-emerald-400'
               : pulseBias.dir === 'DOWN' ? 'bg-rose-500/20 text-rose-400'
@@ -5982,21 +5994,6 @@ export function AdvancedChart() {
             onSelect={setSelectedInstrument} 
             currentSymbol={selectedInstrument ? selectedInstrument.tradingsymbol : "NIFTY 50"} 
           />
-          {decision && localAnalytics && (
-             <div className="flex items-center gap-4 px-3 py-1 bg-muted/40 border border-0 rounded-md ml-2">
-                <div className="flex items-center gap-2">
-                   {(() => {
-                      const biasText = decision.bullScore > decision.bearScore ? 'Bullish' : decision.bearScore > decision.bullScore ? 'Bearish' : 'Neutral';
-                      const textColor = biasText === 'Bullish' ? 'text-green-500' : biasText === 'Bearish' ? 'text-red-500' : 'text-primary';
-                      return (
-                         <span className={`font-bold ${textColor}`}>
-                            {biasText}
-                         </span>
-                      );
-                   })()}
-                </div>
-             </div>
-          )}
           <div className="flex items-center gap-2 bg-muted/40 border border-0 rounded-md px-3 py-1.5 ml-2 cursor-pointer" onClick={() => setQuickTradeEnabled(!quickTradeEnabled)}>
              <span className="text-xs font-medium text-foreground/80">Quick Trade</span>
              <label className="relative inline-flex items-center cursor-pointer pointer-events-none">

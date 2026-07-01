@@ -22,8 +22,15 @@ export function computeMasterSignal(analytics: any, taData: any, fiiDiiData: any
   const { spot, resistanceZone, supportZone, pcr } = analytics;
   const { rsi, plusDi, minusDi, currentPattern } = taData;
 
-  // Assuming VWAP simulation based on spot vs some EMA (taData might not have VWAP so we'll approximate or use RSI trend)
-  const isAboveVwap = taData.candles?.[taData.candles.length - 1]?.close > (taData.candles?.[taData.candles.length - 1]?.open || spot);
+  // Real session VWAP when the TA feed provides it (it now does). Falls back to
+  // the last candle's open only if VWAP is unavailable. Previously this compared
+  // close > open — i.e. just "is the last candle green" — despite the VWAP name.
+  const lastCandle = taData.candles?.[taData.candles.length - 1];
+  const lastClose = lastCandle?.close ?? spot;
+  const vwapRef = (typeof taData.vwap === 'number' && taData.vwap > 0)
+    ? taData.vwap
+    : (lastCandle?.open ?? spot);
+  const isAboveVwap = lastClose > vwapRef;
 
   // Bullish Checks
   if (spot > (resistanceZone?.strikePrice || spot + 100)) bullScore += 3;
