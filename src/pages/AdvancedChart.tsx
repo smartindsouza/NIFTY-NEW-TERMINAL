@@ -2598,6 +2598,17 @@ export function AdvancedChart() {
     } catch(e) {}
     return true;
   });
+  const [levelAlertsOn, setLevelAlertsOn] = useState(() => {
+    try { return localStorage.getItem('levelAlertsOn') === 'true'; } catch(e) {}
+    return false;
+  });
+  // Level-touch alert engine (refs so the tick handler always sees fresh values
+  // without re-subscribing). levels: [{key,label,price}]. armed: per-key re-arm state.
+  const alertLevelsRef = useRef<{ key: string; label: string; price: number }[]>([]);
+  const alertPrevSpotRef = useRef<number | null>(null);
+  const alertStateRef = useRef<Map<string, { lastFired: number; armed: boolean }>>(new Map());
+  const levelAlertsOnRef = useRef(levelAlertsOn);
+  useEffect(() => { levelAlertsOnRef.current = levelAlertsOn; }, [levelAlertsOn]);
   const [pdhColor, setPdhColor] = useState(() => {
     try {
       return localStorage.getItem('pdhColor') || '#22c55e';
@@ -2677,6 +2688,15 @@ export function AdvancedChart() {
       localStorage.setItem('showDsZones', String(showDsZones));
     } catch(e) {}
   }, [showDsZones]);
+
+  useEffect(() => {
+    try { localStorage.setItem('levelAlertsOn', String(levelAlertsOn)); } catch(e) {}
+    // Ask for browser-notification permission the moment alerts are enabled, so
+    // OS popups work even when this tab is in the background.
+    if (levelAlertsOn && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      try { Notification.requestPermission(); } catch(e) {}
+    }
+  }, [levelAlertsOn]);
 
   useEffect(() => {
     try {
@@ -4215,6 +4235,7 @@ export function AdvancedChart() {
   const [lastTickMessage, setLastTickMessage] = useState<string>('');
   const lastTickAtRef = useRef(0); // ms timestamp of the last live tick (to know when ticks are fresh)
 
+
   // Enforce ONLY the active selected instrument receives dynamic WS price updates
   // Directly updates the lightweight chart series, avoiding full component teardowns/re-renders
   useEffect(() => {
@@ -4247,6 +4268,7 @@ export function AdvancedChart() {
 
       if (isMatch) {
         setLastTickMessage(`${msgSym}: ${msg.candle.close.toFixed(2)}`);
+        try { checkLevelAlertsRef.current(msg.candle.close); } catch(e) {}
         if (mainSeriesRef.current && msg.candle) {
           const tfMin = parseInt(timeframe) || 5;
           // Synchronize time calculations using the high-precision server/exchange clock
@@ -4557,6 +4579,84 @@ export function AdvancedChart() {
     }
     return { pdhPrice: null, pdlPrice: null, pStartTime: null };
   }, [chartData, showPdhPdl]);
+
+  // Rebuild the alert level list whenever any level source changes. Only levels
+  // whose indicator is currently visible are alerted — what you see is what alerts.
+  useEffect(() => {
+    const L: { key: string; label: string; price: number }[] = [];
+    const add = (key: string, label: string, price: any) => {
+      const p = Number(price);
+      if (Number.isFinite(p) && p > 0) L.push({ key, label, price: p });
+    };
+    if (showHLevels && Array.isArray(hLevels)) {
+      const names = ['Red 1', 'Red 2', 'Trap 1', 'Trap 2', 'Green 1', 'Green 2'];
+      hLevels.forEach((v, i) => { if (v > 0) add(`h${i}`, `H-Level ${names[i] || i + 1}`, v); });
+    }
+    if (showPdhPdl) { add('pdh', 'PDH', pdhPdlData?.pdh); add('pdl', 'PDL', pdhPdlData?.pdl); }
+    if (showSnR) {
+      add('sup', 'Support', localAnalytics?.supportZone?.strikePrice);
+      add('res', 'Resistance', localAnalytics?.resistanceZone?.strikePrice);
+    }
+    if (showOpeningRange) {
+      add('orh', '15m High', (taInfo as any)?.openingRange?.high);
+      add('orl', '15m Low', (taInfo as any)?.openingRange?.low);
+    }
+    if (showDsZones) {
+      const dz = (taInfo as any)?.dsZones;
+      (dz?.demand || []).forEach((z: any, i: number) => add(`dz${i}`, 'Demand zone', z.top));
+      (dz?.supply || []).forEach((z: any, i: number) => add(`sz${i}`, 'Supply zone', z.bottom));
+    }
+    alertLevelsRef.current = L;
+  }, [hLevels, showHLevels, pdhPdlData, showPdhPdl, localAnalytics, showSnR, taInfo, showOpeningRange, showDsZones]);
+
+  // Fire one alert: OS notification (works from background tabs) + in-app toast + beep.
+  const fireLevelAlert = (label: string, price: number, spot: number, dirUp: boolean) => {
+    const title = `${label} touched`;
+    const body = `Price ${spot.toFixed(2)} crossed ${dirUp ? 'up through' : 'down through'} ${label} (${price})`;
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        new Notification(title, { body, tag: `lvl-${label}-${price}` });
+      }
+    } catch(e) {}
+    try { toast(title, { description: body }); } catch(e) {}
+    try {
+      const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (AC) {
+        const actx = new AC();
+        const o = actx.createOscillator(); const g = actx.createGain();
+        o.connect(g); g.connect(actx.destination);
+        o.frequency.value = dirUp ? 880 : 520; g.gain.value = 0.08;
+        o.start(); o.stop(actx.currentTime + 0.18);
+        setTimeout(() => { try { actx.close(); } catch(e) {} }, 400);
+      }
+    } catch(e) {}
+  };
+
+  // Crossing detector, called from the live tick handler. Fires when price crosses
+  // a level between consecutive ticks; per-level 3-min cooldown, and re-arms only
+  // after price moves >0.05% away from the level (prevents hover spam).
+  const checkLevelAlerts = (spot: number) => {
+    if (!levelAlertsOnRef.current || !Number.isFinite(spot) || spot <= 0) return;
+    const prev = alertPrevSpotRef.current;
+    alertPrevSpotRef.current = spot;
+    if (prev === null || prev === spot) return;
+    const now = Date.now();
+    const rearmDist = spot * 0.0005; // 0.05% ≈ ~12 pts on NIFTY
+    for (const { key, label, price } of alertLevelsRef.current) {
+      let st = alertStateRef.current.get(key);
+      if (!st) { st = { lastFired: 0, armed: true }; alertStateRef.current.set(key, st); }
+      if (!st.armed && Math.abs(spot - price) > rearmDist) st.armed = true;
+      const crossedUp = prev < price && spot >= price;
+      const crossedDown = prev > price && spot <= price;
+      if ((crossedUp || crossedDown) && st.armed && now - st.lastFired > 180000) {
+        st.lastFired = now; st.armed = false;
+        fireLevelAlert(label, price, spot, crossedUp);
+      }
+    }
+  };
+  const checkLevelAlertsRef = useRef(checkLevelAlerts);
+  checkLevelAlertsRef.current = checkLevelAlerts;
+
 
   // Collect every chart level (H-levels, their 50% midpoints, PDH/PDL, OI support/resistance)
   // so the SL/Target tool can default the target to the nearest upcoming level.
@@ -6101,6 +6201,19 @@ export function AdvancedChart() {
                         {showDsZones && <Check size={14} className="text-emerald-400" />}
                       </div>
                       <span>Demand/Supply Zones (intraday)</span>
+                    </button>
+                  </div>
+
+                  {/* Level Touch Alerts */}
+                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                    <button
+                      onClick={() => setLevelAlertsOn(!levelAlertsOn)}
+                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
+                    >
+                      <div className="w-4 flex items-center justify-center">
+                        {levelAlertsOn && <Check size={14} className="text-emerald-400" />}
+                      </div>
+                      <span>Level Touch Alerts (sound + popup)</span>
                     </button>
                   </div>
 
