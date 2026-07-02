@@ -117,6 +117,79 @@ function calculateEMA(values: number[], period: number): number[] {
 // day in the data. Works on any intraday base interval (candle START times 09:15/09:20/09:25
 // for 5m, the single 09:15 bar for 15m, etc.). Returns null when there are no intraday bars
 // in that window (e.g. daily/weekly timeframes), so the chart simply won't draw the lines.
+// Demand/Supply zones: a "base" of small-bodied candles followed by an explosive
+// leg away. The base before a strong up-leg is a DEMAND zone; before a strong
+// down-leg, a SUPPLY zone. A zone is invalidated once a candle CLOSES through its
+// far edge. Thresholds scale with ATR so the detector adapts to volatility.
+export function computeDemandSupplyZones(
+  candles: { open: number; high: number; low: number; close: number }[],
+  opts?: { atrPeriod?: number; legBodyAtr?: number; baseBodyAtr?: number; maxBase?: number; maxZones?: number }
+): { demand: { top: number; bottom: number; index: number }[]; supply: { top: number; bottom: number; index: number }[] } {
+  const atrPeriod = opts?.atrPeriod ?? 14;
+  const legBodyAtr = opts?.legBodyAtr ?? 1.2;   // leg-out body must exceed 1.2× ATR
+  const baseBodyAtr = opts?.baseBodyAtr ?? 0.5; // base candles' bodies stay under 0.5× ATR
+  const maxBase = opts?.maxBase ?? 4;           // base = 1..4 candles
+  const maxZones = opts?.maxZones ?? 3;         // keep the freshest N per side
+  const n = candles.length;
+  const out = { demand: [] as any[], supply: [] as any[] };
+  if (n < atrPeriod + maxBase + 2) return out;
+
+  // Wilder-style ATR
+  const trs: number[] = [];
+  for (let i = 1; i < n; i++) {
+    const c = candles[i], p = candles[i - 1];
+    trs.push(Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close)));
+  }
+  let atr = trs.slice(0, atrPeriod).reduce((a, b) => a + b, 0) / atrPeriod;
+  const atrAt: number[] = new Array(n).fill(atr);
+  for (let i = atrPeriod; i < trs.length; i++) {
+    atr = (atr * (atrPeriod - 1) + trs[i]) / atrPeriod;
+    atrAt[i + 1] = atr;
+  }
+
+  for (let i = atrPeriod + 1; i < n; i++) {
+    const c = candles[i];
+    const body = Math.abs(c.close - c.open);
+    const a = atrAt[i] || 0;
+    if (a <= 0 || body < legBodyAtr * a) continue;
+    const bullish = c.close > c.open;
+    // gather the base: consecutive small-bodied candles immediately before the leg
+    let bStart = i - 1, count = 0;
+    while (bStart >= 0 && count < maxBase && Math.abs(candles[bStart].close - candles[bStart].open) <= baseBodyAtr * a) {
+      bStart--; count++;
+    }
+    if (count < 1) continue;
+    const base = candles.slice(bStart + 1, i);
+    const top = Math.max(...base.map(b => Math.max(b.open, b.close, b.high)));
+    const bottom = Math.min(...base.map(b => Math.min(b.open, b.close, b.low)));
+    if (!(top > bottom)) continue;
+    if (bullish) out.demand.push({ top, bottom, index: i });
+    else out.supply.push({ top, bottom, index: i });
+  }
+
+  // Invalidate zones price has closed through (far edge), keep freshest per side
+  const lastValid = (zs: any[], side: 'demand' | 'supply') => {
+    const alive = zs.filter(z => {
+      for (let j = z.index; j < n; j++) {
+        const cl = candles[j].close;
+        if (side === 'demand' && cl < z.bottom) return false;
+        if (side === 'supply' && cl > z.top) return false;
+      }
+      return true;
+    });
+    // de-duplicate heavily overlapping zones (keep the most recent)
+    const dedup: any[] = [];
+    for (const z of alive.sort((x, y) => y.index - x.index)) {
+      if (!dedup.some(d => Math.min(d.top, z.top) - Math.max(d.bottom, z.bottom) > 0.5 * (z.top - z.bottom))) dedup.push(z);
+      if (dedup.length >= maxZones) break;
+    }
+    return dedup;
+  };
+  out.demand = lastValid(out.demand, 'demand');
+  out.supply = lastValid(out.supply, 'supply');
+  return out;
+}
+
 function computeOpeningRange(raw: any[]): { high: number; low: number; date: string } | null {
   if (!Array.isArray(raw) || raw.length === 0) return null;
   const toIst = (d: any) => new Date(new Date(d).getTime() + 5.5 * 60 * 60 * 1000);
@@ -435,6 +508,12 @@ export async function getTechnicalAnalysis(
 
           const openingRange = computeOpeningRange(rawHist);
 
+          // Demand/Supply zones — intraday only (that's their use case here); on
+          // the last ~200 candles to keep zones recent and computation light.
+          const dsZones = timeframeMin < 1440
+            ? computeDemandSupplyZones(hist.slice(-200).map((h: any) => ({ open: h.open, high: h.high, low: h.low, close: h.close })))
+            : { demand: [], supply: [] };
+
           const rsiMap = hist
             .map((h: any, i: number) => ({ ...h, rsi14: rsiValues[i] }));
 
@@ -482,6 +561,7 @@ export async function getTechnicalAnalysis(
             ema20: realEma20,
             bounce,
             openingRange,
+            dsZones,
             candles,
             rawTop5: rawHist.slice(0, 5),
             rawVolumeStats: { max: maxVol, min: minVol, avg: avgVol },

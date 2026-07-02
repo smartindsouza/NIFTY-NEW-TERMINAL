@@ -2591,6 +2591,13 @@ export function AdvancedChart() {
     } catch(e) {}
     return true;
   });
+  const [showDsZones, setShowDsZones] = useState(() => {
+    try {
+      const v = localStorage.getItem('showDsZones');
+      return v === null ? true : v === 'true'; // default on
+    } catch(e) {}
+    return true;
+  });
   const [pdhColor, setPdhColor] = useState(() => {
     try {
       return localStorage.getItem('pdhColor') || '#22c55e';
@@ -2664,6 +2671,12 @@ export function AdvancedChart() {
       localStorage.setItem('showOpeningRange', String(showOpeningRange));
     } catch(e) {}
   }, [showOpeningRange]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('showDsZones', String(showDsZones));
+    } catch(e) {}
+  }, [showDsZones]);
 
   useEffect(() => {
     try {
@@ -5526,6 +5539,33 @@ export function AdvancedChart() {
               const textDrawX = textAlignX - textMargin;
               
               const linesToDraw: { text: string, y: number, color: string, isTextOnly?: boolean, dash?: number[], lineWidth?: number }[] = [];
+
+              // Demand/Supply zones — shaded bands from formation to the right edge
+              const dz = (taInfo as any)?.dsZones;
+              if (showDsZones && dz && mainSeriesRef.current) {
+                const drawZone = (z: any, fill: string, edge: string, label: string) => {
+                  const yTop = mainSeriesRef.current.priceToCoordinate(z.top);
+                  const yBot = mainSeriesRef.current.priceToCoordinate(z.bottom);
+                  if (yTop === null || yBot === null) return;
+                  const zx = 0, zw = textAlignX; // span the chart area
+                  ctx.fillStyle = fill;
+                  ctx.fillRect(zx, Math.min(yTop, yBot), zw, Math.abs(yBot - yTop));
+                  ctx.strokeStyle = edge;
+                  ctx.lineWidth = 1;
+                  ctx.setLineDash([4, 4]);
+                  ctx.beginPath(); ctx.moveTo(zx, yTop); ctx.lineTo(zw, yTop); ctx.stroke();
+                  ctx.beginPath(); ctx.moveTo(zx, yBot); ctx.lineTo(zw, yBot); ctx.stroke();
+                  ctx.setLineDash([]);
+                  ctx.font = 'bold 9px monospace';
+                  ctx.textAlign = 'center';
+                  ctx.textBaseline = 'middle';
+                  ctx.fillStyle = edge;
+                  ctx.fillText(label, textAlignX / 2, (yTop + yBot) / 2);
+                };
+                (dz.demand || []).forEach((z: any) => drawZone(z, 'rgba(16,185,129,0.08)', 'rgba(16,185,129,0.55)', 'DEMAND'));
+                (dz.supply || []).forEach((z: any) => drawZone(z, 'rgba(244,63,94,0.08)', 'rgba(244,63,94,0.55)', 'SUPPLY'));
+              }
+
               const snrDash = snrStyle === 1 ? [5, 5] : snrStyle === 2 ? [2, 4] : [];
               if (showSnR && localAnalytics?.supportZone?.strikePrice) {
                  const y = mainSeriesRef.current.priceToCoordinate(localAnalytics.supportZone.strikePrice);
@@ -5767,7 +5807,7 @@ export function AdvancedChart() {
     draw();
     
     return () => cancelAnimationFrame(animationFrameId);
-  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth, taInfo, showOpeningRange]);
+  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth, taInfo, showOpeningRange, showDsZones]);
 
   const { data: serverStats } = useQuery({
     queryKey: ["server-diagnostics"],
@@ -6048,6 +6088,19 @@ export function AdvancedChart() {
                         {showOpeningRange && <Check size={14} className="text-emerald-400" />}
                       </div>
                       <span>15m Opening Range (High/Low)</span>
+                    </button>
+                  </div>
+
+                  {/* Demand / Supply Zones */}
+                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                    <button
+                      onClick={() => setShowDsZones(!showDsZones)}
+                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
+                    >
+                      <div className="w-4 flex items-center justify-center">
+                        {showDsZones && <Check size={14} className="text-emerald-400" />}
+                      </div>
+                      <span>Demand/Supply Zones (intraday)</span>
                     </button>
                   </div>
 
