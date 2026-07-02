@@ -2617,6 +2617,13 @@ export function AdvancedChart() {
     } catch(e) {}
     return true;
   });
+  const [dsZoneOpacity, setDsZoneOpacity] = useState<string>(() => {
+    try { return localStorage.getItem('dsZoneOpacity') || '8'; } catch(e) {}
+    return '8';
+  });
+  useEffect(() => {
+    try { localStorage.setItem('dsZoneOpacity', dsZoneOpacity); } catch(e) {}
+  }, [dsZoneOpacity]);
   const [levelAlertsOn, setLevelAlertsOn] = useState(() => {
     try { return localStorage.getItem('levelAlertsOn') === 'true'; } catch(e) {}
     return false;
@@ -5752,30 +5759,25 @@ export function AdvancedChart() {
               
               const linesToDraw: { text: string, y: number, color: string, isTextOnly?: boolean, dash?: number[], lineWidth?: number }[] = [];
 
-              // Demand/Supply zones — shaded bands from formation to the right edge
+              // Demand/Supply zones — borderless shaded bands, adjustable opacity
               const dz = (taInfo as any)?.dsZones;
               if (showDsZones && dz && mainSeriesRef.current) {
-                const drawZone = (z: any, fill: string, edge: string, label: string) => {
+                const pct = Math.min(100, Math.max(1, parseFloat(dsZoneOpacity) || 8)) / 100;
+                const drawZone = (z: any, rgb: string, labelColor: string, label: string) => {
                   const yTop = mainSeriesRef.current.priceToCoordinate(z.top);
                   const yBot = mainSeriesRef.current.priceToCoordinate(z.bottom);
                   if (yTop === null || yBot === null) return;
                   const zx = 0, zw = textAlignX; // span the chart area
-                  ctx.fillStyle = fill;
+                  ctx.fillStyle = `rgba(${rgb},${pct})`;
                   ctx.fillRect(zx, Math.min(yTop, yBot), zw, Math.abs(yBot - yTop));
-                  ctx.strokeStyle = edge;
-                  ctx.lineWidth = 1;
-                  ctx.setLineDash([4, 4]);
-                  ctx.beginPath(); ctx.moveTo(zx, yTop); ctx.lineTo(zw, yTop); ctx.stroke();
-                  ctx.beginPath(); ctx.moveTo(zx, yBot); ctx.lineTo(zw, yBot); ctx.stroke();
-                  ctx.setLineDash([]);
                   ctx.font = 'bold 9px monospace';
                   ctx.textAlign = 'center';
                   ctx.textBaseline = 'middle';
-                  ctx.fillStyle = edge;
+                  ctx.fillStyle = labelColor;
                   ctx.fillText(label, textAlignX / 2, (yTop + yBot) / 2);
                 };
-                (dz.demand || []).forEach((z: any) => drawZone(z, 'rgba(16,185,129,0.08)', 'rgba(16,185,129,0.55)', 'DEMAND'));
-                (dz.supply || []).forEach((z: any) => drawZone(z, 'rgba(244,63,94,0.08)', 'rgba(244,63,94,0.55)', 'SUPPLY'));
+                (dz.demand || []).forEach((z: any) => drawZone(z, '16,185,129', 'rgba(16,185,129,0.55)', 'DEMAND'));
+                (dz.supply || []).forEach((z: any) => drawZone(z, '244,63,94', 'rgba(244,63,94,0.55)', 'SUPPLY'));
               }
 
               const snrDash = snrStyle === 1 ? [5, 5] : snrStyle === 2 ? [2, 4] : [];
@@ -6019,7 +6021,7 @@ export function AdvancedChart() {
     draw();
     
     return () => cancelAnimationFrame(animationFrameId);
-  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth, taInfo, showOpeningRange, showDsZones]);
+  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth, taInfo, showOpeningRange, showDsZones, dsZoneOpacity]);
 
   const { data: serverStats } = useQuery({
     queryKey: ["server-diagnostics"],
@@ -6314,6 +6316,16 @@ export function AdvancedChart() {
                       </div>
                       <span>Demand/Supply Zones (intraday)</span>
                     </button>
+                    <div className="flex items-center gap-1 pr-1" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        value={dsZoneOpacity}
+                        onChange={e => setDsZoneOpacity(e.target.value)}
+                        inputMode="numeric"
+                        title="Zone darkness (% opacity, 1–100)"
+                        className="w-11 bg-muted rounded px-1.5 py-0.5 text-xs text-foreground text-center"
+                      />
+                      <span className="text-[10px] text-muted-foreground">%</span>
+                    </div>
                   </div>
 
                   {/* Level Touch Alerts */}
