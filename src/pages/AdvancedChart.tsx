@@ -2502,6 +2502,25 @@ function MarginDiagnosticsPanel({ ticketData, kiteDiagnosticsData }: { ticketDat
 
 // Global cache to remember the chart position across tab switches and unmounts
 const globalLogicalRangeCache: Record<string, any> = {};
+// Persist the X-axis (time zoom) across refreshes: hydrate the in-memory cache
+// from localStorage at load, and write it back (debounced) whenever it changes.
+try {
+  const savedRanges = JSON.parse(localStorage.getItem('chartLogicalRanges') || '{}');
+  if (savedRanges && typeof savedRanges === 'object') Object.assign(globalLogicalRangeCache, savedRanges);
+} catch (e) { /* ignore */ }
+let logicalRangePersistTimer: any = null;
+function persistLogicalRanges() {
+  if (logicalRangePersistTimer) clearTimeout(logicalRangePersistTimer);
+  logicalRangePersistTimer = setTimeout(() => {
+    try {
+      const keys = Object.keys(globalLogicalRangeCache);
+      // cap stored keys to the 20 most recently present to keep the entry small
+      const slim: Record<string, any> = {};
+      keys.slice(-20).forEach(k => { slim[k] = globalLogicalRangeCache[k]; });
+      localStorage.setItem('chartLogicalRanges', JSON.stringify(slim));
+    } catch (e) { /* ignore */ }
+  }, 800);
+}
 
 export function AdvancedChart() {
   useProfiler("AdvancedChart");
@@ -2613,6 +2632,11 @@ export function AdvancedChart() {
     return '';
   });
   const rsiScaleRef = useRef<{ min: number | null; max: number | null }>({ min: null, max: null });
+  // Y-axis lock for the main price scale: captures the currently-visible price
+  // range (computed from pane coordinates — the library has no getter for a
+  // dragged scale) and pins + persists it per instrument+timeframe.
+  const yLockRef = useRef<{ min: number; max: number } | null>(null);
+  const [yLocked, setYLocked] = useState(false);
   // Level-touch alert engine (refs so the tick handler always sees fresh values
   // without re-subscribing). levels: [{key,label,price}]. armed: per-key re-arm state.
   const alertLevelsRef = useRef<{ key: string; label: string; price: number }[]>([]);
@@ -3164,6 +3188,53 @@ export function AdvancedChart() {
   const logicalRangeRef = useRef<any>(null);
 
   const cacheKey = `${selectedInstrument?.instrument_token}_${timeframe}`;
+
+  // Load any saved Y-lock for this instrument+timeframe; apply via the series'
+  // autoscaleInfoProvider. Runs on mount and whenever the key changes.
+  useEffect(() => {
+    try {
+      const map = JSON.parse(localStorage.getItem('chartYLocks') || '{}');
+      const saved = map[cacheKey];
+      const valid = saved && Number.isFinite(saved.min) && Number.isFinite(saved.max) && saved.min < saved.max;
+      yLockRef.current = valid ? { min: saved.min, max: saved.max } : null;
+      setYLocked(!!valid);
+    } catch (e) { yLockRef.current = null; setYLocked(false); }
+    try { mainSeriesRef.current?.priceScale()?.applyOptions({ autoScale: true }); } catch (e) {}
+  }, [cacheKey]);
+
+  const toggleYLock = () => {
+    if (yLockRef.current) {
+      // unlock: back to autoscale, remove saved entry
+      yLockRef.current = null;
+      setYLocked(false);
+      try {
+        const map = JSON.parse(localStorage.getItem('chartYLocks') || '{}');
+        delete map[cacheKey];
+        localStorage.setItem('chartYLocks', JSON.stringify(map));
+      } catch (e) {}
+    } else {
+      // lock: capture the currently visible price range from pane coordinates
+      try {
+        const series = mainSeriesRef.current;
+        const chart = mainChartRef.current as any;
+        if (!series || !chart) return;
+        const pane = typeof chart.paneSize === 'function' ? chart.paneSize() : null;
+        const h = pane?.height ?? (chartContainerRef.current ? chartContainerRef.current.clientHeight - 28 : 0);
+        if (!h || h < 40) return;
+        const top = series.coordinateToPrice(0);
+        const bottom = series.coordinateToPrice(h);
+        if (typeof top !== 'number' || typeof bottom !== 'number' || !(top > bottom)) return;
+        yLockRef.current = { min: bottom, max: top };
+        setYLocked(true);
+        const map = JSON.parse(localStorage.getItem('chartYLocks') || '{}');
+        map[cacheKey] = yLockRef.current;
+        const keys = Object.keys(map);
+        if (keys.length > 20) delete map[keys[0]];
+        localStorage.setItem('chartYLocks', JSON.stringify(map));
+      } catch (e) {}
+    }
+    try { mainSeriesRef.current?.priceScale()?.applyOptions({ autoScale: true }); } catch (e) {}
+  };
 
   useEffect(() => {
     logicalRangeRef.current = globalLogicalRangeCache[cacheKey] || null;
@@ -4941,6 +5012,10 @@ export function AdvancedChart() {
       wickDownColor: '#ef4444',
       lastValueVisible: false,
       priceLineVisible: false,
+      // When a Y-lock is saved, pin the price scale to it; null = normal autoscale
+      autoscaleInfoProvider: () => (yLockRef.current
+        ? { priceRange: { minValue: yLockRef.current.min, maxValue: yLockRef.current.max } }
+        : null),
     });
 
     mainSeriesRef.current = mainSeries;
@@ -5243,6 +5318,7 @@ export function AdvancedChart() {
           timeScale2.setVisibleLogicalRange(range);
           logicalRangeRef.current = range;
           globalLogicalRangeCache[`${selectedInstrument?.instrument_token}_${timeframe}`] = range;
+          persistLogicalRanges();
         } catch(e) {}
         isSyncing = false;
       }
@@ -5254,6 +5330,7 @@ export function AdvancedChart() {
           timeScale1.setVisibleLogicalRange(range);
           logicalRangeRef.current = range;
           globalLogicalRangeCache[`${selectedInstrument?.instrument_token}_${timeframe}`] = range;
+          persistLogicalRanges();
         } catch(e) {}
         isSyncing = false;
       }
@@ -6277,6 +6354,21 @@ export function AdvancedChart() {
                       >Reset</button>
                     </div>
                     <div className="text-[9px] text-muted-foreground mt-1 leading-tight">e.g. 20–80. Persists across refreshes; blank = full 0–100.</div>
+                  </div>
+
+                  {/* Price scale (Y) lock */}
+                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                    <button
+                      onClick={toggleYLock}
+                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
+                    >
+                      <div className="w-4 flex items-center justify-center">
+                        {yLocked && <Check size={14} className="text-emerald-400" />}
+                      </div>
+                      <span>{yLocked
+                        ? `Price scale locked (${yLockRef.current ? `${Math.round(yLockRef.current.min)}–${Math.round(yLockRef.current.max)}` : 'saved'})`
+                        : 'Lock price scale (Y) at current view'}</span>
+                    </button>
                   </div>
 
                   {/* Support/Resistance Lines */}
