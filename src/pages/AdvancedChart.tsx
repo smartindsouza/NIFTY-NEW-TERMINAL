@@ -2602,6 +2602,17 @@ export function AdvancedChart() {
     try { return localStorage.getItem('levelAlertsOn') === 'true'; } catch(e) {}
     return false;
   });
+  // RSI pane scale range (persisted). Empty = full 0–100. The library offers no
+  // getter for a manually-dragged scale range, so the zoom is made a setting.
+  const [rsiScaleMin, setRsiScaleMin] = useState<string>(() => {
+    try { return localStorage.getItem('rsiScaleMin') || ''; } catch(e) {}
+    return '';
+  });
+  const [rsiScaleMax, setRsiScaleMax] = useState<string>(() => {
+    try { return localStorage.getItem('rsiScaleMax') || ''; } catch(e) {}
+    return '';
+  });
+  const rsiScaleRef = useRef<{ min: number | null; max: number | null }>({ min: null, max: null });
   // Level-touch alert engine (refs so the tick handler always sees fresh values
   // without re-subscribing). levels: [{key,label,price}]. armed: per-key re-arm state.
   const alertLevelsRef = useRef<{ key: string; label: string; price: number }[]>([]);
@@ -2697,6 +2708,18 @@ export function AdvancedChart() {
       try { Notification.requestPermission(); } catch(e) {}
     }
   }, [levelAlertsOn]);
+
+  useEffect(() => {
+    const mn = parseFloat(rsiScaleMin), mx = parseFloat(rsiScaleMax);
+    const valid = Number.isFinite(mn) && Number.isFinite(mx) && mn < mx && mn >= 0 && mx <= 100;
+    rsiScaleRef.current = valid ? { min: mn, max: mx } : { min: null, max: null };
+    try {
+      localStorage.setItem('rsiScaleMin', rsiScaleMin);
+      localStorage.setItem('rsiScaleMax', rsiScaleMax);
+    } catch(e) {}
+    // Nudge the RSI pane to re-run autoscale so the new range applies immediately
+    try { rsiSeriesRef.current?.priceScale()?.applyOptions({ autoScale: true }); } catch(e) {}
+  }, [rsiScaleMin, rsiScaleMax]);
 
   useEffect(() => {
     try {
@@ -4110,7 +4133,7 @@ export function AdvancedChart() {
   };
 
   const instrumentToken = selectedInstrument ? String(selectedInstrument.instrument_token) : "256265";
-  const { data: taInfo, isLoading: isLoadingTa, isError: isTaError, error: taError } = useQuery({
+  const { data: taInfo, isLoading: isLoadingTa, isError: isTaError, error: taError, refetch: refetchTa } = useQuery({
     queryKey: ["ta-data-live-chart", timeframe, instrumentToken],
     queryFn: async () => {
       const res = await fetch(`/api/ta?timeframe=${timeframe}&token=${instrumentToken}&symbol=${encodeURIComponent(selectedInstrument ? selectedInstrument.tradingsymbol : "NIFTY 50")}`);
@@ -4127,7 +4150,10 @@ export function AdvancedChart() {
     refetchInterval: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
-    refetchOnMount: false,
+    // Refetch full history whenever the chart (re)mounts — returning from another
+    // tab/timeframe within gcTime used to serve stale candles with no refetch,
+    // leaving a hole between old history and the live bar until a manual refresh.
+    refetchOnMount: 'always',
     staleTime: 10 * 1000,
     gcTime: 10 * 60000,
     enabled: Boolean(timeframe && instrumentToken)
@@ -4404,6 +4430,15 @@ export function AdvancedChart() {
 
            if (lastCandleTimeRef.current !== null && updateTime < lastCandleTimeRef.current) {
              return; // Older than tick
+           }
+
+           // Self-heal: if the server is 2+ bars ahead of the chart's last drawn bar
+           // (tab was throttled/asleep, or we seeded from stale cache), a single-bar
+           // update() would leave a hole of missing candles. Reseed the full history
+           // through the normal chartData path instead.
+           if (lastCandleTimeRef.current !== null && updateTime - lastCandleTimeRef.current >= 2 * tfMin * 60) {
+             try { refetchTa(); } catch(e) {}
+             return;
            }
 
            const live = lastCandleDataRef.current;
@@ -5096,8 +5131,8 @@ export function AdvancedChart() {
       priceLineVisible: false,
       autoscaleInfoProvider: () => ({
         priceRange: {
-          minValue: 0,
-          maxValue: 100,
+          minValue: rsiScaleRef.current.min ?? 0,
+          maxValue: rsiScaleRef.current.max ?? 100,
         },
       }),
     });
@@ -6215,6 +6250,33 @@ export function AdvancedChart() {
                       </div>
                       <span>Level Touch Alerts (sound + popup)</span>
                     </button>
+                  </div>
+
+                  {/* RSI pane scale (persisted zoom) */}
+                  <div className="px-3 py-2 hover:bg-muted transition-colors">
+                    <div className="text-sm text-foreground/80 mb-1">RSI scale (min–max)</div>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        value={rsiScaleMin}
+                        onChange={e => setRsiScaleMin(e.target.value)}
+                        placeholder="0"
+                        inputMode="numeric"
+                        className="w-14 bg-muted rounded px-1.5 py-0.5 text-xs text-foreground text-center placeholder:text-muted-foreground"
+                      />
+                      <span className="text-muted-foreground text-xs">–</span>
+                      <input
+                        value={rsiScaleMax}
+                        onChange={e => setRsiScaleMax(e.target.value)}
+                        placeholder="100"
+                        inputMode="numeric"
+                        className="w-14 bg-muted rounded px-1.5 py-0.5 text-xs text-foreground text-center placeholder:text-muted-foreground"
+                      />
+                      <button
+                        onClick={() => { setRsiScaleMin(''); setRsiScaleMax(''); }}
+                        className="ml-1 px-2 py-0.5 rounded text-[10px] font-bold bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                      >Reset</button>
+                    </div>
+                    <div className="text-[9px] text-muted-foreground mt-1 leading-tight">e.g. 20–80. Persists across refreshes; blank = full 0–100.</div>
                   </div>
 
                   {/* Support/Resistance Lines */}
