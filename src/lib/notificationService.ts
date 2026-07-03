@@ -18,8 +18,24 @@ export interface SavedNotification {
 }
 
 const STORAGE_KEY = "quant_terminal_notification_history";
+const POPUPS_KEY = "quant_popups_enabled";
 
 export const notificationService = {
+  /**
+   * Master switch for quant pop-up alerts (desktop notifications). DEFAULT OFF —
+   * alerts are always archived to the terminal silently; pop-ups fire only when
+   * the user enables them, so they don't mix with the chart's level-touch alerts.
+   */
+  popupsEnabled(): boolean {
+    if (typeof window === "undefined") return false;
+    try { return localStorage.getItem(POPUPS_KEY) === "1"; } catch { return false; }
+  },
+
+  setPopupsEnabled(on: boolean) {
+    try { localStorage.setItem(POPUPS_KEY, on ? "1" : "0"); } catch { /* ignore */ }
+    this._notifyChange();
+  },
+
   /**
    * Checks if notifications are supported by the browser client
    */
@@ -195,8 +211,9 @@ export const notificationService = {
         console.error("Failed to save notification to localStorage", e);
       }
 
-      // Also dispatch to OS-level notification tray if permissions allow
-      if (type === "oi_alert" || type === "divergence" || type === "order") {
+      // Also dispatch to OS-level notification tray if permissions allow —
+      // ONLY when quant pop-ups are enabled (default off; see popupsEnabled).
+      if (this.popupsEnabled() && (type === "oi_alert" || type === "divergence" || type === "order")) {
         this.send({
           title: `[Quant] ${title}`,
           body: body,
@@ -216,4 +233,3 @@ export const notificationService = {
     }
   },
 };
-

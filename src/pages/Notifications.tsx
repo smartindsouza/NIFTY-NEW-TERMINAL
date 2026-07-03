@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { useNotifications } from "../hooks/useNotifications";
+import { notificationService } from "../lib/notificationService";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 function renderMarkdownFallback(text: string) {
@@ -8,6 +9,7 @@ function renderMarkdownFallback(text: string) {
 }
 import { 
   Bell, 
+  BellOff, 
   Trash2, 
   CheckCheck, 
   TrendingUp, 
@@ -28,6 +30,14 @@ type FilterType = "all" | "oi_alert" | "divergence" | "order" | "system";
 export default function Notifications() {
   const { notifications, markAsRead, markAllAsRead, clearAll, unreadCount } = useNotifications();
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
+  // Quant pop-up alerts master switch — DEFAULT OFF so quant desktop pop-ups
+  // don't mix with the chart's level-touch alerts. History still archives here.
+  const [popupsOn, setPopupsOn] = useState<boolean>(() => notificationService.popupsEnabled());
+  const togglePopups = () => {
+    const next = !popupsOn;
+    notificationService.setPopupsEnabled(next);
+    setPopupsOn(next);
+  };
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [gamePlan, setGamePlan] = useState<string | null>(null);
 
@@ -153,6 +163,17 @@ export default function Notifications() {
 
         {/* Quick Utilities */}
         <div className="flex items-center gap-2.5 self-stretch md:self-auto justify-end w-full md:w-auto">
+          <button
+            onClick={togglePopups}
+            title={popupsOn ? "Quant pop-up alerts are ON — click to disable" : "Quant pop-up alerts are OFF (default) — alerts archive here silently"}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 text-xs border border-0 rounded-lg transition-all font-mono",
+              popupsOn ? "bg-primary/15 text-primary" : "bg-muted/80 text-muted-foreground hover:text-foreground"
+            )}
+          >
+            {popupsOn ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
+            {popupsOn ? "Pop-ups on" : "Pop-ups off"}
+          </button>
           {notifications.length > 0 && (
             <>
               <button
