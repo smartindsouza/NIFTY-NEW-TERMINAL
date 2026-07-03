@@ -14,6 +14,72 @@ function Card({ label, value, hint, tone }: { label: string; value: string; hint
   );
 }
 
+
+// Translate the screen's numbers into everyday language — no greeks needed.
+// Answers: is today the day? how "dry" is the grass? where's the likely spark?
+function plainWords(data: any, blast: any): { headline: string; tone: 'high' | 'mod' | 'low'; lines: string[] } {
+  const lines: string[] = [];
+  const isExp = !!data?.expiry?.isExpiryDay;
+  const mins = data?.expiry?.minutesToClose;
+  const regime = data?.gammaRegime;
+  const spot = Number(data?.spot);
+  const callWall = data?.pinning?.callWall;
+  const putWall = data?.pinning?.putWall;
+  const pinned = !!data?.pinning?.pinned;
+  const maxPain = data?.pinning?.maxPain;
+  const catalyst = data?.catalyst;
+
+  // 1) Is today the day?
+  if (!isExp) {
+    lines.push('Today is NOT an expiry day, so a true gamma blast is unlikely — options still have time value cushioning them. Treat everything below as background reference.');
+  } else if (typeof mins === 'number' && mins > 90) {
+    lines.push(`Today IS expiry day. The blast window is the last ~90 minutes — still ${mins} minutes to close, so conditions can build but the spark usually comes later.`);
+  } else if (typeof mins === 'number' && mins > 0) {
+    lines.push(`Today IS expiry day and we are in the blast window (${mins} min to close) — this is when small index moves can violently reprice ATM options.`);
+  } else {
+    lines.push('Expiry session is over for today.');
+  }
+
+  // 2) How dry is the grass? (cheap + touchy options)
+  const ce = data?.ce, pe = data?.pe;
+  const cheapTxt = (ce != null && pe != null) ? `ATM options cost \u20b9${ce} (CE) / \u20b9${pe} (PE)` : 'ATM option prices unavailable';
+  if (regime === 'LOADED') {
+    lines.push(`The grass is dry: ${cheapTxt} — cheap and extremely touchy. A ~${blast?.movePts ?? '—'}-pt index move pays roughly +${blast?.ceGainPct ?? '—'}% on the CE or +${blast?.peGainPct ?? '—'}% on the PE.`);
+  } else if (regime === 'ELEVATED') {
+    lines.push(`Conditions are warming up: ${cheapTxt}. Sensitivity is elevated but not extreme — a ~${blast?.movePts ?? '—'}-pt move pays about +${blast?.ceGainPct ?? '—'}% (CE) / +${blast?.peGainPct ?? '—'}% (PE).`);
+  } else {
+    lines.push(`The grass is damp: options are not in blast condition right now (${cheapTxt}). Big percentage moves need much larger index swings today.`);
+  }
+
+  // 3) Where's the spark?
+  const distCall = (Number.isFinite(spot) && callWall != null) ? Math.round(callWall - spot) : null;
+  const distPut = (Number.isFinite(spot) && putWall != null) ? Math.round(spot - putWall) : null;
+  if (catalyst === 'UP') {
+    lines.push('A spark is already showing: price is breaking UP out of its recent range — if it keeps going, the CE side is the one that blasts.');
+  } else if (catalyst === 'DOWN') {
+    lines.push('A spark is already showing: price is breaking DOWN out of its recent range — if it keeps going, the PE side is the one that blasts.');
+  } else if (pinned && maxPain != null) {
+    lines.push(`No spark yet: sellers are holding price near ${maxPain} (max-pain pin). The blast only comes if price breaks decisively away from this level — until then expect stalling.`);
+  } else if (distCall != null && distCall > 0 && distCall <= 40) {
+    lines.push(`Watch the call wall at ${callWall}: price is only ${distCall} pts below it. Walls act like fences — they usually hold, but a clean break ABOVE turns trapped call sellers into fuel and favours the CE.`);
+  } else if (distPut != null && distPut > 0 && distPut <= 40) {
+    lines.push(`Watch the put wall at ${putWall}: price is only ${distPut} pts above it. If it breaks BELOW, trapped put sellers add fuel and the PE side is favoured.`);
+  } else {
+    lines.push('No spark yet: price is sitting inside its range, away from the big walls. Wait for a break of the range or a wall before expecting a blast.');
+  }
+
+  // Headline
+  let tone: 'high' | 'mod' | 'low' = 'low';
+  let headline = 'Blast possibility today: LOW';
+  if (isExp && (typeof mins !== 'number' || mins > 0)) {
+    const sparkNear = catalyst === 'UP' || catalyst === 'DOWN' || (distCall != null && distCall > 0 && distCall <= 40) || (distPut != null && distPut > 0 && distPut <= 40);
+    if (regime === 'LOADED' && sparkNear) { tone = 'high'; headline = 'Blast possibility today: HIGH — dry grass and a spark nearby'; }
+    else if (regime === 'LOADED' || (regime === 'ELEVATED' && sparkNear)) { tone = 'mod'; headline = 'Blast possibility today: MODERATE — conditions present, waiting on the spark'; }
+    else { tone = 'low'; headline = 'Blast possibility today: LOW — expiry day, but options are not in blast condition'; }
+  }
+  return { headline, tone, lines };
+}
+
 export default function GammaBlast() {
   const [movePct, setMovePct] = useState(0.3);
   const { data, dataUpdatedAt, refetch, isFetching } = useQuery({
@@ -28,6 +94,7 @@ export default function GammaBlast() {
   const banner = lvl === 'SETUP' ? 'bg-amber-500/15 border-amber-500/40' : lvl === 'WATCH' ? 'bg-sky-500/10 border-sky-500/30' : 'bg-card border-border';
   const bannerText = lvl === 'SETUP' ? 'text-amber-400' : lvl === 'WATCH' ? 'text-sky-400' : 'text-muted-foreground';
   const blast = ok ? data.blast : null;
+  const plain = ok ? plainWords(data, blast) : null;
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-5 pb-24">
@@ -53,6 +120,25 @@ export default function GammaBlast() {
           {ok ? data.verdict : (data?.error || 'Loading…')}
         </div>
       </div>
+
+      {/* In plain words — no-greeks translation of the whole screen */}
+      {plain && (
+        <div className={cn('rounded-2xl border p-4 mb-4',
+          plain.tone === 'high' ? 'bg-amber-500/10 border-amber-500/40' : plain.tone === 'mod' ? 'bg-sky-500/10 border-sky-500/30' : 'bg-card border-border')}>
+          <div className={cn('text-xs font-bold uppercase tracking-wider mb-2',
+            plain.tone === 'high' ? 'text-amber-400' : plain.tone === 'mod' ? 'text-sky-400' : 'text-muted-foreground')}>
+            In plain words
+          </div>
+          <div className={cn('text-sm font-semibold mb-2', plain.tone === 'high' ? 'text-amber-300' : plain.tone === 'mod' ? 'text-sky-300' : 'text-foreground')}>
+            {plain.headline}
+          </div>
+          <div className="space-y-1.5">
+            {plain.lines.map((l, i) => (
+              <p key={i} className="text-[12px] leading-relaxed text-foreground/85">{l}</p>
+            ))}
+          </div>
+        </div>
+      )}
 
       {ok && (
         <>
