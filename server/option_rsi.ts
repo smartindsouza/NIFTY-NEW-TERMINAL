@@ -182,7 +182,7 @@ export async function getLiveSignal(threshold = 40) {
 }
 
 // ---- BACKTEST: recent window only, add option-RSI confirmation + real option P&L ----
-export async function runOptionConfirmBacktest(opts: { optionDays?: number; deepOb?: number; deepOs?: number; threshold?: number; useStop?: boolean; useDivergence?: boolean; divWindow?: number; noEntryAfter?: string; exitAtCutoff?: boolean; requireOptionRsi?: boolean }) {
+export async function runOptionConfirmBacktest(opts: { optionDays?: number; deepOb?: number; deepOs?: number; threshold?: number; useStop?: boolean; slMode?: string; timeframe?: string; useDivergence?: boolean; divWindow?: number; noEntryAfter?: string; exitAtCutoff?: boolean; requireOptionRsi?: boolean }) {
   const optionDays = Math.min(Math.max(opts.optionDays || 12, 3), 25);
   const threshold = opts.threshold ?? 40;
   const kc = getKiteClient();
@@ -191,7 +191,7 @@ export async function runOptionConfirmBacktest(opts: { optionDays?: number; deep
 
   const base = await runRsiBacktest({
     days: optionDays, deepOb: opts.deepOb ?? 70, deepOs: opts.deepOs ?? 30,
-    useStop: !!opts.useStop, useDivergence: !!opts.useDivergence,
+    useStop: !!opts.useStop, slMode: opts.slMode, timeframe: opts.timeframe, useDivergence: !!opts.useDivergence,
     divWindow: opts.divWindow, noEntryAfter: opts.noEntryAfter, exitAtCutoff: !!opts.exitAtCutoff,
   });
   if (!('success' in base) || !base.success) return base;

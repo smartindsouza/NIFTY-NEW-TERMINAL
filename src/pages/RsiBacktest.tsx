@@ -48,7 +48,8 @@ export default function RsiBacktest() {
   const [days, setDays] = useState(60);
   const [deepOb, setDeepOb] = useState(70);
   const [deepOs, setDeepOs] = useState(30);
-  const [useStop, setUseStop] = useState(false);
+  const [slMode, setSlMode] = useState<'none' | 'same' | 'prev' | 'prev2'>('none');
+  const [timeframe, setTimeframe] = useState<'5' | '15'>('5');
   const [useDiv, setUseDiv] = useState(false);
   const [divWindow, setDivWindow] = useState(7);
   const [noEntryAfter, setNoEntryAfter] = useState('');
@@ -65,7 +66,7 @@ export default function RsiBacktest() {
   const runOption = async () => {
     setOptLoading(true); setOptError(null);
     try {
-      const r = await fetch(`/api/backtest/rsi-option?deepOb=${deepOb}&deepOs=${deepOs}&optionDays=12&useStop=${useStop}&useDiv=${useDiv}&divWindow=${divWindow}&noEntryAfter=${encodeURIComponent(noEntryAfter)}&exitAtCutoff=${exitAtCutoff}&reqOptRsi=${reqOptRsi}`);
+      const r = await fetch(`/api/backtest/rsi-option?deepOb=${deepOb}&deepOs=${deepOs}&optionDays=12&slMode=${slMode}&timeframe=${timeframe}&useDiv=${useDiv}&divWindow=${divWindow}&noEntryAfter=${encodeURIComponent(noEntryAfter)}&exitAtCutoff=${exitAtCutoff}&reqOptRsi=${reqOptRsi}`);
       const j = await r.json();
       if (!j.success) { setOptError(j.error || 'Failed'); setOptData(null); }
       else setOptData(j);
@@ -76,7 +77,7 @@ export default function RsiBacktest() {
   const run = async () => {
     setLoading(true); setError(null);
     try {
-      const r = await fetch(`/api/backtest/rsi?days=${days}&deepOb=${deepOb}&deepOs=${deepOs}&useStop=${useStop}&useDiv=${useDiv}&divWindow=${divWindow}&noEntryAfter=${encodeURIComponent(noEntryAfter)}&exitAtCutoff=${exitAtCutoff}`);
+      const r = await fetch(`/api/backtest/rsi?days=${days}&deepOb=${deepOb}&deepOs=${deepOs}&slMode=${slMode}&timeframe=${timeframe}&useDiv=${useDiv}&divWindow=${divWindow}&noEntryAfter=${encodeURIComponent(noEntryAfter)}&exitAtCutoff=${exitAtCutoff}`);
       const j = await r.json();
       if (!j.success) { setError(j.error || 'Backtest failed'); setData(null); }
       else setData(j);
@@ -108,7 +109,7 @@ export default function RsiBacktest() {
         <h1 className="text-lg md:text-2xl font-bold tracking-tight">RSI Strategy Backtest</h1>
       </div>
       <p className="text-xs text-muted-foreground mb-4">
-        Your RSI zone strategy, tested on real 5-min NIFTY history. Takes only setups where RSI pushes <span className="text-foreground">deep</span> into a zone (≥{deepOb} / ≤{deepOs}) then closes back out{useDiv ? <span className="text-foreground"> and shows matching RSI divergence (≤{divWindow} bars)</span> : ''}; exit at the opposite zone; {useStop ? <span className="text-foreground">stop = prev candle low/high on a close beyond it</span> : 'no stop-loss'}; intraday{noEntryAfter ? <span className="text-foreground">, no new entries after {noEntryAfter} IST</span> : ''}{exitAtCutoff && noEntryAfter ? <span className="text-foreground">, open trades squared off at {noEntryAfter}</span> : ', squared off at day end'}.
+        Your RSI zone strategy, tested on real {timeframe}-min NIFTY history. Takes only setups where RSI pushes <span className="text-foreground">deep</span> into a zone (≥{deepOb} / ≤{deepOs}) then closes back out{useDiv ? <span className="text-foreground"> and shows matching RSI divergence (≤{divWindow} bars)</span> : ''}; exit at the opposite zone; {slMode !== 'none' ? <span className="text-foreground">stop = {slMode === 'same' ? 'entry' : slMode === 'prev' ? 'previous' : '2nd previous'} candle low/high on a close beyond it</span> : 'no stop-loss'}; intraday{noEntryAfter ? <span className="text-foreground">, no new entries after {noEntryAfter} IST</span> : ''}{exitAtCutoff && noEntryAfter ? <span className="text-foreground">, open trades squared off at {noEntryAfter}</span> : ', squared off at day end'}.
       </p>
 
       {/* Honest framing banner */}
@@ -144,15 +145,23 @@ export default function RsiBacktest() {
             className="w-16 text-xs font-mono px-2.5 py-1.5 rounded-lg bg-card text-foreground border border-border focus:border-primary outline-none" />
         </div>
         <div className="flex flex-col gap-1">
+          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Timeframe</span>
+          <select value={timeframe} onChange={(e) => setTimeframe(e.target.value as '5' | '15')}
+            className="text-xs font-mono px-2 py-1.5 rounded-lg bg-card text-foreground border border-border focus:border-primary outline-none">
+            <option value="5">5 min</option>
+            <option value="15">15 min</option>
+          </select>
+        </div>
+        <div className="flex flex-col gap-1">
           <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Stop-loss</span>
-          <button onClick={() => setUseStop((v) => !v)}
-            className={cn('flex items-center gap-2 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-colors',
-              useStop ? 'bg-rose-500/15 text-rose-400' : 'bg-card text-muted-foreground hover:text-foreground')}>
-            <span className={cn('relative w-7 h-4 rounded-full transition-colors', useStop ? 'bg-rose-500' : 'bg-muted')}>
-              <span className={cn('absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all', useStop ? 'left-[14px]' : 'left-0.5')} />
-            </span>
-            prev candle (close)
-          </button>
+          <select value={slMode} onChange={(e) => setSlMode(e.target.value as 'none' | 'same' | 'prev' | 'prev2')}
+            className={cn('text-xs font-mono px-2 py-1.5 rounded-lg border border-border focus:border-primary outline-none',
+              slMode !== 'none' ? 'bg-rose-500/15 text-rose-400' : 'bg-card text-foreground')}>
+            <option value="none">None</option>
+            <option value="same">Same candle high/low</option>
+            <option value="prev">Previous candle high/low</option>
+            <option value="prev2">2nd previous candle high/low</option>
+          </select>
         </div>
         <div className="flex flex-col gap-1">
           <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Divergence</span>
@@ -223,7 +232,7 @@ export default function RsiBacktest() {
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 mb-5">
             <Stat label="Trades" value={String(s.trades)} />
             <Stat label="Hit Target" value={String(s.targetExits)} tone="pos" hint="reached opposite zone" />
-            {(s.stopExits > 0 || data.params?.useStop) && <Stat label="Stopped" value={String(s.stopExits ?? 0)} tone="neg" hint="closed past prev candle" />}
+            {(s.stopExits > 0 || (data.params?.slMode && data.params.slMode !== 'none')) && <Stat label="Stopped" value={String(s.stopExits ?? 0)} tone="neg" hint="closed past the stop candle" />}
             {(s.cutoffExits > 0 || data.params?.exitAtCutoff) && <Stat label="Cutoff exits" value={String(s.cutoffExits ?? 0)} tone="warn" hint="squared off at cutoff time" />}
             <Stat label="Squared off (EOD)" value={String(s.eodExits)} tone="warn" hint="held to day end" />
             <Stat label="Avg / Max Heat" value={`${s.avgMae} / ${s.maxMae}`} tone="neutral" hint="adverse pts (MAE)" />
