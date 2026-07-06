@@ -25,7 +25,7 @@ function wilderRSI(closes: number[], period = 14): (number | null)[] {
 const fmtDate = (d: Date): string => d.toISOString().slice(0, 10); // yyyy-mm-dd
 
 // Fetch historical 5-minute NIFTY index candles, chunked to respect Kite's ~100-day/request limit.
-async function fetchCandles(days: number): Promise<any[]> {
+async function fetchCandles(days: number, interval: '5minute' | '15minute'): Promise<any[]> {
   const kc = getKiteClient();
   // @ts-ignore
   if (!kc || !kc.access_token) throw new Error('NOT_LOGGED_IN');
@@ -38,7 +38,7 @@ async function fetchCandles(days: number): Promise<any[]> {
     const span = Math.min(remaining, CHUNK);
     const from = new Date(to.getTime() - span * 24 * 60 * 60 * 1000);
     try {
-      const hist = await kc.getHistoricalData(token, '5minute' as any, fmtDate(from), fmtDate(to));
+      const hist = await kc.getHistoricalData(token, interval as any, fmtDate(from), fmtDate(to));
       if (hist && hist.length) all.push(...hist);
     } catch (e) { /* skip a failed chunk, keep going */ }
     to = new Date(from.getTime() - 24 * 60 * 60 * 1000);
@@ -53,6 +53,7 @@ async function fetchCandles(days: number): Promise<any[]> {
 
 export interface RsiBacktestOpts {
   days?: number; rsiPeriod?: number;
+  slMode?: string; timeframe?: string;
   obLow?: number; obHigh?: number; osLow?: number; osHigh?: number;
   deepOb?: number; deepOs?: number; useStop?: boolean; useDivergence?: boolean;
   divWindow?: number; noEntryAfter?: string; exitAtCutoff?: boolean;
@@ -66,7 +67,13 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
   // "Deep" penetration required to qualify a setup — filters out shallow bounces off the zone edge.
   const deepOb = opts.deepOb ?? 70; // short only if RSI first reached at least this (deep overbought)
   const deepOs = opts.deepOs ?? 30; // long only if RSI first reached at most this (deep oversold)
-  const useStop = !!opts.useStop;   // optional: stop at the pre-entry candle's low/high, on a CLOSING basis
+  // Stop-loss mode: none | same (entry candle) | prev | prev2 — the chosen candle's
+  // low (LONG) / high (SHORT), triggered only when a later candle CLOSES past it.
+  // Back-compat: legacy useStop=true maps to 'prev' (its old behaviour).
+  const slMode = ['none', 'same', 'prev', 'prev2'].includes(String(opts.slMode))
+    ? String(opts.slMode) : (opts.useStop ? 'prev' : 'none');
+  const timeframe = String(opts.timeframe) === '15' ? '15' : '5';
+  const interval: '5minute' | '15minute' = timeframe === '15' ? '15minute' : '5minute';
   const useDivergence = !!opts.useDivergence; // optional: require matching RSI divergence
   const DIVW = Math.min(Math.max(Math.round(opts.divWindow ?? 7), 1), 7); // divergence lookback window (1-7 candles)
   const noEntryAfter = (opts.noEntryAfter || '').trim(); // 'HH:MM' IST; '' = no cutoff
@@ -74,7 +81,7 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
 
   let candles: any[];
   try {
-    candles = await fetchCandles(days);
+    candles = await fetchCandles(days, interval);
   } catch (e: any) {
     if (e?.message === 'NOT_LOGGED_IN') return { success: false, error: 'Not logged in to Kite — historical data needs an active Kite session.' };
     return { success: false, error: e?.message || String(e) };
@@ -165,8 +172,8 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
       }
       let exit = false, reason = '';
       // Optional stop-loss: pre-entry candle's low/high, triggered only when a candle CLOSES past it
-      if (useStop && pos.stop != null && pos.dir === 'LONG' && closes[i] < pos.stop) { exit = true; reason = 'STOP'; }
-      else if (useStop && pos.stop != null && pos.dir === 'SHORT' && closes[i] > pos.stop) { exit = true; reason = 'STOP'; }
+      if (pos.stop != null && pos.dir === 'LONG' && closes[i] < pos.stop) { exit = true; reason = 'STOP'; }
+      else if (pos.stop != null && pos.dir === 'SHORT' && closes[i] > pos.stop) { exit = true; reason = 'STOP'; }
       // Target = opposite RSI zone (on close)
       else if (pos.dir === 'SHORT' && r <= osHigh) { exit = true; reason = 'TARGET'; }
       else if (pos.dir === 'LONG' && r >= obLow) { exit = true; reason = 'TARGET'; }
@@ -195,15 +202,21 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
     if (lastOfDay) continue;
     if (noEntryAfter && istTime[i] >= noEntryAfter) continue; // no new entries after the cutoff time
 
+    // Stop for a new entry: the chosen candle's low (LONG) / high (SHORT); null = no stop
+    const stopFor = (dir: 'LONG' | 'SHORT'): number | null => {
+      const off = slMode === 'same' ? 0 : slMode === 'prev' ? 1 : slMode === 'prev2' ? 2 : -1;
+      if (off < 0 || i - off < 0) return null;
+      return dir === 'LONG' ? lows[i - off] : highs[i - off];
+    };
     // SHORT: RSI went DEEP into overbought (peak >= deepOb), then a candle closes back below obLow
     if (flatPeak >= deepOb && rPrev >= obLow && r < obLow && (!useDivergence || hasBearishDiv(i))) {
-      pos = { dir: 'SHORT', entryIdx: i, entryTime: String(candles[i].date), entryPrice: closes[i], entryRsi: r, mae: 0, mfe: 0, regime: regimeAt(i, 'SHORT'), stop: useStop ? highs[i - 1] : null };
+      pos = { dir: 'SHORT', entryIdx: i, entryTime: String(candles[i].date), entryPrice: closes[i], entryRsi: r, mae: 0, mfe: 0, regime: regimeAt(i, 'SHORT'), stop: stopFor('SHORT') };
       flatPeak = r; flatTrough = r;
     }
     // LONG: RSI went DEEP into oversold (trough <= deepOs), then a candle closes back above osHigh
     else if (flatTrough <= deepOs && rPrev <= osHigh && r > osHigh && (!useDivergence || hasBullishDiv(i))) {
       const bs = scoreBounceAt(bounceSeries, i, bounceOpts);
-      pos = { dir: 'LONG', entryIdx: i, entryTime: String(candles[i].date), entryPrice: closes[i], entryRsi: r, mae: 0, mfe: 0, regime: regimeAt(i, 'LONG'), stop: useStop ? lows[i - 1] : null, bounceScore: bs.score };
+      pos = { dir: 'LONG', entryIdx: i, entryTime: String(candles[i].date), entryPrice: closes[i], entryRsi: r, mae: 0, mfe: 0, regime: regimeAt(i, 'LONG'), stop: stopFor('LONG'), bounceScore: bs.score };
       flatPeak = r; flatTrough = r;
     }
   }
@@ -295,7 +308,7 @@ export async function runRsiBacktest(opts: RsiBacktestOpts) {
 
   return {
     success: true,
-    params: { days, rsiPeriod: period, obLow, obHigh, osLow, osHigh, deepOb, deepOs, useStop, useDivergence, divWindow: DIVW, noEntryAfter, exitAtCutoff },
+    params: { days, rsiPeriod: period, obLow, obHigh, osLow, osHigh, deepOb, deepOs, useStop: slMode !== 'none', slMode, timeframe, useDivergence, divWindow: DIVW, noEntryAfter, exitAtCutoff },
     from: candles[0]?.date || null,
     to: candles[candles.length - 1]?.date || null,
     candles: candles.length,
