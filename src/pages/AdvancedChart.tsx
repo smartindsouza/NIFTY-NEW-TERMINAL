@@ -3196,50 +3196,21 @@ export function AdvancedChart() {
 
   const cacheKey = `${selectedInstrument?.instrument_token}_${timeframe}`;
 
-  // Load any saved Y-lock for this instrument+timeframe; apply via the series'
-  // autoscaleInfoProvider. Runs on mount and whenever the key changes.
+  // Y-lock removed: always clear any previously-saved lock and keep autoscale on,
+  // so a stale near-zero locked range can never hide the candles again.
   useEffect(() => {
-    try {
-      const map = JSON.parse(localStorage.getItem('chartYLocks') || '{}');
-      const saved = map[cacheKey];
-      const valid = saved && Number.isFinite(saved.min) && Number.isFinite(saved.max) && saved.min < saved.max;
-      yLockRef.current = valid ? { min: saved.min, max: saved.max } : null;
-      setYLocked(!!valid);
-    } catch (e) { yLockRef.current = null; setYLocked(false); }
+    yLockRef.current = null;
+    setYLocked(false);
+    try { localStorage.removeItem('chartYLocks'); } catch (e) {}
     try { mainSeriesRef.current?.priceScale()?.applyOptions({ autoScale: true }); } catch (e) {}
   }, [cacheKey]);
 
+  // Y-lock feature removed (it could pin the scale to a stale near-zero range and
+  // hide the candles). Kept as a no-op so any lingering reference stays valid.
   const toggleYLock = () => {
-    if (yLockRef.current) {
-      // unlock: back to autoscale, remove saved entry
-      yLockRef.current = null;
-      setYLocked(false);
-      try {
-        const map = JSON.parse(localStorage.getItem('chartYLocks') || '{}');
-        delete map[cacheKey];
-        localStorage.setItem('chartYLocks', JSON.stringify(map));
-      } catch (e) {}
-    } else {
-      // lock: capture the currently visible price range from pane coordinates
-      try {
-        const series = mainSeriesRef.current;
-        const chart = mainChartRef.current as any;
-        if (!series || !chart) return;
-        const pane = typeof chart.paneSize === 'function' ? chart.paneSize() : null;
-        const h = pane?.height ?? (chartContainerRef.current ? chartContainerRef.current.clientHeight - 28 : 0);
-        if (!h || h < 40) return;
-        const top = series.coordinateToPrice(0);
-        const bottom = series.coordinateToPrice(h);
-        if (typeof top !== 'number' || typeof bottom !== 'number' || !(top > bottom)) return;
-        yLockRef.current = { min: bottom, max: top };
-        setYLocked(true);
-        const map = JSON.parse(localStorage.getItem('chartYLocks') || '{}');
-        map[cacheKey] = yLockRef.current;
-        const keys = Object.keys(map);
-        if (keys.length > 20) delete map[keys[0]];
-        localStorage.setItem('chartYLocks', JSON.stringify(map));
-      } catch (e) {}
-    }
+    yLockRef.current = null;
+    setYLocked(false);
+    try { localStorage.removeItem('chartYLocks'); } catch (e) {}
     try { mainSeriesRef.current?.priceScale()?.applyOptions({ autoScale: true }); } catch (e) {}
   };
 
@@ -3634,6 +3605,36 @@ export function AdvancedChart() {
       clearInterval(iv);
     };
   }, []);
+
+  // External "reload chart" button (in the app shell) → refetch full history and
+  // snap the view back to the latest candle. Fixes a chart that's scrolled away or
+  // stuck on stale data on mobile without a full app refresh.
+  useEffect(() => {
+    const onReload = () => {
+      try { refetchTa(); } catch (e) {}
+      // snap to the most recent candle after data settles
+      const snap = (attempt: number) => {
+        try {
+          const ts = mainChartRef.current?.timeScale?.();
+          if (ts) {
+            ts.scrollToRealTime();
+            // also reset the saved zoom so a persisted range doesn't pull us back
+            try {
+              const data = chartDataRef.current?.candles;
+              if (data && data.length) {
+                const barsToShow = Math.min(120, data.length);
+                ts.setVisibleLogicalRange({ from: data.length - barsToShow, to: data.length + 2 });
+              }
+            } catch (e) {}
+          }
+        } catch (e) {}
+        if (attempt < 3) setTimeout(() => snap(attempt + 1), 250);
+      };
+      setTimeout(() => snap(0), 150);
+    };
+    window.addEventListener('chart_reload', onReload);
+    return () => window.removeEventListener('chart_reload', onReload);
+  }, [refetchTa]);
 
   // Poll the server for an armed auto-exit rule on the active position
   useEffect(() => {
@@ -4254,13 +4255,18 @@ export function AdvancedChart() {
     : undefined;
 
   const { data: oiData } = useQuery({
-    queryKey: ["oi-data", currentSymbol, lastSpotValue],
+    queryKey: ["oi-data", currentSymbol],
     queryFn: async () => {
       const spotParam = lastSpotValue ? `&spot=${lastSpotValue}` : "";
       const res = await fetch(`/api/option-chain?symbol=${encodeURIComponent(currentSymbol)}${spotParam}`);
       if (!res.ok) throw new Error("Network error");
       return res.json();
     },
+    // Keep showing the previous chain while a refetch is in flight — the spot
+    // value used to be part of the queryKey, so every spot move spawned a brand
+    // new query whose data was undefined during fetch, making the OI bars
+    // disappear and reappear.
+    placeholderData: (prev: any) => prev,
     refetchInterval: () => document.visibilityState === 'visible' ? 10 * 1000 : false,
     staleTime: 30000,
     gcTime: 10 * 60000,
@@ -4390,6 +4396,17 @@ export function AdvancedChart() {
           const currentChartData = chartDataRef.current;
           const seededLastCandle = lastCandleDataRef.current ||
             (currentChartData?.candles?.length ? currentChartData.candles[currentChartData.candles.length - 1] : null);
+
+          // Sanity gate: reject outlier ticks. A single bad tick (0, another
+          // instrument, feed glitch) would permanently pollute the forming
+          // candle's high/low (they're cumulative max/min). NIFTY never moves
+          // 1.5% within one candle vs the last known close, so such a tick is bad data.
+          if (seededLastCandle && Number.isFinite(seededLastCandle.close) && seededLastCandle.close > 0) {
+            const dev = Math.abs(msg.candle.close - seededLastCandle.close) / seededLastCandle.close;
+            if (!Number.isFinite(msg.candle.close) || msg.candle.close <= 0 || dev > 0.015) {
+              return;
+            }
+          }
 
           // Daily/Weekly/Monthly: a live tick always belongs to the CURRENT (last) bar.
           // A new bar only appears when the server rolls to the next day/week/month, which the
@@ -4526,11 +4543,16 @@ export function AdvancedChart() {
              // Same forming candle, live ticks still flowing: keep the live OHLC.
              // The 15s server snapshot lags the ticks, so don't let it retract the
              // tick-extended high/low or reset the live close (that caused the jump vs Zerodha/TV).
+             // But clamp the preserved extremes to NEAR the server's values: genuine
+             // tick extremes only exceed the snapshot by what price moved since it
+             // (seconds), while a polluted wick from a bad tick sits far outside —
+             // this heals it instead of preserving it forever.
+             const tol = Math.max(latestCandle.close * 0.001, 10); // ~0.1% or 10 pts
              updatedCandle = {
                time: updateTime,
                open: live.open,
-               high: Math.max(live.high, latestCandle.high),
-               low: Math.min(live.low, latestCandle.low),
+               high: Math.min(Math.max(live.high, latestCandle.high), latestCandle.high + tol),
+               low: Math.max(Math.min(live.low, latestCandle.low), latestCandle.low - tol),
                close: live.close,
                rsi14: latestCandle.rsi14, // server RSI is authoritative
              };
@@ -4702,8 +4724,15 @@ export function AdvancedChart() {
       if (Number.isFinite(p) && p > 0) L.push({ key, label, price: p });
     };
     if (showHLevels && Array.isArray(hLevels)) {
-      const names = ['Red 1', 'Red 2', 'Trap 1', 'Trap 2', 'Green 1', 'Green 2'];
-      hLevels.forEach((v, i) => { if (v > 0) add(`h${i}`, `H-Level ${names[i] || i + 1}`, v); });
+      const names = ['RED OUTER', 'RED INNER', 'TRAP UPPER', 'TRAP LOWER', 'GREEN INNER', 'GREEN OUTER'];
+      hLevels.forEach((v, i) => { if (v > 0) add(`h${i}`, names[i] || `H-Level ${i + 1}`, v); });
+    }
+    if (showFiftyPercentLevels && Array.isArray(hLevels)) {
+      const active = hLevels.filter(v => v > 0).sort((a, b) => b - a);
+      for (let i = 0; i < active.length - 1; i++) {
+        const mid = Math.round((active[i] + active[i + 1]) / 2);
+        add(`fifty${i}`, '50% Level', mid);
+      }
     }
     if (showPdhPdl) { add('pdh', 'PDH', pdhPdlData?.pdh); add('pdl', 'PDL', pdhPdlData?.pdl); }
     if (showSnR) {
@@ -4720,7 +4749,7 @@ export function AdvancedChart() {
       (dz?.supply || []).forEach((z: any, i: number) => add(`sz${i}`, 'Supply zone', z.bottom));
     }
     alertLevelsRef.current = L;
-  }, [hLevels, showHLevels, pdhPdlData, showPdhPdl, localAnalytics, showSnR, taInfo, showOpeningRange, showDsZones]);
+  }, [hLevels, showHLevels, showFiftyPercentLevels, pdhPdlData, showPdhPdl, localAnalytics, showSnR, taInfo, showOpeningRange, showDsZones]);
 
   // Fire one alert: OS notification (works from background tabs) + in-app toast + beep.
   const fireLevelAlert = (label: string, price: number, spot: number, dirUp: boolean) => {
@@ -5019,10 +5048,8 @@ export function AdvancedChart() {
       wickDownColor: '#ef4444',
       lastValueVisible: false,
       priceLineVisible: false,
-      // When a Y-lock is saved, pin the price scale to it; null = normal autoscale
-      autoscaleInfoProvider: () => (yLockRef.current
-        ? { priceRange: { minValue: yLockRef.current.min, maxValue: yLockRef.current.max } }
-        : null),
+      // Candle price scale ALWAYS auto-fits to the data. (A previous "Y-lock"
+      // could pin it to a stale near-zero range and hide the candles — removed.)
     });
 
     mainSeriesRef.current = mainSeries;
@@ -6366,21 +6393,6 @@ export function AdvancedChart() {
                       >Reset</button>
                     </div>
                     <div className="text-[9px] text-muted-foreground mt-1 leading-tight">e.g. 20–80. Persists across refreshes; blank = full 0–100.</div>
-                  </div>
-
-                  {/* Price scale (Y) lock */}
-                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
-                    <button
-                      onClick={toggleYLock}
-                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
-                    >
-                      <div className="w-4 flex items-center justify-center">
-                        {yLocked && <Check size={14} className="text-emerald-400" />}
-                      </div>
-                      <span>{yLocked
-                        ? `Price scale locked (${yLockRef.current ? `${Math.round(yLockRef.current.min)}–${Math.round(yLockRef.current.max)}` : 'saved'})`
-                        : 'Lock price scale (Y) at current view'}</span>
-                    </button>
                   </div>
 
                   {/* Support/Resistance Lines */}
