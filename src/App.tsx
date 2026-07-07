@@ -4,13 +4,13 @@
  */
 
 import { lazy, Suspense, useState, useEffect } from 'react';
-import { Route, Switch } from 'wouter';
+import { Route, Switch, useLocation } from 'wouter';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Header } from './components/Header';
 import { ActivePositions } from './components/ActivePositions';
 import { Toaster } from '@/components/ui/sonner';
 import { DiagnosticsPanel } from './components/DiagnosticsPanel';
-import { Cpu } from 'lucide-react';
+import { Cpu, RefreshCw } from 'lucide-react';
 import { useUserSettings } from './hooks/useUserSettings';
 
 // Lazy load all terminal pages & tabs to maximize performance & reduce bundle size
@@ -73,6 +73,16 @@ function TerminalLoader() {
 export default function App() {
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const { settings } = useUserSettings();
+  const [location] = useLocation();
+  // The reload button only makes sense on the chart page; it asks the chart to
+  // refetch history and snap back to the latest candle (fixes 'stuck' charts on mobile).
+  const onChart = location.startsWith('/advanced-chart');
+  const [reloading, setReloading] = useState(false);
+  const reloadChart = () => {
+    setReloading(true);
+    try { window.dispatchEvent(new CustomEvent('chart_reload')); } catch (e) {}
+    setTimeout(() => setReloading(false), 1200);
+  };
 
   useEffect(() => {
     document.documentElement.classList.remove('dark', 'light');
@@ -171,6 +181,17 @@ export default function App() {
         >
           <Cpu className={`w-5 h-5 ${showDiagnostics ? 'animate-pulse' : ''}`} />
         </button>
+
+        {/* Reload chart → refetch history and snap to latest candle (chart page only) */}
+        {onChart && (
+          <button
+            onClick={reloadChart}
+            className="fixed bottom-20 right-20 md:bottom-6 md:right-24 z-50 p-3.5 rounded-full border border-0 bg-card text-foreground/80 hover:text-foreground hover:bg-accent hover:text-accent-foreground transition-all duration-300 flex items-center justify-center cursor-pointer"
+            title="Reload chart to the latest candle"
+          >
+            <RefreshCw className={`w-5 h-5 ${reloading ? 'animate-spin' : ''}`} />
+          </button>
+        )}
 
         {/* Floating live diagnostics view */}
         {showDiagnostics && (
