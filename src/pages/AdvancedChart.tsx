@@ -3634,7 +3634,11 @@ export function AdvancedChart() {
     };
     window.addEventListener('chart_reload', onReload);
     return () => window.removeEventListener('chart_reload', onReload);
-  }, [refetchTa]);
+    // refetchTa is only invoked inside the handler (runs long after mount), so it
+    // must NOT be in the dep array — referencing it here reads the useQuery result
+    // before it's initialized (temporal dead zone) and crashes the whole chart.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Poll the server for an armed auto-exit rule on the active position
   useEffect(() => {
