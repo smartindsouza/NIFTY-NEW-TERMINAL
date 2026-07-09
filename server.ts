@@ -9,7 +9,7 @@ import Database from 'better-sqlite3';
 import { generateSimulatedChain } from './server/simulate_data';
 import { computeAnalytics } from './server/analytics_engine';
 import { getTechnicalAnalysis, kiteDiagnostics } from './server/technical_analysis';
-import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData } from './server/kite_service';
+import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData, getIndexFuturesTokens } from './server/kite_service';
 import { getHistoricalAnalytics } from './server/analytics_service';
 import { runRsiBacktest } from './server/rsi_backtest';
 import { getLiveSignal, runOptionConfirmBacktest, getAlertSignal } from './server/option_rsi';
@@ -22,6 +22,7 @@ import { generateGamePlan } from './server/game_plan_service';
 
 import { getLiveNews, rateLimitMiddleware, currentAIStatus } from './server/news_service';
 import { startTicker, setSubscriptions, isTickerConnected } from './server/ticker_service';
+import { setDeltaFuturesToken, getDeltaFuturesToken, onFuturesTick, getDeltaSnapshot } from './server/delta_tracker';
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 
@@ -289,6 +290,15 @@ async function refreshData() {
         if (latestChainData.ceData?.[k]?.instrument_token) tokens.push(latestChainData.ceData[k].instrument_token);
         if (latestChainData.peData?.[k]?.instrument_token) tokens.push(latestChainData.peData[k].instrument_token);
       }
+      // Also subscribe the front-month NIFTY future so the delta tracker gets its
+      // ticks (the index itself has no volume). Best-effort; ignore failures.
+      try {
+        const futs = await getIndexFuturesTokens('NIFTY');
+        if (futs && futs.length) {
+          const front = [...futs].sort((a, b) => a.expiry.localeCompare(b.expiry))[0];
+          if (front?.token) { setDeltaFuturesToken(front.token); tokens.push(front.token); }
+        }
+      } catch (e) { /* delta is optional; don't break the feed */ }
       setSubscriptions(tokens);
 
       if (latestChainData.isMock) {
@@ -325,6 +335,10 @@ function connectTicker() {
       const ts = Math.floor(Date.now() / 1000);
       broadcast({ type: 'tick', symbol: 'NSE:NIFTY 50', price: tick.ltp, timestamp: ts,
         candle: { time: ts, open: tick.ltp, high: tick.ltp, low: tick.ltp, close: tick.ltp } });
+    } else if (tick.token === getDeltaFuturesToken()) {
+      // Front-month future: update the delta (pressure) proxy. Also broadcast the
+      // option tick shape is irrelevant here; the future isn't shown as an option.
+      onFuturesTick({ token: tick.token, ltp: tick.ltp, volume: tick.volume, ts: Date.now() });
     } else {
       broadcast({ type: 'optionTick', token: tick.token, ltp: tick.ltp, oi: tick.oi, volume: tick.volume });
     }
@@ -333,6 +347,14 @@ function connectTicker() {
 
 refreshData();
 connectTicker();
+
+// Broadcast the futures delta (pressure) snapshot to all clients every 2s.
+setInterval(() => {
+  try {
+    const snap = getDeltaSnapshot();
+    if (snap.token) broadcast({ type: 'delta', ...snap });
+  } catch (e) { /* ignore */ }
+}, 2000);
 
   // ===== Auto-Exit Watcher: server-side stoploss/target on spot levels + RSI =====
   const lastClosedCandleByTf: Record<string, number> = {};
@@ -777,6 +799,11 @@ connectTicker();
 
   app.get('/api/analytics', (req, res) => {
     res.json(latestAnalytics);
+  });
+
+  app.get('/api/delta', (req, res) => {
+    try { res.json({ success: true, ...getDeltaSnapshot() }); }
+    catch (e: any) { res.json({ success: false, error: e?.message || String(e) }); }
   });
 
   app.get('/api/option-chain', async (req, res) => {

@@ -4,6 +4,7 @@ import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2 } from "luci
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { getDivergences } from "../lib/divergence";
+import { evaluateBreakout } from "../lib/breakoutQuality";
 import { calculateBollingerBands } from "../indicators/bollingerBands";
 import { format } from "date-fns";
 import { SymbolSearch } from "../components/SymbolSearch";
@@ -2651,6 +2652,26 @@ export function AdvancedChart() {
   const alertStateRef = useRef<Map<string, { lastFired: number; armed: boolean }>>(new Map());
   const levelAlertsOnRef = useRef(levelAlertsOn);
   useEffect(() => { levelAlertsOnRef.current = levelAlertsOn; }, [levelAlertsOn]);
+
+  // Live futures "pressure" proxy (from the server delta broadcast) + latest
+  // breakout-authenticity verdict. deltaRef holds the freshest value for use
+  // inside effects without re-subscribing.
+  const [deltaInfo, setDeltaInfo] = useState<{ pressure: number; dayBias: number; cvd: number } | null>(null);
+  const deltaRef = useRef<{ pressure: number; dayBias: number; cvd: number } | null>(null);
+  const [breakoutInfo, setBreakoutInfo] = useState<any>(null);
+  const lastBreakoutBarRef = useRef<number>(0);
+  const [breakoutAlertsOn, setBreakoutAlertsOn] = useState(() => {
+    try { return localStorage.getItem('breakoutAlertsOn') === 'true'; } catch(e) {}
+    return false;
+  });
+  const breakoutAlertsOnRef = useRef(breakoutAlertsOn);
+  useEffect(() => {
+    breakoutAlertsOnRef.current = breakoutAlertsOn;
+    try { localStorage.setItem('breakoutAlertsOn', String(breakoutAlertsOn)); } catch(e) {}
+    if (breakoutAlertsOn && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      try { Notification.requestPermission(); } catch(e) {}
+    }
+  }, [breakoutAlertsOn]);
   const [pdhColor, setPdhColor] = useState(() => {
     try {
       return localStorage.getItem('pdhColor') || '#22c55e';
@@ -4457,6 +4478,13 @@ export function AdvancedChart() {
 
     // 2. Map high-performance instant tick update to chart instance
     const removeListener = addWsMessageListener((msg) => {
+      // Live futures delta (pressure) proxy broadcast — cheap, update ref + state.
+      if (msg && msg.type === 'delta') {
+        const d = { pressure: Number(msg.pressure) || 0, dayBias: Number(msg.dayBias) || 0, cvd: Number(msg.cvd) || 0 };
+        deltaRef.current = d;
+        setDeltaInfo(d);
+        return;
+      }
       // Keep track of the server's time compared to our local PC clock
       if (msg && msg.timestamp) {
         let serverSec = 0;
@@ -4899,6 +4927,65 @@ export function AdvancedChart() {
   };
   const checkLevelAlertsRef = useRef(checkLevelAlerts);
   checkLevelAlertsRef.current = checkLevelAlerts;
+
+  // Fire a breakout-authenticity alert (distinct sound from level-touch).
+  const fireBreakoutAlert = (r: any) => {
+    const dirWord = r.direction === 'up' ? 'break UP' : 'break DOWN';
+    const title = r.verdict === 'FAKEOUT_RISK'
+      ? `⚠️ Fakeout risk: ${r.level}`
+      : `Breakout ${r.verdict === 'STRONG' ? '✓ strong' : 'moderate'}: ${r.level}`;
+    const body = `${dirWord} @ ${r.price} · score ${r.score}/100 · ${r.reasons.slice(0, 3).join(', ')}`;
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        new Notification(title, { body, tag: `brk-${r.level}-${r.brokeAt}` });
+      }
+    } catch(e) {}
+    try { toast(title, { description: body }); } catch(e) {}
+    try {
+      notificationService.add('divergence', title, body);
+    } catch(e) {}
+    try {
+      const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (AC) {
+        const actx = new AC();
+        const o = actx.createOscillator(); const g = actx.createGain();
+        o.connect(g); g.connect(actx.destination);
+        // strong = rising double-ish tone, fakeout = low warning tone
+        o.frequency.value = r.verdict === 'FAKEOUT_RISK' ? 320 : (r.direction === 'up' ? 990 : 590);
+        g.gain.value = 0.09;
+        o.start(); o.stop(actx.currentTime + 0.28);
+        setTimeout(() => { try { actx.close(); } catch(e) {} }, 500);
+      }
+    } catch(e) {}
+  };
+
+  // Evaluate breakout authenticity whenever a NEW candle closes. Uses only closed
+  // candles (chartData excludes the forming bar via its own logic) against the
+  // same visible levels the alert engine uses, plus the live futures pressure proxy.
+  useEffect(() => {
+    if (!chartData || !chartData.candles || chartData.candles.length < 5) return;
+    const candles = chartData.candles;
+    const lastBar = candles[candles.length - 1];
+    if (!lastBar || lastBar.time === lastBreakoutBarRef.current) return; // once per bar
+    const levels = (alertLevelsRef.current || [])
+      .filter(l => Number.isFinite(l.price) && l.price > 0)
+      .map(l => ({ name: l.label, price: l.price }));
+    if (levels.length === 0) return;
+
+    const res = evaluateBreakout(
+      candles.map((c: any) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume })),
+      levels,
+      { pressure: deltaRef.current ? deltaRef.current.pressure : null }
+    );
+    lastBreakoutBarRef.current = lastBar.time;
+    if (res) {
+      setBreakoutInfo(res);
+      // Alert only on decisive verdicts, if enabled.
+      if (breakoutAlertsOnRef.current && (res.verdict === 'STRONG' || res.verdict === 'FAKEOUT_RISK')) {
+        fireBreakoutAlert(res);
+      }
+    }
+  }, [chartData]);
 
 
   // Collect every chart level (H-levels, their 50% midpoints, PDH/PDL, OI support/resistance)
@@ -6375,6 +6462,30 @@ export function AdvancedChart() {
               </span>
             );
           })()}
+          {breakoutInfo && (() => {
+            const v = breakoutInfo.verdict;
+            const color = v === 'STRONG' ? (breakoutInfo.direction === 'up' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400')
+              : v === 'FAKEOUT_RISK' ? 'bg-amber-500/20 text-amber-400'
+              : 'bg-slate-500/20 text-slate-300';
+            const word = v === 'STRONG' ? `BREAKOUT ✓ ${breakoutInfo.direction === 'up' ? 'UP' : 'DOWN'}` : v === 'FAKEOUT_RISK' ? 'FAKEOUT RISK' : 'BREAKOUT ?';
+            return (
+              <span className={`px-3 py-1 rounded-md text-xs font-mono font-bold whitespace-nowrap ${color}`}
+                title={`${breakoutInfo.level} ${breakoutInfo.direction === 'up' ? 'break up' : 'break down'} @ ${breakoutInfo.price} — authenticity ${breakoutInfo.score}/100 (${breakoutInfo.reasons.join(', ')}). Structural read of the breakout candle + volume + live futures pressure; NOT true order-flow delta. Confirm with price.`}>
+                {word} {breakoutInfo.score}
+              </span>
+            );
+          })()}
+          {deltaInfo && (() => {
+            const p = deltaInfo.pressure;
+            const color = p >= 0.15 ? 'bg-emerald-500/20 text-emerald-400' : p <= -0.15 ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-500/20 text-slate-300';
+            const word = p >= 0.15 ? 'BUY' : p <= -0.15 ? 'SELL' : 'FLAT';
+            return (
+              <span className={`px-3 py-1 rounded-md text-xs font-mono font-bold whitespace-nowrap ${color}`}
+                title={`Futures pressure proxy (~90s window): ${word}, pressure ${p.toFixed(2)}, session lean ${deltaInfo.dayBias.toFixed(2)}, CVD ${deltaInfo.cvd}. Tick-rule uptick/downtick VOLUME on the front-month NIFTY future — a live approximation, NOT true aggressor delta (Kite doesn't provide that). Weigh with price.`}>
+                Δ: {word}
+              </span>
+            );
+          })()}
           <AiMarketRead taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} model="claude-sonnet-4-6" />
           {wsError && (
              <span className="bg-red-500/20 text-red-400 px-3 py-1 rounded-md text-xs font-mono font-bold animate-pulse whitespace-nowrap">
@@ -6477,6 +6588,19 @@ export function AdvancedChart() {
                         {levelAlertsOn && <Check size={14} className="text-emerald-400" />}
                       </div>
                       <span>Level Touch Alerts (sound + popup)</span>
+                    </button>
+                  </div>
+
+                  {/* Breakout Authenticity Alerts */}
+                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                    <button
+                      onClick={() => setBreakoutAlertsOn(!breakoutAlertsOn)}
+                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
+                    >
+                      <div className="w-4 flex items-center justify-center">
+                        {breakoutAlertsOn && <Check size={14} className="text-emerald-400" />}
+                      </div>
+                      <span>Breakout / Fakeout Alerts (sound + popup)</span>
                     </button>
                   </div>
 
