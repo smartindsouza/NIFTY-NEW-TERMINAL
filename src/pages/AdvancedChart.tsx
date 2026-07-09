@@ -4772,7 +4772,10 @@ export function AdvancedChart() {
 
   const divergences = useMemo(() => {
     if (!chartData || !chartData.candles || parseInt(timeframe) < 15) return [];
-    return getDivergences(chartData.candles, 7, 3, timeframe);
+    // Args: (candles, maxDistance between the two pivots, minRSIDiff, timeframe, pivotLookback)
+    // maxDistance is now measured pivot-to-pivot (swing to swing), so it needs to be
+    // wider than the old candle-to-candle 7. pivotLookback=3 = 3 bars each side define a swing.
+    return getDivergences(chartData.candles, 40, 3, timeframe, 3);
   }, [chartData, timeframe]);
 
   const pdhPdlData = useMemo(() => {
