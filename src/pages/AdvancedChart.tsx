@@ -4287,6 +4287,100 @@ export function AdvancedChart() {
     gcTime: 10 * 60000,
   });
 
+  // Higher-timeframe trend for the "TREND" badge (BTST context). These reuse the
+  // same /api/ta endpoint at 60-min and daily, on the NIFTY index token, and are
+  // computed on the frontend from real EMA20/RSI/DI — no server changes needed.
+  const htfToken = '256265'; // NIFTY 50 index — overall market tide regardless of selected symbol
+  const { data: htfHourly } = useQuery({
+    queryKey: ["ta-htf-hourly", htfToken],
+    queryFn: async () => {
+      const res = await fetch(`/api/ta?timeframe=60&token=${htfToken}&symbol=${encodeURIComponent("NIFTY 50")}`);
+      if (!res.ok) throw new Error("htf hourly fetch failed");
+      return res.json();
+    },
+    refetchInterval: () => document.visibilityState === 'visible' ? 5 * 60 * 1000 : false,
+    staleTime: 4 * 60 * 1000,
+    gcTime: 15 * 60000,
+  });
+  const { data: htfDaily } = useQuery({
+    queryKey: ["ta-htf-daily", htfToken],
+    queryFn: async () => {
+      const res = await fetch(`/api/ta?timeframe=1440&token=${htfToken}&symbol=${encodeURIComponent("NIFTY 50")}`);
+      if (!res.ok) throw new Error("htf daily fetch failed");
+      return res.json();
+    },
+    refetchInterval: () => document.visibilityState === 'visible' ? 15 * 60 * 1000 : false,
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60000,
+  });
+
+  // Score one timeframe's trend from real TA fields: price vs EMA20, EMA20 slope,
+  // RSI vs 50, and DI direction. Returns -3..+3 (sign = direction, magnitude = agreement).
+  const scoreHtf = (ta: any): { score: number; parts: string[] } | null => {
+    if (!ta || !ta.candles || ta.candles.length < 25 || typeof ta.ema20 !== 'number') return null;
+    const closes = ta.candles.map((c: any) => c.close).filter((x: any) => Number.isFinite(x));
+    if (closes.length < 25) return null;
+    const last = closes[closes.length - 1];
+    let score = 0; const parts: string[] = [];
+    // 1) price above/below EMA20
+    if (last > ta.ema20) { score += 1; parts.push('price > EMA20'); }
+    else if (last < ta.ema20) { score -= 1; parts.push('price < EMA20'); }
+    // 2) EMA20 slope proxy: last close vs close ~10 bars back, as % of price
+    const backClose = closes[Math.max(0, closes.length - 11)];
+    const slopePct = (last - backClose) / last;
+    if (slopePct > 0.001) { score += 1; parts.push('rising'); }
+    else if (slopePct < -0.001) { score -= 1; parts.push('falling'); }
+    // 3) RSI vs 50
+    if (typeof ta.rsi === 'number') {
+      if (ta.rsi >= 55) { score += 1; parts.push(`RSI ${Math.round(ta.rsi)}`); }
+      else if (ta.rsi <= 45) { score -= 1; parts.push(`RSI ${Math.round(ta.rsi)}`); }
+    }
+    // 4) DI direction (only if ADX shows some trend)
+    if (typeof ta.plusDi === 'number' && typeof ta.minusDi === 'number' && (ta.adx ?? 0) >= 18) {
+      if (ta.plusDi > ta.minusDi) { score += 1; parts.push('+DI>−DI'); }
+      else if (ta.minusDi > ta.plusDi) { score -= 1; parts.push('−DI>+DI'); }
+    }
+    // clamp to -3..3 for a stable label
+    score = Math.max(-3, Math.min(3, score));
+    return { score, parts };
+  };
+
+  const htfTrend = useMemo(() => {
+    const h = scoreHtf(htfHourly);
+    const d = scoreHtf(htfDaily);
+    if (!h && !d) return null;
+    const word = (s: number) => s >= 2 ? 'UP' : s <= -2 ? 'DOWN' : 'FLAT';
+    const hWord = h ? word(h.score) : '—';
+    const dWord = d ? word(d.score) : '—';
+    // Overall: daily leads (the tide), hourly confirms. Aligned strong = STRONG.
+    let label = 'MIXED', tone: 'up' | 'down' | 'flat' = 'flat';
+    if (h && d) {
+      if (h.score >= 2 && d.score >= 2) { label = 'STRONG UP'; tone = 'up'; }
+      else if (h.score <= -2 && d.score <= -2) { label = 'STRONG DOWN'; tone = 'down'; }
+      else if (d.score >= 2) { label = 'UP'; tone = 'up'; }
+      else if (d.score <= -2) { label = 'DOWN'; tone = 'down'; }
+      else if (h.score >= 2) { label = 'UP (1h)'; tone = 'up'; }
+      else if (h.score <= -2) { label = 'DOWN (1h)'; tone = 'down'; }
+      else { label = 'FLAT'; tone = 'flat'; }
+    } else {
+      const only = (h || d)!;
+      label = word(only.score) === 'UP' ? 'UP' : word(only.score) === 'DOWN' ? 'DOWN' : 'FLAT';
+      tone = word(only.score) === 'UP' ? 'up' : word(only.score) === 'DOWN' ? 'down' : 'flat';
+    }
+    // BTST guidance
+    const btst = tone === 'up'
+      ? 'BTST longs are with the higher-timeframe trend; overnight holds of long/CE align with the tide.'
+      : tone === 'down'
+        ? 'BTST shorts are with the higher-timeframe trend; overnight holds of short/PE align with the tide.'
+        : 'Higher timeframes are mixed/flat — BTST holds carry more overnight risk; size down or skip.';
+    return {
+      label, tone, hWord, dWord,
+      hParts: h?.parts.join(', ') || 'insufficient data',
+      dParts: d?.parts.join(', ') || 'insufficient data',
+      btst,
+    };
+  }, [htfHourly, htfDaily]);
+
   // First-15-minute opening range lines are drawn on the canvas overlay
   // (alongside PDH/PDL/S&R) so the labels are centered and no value shows on
   // the Y axis. See the "Draw S&R / PDH / PDL text and lines" block below.
@@ -6264,6 +6358,17 @@ export function AdvancedChart() {
               <span className={`px-3 py-1 rounded-md text-xs font-mono font-bold whitespace-nowrap ${color}`}
                 title={`Premium Pulse direction lean (${pulseBias.confidence} confidence) — which side's premium is being bid up. ${pulseBias.reason}. Soft read from option premium behaviour, not a hard signal; weigh alongside price.`}>
                 PULSE: {pulseBias.label}
+              </span>
+            );
+          })()}
+          {htfTrend && (() => {
+            const color = htfTrend.tone === 'up' ? 'bg-emerald-500/20 text-emerald-400'
+              : htfTrend.tone === 'down' ? 'bg-rose-500/20 text-rose-400'
+              : 'bg-slate-500/20 text-slate-300';
+            return (
+              <span className={`px-3 py-1 rounded-md text-xs font-mono font-bold whitespace-nowrap ${color}`}
+                title={`Higher-timeframe trend (BTST context) — the bigger tide behind intraday moves. Daily: ${htfTrend.dWord} (${htfTrend.dParts}). 1-hour: ${htfTrend.hWord} (${htfTrend.hParts}). ${htfTrend.btst} Always confirm with price; this is context, not a trigger.`}>
+                TREND: {htfTrend.label}
               </span>
             );
           })()}
