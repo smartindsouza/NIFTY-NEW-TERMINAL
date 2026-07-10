@@ -15,19 +15,19 @@ export async function getFiiData() {
     let actualDateStr = '';
 
     // Loop backwards to find the last available end-of-day file
-    // Check up to 10 days back to get ~5 trading days
+    // Check up to 12 days back to get ~5 trading days
     for (let i = 0; i < 12; i++) {
         if (history.length >= 5) break;
 
         const targetDate = new Date();
         targetDate.setDate(targetDate.getDate() - i);
-        
+
         // Skip weekends
         if (targetDate.getDay() === 0 || targetDate.getDay() === 6) continue;
 
         const dateStr = formatDate(targetDate);
         const url = `https://archives.nseindia.com/content/nsccl/fao_participant_oi_${dateStr}.csv`;
-        
+
         try {
             const response = await axios.get(url, {
                 headers: {
@@ -36,12 +36,12 @@ export async function getFiiData() {
                 },
                 timeout: 5000
             });
-            
+
             if (response.status === 200 && response.data) {
                 const lines = response.data.split('\n');
                 let fiiLong = 0, fiiShort = 0;
                 let diiLong = 0, diiShort = 0;
-                
+
                 for (const line of lines) {
                     if (line.startsWith('FII,')) {
                         const cols = line.split(',');
@@ -88,39 +88,13 @@ export async function getFiiData() {
     }
 
     if (!latestData) {
-         // Return highly realistic simulated FII & DII data so it never fails!
-         const simulatedHistory = [];
-         const today = new Date();
-         for (let i = 4; i >= 0; i--) {
-            const targetDate = new Date();
-            targetDate.setDate(today.getDate() - i * 2 - 1);
-            if (targetDate.getDay() === 0) targetDate.setDate(targetDate.getDate() - 2);
-            if (targetDate.getDay() === 6) targetDate.setDate(targetDate.getDate() - 1);
-            const ratio = parseFloat((45 + Math.random() * 10).toFixed(2));
-            const netFii = Math.floor((Math.random() - 0.45) * 40000);
-            const netDii = Math.floor((Math.random() - 0.5) * 30000);
-            simulatedHistory.push({
-               date: targetDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
-               fiiNetFutures: netFii,
-               diiNetFutures: netDii,
-               fiiLongRatio: ratio
-            });
-         }
-         latestData = {
-           fiiLongRatio: simulatedHistory[simulatedHistory.length - 1].fiiLongRatio,
-           trend: simulatedHistory[simulatedHistory.length - 1].fiiLongRatio > 50 ? "BULLISH" : "BEARISH",
-           longContracts: 65000,
-           shortContracts: 55000,
-           lastUpdated: today.toISOString()
-         };
-
+         // HONEST FALLBACK: NSE archives unreachable or no recent file found.
+         // Report it plainly instead of fabricating numbers — this page informs
+         // real trading decisions, so no data is always better than fake data.
          return {
-           status: "SUCCESS",
-           message: "NSE Archives (Simulated Live Fallback)",
-           data: {
-              ...latestData,
-              history: simulatedHistory
-           }
+           status: "UNAVAILABLE",
+           message: "NSE participant OI report could not be fetched (checked the last 12 days). Showing no data rather than simulated data.",
+           data: { history: [] }
          };
     }
 
@@ -133,25 +107,11 @@ export async function getFiiData() {
       }
     };
   } catch (error: any) {
-    const today = new Date();
-    const simulatedHistory = [
-      { date: "05 Jun", fiiNetFutures: 14500, diiNetFutures: 12100, fiiLongRatio: 54.3 },
-      { date: "06 Jun", fiiNetFutures: -2400, diiNetFutures: 8900, fiiLongRatio: 51.2 },
-      { date: "07 Jun", fiiNetFutures: 18200, diiNetFutures: -5300, fiiLongRatio: 55.6 },
-      { date: "08 Jun", fiiNetFutures: 9300, diiNetFutures: 1400, fiiLongRatio: 53.8 },
-      { date: "09 Jun", fiiNetFutures: 11200, diiNetFutures: 3100, fiiLongRatio: 55.1 }
-    ];
+    // HONEST FALLBACK: unexpected failure. Same principle — never simulate.
     return {
-      status: "SUCCESS",
-      message: "NSE Archives (Simulated Fallback Mode)",
-      data: {
-         fiiLongRatio: 55.1,
-         trend: "BULLISH",
-         longContracts: 68120,
-         shortContracts: 55430,
-         lastUpdated: today.toISOString(),
-         history: simulatedHistory
-      }
+      status: "UNAVAILABLE",
+      message: `NSE participant OI fetch failed: ${error?.message || String(error)}. Showing no data rather than simulated data.`,
+      data: { history: [] }
     };
   }
 }
