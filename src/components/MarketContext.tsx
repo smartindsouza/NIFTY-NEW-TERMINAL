@@ -1,32 +1,13 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, ChevronLeft, TrendingUp, TrendingDown, Globe } from "lucide-react";
 
 interface Market {
   key: string; label: string; price?: number; change?: number; changePct?: number;
-  spark?: number[]; asOf?: number; available: boolean;
+  asOf?: number; available: boolean;
 }
 
-// Tiny inline sparkline from a numeric series.
-function Spark({ data, up }: { data: number[]; up: boolean }) {
-  if (!data || data.length < 2) return <div className="w-16 h-6" />;
-  const w = 64, h = 24;
-  const min = Math.min(...data), max = Math.max(...data);
-  const range = max - min || 1;
-  const pts = data.map((v, i) => {
-    const x = (i / (data.length - 1)) * w;
-    const y = h - ((v - min) / range) * h;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ");
-  return (
-    <svg width={w} height={h} className="shrink-0">
-      <polyline points={pts} fill="none" strokeWidth="1.5"
-        stroke={up ? "#22c55e" : "#ef4444"} strokeLinejoin="round" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function Row({ m, localSpark }: { m: Market; localSpark?: number[] }) {
+function Row({ m }: { m: Market }) {
   if (!m.available) {
     return (
       <div className="flex items-center justify-between px-3 py-2 border-b border-white/5">
@@ -37,7 +18,6 @@ function Row({ m, localSpark }: { m: Market; localSpark?: number[] }) {
   }
   const up = (m.changePct ?? 0) >= 0;
   const color = up ? "text-emerald-400" : "text-rose-400";
-  const spark = (m.spark && m.spark.length > 1) ? m.spark : (localSpark || []);
   return (
     <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-white/5">
       <div className="min-w-0">
@@ -46,7 +26,6 @@ function Row({ m, localSpark }: { m: Market; localSpark?: number[] }) {
           {m.price?.toLocaleString(undefined, { maximumFractionDigits: 2 })}
         </div>
       </div>
-      <Spark data={spark} up={up} />
       <div className={`text-right ${color} shrink-0`}>
         <div className="text-xs font-mono font-bold tabular-nums flex items-center gap-0.5 justify-end">
           {up ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
@@ -69,8 +48,6 @@ function freshnessLabel(asOf?: number): string {
 
 export default function MarketContext() {
   const [open, setOpen] = useState(false);
-  // Rolling local sparkline history for Indian indices (server sends no spark for them).
-  const histRef = useRef<Record<string, number[]>>({});
 
   const { data } = useQuery({
     queryKey: ["market-context"],
@@ -82,19 +59,6 @@ export default function MarketContext() {
     refetchInterval: () => (document.visibilityState === "visible" ? 5000 : false),
     staleTime: 4000,
   });
-
-  // accumulate rolling values for the Indian sparklines
-  useEffect(() => {
-    if (!data?.indian) return;
-    for (const m of data.indian) {
-      if (m.available && typeof m.price === "number") {
-        const arr = histRef.current[m.key] || [];
-        arr.push(m.price);
-        if (arr.length > 40) arr.shift();
-        histRef.current[m.key] = arr;
-      }
-    }
-  }, [data]);
 
   const indian: Market[] = data?.indian || [];
   const us: Market[] = data?.us || [];
@@ -133,7 +97,7 @@ export default function MarketContext() {
             Indian Indices · live
           </div>
           {indian.map((m) => (
-            <Row key={m.key} m={m} localSpark={histRef.current[m.key]} />
+            <Row key={m.key} m={m} />
           ))}
 
           <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-slate-500 font-bold bg-white/[0.02] flex items-center justify-between">
