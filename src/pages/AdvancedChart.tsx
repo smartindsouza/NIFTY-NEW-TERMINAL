@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2 } from "lucide-react";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
@@ -4261,6 +4261,10 @@ export function AdvancedChart() {
     refetchOnMount: 'always',
     staleTime: 10 * 1000,
     gcTime: 10 * 60000,
+    // Keep the previous timeframe's candles on screen while the new ones load, so a
+    // switch feels instant instead of blanking. The chartData memo guards against
+    // rendering mismatched-timeframe data, so this never shows corrupt bars.
+    placeholderData: keepPreviousData,
     enabled: Boolean(timeframe && instrumentToken)
   });
 
@@ -4763,15 +4767,26 @@ export function AdvancedChart() {
     }
   }, [taInfo, selectedInstrument, instrumentToken]);
 
+  const lastGoodChartDataRef = useRef<any>(null);
   const chartData = useMemo(() => {
-    if (!taInfo || !taInfo.candles) return null;
-    
+    if (!taInfo || !taInfo.candles) return lastGoodChartDataRef.current;
+
+    // Guard against the brief window during a timeframe switch where `timeframe`
+    // has already changed but `taInfo` still holds the PREVIOUS timeframe's candles
+    // (kept on screen by placeholderData). The server echoes which timeframe it
+    // computed; on mismatch, keep showing the last good render rather than
+    // re-aligning old 5m candles onto 1m buckets (which drew malformed candles).
+    const tfNum = parseInt(timeframe, 10) || 5;
+    if (typeof taInfo.timeframe === 'number' && taInfo.timeframe !== tfNum) {
+      return lastGoodChartDataRef.current;
+    }
+
     // De-duplicate and sort
     const uniqueCandles: any[] = [];
     const seen = new Set();
     for (const c of taInfo.candles) {
       // Kite candle timestamps or our server timestamps
-      const timeSec = getMarketAlignedCandleStart(toUnixSeconds(c.time), parseInt(timeframe, 10) || 5);
+      const timeSec = getMarketAlignedCandleStart(toUnixSeconds(c.time), tfNum);
       if (!seen.has(timeSec)) {
         seen.add(timeSec);
         uniqueCandles.push({
@@ -4783,10 +4798,12 @@ export function AdvancedChart() {
     }
     uniqueCandles.sort((a, b) => a.time - b.time);
 
-    return {
+    const result = {
       candles: uniqueCandles,
       spot: taInfo.spot,
     };
+    lastGoodChartDataRef.current = result;
+    return result;
   }, [taInfo, timeframe]);
 
   useEffect(() => {
