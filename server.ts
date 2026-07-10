@@ -1230,10 +1230,13 @@ setInterval(() => {
     const curIv = latestAnalytics?.atmIv ?? 14.2;
     const ivPercentile = Math.max(10, Math.min(95, parseFloat((((curIv - 10) / 10) * 100).toFixed(1)))) || 55.4;
 
-    let fiiLongRatio = 54.3;
+    // FII factor: only included when REAL NSE data is available. When the fetch
+    // fails or returns UNAVAILABLE, pass null — evaluateQuantSignals skips the
+    // FII rules entirely rather than scoring a fabricated default ratio.
+    let fiiLongRatio: number | null = null;
     try {
       const fiiResult = await getFiiData();
-      if (fiiResult && fiiResult.data && fiiResult.data.fiiLongRatio) {
+      if (fiiResult && fiiResult.status === "SUCCESS" && fiiResult.data && typeof fiiResult.data.fiiLongRatio === 'number') {
         fiiLongRatio = fiiResult.data.fiiLongRatio;
       }
     } catch (e) {}

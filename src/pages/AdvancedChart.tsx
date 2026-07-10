@@ -27,38 +27,9 @@ import { getWsDiagnostics, subscribeToTicks, addWsMessageListener } from "../hoo
 import { useProfiler } from "../hooks/useProfiler";
 import { computeMasterSignal, getCandleOiSentiment } from "../../lib/decisionEngine";
 
-// Patch HTMLCanvasElement.prototype.getContext to intercept 2D contexts for rounding corners
-if (typeof window !== 'undefined' && !(HTMLCanvasElement.prototype as any).__patched) {
-  (HTMLCanvasElement.prototype as any).__patched = true;
-  const originalGetContext = HTMLCanvasElement.prototype.getContext;
-  HTMLCanvasElement.prototype.getContext = function (type, ...args) {
-    const ctx = originalGetContext.call(this, type, ...args);
-    if (type === '2d' && ctx && !(ctx as any).__patched) {
-      (ctx as any).__patched = true;
-      const originalFillRect = ctx.fillRect;
-      ctx.fillRect = function (x, y, w, h) {
-        let style = ctx.fillStyle;
-        if (typeof style === 'string') {
-          style = style.toLowerCase();
-          const isVolume = style.includes('rgba') && style.includes('0.4');
-          if (w > 2 && w < 100 && h > 2) {
-            ctx.beginPath();
-            const radius = isVolume ? Math.min(3, w / 2, h / 2) : Math.min(w / 2, h / 2);
-            if (ctx.roundRect) {
-              ctx.roundRect(x, y, w, h, isVolume ? [radius, radius, 0, 0] : radius);
-            } else {
-              ctx.rect(x, y, w, h);
-            }
-            ctx.fill();
-            return;
-          }
-        }
-        originalFillRect.call(ctx, x, y, w, h);
-      };
-    }
-    return ctx;
-  };
-}
+// (A previous global canvas patch rounded every candle/volume bar's corners.
+// Removed per user request — candles and volume bars now render in the
+// library's default sharp rectangular shapes.)
 
 export function calculateZerodhaCharges(action: 'BUY' | 'SELL', quantity: number, price: number) {
   const premium = quantity * price;
@@ -6418,7 +6389,7 @@ export function AdvancedChart() {
       )}
 
       <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2 md:gap-3 pb-2 mb-2 md:mb-4">
-        <div className="flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap overflow-x-auto md:overflow-visible [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden pr-2">
+        <div className="flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap overflow-x-auto md:overflow-visible [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden pr-28 md:pr-2">
           <h1 className="text-lg md:text-2xl font-bold text-foreground tracking-tight whitespace-nowrap">
             Advanced Trading Chart
           </h1>
