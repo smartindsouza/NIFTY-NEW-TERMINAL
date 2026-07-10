@@ -6417,8 +6417,8 @@ export function AdvancedChart() {
         </div>
       )}
 
-      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 pb-2 mb-2 md:mb-4">
-        <div className="flex items-center gap-2 md:gap-4 flex-wrap">
+      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2 md:gap-3 pb-2 mb-2 md:mb-4">
+        <div className="flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap overflow-x-auto md:overflow-visible [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden pr-2">
           <h1 className="text-lg md:text-2xl font-bold text-foreground tracking-tight whitespace-nowrap">
             Advanced Trading Chart
           </h1>
