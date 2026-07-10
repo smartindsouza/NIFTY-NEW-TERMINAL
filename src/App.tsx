@@ -172,7 +172,7 @@ export default function App() {
         {/* Global floating telemetry toggle button */}
         <button
           onClick={() => setShowDiagnostics(!showDiagnostics)}
-          className={`fixed bottom-20 right-4 md:bottom-6 md:right-6 z-50 p-3.5 rounded-full border transition-all duration-300 flex items-center justify-center cursor-pointer ${
+          className={`fixed ${onChart ? 'bottom-36' : 'bottom-20'} right-4 md:bottom-6 md:right-6 z-50 p-3.5 rounded-full border transition-all duration-300 flex items-center justify-center cursor-pointer ${
             showDiagnostics 
               ? 'bg-emerald-500 text-black border-emerald-400 hover:bg-emerald-400' 
               : 'bg-card text-foreground/80 border-0 hover:text-foreground hover:bg-accent hover:text-accent-foreground'
@@ -186,7 +186,7 @@ export default function App() {
         {onChart && (
           <button
             onClick={reloadChart}
-            className="fixed bottom-20 right-20 md:bottom-6 md:right-24 z-50 p-3.5 rounded-full border border-0 bg-card text-foreground/80 hover:text-foreground hover:bg-accent hover:text-accent-foreground transition-all duration-300 flex items-center justify-center cursor-pointer"
+            className="fixed bottom-36 right-20 md:bottom-6 md:right-24 z-50 p-3.5 rounded-full border border-0 bg-card text-foreground/80 hover:text-foreground hover:bg-accent hover:text-accent-foreground transition-all duration-300 flex items-center justify-center cursor-pointer"
             title="Reload chart to the latest candle"
           >
             <RefreshCw className={`w-5 h-5 ${reloading ? 'animate-spin' : ''}`} />
@@ -195,7 +195,7 @@ export default function App() {
 
         {/* Floating live diagnostics view */}
         {showDiagnostics && (
-          <div className="fixed bottom-36 right-3 md:bottom-20 md:right-6 z-50 w-80 md:w-96 max-h-[70vh] overflow-y-auto animate-in slide-in-from-bottom-5 duration-300 rounded-2xl ">
+          <div className={`fixed ${onChart ? 'bottom-52' : 'bottom-36'} right-3 md:bottom-20 md:right-6 z-50 w-80 md:w-96 max-h-[70vh] overflow-y-auto animate-in slide-in-from-bottom-5 duration-300 rounded-2xl `}>
             <DiagnosticsPanel />
           </div>
         )}

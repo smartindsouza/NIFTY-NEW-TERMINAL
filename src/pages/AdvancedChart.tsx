@@ -3133,6 +3133,9 @@ export function AdvancedChart() {
     } catch(e) {}
   }, [bbStdDev]);
   const [isIndicatorsOpen, setIsIndicatorsOpen] = useState(false);
+  // Mobile-only: biases (OI/SIGNAL/PULSE/TREND/…) live in a collapsible dropdown
+  // toggled by a chevron beside the page title. Desktop shows them inline as before.
+  const [showBiases, setShowBiases] = useState(false);
   const [showDiagnostic, setShowDiagnostic] = useState(() => {
     try {
       return localStorage.getItem('showDiagnostic') === 'true';
@@ -6238,7 +6241,7 @@ export function AdvancedChart() {
   });
 
   return (
-    <div className="px-1 py-2 md:p-8 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto pb-20 flex flex-col min-h-screen relative">
+    <div className="px-1 py-2 md:p-8 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto pb-32 md:pb-20 flex flex-col min-h-screen relative">
       
       {showDiagnostic && (
         <div className="fixed bottom-6 right-6 z-50 bg-card/95 backdrop-blur-md border border-0 p-4 rounded-lg text-xs font-mono w-[340px] max-h-[80vh] overflow-y-auto">
@@ -6389,10 +6392,19 @@ export function AdvancedChart() {
       )}
 
       <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2 md:gap-3 pb-2 mb-2 md:mb-4">
-        <div className="flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap overflow-x-auto md:overflow-visible [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden pr-28 md:pr-2">
-          <h1 className="text-lg md:text-2xl font-bold text-foreground tracking-tight whitespace-nowrap">
+        <div className="relative flex items-center gap-2 md:gap-4 md:flex-wrap">
+          <h1 className="text-base md:text-2xl font-bold text-foreground tracking-tight whitespace-nowrap">
             Advanced Trading Chart
           </h1>
+          {/* Mobile: chevron toggles the biases dropdown */}
+          <button
+            onClick={() => setShowBiases(!showBiases)}
+            className="md:hidden p-1 rounded-md bg-muted/50 text-foreground/80"
+            aria-label="Show market biases"
+          >
+            <ChevronDown size={16} className={`transition-transform ${showBiases ? 'rotate-180' : ''}`} />
+          </button>
+          <div className={`${showBiases ? 'flex' : 'hidden'} md:flex absolute md:static top-full left-0 mt-1 md:mt-0 z-[80] md:z-auto flex-col md:flex-row items-start md:items-center gap-1.5 md:gap-4 bg-card md:bg-transparent border border-white/10 md:border-0 rounded-lg md:rounded-none p-2 md:p-0 shadow-xl md:shadow-none max-h-[60vh] md:max-h-none overflow-y-auto md:overflow-visible md:flex-wrap`}>
           {lastTickMessage && (
              <span className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-md text-xs font-mono font-bold animate-pulse whitespace-nowrap">
               LIVE TICK: {lastTickMessage}
@@ -6475,27 +6487,30 @@ export function AdvancedChart() {
               </span>
             );
           })()}
-          <AiMarketRead taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} model="claude-sonnet-4-6" />
-          <MarketContext />
           {wsError && (
              <span className="bg-red-500/20 text-red-400 px-3 py-1 rounded-md text-xs font-mono font-bold animate-pulse whitespace-nowrap">
               WS ERROR: {wsError}
              </span>
           )}
+          </div>
+          <AiMarketRead taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} model="claude-sonnet-4-6" />
+          <MarketContext />
         </div>
-        <div className="flex items-center gap-2 md:gap-4 flex-wrap md:justify-end w-full md:w-auto">
+        <div className="fixed md:static bottom-20 md:bottom-auto left-0 right-0 z-40 bg-[#141618]/95 md:bg-transparent backdrop-blur md:backdrop-blur-none border-t border-white/10 md:border-0 px-2 py-1.5 md:p-0 flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap overflow-x-auto md:overflow-visible [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:justify-end w-full md:w-auto">
+          <div className="w-40 shrink-0 sm:w-auto">
           <SymbolSearch 
             onSelect={setSelectedInstrument} 
             currentSymbol={selectedInstrument ? selectedInstrument.tradingsymbol : "NIFTY 50"} 
           />
-          <div className="flex items-center gap-2 bg-muted/40 border border-0 rounded-md px-3 py-1.5 ml-2 cursor-pointer" onClick={() => setQuickTradeEnabled(!quickTradeEnabled)}>
+          </div>
+          <div className="flex items-center gap-2 bg-muted/40 border border-0 rounded-md px-3 py-1.5 ml-0 md:ml-2 shrink-0 cursor-pointer" onClick={() => setQuickTradeEnabled(!quickTradeEnabled)}>
              <span className="text-xs font-medium text-foreground/80">Quick Trade</span>
              <label className="relative inline-flex items-center cursor-pointer pointer-events-none">
                <input type="checkbox" className="sr-only peer" checked={quickTradeEnabled} readOnly />
                <div className="w-7 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after: after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
              </label>
           </div>
-          <div className="flex bg-muted p-1 rounded-md">
+          <div className="flex bg-muted p-1 rounded-md shrink-0">
             <div className="relative" ref={indicatorsRef}>
               <button
                 onClick={() => setIsIndicatorsOpen(!isIndicatorsOpen)}
@@ -6505,7 +6520,7 @@ export function AdvancedChart() {
                 <ChevronDown size={14} className={`transition-transform ${isIndicatorsOpen ? 'rotate-180' : ''}`} />
               </button>
               {isIndicatorsOpen && (
-                <div className="absolute top-full mt-1.5 right-0 min-w-[240px] bg-card border border-0 rounded-md py-1.5 z-50 overflow-hidden flex flex-col">
+                <div className="fixed md:absolute inset-x-2 md:inset-x-auto bottom-[136px] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto md:overflow-hidden bg-card border border-white/10 md:border-0 rounded-md py-1.5 z-50 flex flex-col">
                   <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase">Available Indicators</div>
                   
                   {/* Previous Day High/Low */}
@@ -6756,8 +6771,8 @@ export function AdvancedChart() {
             </div>
           </div>
           
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground font-medium">
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="hidden md:inline text-sm text-muted-foreground font-medium">
               Timeframe:
             </span>
             <select
