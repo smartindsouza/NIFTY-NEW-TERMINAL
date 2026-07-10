@@ -806,6 +806,100 @@ setInterval(() => {
     catch (e: any) { res.json({ success: false, error: e?.message || String(e) }); }
   });
 
+  // Market-context sidebar: Indian indices (live from Kite) + US index futures
+  // (near-real-time from Yahoo's free endpoint, with a graceful "unavailable"
+  // fallback if the server can't reach it). Cached ~5s to stay light.
+  let marketContextCache: { at: number; data: any } | null = null;
+  app.get('/api/market-context', async (_req, res) => {
+    try {
+      if (marketContextCache && Date.now() - marketContextCache.at < 5000) {
+        return res.json(marketContextCache.data);
+      }
+      const indian: any[] = [];
+      const us: any[] = [];
+
+      // --- Indian indices via Kite ---
+      const kc = getKiteClient();
+      // @ts-ignore
+      const hasKite = kc && kc.access_token;
+      const IND = [
+        { key: 'BANKNIFTY', label: 'Bank Nifty', sym: 'NSE:NIFTY BANK' },
+        { key: 'FINNIFTY', label: 'Fin Nifty', sym: 'NSE:NIFTY FIN SERVICE' },
+        { key: 'VIX', label: 'India VIX', sym: 'NSE:INDIA VIX' },
+        { key: 'SENSEX', label: 'Sensex', sym: 'BSE:SENSEX' },
+      ];
+      if (hasKite) {
+        try {
+          const q = await kc.getQuote(IND.map(i => i.sym));
+          for (const i of IND) {
+            const d = q?.[i.sym];
+            if (d && typeof d.last_price === 'number') {
+              const prevClose = d.ohlc?.close ?? (d.last_price - (d.net_change || 0));
+              const chg = d.net_change ?? (d.last_price - prevClose);
+              const chgPct = prevClose ? (chg / prevClose) * 100 : 0;
+              indian.push({
+                key: i.key, label: i.label, price: d.last_price,
+                change: +chg.toFixed(2), changePct: +chgPct.toFixed(2),
+                available: true,
+              });
+            } else {
+              indian.push({ key: i.key, label: i.label, available: false });
+            }
+          }
+        } catch (e) {
+          for (const i of IND) indian.push({ key: i.key, label: i.label, available: false });
+        }
+      } else {
+        for (const i of IND) indian.push({ key: i.key, label: i.label, available: false, reason: 'no_kite_session' });
+      }
+
+      // --- US index futures via Yahoo (free, may be blocked from some IPs) ---
+      const US = [
+        { key: 'SPX', label: 'S&P 500 Fut', sym: 'ES=F' },
+        { key: 'NDX', label: 'Nasdaq Fut', sym: 'NQ=F' },
+        { key: 'DJI', label: 'Dow Fut', sym: 'YM=F' },
+      ];
+      await Promise.all(US.map(async (u) => {
+        try {
+          const r = await axios.get(
+            `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(u.sym)}?interval=5m&range=1d`,
+            { timeout: 4000, headers: { 'User-Agent': 'Mozilla/5.0' } }
+          );
+          const result = r.data?.chart?.result?.[0];
+          const meta = result?.meta;
+          if (meta && typeof meta.regularMarketPrice === 'number') {
+            const prev = meta.chartPreviousClose ?? meta.previousClose ?? meta.regularMarketPrice;
+            const chg = meta.regularMarketPrice - prev;
+            const chgPct = prev ? (chg / prev) * 100 : 0;
+            // sparkline: intraday closes (compact)
+            const closesRaw: any[] = result?.indicators?.quote?.[0]?.close || [];
+            const spark = closesRaw.filter((x) => typeof x === 'number');
+            const sparkTrim = spark.length > 40 ? spark.filter((_, idx) => idx % Math.ceil(spark.length / 40) === 0) : spark;
+            us.push({
+              key: u.key, label: u.label, price: +meta.regularMarketPrice.toFixed(2),
+              change: +chg.toFixed(2), changePct: +chgPct.toFixed(2),
+              spark: sparkTrim.map((v) => +v.toFixed(2)),
+              asOf: meta.regularMarketTime ? meta.regularMarketTime * 1000 : Date.now(),
+              available: true,
+            });
+          } else {
+            us.push({ key: u.key, label: u.label, available: false });
+          }
+        } catch (e) {
+          us.push({ key: u.key, label: u.label, available: false });
+        }
+      }));
+      // keep US in declared order
+      us.sort((a, b) => US.findIndex(x => x.key === a.key) - US.findIndex(x => x.key === b.key));
+
+      const payload = { success: true, indian, us, ts: Date.now() };
+      marketContextCache = { at: Date.now(), data: payload };
+      res.json(payload);
+    } catch (e: any) {
+      res.json({ success: false, error: e?.message || String(e), indian: [], us: [] });
+    }
+  });
+
   app.get('/api/option-chain', async (req, res) => {
     const symbol = req.query.symbol as string || 'NIFTY 50';
     const spotParam = req.query.spot as string;
