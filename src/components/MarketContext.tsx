@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, ChevronLeft, TrendingUp, TrendingDown, Globe } from "lucide-react";
+import { ChevronLeft, TrendingUp, TrendingDown, Globe, X } from "lucide-react";
 
 interface Market {
   key: string; label: string; price?: number; change?: number; changePct?: number;
@@ -71,24 +71,38 @@ export default function MarketContext() {
         <button
           onClick={() => setOpen(true)}
           title="Market context"
-          className="fixed top-1/2 -translate-y-1/2 right-0 z-[70] bg-[#1a1c1e] border border-white/10 border-r-0 rounded-l-lg px-1.5 py-3 text-slate-300 hover:text-white hover:bg-white/5 transition-colors flex flex-col items-center gap-1"
+          className="fixed top-1/2 -translate-y-1/2 right-0 z-[9997] bg-[#1a1c1e] border border-white/10 border-r-0 rounded-l-lg px-1.5 py-3 text-slate-300 hover:text-white hover:bg-white/5 transition-colors flex flex-col items-center gap-1"
         >
           <ChevronLeft className="w-4 h-4" />
           <Globe className="w-4 h-4" />
         </button>
       )}
 
+      {/* Tap-anywhere backdrop to dismiss (reliable close on mobile + desktop) */}
+      {open && (
+        <div
+          onClick={() => setOpen(false)}
+          className="fixed inset-0 z-[9998] bg-black/40"
+          aria-label="Close market context"
+        />
+      )}
+
       {/* Slide-out panel */}
       <div
-        className={`fixed top-0 right-0 h-full z-[71] w-[290px] max-w-[85vw] bg-[#141618] border-l border-white/10 shadow-2xl transition-transform duration-300 flex flex-col ${open ? "translate-x-0" : "translate-x-full"}`}
+        className={`fixed top-0 right-0 h-full z-[9999] w-[290px] max-w-[85vw] bg-[#141618] border-l border-white/10 shadow-2xl transition-transform duration-300 flex flex-col ${open ? "translate-x-0" : "translate-x-full"}`}
       >
         <div className="flex items-center justify-between px-3 py-3 border-b border-white/10 bg-app-base">
           <div className="flex items-center gap-2">
             <Globe className="w-4 h-4 text-primary" />
             <span className="font-bold text-white text-sm">Market Context</span>
           </div>
-          <button onClick={() => setOpen(false)} className="text-slate-400 hover:text-white p-1">
-            <ChevronRight className="w-4 h-4" />
+          <button
+            onClick={() => setOpen(false)}
+            className="flex items-center gap-1 px-2 py-1.5 rounded-md bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors"
+            aria-label="Close"
+          >
+            <X className="w-4 h-4" />
+            <span className="text-xs font-semibold">Close</span>
           </button>
         </div>
 
