@@ -3475,6 +3475,14 @@ export function AdvancedChart() {
   const [slTrail, setSlTrail] = useState(true);
   const [slTrailCandles, setSlTrailCandles] = useState<string>('3');
   const [slStructureStop, setSlStructureStop] = useState<'' | 'VWAP' | 'OR'>('');
+  // Trade-follow: after a quick trade, open the traded OPTION's chart in a tab and
+  // place SL(-10%)/TARGET(+30%) lines vs the actual entry price, with live % labels.
+  const slEntryRef = useRef<number | null>(null);
+  const tradeInstrumentRef = useRef<any>(null);
+  const [tradeTabInstr, setTradeTabInstr] = useState<any>(null);
+  const autoOpenedForRef = useRef<string>('');
+  const slActivePosRef = useRef<any>(null);
+  useEffect(() => { slActivePosRef.current = slActivePos; }, [slActivePos]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (!chartContainerRef.current || !mainSeriesRef.current || !mainChartRef.current) return;
@@ -3523,8 +3531,17 @@ export function AdvancedChart() {
        if (newPrice !== null) {
           const kind = draggingLineRef.current.sl;
           const sl = slLinesRef.current.find(s => s.kind === kind);
-          if (sl) { sl.price = newPrice; sl.instance.applyOptions({ price: newPrice }); }
-          setSlLevels(prev => ({ ...prev, [kind]: Math.round(newPrice) }));
+          if (sl) {
+            sl.price = newPrice;
+            const entry = slEntryRef.current;
+            if (entry) {
+              const pct = ((newPrice - entry) / entry) * 100;
+              sl.instance.applyOptions({ price: newPrice, title: `${sl.label} ${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%` });
+            } else {
+              sl.instance.applyOptions({ price: newPrice });
+            }
+          }
+          if (!slEntryRef.current) setSlLevels(prev => ({ ...prev, [kind]: Math.round(newPrice) }));
        }
        return;
     }
@@ -3588,6 +3605,34 @@ export function AdvancedChart() {
   };
 
   // ===== Phase 2: SL/Target auto-exit lines =====
+
+  // When a position appears, resolve its instrument token and open its chart in a
+  // second tab (auto-switch once per position; user can tab back to NIFTY freely).
+  useEffect(() => {
+    let cancelled = false;
+    const sym = slActivePos?.symbol;
+    if (!sym) {
+      setTradeTabInstr(null); tradeInstrumentRef.current = null; slEntryRef.current = null;
+      autoOpenedForRef.current = '';
+      return;
+    }
+    if (autoOpenedForRef.current === sym) return;
+    (async () => {
+      try {
+        const r = await fetch(`/api/instruments/search?q=${encodeURIComponent(sym)}`);
+        const d = await r.json();
+        const list = d?.instruments || d?.results || d || [];
+        const exact = Array.isArray(list) ? list.find((i: any) => i.tradingsymbol === sym) : null;
+        if (!cancelled && exact && exact.instrument_token) {
+          tradeInstrumentRef.current = exact;
+          setTradeTabInstr(exact);
+          autoOpenedForRef.current = sym;
+          setSelectedInstrument(exact); // open the traded option's chart
+        }
+      } catch (e) {}
+    })();
+    return () => { cancelled = true; };
+  }, [slActivePos]);
 
   // Track the active position (first one); only update state when it actually changes
   useEffect(() => {
@@ -3685,8 +3730,22 @@ export function AdvancedChart() {
       const spot = cd?.spot || (candles.length ? candles[candles.length - 1].close : 0);
       if (!spot) return;
 
+      const posNow = slActivePosRef.current;
+      const viewingTrade = !!(posNow && posNow.entryPrice && tradeInstrumentRef.current &&
+        String(instrumentTokenRef.current) === String(tradeInstrumentRef.current.instrument_token));
+      const effBull = viewingTrade ? (posNow.side === 'BUY') : slIsBullish;
+      slEntryRef.current = viewingTrade ? posNow.entryPrice : null;
+
       let upper: number, lower: number;
-      if (slArmedRule) {
+      if (viewingTrade && !slArmedRule) {
+        // Option-premium chart: SL 10% against entry, TARGET 30% in favour (draggable).
+        const entry = posNow.entryPrice;
+        const long = posNow.side === 'BUY';
+        const slP = +((long ? entry * 0.9 : entry * 1.1)).toFixed(2);
+        const tpP = +((long ? entry * 1.3 : entry * 0.7)).toFixed(2);
+        upper = long ? tpP : slP;
+        lower = long ? slP : tpP;
+      } else if (slArmedRule) {
         // Restore from an existing armed rule
         const isLong = slArmedRule.trail_dir === 'LONG';
         const upVal = slArmedRule.trail_enabled ? (isLong ? slArmedRule.target_price : slArmedRule.spot_upper) : slArmedRule.spot_upper;
@@ -3720,15 +3779,23 @@ export function AdvancedChart() {
         }
       }
 
-      const uInst = s.createPriceLine({ price: upper, color: '#f43f5e', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: '' });
-      const lInst = s.createPriceLine({ price: lower, color: '#10b981', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: '' });
-      // For bullish: upper = TARGET, lower = SL (stop). For bearish: mirrored.
+      const pctTitle = (label: string, price: number) => {
+        const entry = slEntryRef.current;
+        if (!entry) return '';
+        const pct = ((price - entry) / entry) * 100;
+        return `${label} ${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
+      };
+      const upLabel = effBull ? 'TARGET' : 'SL';
+      const loLabel = effBull ? 'SL' : 'TARGET';
+      const uInst = s.createPriceLine({ price: upper, color: '#f43f5e', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: pctTitle(upLabel, upper) });
+      const lInst = s.createPriceLine({ price: lower, color: '#10b981', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: pctTitle(loLabel, lower) });
       slLinesRef.current = [
-        { kind: 'upper', price: upper, instance: uInst, label: slIsBullish ? 'TARGET' : 'SL', color: '#f43f5e' },
-        { kind: 'lower', price: lower, instance: lInst, label: slIsBullish ? 'SL' : 'TARGET', color: '#10b981' },
+        { kind: 'upper', price: upper, instance: uInst, label: upLabel, color: '#f43f5e' },
+        { kind: 'lower', price: lower, instance: lInst, label: loLabel, color: '#10b981' },
       ];
-      slSeriesRef.current = s; // remember which series these lines belong to (for recreation detection)
-      setSlLevels({ upper, lower });
+      slSeriesRef.current = s;
+      // Premium levels must NOT feed the spot-based exit panel; only sync when on NIFTY.
+      if (!viewingTrade) setSlLevels({ upper, lower });
     };
     ensure();
     const iv = setInterval(ensure, 1000);
@@ -4225,6 +4292,8 @@ export function AdvancedChart() {
   };
 
   const instrumentToken = selectedInstrument ? String(selectedInstrument.instrument_token) : "256265";
+  const instrumentTokenRef = useRef(instrumentToken);
+  instrumentTokenRef.current = instrumentToken;
   const { data: taInfo, isLoading: isLoadingTa, isError: isTaError, error: taError, refetch: refetchTa } = useQuery({
     queryKey: ["ta-data-live-chart", timeframe, instrumentToken],
     queryFn: async () => {
@@ -6827,7 +6896,20 @@ export function AdvancedChart() {
           <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
         </div>
       ) : (
-        <div className="flex flex-col flex-grow gap-0 md:gap-2 min-h-0">
+      <div className="flex flex-col flex-grow gap-0 md:gap-2 min-h-0">
+        {tradeTabInstr && (
+        <div className="flex items-center gap-1.5 px-1 pb-1 shrink-0">
+          <button onClick={() => setSelectedInstrument(null)}
+            className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${!selectedInstrument ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
+            NIFTY 50
+          </button>
+          <button onClick={() => setSelectedInstrument(tradeTabInstr)}
+            className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${selectedInstrument && String(selectedInstrument.instrument_token) === String(tradeTabInstr.instrument_token) ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
+            {tradeTabInstr.tradingsymbol}
+          </button>
+        </div>
+      )}
+
 
           {/* Main Chart (Price & Volume) */}
           <div className="relative flex-grow flex w-full bg-card rounded-none md:rounded-xl min-h-0 md:min-h-[450px]" onMouseLeave={() => setCrosshairInfo(null)}>
