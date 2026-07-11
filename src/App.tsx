@@ -87,7 +87,9 @@ export default function App() {
   const reloadChart = () => {
     setReloading(true);
     try { window.dispatchEvent(new CustomEvent('chart_reload')); } catch (e) {}
-    setTimeout(() => setReloading(false), 1200);
+    // Also hard-refresh the whole app so the reload button reloads the page,
+    // not just the chart data. Small delay lets the snap-to-latest fire first.
+    setTimeout(() => { try { window.location.reload(); } catch (e) {} }, 150);
   };
   const { settings } = useUserSettings();
 
