@@ -147,7 +147,7 @@ export default function App() {
           ` : ''}
         `}</style>
         <Header />
-        <main className={`flex-1 overflow-y-auto w-full relative bg-transparent pl-0 md:pl-[80px] pt-2 md:pt-8 md:pb-12 pr-0 md:pr-6 lg:pr-8 ${onChart ? 'max-md:overflow-hidden max-md:overscroll-none pb-24 max-md:pb-0' : 'pb-24'}`}>
+        <main className={`flex-1 overflow-y-auto w-full relative bg-transparent pl-0 md:pl-[80px] pt-[max(env(safe-area-inset-top),12px)] md:pt-8 md:pb-12 pr-0 md:pr-6 lg:pr-8 ${onChart ? 'max-md:overflow-hidden max-md:overscroll-none pb-24 max-md:pb-0' : 'pb-24'}`}>
           <ActivePositions />
           <Suspense fallback={<TerminalLoader />}>
             <Switch>
@@ -211,12 +211,12 @@ export default function App() {
       </div>
       <Toaster
         theme="dark"
-        position="bottom-center"
+        position="top-center"
         visibleToasts={1}
         duration={2500}
         gap={4}
-        offset="16px"
-        mobileOffset="16px"
+        offset="72px"
+        mobileOffset="72px"
         toastOptions={{
           classNames: { toast: "cn-toast" },
           style: { fontSize: '12px', padding: '7px 12px', minHeight: '0', width: 'fit-content', maxWidth: '92vw', margin: '0 auto', borderRadius: '9999px' },

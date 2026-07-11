@@ -156,7 +156,7 @@ export default function AiMarketRead({
           setOpen(true);
           if (!read) runRead();
         }}
-        className="fixed top-3 right-3 z-[90] px-3 py-2 rounded-full text-xs font-mono font-bold bg-indigo-500/90 text-white shadow-lg hover:bg-indigo-500"
+        className="fixed top-[max(env(safe-area-inset-top),12px)] right-3 z-[90] px-3 py-2 rounded-full text-xs font-mono font-bold bg-indigo-500/90 text-white shadow-lg hover:bg-indigo-500"
         title="Claude's plain-English read of the current setup"
       >
         🧠 AI READ
@@ -165,7 +165,7 @@ export default function AiMarketRead({
   }
 
   return (
-    <div className="fixed top-3 right-3 z-[90] w-[92vw] max-w-[340px] bg-popover border border-border rounded-lg shadow-xl p-3 text-xs font-mono flex flex-col gap-2 max-h-[80vh] overflow-y-auto">
+    <div className="fixed top-[max(env(safe-area-inset-top),12px)] right-3 z-[90] w-[92vw] max-w-[340px] bg-popover border border-border rounded-lg shadow-xl p-3 text-xs font-mono flex flex-col gap-2 max-h-[80vh] overflow-y-auto">
       <div className="flex items-center justify-between">
         <span className="font-bold tracking-wide text-foreground">AI MARKET READ</span>
         <div className="flex items-center gap-2">

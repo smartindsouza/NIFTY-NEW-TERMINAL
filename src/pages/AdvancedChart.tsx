@@ -1962,7 +1962,8 @@ const createOHLCInfoPanel = (container: HTMLElement) => {
   let panel = container.querySelector('.ohlc-panel') as HTMLDivElement;
   if (!panel) {
     panel = document.createElement('div');
-    panel.className = 'ohlc-panel absolute top-2 left-2 z-[20] flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-mono select-none pointer-events-none px-2.5 py-1.5 rounded-full bg-card/90 backdrop-blur border border-0';
+    panel.className = 'ohlc-panel absolute top-2 left-2 z-[20] flex flex-nowrap items-center gap-x-3 text-xs font-mono select-none pointer-events-none px-2.5 py-1.5 rounded-full bg-card/90 backdrop-blur border border-0 max-w-[calc(100%-72px)] overflow-hidden whitespace-nowrap';
+    panel.style.display = 'none';
     container.appendChild(panel);
   }
   return panel;
@@ -2067,16 +2068,10 @@ const formatChange = (open: number, close: number) => {
 
 const updateOHLCInfoPanel = (panel: HTMLDivElement, candle: any, volume: any) => {
   if (!candle || !panel) return;
-  const { open, high, low, close, time } = candle;
+  const { open, high, low, close } = candle;
   const changeInfo = formatChange(open, close);
-  
-  const date = new Date(time * 1000);
-  const timeStr = Intl.DateTimeFormat('en-IN', {
-    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' 
-  }).format(date);
 
   panel.innerHTML = `
-    <span style="color: #cbd5e1; font-weight: 500;">${timeStr}</span>
     <span style="color: #64748b;">O <span style="color: #cbd5e1;">${formatPrice(open)}</span></span>
     <span style="color: #64748b;">H <span style="color: #cbd5e1;">${formatPrice(high)}</span></span>
     <span style="color: #64748b;">L <span style="color: #cbd5e1;">${formatPrice(low)}</span></span>
@@ -5575,10 +5570,7 @@ export function AdvancedChart() {
     }
 
     const ohlcPanel = chartContainerRef.current ? createOHLCInfoPanel(chartContainerRef.current) : null;
-    if (ohlcPanel) {
-      const { candle, volume } = getLatestCandle(candleData, volumeData);
-      updateOHLCInfoPanel(ohlcPanel, candle, volume);
-    }
+    // OHLC panel is hover-only: it stays hidden until the crosshair is on a candle.
 
     const rsiDataMap = new Map(rsiData.map((d: any) => [d.time, d.value]));
 
@@ -5591,6 +5583,7 @@ export function AdvancedChart() {
         if (!param.point || param.point.x < 0 || param.point.y < 0) {
           try { rsiChart.clearCrosshairPosition(); } catch(e) {}
           setRsiHoverValue(null);
+          if (ohlcPanel) ohlcPanel.style.display = 'none';
           setTimeout(() => {
             if (!isHoveringButtonRef.current) {
                setCrosshairInfo(null);
@@ -5628,12 +5621,12 @@ export function AdvancedChart() {
         }
 
         if (ohlcPanel) {
-          if (!currentCandle) {
-             const latest = getLatestCandle(candleData, volumeData);
-             currentCandle = latest.candle;
-             currentVolume = latest.volume;
+          if (currentCandle) {
+            ohlcPanel.style.display = 'flex';
+            updateOHLCInfoPanel(ohlcPanel, currentCandle, currentVolume);
+          } else {
+            ohlcPanel.style.display = 'none';
           }
-          updateOHLCInfoPanel(ohlcPanel, currentCandle, currentVolume);
         }
       } catch (e) {
         // ignore disposed
@@ -5678,12 +5671,12 @@ export function AdvancedChart() {
         }
 
         if (ohlcPanel) {
-          if (!currentCandle) {
-             const latest = getLatestCandle(candleData, volumeData);
-             currentCandle = latest.candle;
-             currentVolume = latest.volume;
+          if (currentCandle) {
+            ohlcPanel.style.display = 'flex';
+            updateOHLCInfoPanel(ohlcPanel, currentCandle, currentVolume);
+          } else {
+            ohlcPanel.style.display = 'none';
           }
-          updateOHLCInfoPanel(ohlcPanel, currentCandle, currentVolume);
         }
       } catch(e) {
         // ignore disposed
