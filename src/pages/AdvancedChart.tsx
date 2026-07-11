@@ -5403,11 +5403,6 @@ export function AdvancedChart() {
         borderColor: 'rgba(255, 255, 255, 0.1)',
         autoScale: true,
       },
-      // The RSI pane is display-only: no manual zoom/pan, so its price axis can
-      // NEVER be dragged/pinched out of the fixed 0-100 range (time follows the
-      // main chart via sync anyway).
-      handleScale: false,
-      handleScroll: false,
     });
 
     // Add RSI Series
@@ -5425,6 +5420,25 @@ export function AdvancedChart() {
     });
     
     rsiSeriesRef.current = rsiSeries;
+
+    // 0-100 clamp for the RSI axis: manual pinch/drag is allowed for a quick look,
+    // but the instant the gesture ends the scale snaps back to auto (which the
+    // series pins to exactly 0-100). lightweight-charts exposes no API to hard-cap
+    // a manually-set range, so snap-back is the strongest guarantee available.
+    const rsiSnapBack = () => {
+      try { rsiSeries.priceScale().applyOptions({ autoScale: true }); } catch (e) {}
+    };
+    let rsiWheelTimer: any = null;
+    const rsiWheelEnd = () => {
+      if (rsiWheelTimer) clearTimeout(rsiWheelTimer);
+      rsiWheelTimer = setTimeout(rsiSnapBack, 350);
+    };
+    const rsiClampEl = rsiContainerRef.current;
+    rsiClampEl.addEventListener('pointerup', rsiSnapBack);
+    rsiClampEl.addEventListener('pointercancel', rsiSnapBack);
+    rsiClampEl.addEventListener('touchend', rsiSnapBack);
+    rsiClampEl.addEventListener('mouseleave', rsiSnapBack);
+    rsiClampEl.addEventListener('wheel', rsiWheelEnd, { passive: true });
 
     const rsiData = chartData.candles.map((c: any) => ({
       time: c.time as any,
@@ -5713,6 +5727,14 @@ export function AdvancedChart() {
     return () => {
       mainResizeObserver.disconnect();
       rsiResizeObserver.disconnect();
+      try {
+        rsiClampEl.removeEventListener('pointerup', rsiSnapBack);
+        rsiClampEl.removeEventListener('pointercancel', rsiSnapBack);
+        rsiClampEl.removeEventListener('touchend', rsiSnapBack);
+        rsiClampEl.removeEventListener('mouseleave', rsiSnapBack);
+        rsiClampEl.removeEventListener('wheel', rsiWheelEnd);
+        if (rsiWheelTimer) clearTimeout(rsiWheelTimer);
+      } catch (e) {}
       mainChart.remove();
       rsiChart.remove();
       mainChartRef.current = null;
