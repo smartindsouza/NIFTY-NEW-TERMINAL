@@ -311,25 +311,25 @@ export function Dashboard() {
   return (
     <div className="p-6 md:p-8 space-y-6 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto font-sans tracking-wide pb-20">
       {/* Header */}
-      <div className="flex justify-between items-end pb-4 border-b border-0 border-dashed">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground tracking-tight">NIFTY 50</h1>
-          <div className="flex items-center gap-2 mt-1">
-            <p className="text-xs text-muted-foreground">Expiry: Live Data</p>
+      <div className="flex justify-between items-end gap-3 pb-4 border-b border-0 border-dashed">
+        <div className="min-w-0">
+          <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight">NIFTY 50</h1>
+          <div className="flex items-center flex-wrap gap-2 mt-1">
+            <p className="text-xs text-muted-foreground whitespace-nowrap">Expiry: Live Data</p>
             {isMarketOpen ? (
-              <span className="text-[9px] font-bold bg-green-500/10 dark:bg-green-500/20 text-green-600 dark:text-green-500 px-2 py-0.5 rounded uppercase tracking-wider">Market Open</span>
+              <span className="text-[9px] font-bold bg-green-500/10 dark:bg-green-500/20 text-green-600 dark:text-green-500 px-2 py-0.5 rounded uppercase tracking-wider whitespace-nowrap">Market Open</span>
             ) : (
-              <span className="text-[9px] font-bold bg-secondary/50 dark:bg-gray-500/20 text-muted-foreground px-2 py-0.5 rounded uppercase tracking-wider">Market Closed</span>
+              <span className="text-[9px] font-bold bg-secondary/50 dark:bg-gray-500/20 text-muted-foreground px-2 py-0.5 rounded uppercase tracking-wider whitespace-nowrap">Market Closed</span>
             )}
           </div>
         </div>
-        <div className="text-right flex flex-col items-end">
+        <div className="text-right flex flex-col items-end shrink-0">
           <motion.h1 
             key={spot}
             initial={{ color: '#4ade80', scale: 1.05 }}
             animate={{ color: 'var(--foreground)', scale: 1 }}
             transition={{ duration: 0.8, ease: "easeOut" }}
-            className="text-4xl font-mono font-bold tracking-tighter"
+            className="text-3xl md:text-4xl font-mono font-bold tracking-tighter whitespace-nowrap"
           >
             {spot.toFixed(2)}
           </motion.h1>

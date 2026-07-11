@@ -83,17 +83,19 @@ export function OptionChain() {
     <div className="p-6 md:p-8 space-y-6 animate-in fade-in duration-700 max-w-[1600px] mx-auto font-sans">
       
       {/* Header */}
-      <div className="flex justify-between items-end pb-3 border-b border-0">
-        <div>
-          <h1 className="text-3xl font-black tracking-tight text-foreground">OI Data Levels</h1>
-          <p className="text-sm font-medium text-muted-foreground mt-2 flex items-center gap-3">
-             <span className="text-foreground font-mono bg-card/80 backdrop-blur-md px-2 py-0.5 rounded-lg border border-0">Spot: {spot.toFixed(2)}</span>
-             <span className="text-foreground font-mono bg-card/80 backdrop-blur-md px-2 py-0.5 rounded-lg border border-0">Expiry: {formattedExpiry}</span>
+      <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-3 pb-3 border-b border-0">
+        <div className="min-w-0">
+          <h1 className="text-2xl md:text-3xl font-black tracking-tight text-foreground">OI Data Levels</h1>
+          {/* Row 1: Spot + Expiry together */}
+          <p className="text-sm font-medium text-muted-foreground mt-2 flex items-center flex-wrap gap-2">
+             <span className="text-foreground font-mono bg-card/80 backdrop-blur-md px-2 py-0.5 rounded-lg border border-0 whitespace-nowrap">Spot: {spot.toFixed(2)}</span>
+             <span className="text-foreground font-mono bg-card/80 backdrop-blur-md px-2 py-0.5 rounded-lg border border-0 whitespace-nowrap">Expiry: {formattedExpiry}</span>
           </p>
         </div>
-        <div className="flex items-center gap-4">
+        {/* Row 2 (mobile): expiry dropdown + Min/Max */}
+        <div className="flex items-center gap-2 md:gap-4 flex-wrap">
           <Select value={selectedExpiry} onValueChange={(val) => setSelectedExpiry(val)}>
-            <SelectTrigger className="w-[155px] bg-card border-0 text-xs h-8 rounded-lg text-foreground">
+            <SelectTrigger className="w-[150px] bg-card border-0 text-xs h-8 rounded-lg text-foreground">
               <SelectValue placeholder="Expiry" />
             </SelectTrigger>
             <SelectContent className="bg-card border border-0 rounded-xl text-foreground">
@@ -105,16 +107,18 @@ export function OptionChain() {
               ))}
             </SelectContent>
           </Select>
-          <div className="flex gap-1 bg-card/80 backdrop-blur-md border border-0 rounded-lg p-1">
-             <button className="px-5 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground hover:text-foreground rounded-md transition">Min</button>
-             <button className="px-5 py-1 text-xs font-medium bg-primary/20 text-primary border border-primary/30 rounded-md transition">Max</button>
+          <div className="flex gap-1 bg-card/80 backdrop-blur-md border border-0 rounded-lg p-1 shrink-0">
+             <button className="px-4 md:px-5 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground hover:text-foreground rounded-md transition">Min</button>
+             <button className="px-4 md:px-5 py-1 text-xs font-medium bg-primary/20 text-primary border border-primary/30 rounded-md transition">Max</button>
           </div>
         </div>
       </div>
 
-      <div className="flex items-center justify-between text-xs mb-2 px-2 uppercase tracking-widest font-bold">
-        <span className="flex items-center gap-2 text-muted-foreground"><Activity className="w-3 h-3 text-primary" /> OI + IV Analysis <span className="text-muted-foreground ml-2 font-medium capitalize tracking-normal">Writer Intelligence</span></span>
-        <span className="text-muted-foreground flex gap-4">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-1.5 text-xs mb-2 px-2 uppercase tracking-widest font-bold">
+        {/* Row 1: OI+IV Analysis + Writer Intelligence */}
+        <span className="flex items-center gap-2 text-muted-foreground flex-wrap"><Activity className="w-3 h-3 text-primary shrink-0" /> OI + IV Analysis <span className="text-muted-foreground md:ml-2 font-medium capitalize tracking-normal">Writer Intelligence</span></span>
+        {/* Row 2: SPOT · PCR · Max Pain */}
+        <span className="text-muted-foreground flex gap-3 md:gap-4 flex-wrap">
           <span>SPOT <span className="text-foreground font-mono">{spot.toFixed(2)}</span></span>
           <span className="text-muted-foreground">•</span>
           <span>PCR <span className="text-foreground font-mono">{pcr.toFixed(2)}</span></span>
