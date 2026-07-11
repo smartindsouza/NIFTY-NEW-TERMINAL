@@ -215,8 +215,8 @@ export default function App() {
         visibleToasts={1}
         duration={2500}
         gap={4}
-        offset={6}
-        mobileOffset={6}
+        offset="16px"
+        mobileOffset="16px"
         toastOptions={{
           classNames: { toast: "cn-toast" },
           style: { fontSize: '12px', padding: '7px 12px', minHeight: '0', width: 'fit-content', maxWidth: '92vw', margin: '0 auto', borderRadius: '9999px' },
@@ -225,4 +225,3 @@ export default function App() {
     </QueryClientProvider>
   );
 }
-

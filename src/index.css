@@ -131,3 +131,12 @@
     @apply font-sans;
     }
 }
+/* Lift Sonner toasts clear of the mobile bottom navigation bar.
+   The bar (Header.tsx) is `fixed bottom-0`, `md:hidden` and 4rem tall + safe area,
+   so it only exists below md (768px). Below that breakpoint we push the toast up so
+   it floats just above the bar with a 12px gap instead of sitting under it. */
+@media (max-width: 767px) {
+  [data-sonner-toaster][data-y-position='bottom'] {
+    bottom: calc(4rem + env(safe-area-inset-bottom) + 12px) !important;
+  }
+}
