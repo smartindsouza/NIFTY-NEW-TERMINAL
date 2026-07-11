@@ -3653,7 +3653,7 @@ export function AdvancedChart() {
       } catch { /* ignore */ }
     };
     poll();
-    const iv = setInterval(poll, 5000);
+    const iv = setInterval(poll, 10000);
     return () => { cancelled = true; clearInterval(iv); };
   }, [slActivePos]);
 

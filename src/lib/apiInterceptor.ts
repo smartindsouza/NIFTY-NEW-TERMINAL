@@ -4,6 +4,17 @@ import { toast } from 'sonner';
 
 let isAlertActive = false;
 
+// Endpoints served entirely from OUR server's local state (no Kite/broker call
+// behind them). High frequency here cannot cause broker 429s, so they are
+// exempt from the broker-block warning (stats are still tracked).
+const LOCAL_ONLY_ENDPOINTS = new Set([
+  '/api/exit-rules',
+  '/api/delta',
+  '/api/market-context',
+  '/api/analytics',
+  '/api/healthz',
+]);
+
 function showTooFrequentWarning(endpoint: string, rate: number) {
   if (isAlertActive) return;
   isAlertActive = true;
@@ -42,7 +53,7 @@ export function initializeInterceptor() {
         // Check for high-frequency warnings
         const warnings = performanceTracker.getEndpointFrequencyWarnings();
         const warning = warnings.find(w => w.endpoint === url.split('?')[0]);
-        if (warning) {
+        if (warning && !LOCAL_ONLY_ENDPOINTS.has(warning.endpoint)) {
           showTooFrequentWarning(warning.endpoint, warning.ratePer15s);
         }
 
@@ -90,7 +101,7 @@ export function initializeInterceptor() {
         // Check frequency
         const warnings = performanceTracker.getEndpointFrequencyWarnings();
         const warning = warnings.find(w => w.endpoint === url.split('?')[0]);
-        if (warning) {
+        if (warning && !LOCAL_ONLY_ENDPOINTS.has(warning.endpoint)) {
           showTooFrequentWarning(warning.endpoint, warning.ratePer15s);
         }
       }

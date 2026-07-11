@@ -38,7 +38,7 @@ export function ActivePositions() {
       } catch {}
     };
     fetchRules();
-    const id = setInterval(fetchRules, 5000);
+    const id = setInterval(fetchRules, 10000);
     return () => { active = false; clearInterval(id); };
   }, []);
 
