@@ -5441,24 +5441,9 @@ export function AdvancedChart() {
     
     rsiSeriesRef.current = rsiSeries;
 
-    // 0-100 clamp for the RSI axis: manual pinch/drag is allowed for a quick look,
-    // but the instant the gesture ends the scale snaps back to auto (which the
-    // series pins to exactly 0-100). lightweight-charts exposes no API to hard-cap
-    // a manually-set range, so snap-back is the strongest guarantee available.
-    const rsiSnapBack = () => {
-      try { rsiSeries.priceScale().applyOptions({ autoScale: true }); } catch (e) {}
-    };
-    let rsiWheelTimer: any = null;
-    const rsiWheelEnd = () => {
-      if (rsiWheelTimer) clearTimeout(rsiWheelTimer);
-      rsiWheelTimer = setTimeout(rsiSnapBack, 350);
-    };
-    const rsiClampEl = rsiContainerRef.current;
-    rsiClampEl.addEventListener('pointerup', rsiSnapBack);
-    rsiClampEl.addEventListener('pointercancel', rsiSnapBack);
-    rsiClampEl.addEventListener('touchend', rsiSnapBack);
-    rsiClampEl.addEventListener('mouseleave', rsiSnapBack);
-    rsiClampEl.addEventListener('wheel', rsiWheelEnd, { passive: true });
+    // Manual scaling of the RSI axis is fully enabled: the user can pinch/drag the
+    // axis to any range and it stays (no snap-back). Double-tapping the axis still
+    // resets to the auto 0-100 fit.
 
     const rsiData = chartData.candles.map((c: any) => ({
       time: c.time as any,
@@ -5748,12 +5733,6 @@ export function AdvancedChart() {
       mainResizeObserver.disconnect();
       rsiResizeObserver.disconnect();
       try {
-        rsiClampEl.removeEventListener('pointerup', rsiSnapBack);
-        rsiClampEl.removeEventListener('pointercancel', rsiSnapBack);
-        rsiClampEl.removeEventListener('touchend', rsiSnapBack);
-        rsiClampEl.removeEventListener('mouseleave', rsiSnapBack);
-        rsiClampEl.removeEventListener('wheel', rsiWheelEnd);
-        if (rsiWheelTimer) clearTimeout(rsiWheelTimer);
       } catch (e) {}
       mainChart.remove();
       rsiChart.remove();
@@ -6551,7 +6530,7 @@ export function AdvancedChart() {
             <select
               value={timeframe}
               onChange={(e) => setTimeframe(e.target.value)}
-              className="bg-background text-foreground border border-0 text-xs md:text-sm rounded-md px-2 md:px-3 py-1 md:py-1.5 focus:outline-none focus:ring-1 focus:ring-primary h-8 md:h-9"
+              className="appearance-none text-center bg-muted/40 text-foreground border border-0 text-xs md:text-sm rounded-md px-3 focus:outline-none focus:ring-1 focus:ring-primary h-9 [&::-ms-expand]:hidden shrink-0"
             >
               <option value="1">1m</option>
               <option value="3">3m</option>
@@ -6799,8 +6778,8 @@ export function AdvancedChart() {
             </div>
           </div>
           </div>
-          <div className="flex items-center gap-2 flex-1 basis-0 min-w-[52%] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents md:min-w-0 md:basis-auto">
-          <div className="flex items-center gap-2 bg-muted/40 border border-0 rounded-md px-2 md:px-3 py-1.5 ml-0 md:ml-2 shrink-0 md:order-2 cursor-pointer" onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled' : 'Quick Trade disabled'); } catch (e) {} }} title="Quick Trade">
+          <div className="flex items-center gap-2 flex-1 basis-0 min-w-[52%] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents md:min-w-0 md:basis-auto pr-1">
+          <div className="flex items-center justify-center gap-2 h-9 w-9 md:w-auto bg-muted/40 border border-0 rounded-md md:px-3 shrink-0 md:order-2 cursor-pointer" onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled' : 'Quick Trade disabled'); } catch (e) {} }} title="Quick Trade">
              <Zap size={18} className={`md:hidden ${quickTradeEnabled ? 'text-primary' : 'text-muted-foreground'}`} />
              <span className="hidden md:inline text-xs font-medium text-foreground/80">Quick Trade</span>
              <label className="relative hidden md:inline-flex items-center cursor-pointer pointer-events-none">
@@ -6808,22 +6787,18 @@ export function AdvancedChart() {
                <div className="w-7 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after: after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
              </label>
           </div>
-          <div className="shrink-0 md:order-5"><BounceConviction taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} /></div>
             <button
               onClick={() => {
                 setTbReloading(true);
                 try { window.dispatchEvent(new CustomEvent('chart_reload')); } catch (e) {}
-                // Hard refresh the whole app (bypass cache) shortly after, so the
-                // reload button also reloads the page — not just the chart data.
-                setTimeout(() => {
-                  try { window.location.reload(); } catch (e) {}
-                }, 150);
+                setTimeout(() => { try { window.location.reload(); } catch (e) {} }, 150);
               }}
-              className="md:hidden shrink-0 p-2 rounded-md bg-muted/40 text-foreground/80"
+              className="md:hidden shrink-0 md:order-4 flex items-center justify-center h-9 w-9 rounded-md bg-muted/40 text-foreground/80"
               title="Reload chart and hard-refresh the app"
             >
               <RefreshCw size={18} className={tbReloading ? 'animate-spin' : ''} />
             </button>
+          <div className="shrink-0 md:order-5 [&>button]:h-9"><BounceConviction taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} /></div>
 
           </div>
         </div>

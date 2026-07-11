@@ -60,7 +60,7 @@ export default function BounceConviction({ taInfo, oiData, pulseBias }: Props) {
         className={`inline-flex items-center h-9 px-3 rounded-md text-xs font-mono font-bold whitespace-nowrap ${hasSetup ? scoreColor : "bg-slate-700/90 text-slate-200"}`}
         title="Bounce Conviction + live ADX / EMA / VWAP readout"
       >
-        ↩ BOUNCE {hasSetup ? score : "—"}
+        BOUNCE {hasSetup ? score : "—"}
       </button>
     );
   }
