@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
-import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu } from "lucide-react";
+import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight } from "lucide-react";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { getDivergences } from "../lib/divergence";
@@ -3131,6 +3131,9 @@ export function AdvancedChart() {
   const [showBiases, setShowBiases] = useState(false);
   // Mobile toolbar reload button feedback (dispatches the same chart_reload event)
   const [tbReloading, setTbReloading] = useState(false);
+  // "Scroll to latest" (fast-forward) button — shown only when the view is scrolled
+  // away from the most recent candle.
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   // TradingView-style resizable RSI pane: drag the divider between chart and RSI.
   // 0 = default height (h-[140px] mobile / md:h-[200px] desktop); persisted.
   const [rsiPaneHeight, setRsiPaneHeight] = useState<number>(() => {
@@ -5341,6 +5344,20 @@ export function AdvancedChart() {
       // First mount of the session (or no saved range): show the latest candles.
       focusRecentCandles(mainChart, chartData.candles);
     }
+
+    // Toggle the "scroll to latest" button: visible only when the right edge of the
+    // view is more than a few bars behind the last candle.
+    const jumpRangeHandler = (range: any) => {
+      try {
+        const total = (chartDataRef.current?.candles?.length) || chartData.candles.length;
+        if (!range || !total) { setShowJumpToLatest(false); return; }
+        // range.to is a logical (bar) index; last bar is total-1. If we're viewing
+        // well before the end, show the button.
+        const barsBehind = (total - 1) - range.to;
+        setShowJumpToLatest(barsBehind > 3);
+      } catch (e) {}
+    };
+    mainChart.timeScale().subscribeVisibleLogicalRangeChange(jumpRangeHandler);
     chartFirstLoadDone = true;
 
     bbUpperSeriesRef.current = null;
@@ -5727,6 +5744,7 @@ export function AdvancedChart() {
       rsiResizeObserver.disconnect();
       try {
       } catch (e) {}
+      try { mainChart.timeScale().unsubscribeVisibleLogicalRangeChange(jumpRangeHandler); } catch (e) {}
       mainChart.remove();
       rsiChart.remove();
       mainChartRef.current = null;
@@ -6816,6 +6834,28 @@ export function AdvancedChart() {
               onPointerLeave={handlePointerUp}
               className="border border-0 rounded-none md:rounded-xl stretch-self flex-grow relative w-full overflow-hidden z-20"
             />
+            {showJumpToLatest && (
+              <button
+                onClick={() => {
+                  try {
+                    const ts = mainChartRef.current?.timeScale?.();
+                    if (ts) {
+                      ts.scrollToRealTime();
+                      const data = chartDataRef.current?.candles;
+                      if (data && data.length) {
+                        const barsToShow = Math.min(120, data.length);
+                        ts.setVisibleLogicalRange({ from: data.length - barsToShow, to: data.length + 2 });
+                      }
+                    }
+                  } catch (e) {}
+                  setShowJumpToLatest(false);
+                }}
+                title="Scroll to the latest candle"
+                className="absolute bottom-3 right-[60px] z-[55] h-9 w-9 rounded-full bg-primary/90 text-white shadow-lg flex items-center justify-center hover:bg-primary transition-colors animate-in fade-in duration-200"
+              >
+                <ChevronsRight size={18} />
+              </button>
+            )}
             {crosshairInfo && (
               <button
                 onClick={handleAddManualLine}
