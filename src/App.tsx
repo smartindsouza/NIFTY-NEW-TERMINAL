@@ -207,7 +207,7 @@ export default function App() {
           </div>
         )}
       </div>
-      {/* <Toaster theme="dark" closeButton /> */}
+      <Toaster theme="dark" closeButton />
     </QueryClientProvider>
   );
 }

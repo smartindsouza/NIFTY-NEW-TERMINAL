@@ -6234,7 +6234,7 @@ export function AdvancedChart() {
   });
 
   return (
-    <div className="px-1 py-2 md:p-8 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto pb-0 md:pb-20 flex flex-col h-[calc(100dvh-150px)] md:h-auto md:min-h-screen overflow-hidden md:overflow-visible relative">
+    <div className="px-1 py-2 md:p-8 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto pb-0 md:pb-20 flex flex-col h-[calc(100dvh-132px)] md:h-auto md:min-h-screen overflow-hidden md:overflow-visible relative">
       
       {showDiagnostic && (
         <div className="fixed bottom-6 right-6 z-50 bg-card/95 backdrop-blur-md border border-0 p-4 rounded-lg text-xs font-mono w-[340px] max-h-[80vh] overflow-y-auto">
@@ -6489,14 +6489,37 @@ export function AdvancedChart() {
           <AiMarketRead taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} model="claude-sonnet-4-6" />
           <MarketContext />
         </div>
-        <div className="fixed md:static bottom-20 md:bottom-auto left-0 right-0 z-40 bg-[#141618]/95 md:bg-transparent backdrop-blur md:backdrop-blur-none border-t border-white/10 md:border-0 px-2 py-1.5 md:p-0 flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap overflow-x-auto md:overflow-visible [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:justify-end w-full md:w-auto">
-          <div className="w-40 shrink-0 sm:w-auto">
+        <div className="fixed md:static bottom-16 md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-2 py-1.5 md:p-0 flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap md:justify-end w-full md:w-auto">
+          <div className="flex items-center gap-2 shrink-0 md:contents">
+          <div className="w-36 shrink-0 sm:w-auto md:order-1">
           <SymbolSearch 
             onSelect={setSelectedInstrument} 
             currentSymbol={selectedInstrument ? selectedInstrument.tradingsymbol : "NIFTY 50"} 
           />
           </div>
-          <div className="flex items-center gap-2 bg-muted/40 border border-0 rounded-md px-2 md:px-3 py-1.5 ml-0 md:ml-2 shrink-0 cursor-pointer" onClick={() => setQuickTradeEnabled(!quickTradeEnabled)} title="Quick Trade">
+          <div className="flex items-center gap-2 shrink-0 md:order-4">
+            <span className="hidden md:inline text-sm text-muted-foreground font-medium">
+              Timeframe:
+            </span>
+            <select
+              value={timeframe}
+              onChange={(e) => setTimeframe(e.target.value)}
+              className="bg-background text-foreground border border-0 text-xs md:text-sm rounded-md px-2 md:px-3 py-1 md:py-1.5 focus:outline-none focus:ring-1 focus:ring-primary h-8 md:h-9"
+            >
+              <option value="1">1m</option>
+              <option value="3">3m</option>
+              <option value="5">5m</option>
+              <option value="15">15m</option>
+              <option value="60">1h</option>
+              <option value="240">4h</option>
+              <option value="1440">1D</option>
+              <option value="10080">1W</option>
+              <option value="43200">1M</option>
+            </select>
+          </div>
+          </div>
+          <div className="flex items-center gap-2 flex-1 min-w-0 overflow-x-auto [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents">
+          <div className="flex items-center gap-2 bg-muted/40 border border-0 rounded-md px-2 md:px-3 py-1.5 ml-0 md:ml-2 shrink-0 md:order-2 cursor-pointer" onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled' : 'Quick Trade disabled'); } catch (e) {} }} title="Quick Trade">
              <Zap size={18} className={`md:hidden ${quickTradeEnabled ? 'text-primary' : 'text-muted-foreground'}`} />
              <span className="hidden md:inline text-xs font-medium text-foreground/80">Quick Trade</span>
              <label className="relative hidden md:inline-flex items-center cursor-pointer pointer-events-none">
@@ -6504,7 +6527,7 @@ export function AdvancedChart() {
                <div className="w-7 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after: after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
              </label>
           </div>
-          <div className="flex bg-muted p-1 rounded-md shrink-0">
+          <div className="flex bg-muted p-1 rounded-md shrink-0 md:order-3">
             <div className="relative" ref={indicatorsRef}>
               <button
                 onClick={() => setIsIndicatorsOpen(!isIndicatorsOpen)}
@@ -6515,7 +6538,7 @@ export function AdvancedChart() {
                 <ChevronDown size={14} className={`hidden md:block transition-transform ${isIndicatorsOpen ? 'rotate-180' : ''}`} />
               </button>
               {isIndicatorsOpen && (
-                <div className="fixed md:absolute inset-x-2 md:inset-x-auto bottom-[136px] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto md:overflow-hidden bg-card border border-white/10 md:border-0 rounded-md py-1.5 z-50 flex flex-col">
+                <div className="fixed md:absolute inset-x-2 md:inset-x-auto bottom-[120px] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto md:overflow-hidden bg-card border border-white/10 md:border-0 rounded-md py-1.5 z-[70] flex flex-col">
                   <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase">Available Indicators</div>
                   
                   {/* Previous Day High/Low */}
@@ -6739,26 +6762,7 @@ export function AdvancedChart() {
             </div>
           </div>
           
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="hidden md:inline text-sm text-muted-foreground font-medium">
-              Timeframe:
-            </span>
-            <select
-              value={timeframe}
-              onChange={(e) => setTimeframe(e.target.value)}
-              className="bg-background text-foreground border border-0 text-xs md:text-sm rounded-md px-2 md:px-3 py-1 md:py-1.5 focus:outline-none focus:ring-1 focus:ring-primary h-8 md:h-9"
-            >
-              <option value="1">1m</option>
-              <option value="3">3m</option>
-              <option value="5">5m</option>
-              <option value="15">15m</option>
-              <option value="60">1h</option>
-              <option value="240">4h</option>
-              <option value="1440">1D</option>
-              <option value="10080">1W</option>
-              <option value="43200">1M</option>
-            </select>
-            <BounceConviction taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} />
+            <div className="shrink-0 md:order-5"><BounceConviction taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} /></div>
             <button
               onClick={() => {
                 setTbReloading(true);
@@ -6788,17 +6792,17 @@ export function AdvancedChart() {
           <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
         </div>
       ) : (
-        <div className="flex flex-col flex-grow gap-2 min-h-0">
+        <div className="flex flex-col flex-grow gap-0 md:gap-2 min-h-0">
 
           {/* Main Chart (Price & Volume) */}
-          <div className="relative flex-grow flex w-full bg-card rounded-xl min-h-0 md:min-h-[450px]" onMouseLeave={() => setCrosshairInfo(null)}>
+          <div className="relative flex-grow flex w-full bg-card rounded-none md:rounded-xl min-h-0 md:min-h-[450px]" onMouseLeave={() => setCrosshairInfo(null)}>
             <div
               ref={chartContainerRef}
               onPointerDownCapture={handlePointerDown}
               onPointerMoveCapture={handlePointerMove}
               onPointerUpCapture={handlePointerUp}
               onPointerLeave={handlePointerUp}
-              className="border border-0 rounded-xl stretch-self flex-grow relative w-full overflow-hidden z-20"
+              className="border border-0 rounded-none md:rounded-xl stretch-self flex-grow relative w-full overflow-hidden z-20"
             />
             {crosshairInfo && (
               <button
@@ -7074,7 +7078,7 @@ export function AdvancedChart() {
           <div className={`relative w-full shrink-0 h-[140px] md:h-[200px] ${!showRsi ? 'hidden' : ''}`}>
             <div
               ref={rsiContainerRef}
-              className="bg-card border border-0 rounded-xl overflow-hidden w-full h-full absolute inset-0"
+              className="bg-card border border-0 rounded-none md:rounded-xl overflow-hidden w-full h-full absolute inset-0"
             />
             {rsiHoverValue && (
                <div className="absolute top-2 left-2 z-10 text-xs font-mono font-medium text-cyan-400">
