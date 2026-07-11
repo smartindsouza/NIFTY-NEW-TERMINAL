@@ -6537,8 +6537,8 @@ export function AdvancedChart() {
           <MarketContext />
         </div>
         <div className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-[60] bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-2 py-1.5 md:p-0 flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap md:justify-end w-full md:w-auto">
-          <div className="flex items-center gap-2 shrink-0 md:contents">
-          <div className="w-36 shrink-0 sm:w-auto md:order-1">
+          <div className="flex items-center gap-2 shrink-0 min-w-0 md:contents">
+          <div className="w-28 max-w-[112px] sm:max-w-none shrink-0 sm:w-auto md:order-1">
           <SymbolSearch 
             onSelect={setSelectedInstrument} 
             currentSymbol={selectedInstrument ? selectedInstrument.tradingsymbol : "NIFTY 50"} 
@@ -6565,7 +6565,7 @@ export function AdvancedChart() {
             </select>
           </div>
           </div>
-          <div className="flex items-center gap-2 flex-1 min-w-0 overflow-x-auto [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents">
+          <div className="flex items-center gap-2 flex-1 basis-0 min-w-[52%] overflow-x-auto [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents md:min-w-0 md:basis-auto">
           <div className="flex items-center gap-2 bg-muted/40 border border-0 rounded-md px-2 md:px-3 py-1.5 ml-0 md:ml-2 shrink-0 md:order-2 cursor-pointer" onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled' : 'Quick Trade disabled'); } catch (e) {} }} title="Quick Trade">
              <Zap size={18} className={`md:hidden ${quickTradeEnabled ? 'text-primary' : 'text-muted-foreground'}`} />
              <span className="hidden md:inline text-xs font-medium text-foreground/80">Quick Trade</span>

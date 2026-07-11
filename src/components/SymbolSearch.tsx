@@ -101,7 +101,7 @@ export function SymbolSearch({ onSelect, currentSymbol }: Props) {
   };
 
   return (
-    <div className="relative w-full sm:w-[250px] sm:shrink-0" ref={containerRef}>
+    <div className="relative w-full max-w-full sm:w-[250px] sm:shrink-0" ref={containerRef}>
       <div 
         className="flex items-center bg-card border border-0 rounded-full transition-all cursor-text group w-full px-3 h-9"
         onClick={() => {
