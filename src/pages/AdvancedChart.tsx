@@ -6543,11 +6543,11 @@ export function AdvancedChart() {
               <option value="43200">1M</option>
             </select>
           </div>
-          <div className="flex bg-muted p-1 rounded-md shrink-0 md:order-3">
+          <div className="flex md:bg-muted md:p-1 rounded-md shrink-0 md:order-3">
             <div className="relative" ref={indicatorsRef}>
               <button
                 onClick={() => setIsIndicatorsOpen(!isIndicatorsOpen)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-sm text-muted-foreground hover:bg-background/50 hover:text-foreground transition-colors"
+                className={`flex items-center justify-center md:justify-start gap-1.5 h-9 w-9 md:w-auto md:h-auto md:px-3 md:py-1.5 text-sm font-medium rounded-md md:rounded-sm transition-colors ${isIndicatorsOpen ? 'bg-primary/20 text-primary md:bg-background/50' : 'bg-muted/40 md:bg-transparent text-muted-foreground hover:bg-background/50 hover:text-foreground'}`}
               >
                 <SlidersHorizontal size={18} className="md:hidden" />
                 <span className="hidden md:inline">Indicators</span>
