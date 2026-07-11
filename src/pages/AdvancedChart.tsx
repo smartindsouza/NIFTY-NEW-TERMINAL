@@ -6271,7 +6271,7 @@ export function AdvancedChart() {
   });
 
   return (
-    <div className="px-1 pb-0 pt-[max(env(safe-area-inset-top),14px)] md:p-8 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto md:pb-20 flex flex-col h-[calc(100dvh-124px-env(safe-area-inset-bottom))] md:h-auto md:min-h-screen overflow-hidden md:overflow-visible relative">
+    <div className="px-1 pt-0 pb-0 md:p-8 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto md:pb-20 flex flex-col h-[calc(100dvh-124px-env(safe-area-inset-bottom))] md:h-auto md:min-h-screen overflow-hidden md:overflow-visible relative">
       
       {showDiagnostic && (
         <div className="fixed bottom-6 right-6 z-50 bg-card/95 backdrop-blur-md border border-0 p-4 rounded-lg text-xs font-mono w-[340px] max-h-[80vh] overflow-y-auto">
