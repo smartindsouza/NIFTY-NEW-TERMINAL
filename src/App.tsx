@@ -145,7 +145,7 @@ export default function App() {
           ` : ''}
         `}</style>
         <Header />
-        <main className="flex-1 overflow-y-auto w-full relative bg-transparent pl-0 md:pl-[80px] pt-2 md:pt-8 pb-24 md:pb-12 pr-0 md:pr-6 lg:pr-8">
+        <main className={`flex-1 overflow-y-auto w-full relative bg-transparent pl-0 md:pl-[80px] pt-2 md:pt-8 md:pb-12 pr-0 md:pr-6 lg:pr-8 ${onChart ? 'max-md:overflow-hidden max-md:overscroll-none pb-24 max-md:pb-0' : 'pb-24'}`}>
           <ActivePositions />
           <Suspense fallback={<TerminalLoader />}>
             <Switch>

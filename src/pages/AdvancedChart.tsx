@@ -3129,6 +3129,16 @@ export function AdvancedChart() {
   const [showBiases, setShowBiases] = useState(false);
   // Mobile toolbar reload button feedback (dispatches the same chart_reload event)
   const [tbReloading, setTbReloading] = useState(false);
+  // TradingView-style resizable RSI pane: drag the divider between chart and RSI.
+  // 0 = default height (h-[140px] mobile / md:h-[200px] desktop); persisted.
+  const [rsiPaneHeight, setRsiPaneHeight] = useState<number>(() => {
+    try { const v = parseInt(localStorage.getItem('rsiPaneHeight') || '', 10); if (Number.isFinite(v) && v >= 70 && v <= 420) return v; } catch (e) {}
+    return 0;
+  });
+  const rsiPaneHeightRef = useRef(rsiPaneHeight);
+  useEffect(() => { rsiPaneHeightRef.current = rsiPaneHeight; }, [rsiPaneHeight]);
+  const rsiPaneRef = useRef<HTMLDivElement>(null);
+  const rsiDragRef = useRef<{ startY: number; startH: number } | null>(null);
   const [showDiagnostic, setShowDiagnostic] = useState(() => {
     try {
       return localStorage.getItem('showDiagnostic') === 'true';
@@ -7101,8 +7111,34 @@ export function AdvancedChart() {
               </div>
             )}
           </div>
+          {/* Divider between chart and RSI: visual border + drag to resize the RSI pane */}
+          {showRsi && (
+            <div
+              onPointerDown={(e) => {
+                const h = rsiPaneRef.current?.getBoundingClientRect().height || 140;
+                rsiDragRef.current = { startY: e.clientY, startH: h };
+                try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch (err) {}
+              }}
+              onPointerMove={(e) => {
+                const d = rsiDragRef.current;
+                if (!d) return;
+                const nh = Math.round(Math.min(420, Math.max(70, d.startH + (d.startY - e.clientY))));
+                setRsiPaneHeight(nh);
+              }}
+              onPointerUp={() => {
+                if (!rsiDragRef.current) return;
+                rsiDragRef.current = null;
+                try { localStorage.setItem('rsiPaneHeight', String(rsiPaneHeightRef.current || '')); } catch (err) {}
+              }}
+              onPointerCancel={() => { rsiDragRef.current = null; }}
+              className="w-full h-3 shrink-0 cursor-row-resize touch-none select-none bg-white/5 border-y border-white/10 flex items-center justify-center active:bg-white/15"
+              title="Drag to resize the RSI pane"
+            >
+              <div className="w-10 h-1 rounded-full bg-white/25" />
+            </div>
+          )}
           {/* RSI Chart */}
-          <div className={`relative w-full shrink-0 h-[140px] md:h-[200px] ${!showRsi ? 'hidden' : ''}`}>
+          <div ref={rsiPaneRef} style={rsiPaneHeight ? { height: `${rsiPaneHeight}px` } : undefined} className={`relative w-full shrink-0 h-[140px] md:h-[200px] ${!showRsi ? 'hidden' : ''}`}>
             <div
               ref={rsiContainerRef}
               className="bg-card border border-0 rounded-none md:rounded-xl overflow-hidden w-full h-full absolute inset-0"
