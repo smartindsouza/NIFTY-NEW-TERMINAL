@@ -6536,7 +6536,7 @@ export function AdvancedChart() {
           <AiMarketRead taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} model="claude-sonnet-4-6" />
           <MarketContext />
         </div>
-        <div className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-[60] bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-2 py-1.5 md:p-0 flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap md:justify-end w-full md:w-auto">
+        <div className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-30 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-2 py-1.5 md:p-0 flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap md:justify-end w-full md:w-auto">
           <div className="flex items-center gap-2 shrink-0 min-w-0 md:contents">
           <div className="w-28 max-w-[112px] sm:max-w-none shrink-0 sm:w-auto md:order-1">
           <SymbolSearch 
@@ -6585,7 +6585,7 @@ export function AdvancedChart() {
                 <ChevronDown size={14} className={`hidden md:block transition-transform ${isIndicatorsOpen ? 'rotate-180' : ''}`} />
               </button>
               {isIndicatorsOpen && (
-                <div className="fixed md:absolute inset-x-2 md:inset-x-auto bottom-[120px] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto md:overflow-hidden bg-card border border-white/10 md:border-0 rounded-md py-1.5 z-[95] shadow-2xl flex flex-col">
+                <div className="fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto md:overflow-hidden bg-card border border-white/10 md:border-0 rounded-md py-1.5 z-[45] shadow-2xl flex flex-col">
                   <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase">Available Indicators</div>
                   
                   {/* Previous Day High/Low */}
