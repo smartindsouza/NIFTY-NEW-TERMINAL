@@ -2475,6 +2475,13 @@ function MarginDiagnosticsPanel({ ticketData, kiteDiagnosticsData }: { ticketDat
 
 // Global cache to remember the chart position across tab switches and unmounts
 const globalLogicalRangeCache: Record<string, any> = {};
+
+// True only until the chart mounts for the first time this session. On that first
+// mount we always jump to the latest candles (today) and ignore any persisted
+// logical range, which is a stale bar-index window from a previous session and
+// would otherwise drop the user in the past. Restored ranges still apply on later
+// in-session rebuilds (timeframe/symbol switches).
+let chartFirstLoadDone = false;
 // Persist the X-axis (time zoom) across refreshes: hydrate the in-memory cache
 // from localStorage at load, and write it back (debounced) whenever it changes.
 try {
@@ -5330,13 +5337,16 @@ export function AdvancedChart() {
       lastCandleDataRef.current = null;
     }
     
-    if (logicalRangeRef.current) {
+    const isFirstChartLoad = !chartFirstLoadDone;
+    if (logicalRangeRef.current && !isFirstChartLoad) {
       try {
         mainChart.timeScale().setVisibleLogicalRange(logicalRangeRef.current);
       } catch (e) {}
     } else {
+      // First mount of the session (or no saved range): show the latest candles.
       focusRecentCandles(mainChart, chartData.candles);
     }
+    chartFirstLoadDone = true;
 
     bbUpperSeriesRef.current = null;
     bbMiddleSeriesRef.current = null;
@@ -5456,7 +5466,7 @@ export function AdvancedChart() {
     }));
     rsiSeries.setData(rsiData);
     
-    if (logicalRangeRef.current) {
+    if (logicalRangeRef.current && !isFirstChartLoad) {
       try {
         rsiChart.timeScale().setVisibleLogicalRange(logicalRangeRef.current);
       } catch (e) {}
