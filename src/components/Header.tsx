@@ -369,7 +369,7 @@ export function Header() {
     )}
 
     <nav
-      className="md:hidden fixed bottom-0 left-0 right-0 z-50 h-16 bg-sidebar border-t border-sidebar-border flex items-stretch justify-around px-1"
+      className="md:hidden fixed bottom-0 left-0 right-0 z-50 h-[calc(4rem+env(safe-area-inset-bottom))] bg-sidebar border-t border-sidebar-border flex items-stretch justify-around px-1"
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       {primaryLinks.map((link) => {

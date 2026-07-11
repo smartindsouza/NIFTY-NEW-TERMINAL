@@ -5403,6 +5403,11 @@ export function AdvancedChart() {
         borderColor: 'rgba(255, 255, 255, 0.1)',
         autoScale: true,
       },
+      // The RSI pane is display-only: no manual zoom/pan, so its price axis can
+      // NEVER be dragged/pinched out of the fixed 0-100 range (time follows the
+      // main chart via sync anyway).
+      handleScale: false,
+      handleScroll: false,
     });
 
     // Add RSI Series
@@ -6234,7 +6239,7 @@ export function AdvancedChart() {
   });
 
   return (
-    <div className="px-1 py-2 md:p-8 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto pb-0 md:pb-20 flex flex-col h-[calc(100dvh-132px)] md:h-auto md:min-h-screen overflow-hidden md:overflow-visible relative">
+    <div className="px-1 pb-0 pt-[max(env(safe-area-inset-top),14px)] md:p-8 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto md:pb-20 flex flex-col h-[calc(100dvh-124px-env(safe-area-inset-bottom))] md:h-auto md:min-h-screen overflow-hidden md:overflow-visible relative">
       
       {showDiagnostic && (
         <div className="fixed bottom-6 right-6 z-50 bg-card/95 backdrop-blur-md border border-0 p-4 rounded-lg text-xs font-mono w-[340px] max-h-[80vh] overflow-y-auto">
@@ -6489,7 +6494,7 @@ export function AdvancedChart() {
           <AiMarketRead taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} model="claude-sonnet-4-6" />
           <MarketContext />
         </div>
-        <div className="fixed md:static bottom-16 md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-2 py-1.5 md:p-0 flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap md:justify-end w-full md:w-auto">
+        <div className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-2 py-1.5 md:p-0 flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap md:justify-end w-full md:w-auto">
           <div className="flex items-center gap-2 shrink-0 md:contents">
           <div className="w-36 shrink-0 sm:w-auto md:order-1">
           <SymbolSearch 
