@@ -181,7 +181,7 @@ export default function App() {
         {/* Global floating telemetry toggle button */}
         <button
           onClick={() => setShowDiagnostics(!showDiagnostics)}
-          className={`fixed ${onChart ? 'bottom-36 max-md:hidden' : 'bottom-20'} right-4 md:bottom-6 md:right-6 z-50 p-3.5 rounded-full border transition-all duration-300 flex items-center justify-center cursor-pointer ${
+          className={`fixed max-md:hidden ${onChart ? 'bottom-36' : 'bottom-20'} right-4 md:bottom-6 md:right-6 z-50 p-3.5 rounded-full border transition-all duration-300 flex items-center justify-center cursor-pointer ${
             showDiagnostics 
               ? 'bg-emerald-500 text-black border-emerald-400 hover:bg-emerald-400' 
               : 'bg-card text-foreground/80 border-0 hover:text-foreground hover:bg-accent hover:text-accent-foreground'

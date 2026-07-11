@@ -6564,16 +6564,6 @@ export function AdvancedChart() {
               <option value="43200">1M</option>
             </select>
           </div>
-          </div>
-          <div className="flex items-center gap-2 flex-1 basis-0 min-w-[52%] overflow-x-auto [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents md:min-w-0 md:basis-auto">
-          <div className="flex items-center gap-2 bg-muted/40 border border-0 rounded-md px-2 md:px-3 py-1.5 ml-0 md:ml-2 shrink-0 md:order-2 cursor-pointer" onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled' : 'Quick Trade disabled'); } catch (e) {} }} title="Quick Trade">
-             <Zap size={18} className={`md:hidden ${quickTradeEnabled ? 'text-primary' : 'text-muted-foreground'}`} />
-             <span className="hidden md:inline text-xs font-medium text-foreground/80">Quick Trade</span>
-             <label className="relative hidden md:inline-flex items-center cursor-pointer pointer-events-none">
-               <input type="checkbox" className="sr-only peer" checked={quickTradeEnabled} readOnly />
-               <div className="w-7 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after: after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
-             </label>
-          </div>
           <div className="flex bg-muted p-1 rounded-md shrink-0 md:order-3">
             <div className="relative" ref={indicatorsRef}>
               <button
@@ -6808,8 +6798,17 @@ export function AdvancedChart() {
               )}
             </div>
           </div>
-          
-            <div className="shrink-0 md:order-5"><BounceConviction taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} /></div>
+          </div>
+          <div className="flex items-center gap-2 flex-1 basis-0 min-w-[52%] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents md:min-w-0 md:basis-auto">
+          <div className="flex items-center gap-2 bg-muted/40 border border-0 rounded-md px-2 md:px-3 py-1.5 ml-0 md:ml-2 shrink-0 md:order-2 cursor-pointer" onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled' : 'Quick Trade disabled'); } catch (e) {} }} title="Quick Trade">
+             <Zap size={18} className={`md:hidden ${quickTradeEnabled ? 'text-primary' : 'text-muted-foreground'}`} />
+             <span className="hidden md:inline text-xs font-medium text-foreground/80">Quick Trade</span>
+             <label className="relative hidden md:inline-flex items-center cursor-pointer pointer-events-none">
+               <input type="checkbox" className="sr-only peer" checked={quickTradeEnabled} readOnly />
+               <div className="w-7 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after: after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
+             </label>
+          </div>
+          <div className="shrink-0 md:order-5"><BounceConviction taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} /></div>
             <button
               onClick={() => {
                 setTbReloading(true);
@@ -6825,13 +6824,7 @@ export function AdvancedChart() {
             >
               <RefreshCw size={18} className={tbReloading ? 'animate-spin' : ''} />
             </button>
-            <button
-              onClick={() => { try { window.dispatchEvent(new CustomEvent('toggle_diagnostics')); } catch (e) {} }}
-              className="md:hidden shrink-0 p-2 rounded-md bg-muted/40 text-foreground/80"
-              title="Toggle Terminal Diagnostics"
-            >
-              <Cpu size={18} />
-            </button>
+
           </div>
         </div>
       </div>

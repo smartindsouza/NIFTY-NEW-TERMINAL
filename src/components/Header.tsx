@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'wouter';
-import { Home, List, TrendingUp, Newspaper, Activity, LogIn, CheckCircle2, BarChart2, PlayCircle, FileText, Sparkles, LineChart, Settings2, Bell, BellRing, Menu, BookOpen, Gauge, FlaskConical, Radio, Layers, Zap, Wind, ArrowUpDown, RotateCcw, GripVertical, Check } from 'lucide-react';
+import { Home, List, TrendingUp, Newspaper, Activity, LogIn, CheckCircle2, BarChart2, PlayCircle, FileText, Sparkles, LineChart, Settings2, Bell, BellRing, Menu, BookOpen, Gauge, FlaskConical, Radio, Layers, Zap, Wind, ArrowUpDown, RotateCcw, GripVertical, Check, Cpu } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -391,6 +391,14 @@ export function Header() {
           </Link>
         );
       })}
+      <button
+        type="button"
+        onClick={() => { try { window.dispatchEvent(new CustomEvent('toggle_diagnostics')); } catch (e) {} }}
+        className="flex-1 flex flex-col items-center justify-center gap-1 transition-colors text-muted-foreground"
+      >
+        <Cpu className="w-5 h-5" />
+        <span className="text-[9px] font-medium">Diag</span>
+      </button>
       <button
         type="button"
         onClick={() => setMoreOpen((v) => !v)}
