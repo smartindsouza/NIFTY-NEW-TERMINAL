@@ -1962,7 +1962,7 @@ const createOHLCInfoPanel = (container: HTMLElement) => {
   let panel = container.querySelector('.ohlc-panel') as HTMLDivElement;
   if (!panel) {
     panel = document.createElement('div');
-    panel.className = 'ohlc-panel absolute top-2 left-2 z-[20] flex flex-col items-start gap-y-0.5 text-[10px] leading-tight font-mono select-none pointer-events-none px-2 py-1 rounded-lg bg-card/90 backdrop-blur border border-0 max-w-[calc(100%-92px)] overflow-hidden';
+    panel.className = 'ohlc-panel absolute top-2 left-2 z-[20] flex flex-col items-start gap-y-0.5 text-[10px] leading-tight font-mono select-none pointer-events-none max-w-[calc(100%-92px)]';
     panel.style.display = 'none';
     container.appendChild(panel);
   }
@@ -2071,6 +2071,7 @@ const updateOHLCInfoPanel = (panel: HTMLDivElement, candle: any, volume: any) =>
   const { open, high, low, close } = candle;
   const changeInfo = formatChange(open, close);
 
+  panel.style.textShadow = '0 1px 3px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.9)';
   panel.innerHTML = `
     <div style="display:flex; flex-wrap:nowrap; align-items:center; gap:0 10px; white-space:nowrap;">
       <span style="color: #64748b;">O <span style="color: #cbd5e1;">${formatPrice(open)}</span></span>
