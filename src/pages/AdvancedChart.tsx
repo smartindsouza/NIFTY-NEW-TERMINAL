@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
-import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2 } from "lucide-react";
+import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu } from "lucide-react";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { getDivergences } from "../lib/divergence";
@@ -2603,14 +2603,6 @@ export function AdvancedChart() {
   });
   // RSI pane scale range (persisted). Empty = full 0–100. The library offers no
   // getter for a manually-dragged scale range, so the zoom is made a setting.
-  const [rsiScaleMin, setRsiScaleMin] = useState<string>(() => {
-    try { return localStorage.getItem('rsiScaleMin') || ''; } catch(e) {}
-    return '';
-  });
-  const [rsiScaleMax, setRsiScaleMax] = useState<string>(() => {
-    try { return localStorage.getItem('rsiScaleMax') || ''; } catch(e) {}
-    return '';
-  });
   const rsiScaleRef = useRef<{ min: number | null; max: number | null }>({ min: null, max: null });
   // Y-axis lock for the main price scale: captures the currently-visible price
   // range (computed from pane coordinates — the library has no getter for a
@@ -2733,17 +2725,16 @@ export function AdvancedChart() {
     }
   }, [levelAlertsOn]);
 
+  // RSI pane is pinned to the full 0-100 scale (per request). Clear any custom
+  // range saved by the old "RSI scale" setting so stale zooms can't reappear.
   useEffect(() => {
-    const mn = parseFloat(rsiScaleMin), mx = parseFloat(rsiScaleMax);
-    const valid = Number.isFinite(mn) && Number.isFinite(mx) && mn < mx && mn >= 0 && mx <= 100;
-    rsiScaleRef.current = valid ? { min: mn, max: mx } : { min: null, max: null };
+    rsiScaleRef.current = { min: null, max: null };
     try {
-      localStorage.setItem('rsiScaleMin', rsiScaleMin);
-      localStorage.setItem('rsiScaleMax', rsiScaleMax);
+      localStorage.removeItem('rsiScaleMin');
+      localStorage.removeItem('rsiScaleMax');
     } catch(e) {}
-    // Nudge the RSI pane to re-run autoscale so the new range applies immediately
     try { rsiSeriesRef.current?.priceScale()?.applyOptions({ autoScale: true }); } catch(e) {}
-  }, [rsiScaleMin, rsiScaleMax]);
+  }, []);
 
   useEffect(() => {
     try {
@@ -3136,6 +3127,8 @@ export function AdvancedChart() {
   // Mobile-only: biases (OI/SIGNAL/PULSE/TREND/…) live in a collapsible dropdown
   // toggled by a chevron beside the page title. Desktop shows them inline as before.
   const [showBiases, setShowBiases] = useState(false);
+  // Mobile toolbar reload button feedback (dispatches the same chart_reload event)
+  const [tbReloading, setTbReloading] = useState(false);
   const [showDiagnostic, setShowDiagnostic] = useState(() => {
     try {
       return localStorage.getItem('showDiagnostic') === 'true';
@@ -5420,8 +5413,8 @@ export function AdvancedChart() {
       priceLineVisible: false,
       autoscaleInfoProvider: () => ({
         priceRange: {
-          minValue: rsiScaleRef.current.min ?? 0,
-          maxValue: rsiScaleRef.current.max ?? 100,
+          minValue: 0,
+          maxValue: 100,
         },
       }),
     });
@@ -6241,7 +6234,7 @@ export function AdvancedChart() {
   });
 
   return (
-    <div className="px-1 py-2 md:p-8 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto pb-32 md:pb-20 flex flex-col min-h-screen relative">
+    <div className="px-1 py-2 md:p-8 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto pb-0 md:pb-20 flex flex-col h-[calc(100dvh-150px)] md:h-auto md:min-h-screen overflow-hidden md:overflow-visible relative">
       
       {showDiagnostic && (
         <div className="fixed bottom-6 right-6 z-50 bg-card/95 backdrop-blur-md border border-0 p-4 rounded-lg text-xs font-mono w-[340px] max-h-[80vh] overflow-y-auto">
@@ -6503,9 +6496,10 @@ export function AdvancedChart() {
             currentSymbol={selectedInstrument ? selectedInstrument.tradingsymbol : "NIFTY 50"} 
           />
           </div>
-          <div className="flex items-center gap-2 bg-muted/40 border border-0 rounded-md px-3 py-1.5 ml-0 md:ml-2 shrink-0 cursor-pointer" onClick={() => setQuickTradeEnabled(!quickTradeEnabled)}>
-             <span className="text-xs font-medium text-foreground/80">Quick Trade</span>
-             <label className="relative inline-flex items-center cursor-pointer pointer-events-none">
+          <div className="flex items-center gap-2 bg-muted/40 border border-0 rounded-md px-2 md:px-3 py-1.5 ml-0 md:ml-2 shrink-0 cursor-pointer" onClick={() => setQuickTradeEnabled(!quickTradeEnabled)} title="Quick Trade">
+             <Zap size={18} className={`md:hidden ${quickTradeEnabled ? 'text-primary' : 'text-muted-foreground'}`} />
+             <span className="hidden md:inline text-xs font-medium text-foreground/80">Quick Trade</span>
+             <label className="relative hidden md:inline-flex items-center cursor-pointer pointer-events-none">
                <input type="checkbox" className="sr-only peer" checked={quickTradeEnabled} readOnly />
                <div className="w-7 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after: after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
              </label>
@@ -6516,8 +6510,9 @@ export function AdvancedChart() {
                 onClick={() => setIsIndicatorsOpen(!isIndicatorsOpen)}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-sm text-muted-foreground hover:bg-background/50 hover:text-foreground transition-colors"
               >
-                Indicators
-                <ChevronDown size={14} className={`transition-transform ${isIndicatorsOpen ? 'rotate-180' : ''}`} />
+                <SlidersHorizontal size={18} className="md:hidden" />
+                <span className="hidden md:inline">Indicators</span>
+                <ChevronDown size={14} className={`hidden md:block transition-transform ${isIndicatorsOpen ? 'rotate-180' : ''}`} />
               </button>
               {isIndicatorsOpen && (
                 <div className="fixed md:absolute inset-x-2 md:inset-x-auto bottom-[136px] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto md:overflow-hidden bg-card border border-white/10 md:border-0 rounded-md py-1.5 z-50 flex flex-col">
@@ -6607,33 +6602,6 @@ export function AdvancedChart() {
                       </div>
                       <span>Breakout / Fakeout Alerts (sound + popup)</span>
                     </button>
-                  </div>
-
-                  {/* RSI pane scale (persisted zoom) */}
-                  <div className="px-3 py-2 hover:bg-muted transition-colors">
-                    <div className="text-sm text-foreground/80 mb-1">RSI scale (min–max)</div>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        value={rsiScaleMin}
-                        onChange={e => setRsiScaleMin(e.target.value)}
-                        placeholder="0"
-                        inputMode="numeric"
-                        className="w-14 bg-muted rounded px-1.5 py-0.5 text-xs text-foreground text-center placeholder:text-muted-foreground"
-                      />
-                      <span className="text-muted-foreground text-xs">–</span>
-                      <input
-                        value={rsiScaleMax}
-                        onChange={e => setRsiScaleMax(e.target.value)}
-                        placeholder="100"
-                        inputMode="numeric"
-                        className="w-14 bg-muted rounded px-1.5 py-0.5 text-xs text-foreground text-center placeholder:text-muted-foreground"
-                      />
-                      <button
-                        onClick={() => { setRsiScaleMin(''); setRsiScaleMax(''); }}
-                        className="ml-1 px-2 py-0.5 rounded text-[10px] font-bold bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                      >Reset</button>
-                    </div>
-                    <div className="text-[9px] text-muted-foreground mt-1 leading-tight">e.g. 20–80. Persists across refreshes; blank = full 0–100.</div>
                   </div>
 
                   {/* Support/Resistance Lines */}
@@ -6778,7 +6746,7 @@ export function AdvancedChart() {
             <select
               value={timeframe}
               onChange={(e) => setTimeframe(e.target.value)}
-              className="bg-background text-foreground border border-0 text-sm rounded-md px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary h-9"
+              className="bg-background text-foreground border border-0 text-xs md:text-sm rounded-md px-2 md:px-3 py-1 md:py-1.5 focus:outline-none focus:ring-1 focus:ring-primary h-8 md:h-9"
             >
               <option value="1">1m</option>
               <option value="3">3m</option>
@@ -6791,6 +6759,24 @@ export function AdvancedChart() {
               <option value="43200">1M</option>
             </select>
             <BounceConviction taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} />
+            <button
+              onClick={() => {
+                setTbReloading(true);
+                try { window.dispatchEvent(new CustomEvent('chart_reload')); } catch (e) {}
+                setTimeout(() => setTbReloading(false), 1200);
+              }}
+              className="md:hidden shrink-0 p-2 rounded-md bg-muted/40 text-foreground/80"
+              title="Reload chart to the latest candle"
+            >
+              <RefreshCw size={18} className={tbReloading ? 'animate-spin' : ''} />
+            </button>
+            <button
+              onClick={() => { try { window.dispatchEvent(new CustomEvent('toggle_diagnostics')); } catch (e) {} }}
+              className="md:hidden shrink-0 p-2 rounded-md bg-muted/40 text-foreground/80"
+              title="Toggle Terminal Diagnostics"
+            >
+              <Cpu size={18} />
+            </button>
           </div>
         </div>
       </div>
@@ -6802,10 +6788,10 @@ export function AdvancedChart() {
           <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
         </div>
       ) : (
-        <div className="flex flex-col flex-grow gap-2">
+        <div className="flex flex-col flex-grow gap-2 min-h-0">
 
           {/* Main Chart (Price & Volume) */}
-          <div className="relative flex-grow flex w-full bg-card rounded-xl" style={{ minHeight: "450px" }} onMouseLeave={() => setCrosshairInfo(null)}>
+          <div className="relative flex-grow flex w-full bg-card rounded-xl min-h-0 md:min-h-[450px]" onMouseLeave={() => setCrosshairInfo(null)}>
             <div
               ref={chartContainerRef}
               onPointerDownCapture={handlePointerDown}
@@ -7085,7 +7071,7 @@ export function AdvancedChart() {
             )}
           </div>
           {/* RSI Chart */}
-          <div className={`relative w-full ${!showRsi ? 'hidden' : ''}`} style={{ height: "200px", minHeight: "200px" }}>
+          <div className={`relative w-full shrink-0 h-[140px] md:h-[200px] ${!showRsi ? 'hidden' : ''}`}>
             <div
               ref={rsiContainerRef}
               className="bg-card border border-0 rounded-xl overflow-hidden w-full h-full absolute inset-0"

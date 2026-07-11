@@ -77,6 +77,13 @@ export default function App() {
   // Reload button shows only on the chart page; it tells the chart (via a window
   // event the chart already listens for) to refetch history and snap to the latest candle.
   const onChart = location.startsWith('/advanced-chart');
+  // The chart page's mobile toolbar has a diagnostics icon that dispatches this
+  // event (the Cpu state lives here in the shell).
+  useEffect(() => {
+    const f = () => setShowDiagnostics(v => !v);
+    window.addEventListener('toggle_diagnostics', f);
+    return () => window.removeEventListener('toggle_diagnostics', f);
+  }, []);
   const reloadChart = () => {
     setReloading(true);
     try { window.dispatchEvent(new CustomEvent('chart_reload')); } catch (e) {}
@@ -172,7 +179,7 @@ export default function App() {
         {/* Global floating telemetry toggle button */}
         <button
           onClick={() => setShowDiagnostics(!showDiagnostics)}
-          className={`fixed ${onChart ? 'bottom-36' : 'bottom-20'} right-4 md:bottom-6 md:right-6 z-50 p-3.5 rounded-full border transition-all duration-300 flex items-center justify-center cursor-pointer ${
+          className={`fixed ${onChart ? 'bottom-36 max-md:hidden' : 'bottom-20'} right-4 md:bottom-6 md:right-6 z-50 p-3.5 rounded-full border transition-all duration-300 flex items-center justify-center cursor-pointer ${
             showDiagnostics 
               ? 'bg-emerald-500 text-black border-emerald-400 hover:bg-emerald-400' 
               : 'bg-card text-foreground/80 border-0 hover:text-foreground hover:bg-accent hover:text-accent-foreground'
@@ -186,7 +193,7 @@ export default function App() {
         {onChart && (
           <button
             onClick={reloadChart}
-            className="fixed bottom-36 right-20 md:bottom-6 md:right-24 z-50 p-3.5 rounded-full border border-0 bg-card text-foreground/80 hover:text-foreground hover:bg-accent hover:text-accent-foreground transition-all duration-300 flex items-center justify-center cursor-pointer"
+            className="fixed bottom-36 max-md:hidden right-20 md:bottom-6 md:right-24 z-50 p-3.5 rounded-full border border-0 bg-card text-foreground/80 hover:text-foreground hover:bg-accent hover:text-accent-foreground transition-all duration-300 flex items-center justify-center cursor-pointer"
             title="Reload chart to the latest candle"
           >
             <RefreshCw className={`w-5 h-5 ${reloading ? 'animate-spin' : ''}`} />
