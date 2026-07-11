@@ -209,7 +209,19 @@ export default function App() {
           </div>
         )}
       </div>
-      <Toaster theme="dark" closeButton />
+      <Toaster
+        theme="dark"
+        position="bottom-center"
+        visibleToasts={1}
+        duration={2500}
+        gap={4}
+        offset={6}
+        mobileOffset={6}
+        toastOptions={{
+          classNames: { toast: "cn-toast" },
+          style: { fontSize: '12px', padding: '7px 12px', minHeight: '0', width: 'fit-content', maxWidth: '92vw', margin: '0 auto', borderRadius: '9999px' },
+        }}
+      />
     </QueryClientProvider>
   );
 }
