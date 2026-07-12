@@ -82,7 +82,7 @@ export function News() {
   return (
     <div className="p-4 md:p-8 pb-32 max-w-[1600px] w-full mx-auto animate-in fade-in zoom-in-95 duration-500">
       {/* Header and Controls */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end pb-6 border-b border-0 border-dashed mb-8 gap-4">
+      <div className="relative bg-card border border-border rounded-xl p-4 md:p-6 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/40 before:to-transparent">
         <div className="w-full">
           <div className="flex items-center gap-2 mb-1">
             <div className="p-1.5 bg-rose-500/10 rounded">

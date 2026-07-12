@@ -93,8 +93,8 @@ export function KiteLogin() {
 
   return (
     <div className="p-4 md:p-8 max-w-[1600px] w-full mx-auto animate-in fade-in duration-500">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold tracking-tight text-foreground mb-2">Zerodha Kite Connect</h1>
+      <div className="relative bg-card border border-border rounded-xl p-4 md:p-6 mb-8 overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/40 before:to-transparent">
+        <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-foreground mb-2">Zerodha Kite Connect</h1>
         <p className="text-muted-foreground">
           Authenticate with Kite to get real option chain data — live OI, IV, volume, LTP for every strike.
         </p>

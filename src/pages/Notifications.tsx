@@ -141,7 +141,7 @@ export default function Notifications() {
       <div className="absolute top-40 right-10 w-96 h-96 bg-primary/5 blur-[120px] pointer-events-none -z-10 rounded-full" />
 
       {/* Header section */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end pb-6 border-b border-0 border-dashed gap-4">
+      <div className="relative bg-card border border-border rounded-xl p-4 md:p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/40 before:to-transparent">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <div className="p-1.5 bg-primary/10 border border-primary/20 rounded-xl">
