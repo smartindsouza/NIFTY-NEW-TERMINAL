@@ -117,13 +117,15 @@ export default function SignalAlerts() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-5 pb-24">
-      <div className="flex items-center gap-2 mb-1">
-        <BellRing className="w-5 h-5 text-primary" />
-        <h1 className="text-lg font-bold text-foreground">Signal Alerts</h1>
-      </div>
-      <p className="text-xs text-muted-foreground mb-4 leading-relaxed">
+      <div className="relative bg-card border border-border rounded-xl p-4 mb-4 overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/40 before:to-transparent">
+        <div className="flex items-center gap-2 mb-1">
+          <BellRing className="w-5 h-5 text-primary" />
+          <h1 className="text-lg font-bold text-foreground">Signal Alerts</h1>
+        </div>
+        <p className="text-xs text-muted-foreground leading-relaxed">
         Pings you when the latest closed <span className="text-foreground">5-min NIFTY</span> candle shows an <span className="text-foreground">RSI zone crossover</span> together with <span className="text-foreground">RSI divergence</span> (high-to-high or low-to-low) within ≤{divWindow} candles — the same entry condition as the backtest. Turn on <span className="text-amber-400">Gamma blast</span> to also get pinged on expiry-day LOADED-gamma breakouts.
-      </p>
+        </p>
+      </div>
 
       {/* Status strip */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 mb-4">
