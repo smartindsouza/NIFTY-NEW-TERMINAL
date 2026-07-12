@@ -56,10 +56,12 @@ export function FiiDii() {
   return (
     <div className="p-6 md:p-8 space-y-6 animate-in fade-in duration-700 max-w-[1600px] mx-auto font-sans pb-20">
       
-      {/* Header */}
-      <div className="flex justify-between items-end pb-3 border-b border-0">
+      {/* Header — elevated hero */}
+      <div className="relative bg-card border border-border rounded-xl overflow-hidden">
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
+        <div className="flex justify-between items-end p-4 md:p-6">
         <div>
-          <h1 className="text-3xl font-black tracking-tight text-foreground flex items-center gap-3">
+          <h1 className="text-2xl md:text-3xl font-black tracking-tight text-foreground flex items-center gap-3">
             Institutional Flow
             <MetricSourceBadge 
               type={isUnavailable ? "UNAVAILABLE" : "STORED SNAPSHOT"} 
@@ -70,6 +72,7 @@ export function FiiDii() {
           <p className="text-sm font-medium text-muted-foreground mt-2">
             Real participant data from NSE EOD reports.
           </p>
+        </div>
         </div>
       </div>
 
