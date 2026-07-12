@@ -83,7 +83,7 @@ export function OptionChain() {
     <div className="p-6 md:p-8 space-y-6 animate-in fade-in duration-700 max-w-[1600px] mx-auto font-sans">
       
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-3 pb-3 border-b border-0">
+      <div className="relative bg-card border border-border rounded-xl p-4 md:p-6 flex flex-col md:flex-row md:justify-between md:items-end gap-3 overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/40 before:to-transparent">
         <div className="min-w-0">
           <h1 className="text-2xl md:text-3xl font-black tracking-tight text-foreground">OI Data Levels</h1>
           {/* Row 1: Spot + Expiry together */}
