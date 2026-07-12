@@ -62,7 +62,7 @@ export default function LiveSignal() {
 
   return (
     <div className="px-2 py-3 md:p-8 max-w-[900px] w-full mx-auto pb-24 min-h-screen">
-      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+      <div className="relative bg-card border border-border rounded-xl p-4 flex items-center justify-between gap-3 mb-4 flex-wrap overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/40 before:to-transparent">
         <div className="flex items-center gap-2.5">
           <Radio className="w-5 h-5 text-primary" />
           <div>

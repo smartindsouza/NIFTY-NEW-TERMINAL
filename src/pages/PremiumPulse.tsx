@@ -31,13 +31,15 @@ export default function PremiumPulse() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-5 pb-24">
-      <div className="flex items-center gap-2 mb-1">
-        <Wind className="w-5 h-5 text-sky-400" />
-        <h1 className="text-lg font-bold text-foreground">Premium Pulse</h1>
+      <div className="relative bg-card border border-border rounded-xl p-4 mb-4 overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/40 before:to-transparent">
+        <div className="flex items-center gap-2 mb-1">
+          <Wind className="w-5 h-5 text-sky-400" />
+          <h1 className="text-lg font-bold text-foreground">Premium Pulse</h1>
+        </div>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          How much the ATM premium actually moves <span className="text-foreground">per index point</span> right now — measured live and compared to its theoretical delta. When realized lags theory, an <span className="text-foreground">IV/theta headwind</span> is sapping the move; the IV trend below shows why.
+        </p>
       </div>
-      <p className="text-xs text-muted-foreground mb-4 leading-relaxed">
-        How much the ATM premium actually moves <span className="text-foreground">per index point</span> right now — measured live and compared to its theoretical delta. When realized lags theory, an <span className="text-foreground">IV/theta headwind</span> is sapping the move; the IV trend below shows why.
-      </p>
 
       {/* CE/PE toggle */}
       <div className="flex items-center gap-2 mb-4">
