@@ -87,20 +87,20 @@
 .dark {
     --background: #101014;
     --foreground: #f1f5f9;
-    --card: #16161c;
+    --card: #17171f;
     --card-foreground: #f1f5f9;
-    --popover: #16161c;
+    --popover: #17171f;
     --popover-foreground: #f1f5f9;
     --primary: #a855f7; /* Sapphire UI purple */
     --primary-foreground: #ffffff;
     --secondary: #1e1e26;
     --secondary-foreground: #f1f5f9;
     --muted: #1e1e26;
-    --muted-foreground: #9ca3af;
+    --muted-foreground: #a7b0be; /* raised for 4.5:1 contrast on dark cards (skill: accessibility) */
     --accent: #1e1e26;
     --accent-foreground: #f1f5f9;
     --destructive: #ef4444;
-    --border: rgba(255, 255, 255, 0.05); /* very subtle light border */
+    --border: rgba(255, 255, 255, 0.08); /* visible card separation in both states (skill) */
     --input: #1e1e26;
     --ring: rgba(168, 85, 247, 0.5); /* purple glow */
     --chart-1: #a855f7;

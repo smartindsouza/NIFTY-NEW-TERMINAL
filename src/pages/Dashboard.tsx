@@ -239,9 +239,9 @@ export function Dashboard() {
   if (!chain || !analytics || !taData || !fiiDiiData) {
     return (
       <div className="p-8 space-y-6">
-        <Skeleton className="h-12 w-64 bg-card/50 backdrop-blur-md rounded-2xl" />
-        <Skeleton className="h-[200px] w-full bg-card/50 backdrop-blur-md rounded-2xl" />
-        <Skeleton className="h-[600px] w-full bg-card/50 backdrop-blur-md rounded-3xl" />
+        <Skeleton className="h-12 w-64 bg-card/50 backdrop-blur-md rounded-xl" />
+        <Skeleton className="h-[200px] w-full bg-card/50 backdrop-blur-md rounded-xl" />
+        <Skeleton className="h-[600px] w-full bg-card/50 backdrop-blur-md rounded-xl" />
       </div>
     );
   }
@@ -309,7 +309,7 @@ export function Dashboard() {
   }
 
   return (
-    <div className="p-6 md:p-8 space-y-6 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto font-sans tracking-wide pb-20">
+    <div className="p-4 md:p-8 space-y-4 md:space-y-6 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto font-sans tracking-wide pb-20">
       {/* Header */}
       <div className="flex justify-between items-end gap-3 pb-4 border-b border-0 border-dashed">
         <div className="min-w-0">
@@ -338,7 +338,7 @@ export function Dashboard() {
       </div>
 
       {/* OI Bars */}
-      <div className="grid grid-cols-[1fr_2fr_1fr] items-center gap-8 py-2">
+      <div className="grid grid-cols-[1fr_2fr_1fr] items-center gap-3 md:gap-8 py-2">
         <div className="text-center">
           <p className="text-[10px] uppercase text-muted-foreground tracking-widest">Total CE OI</p>
           <p className="text-lg font-mono font-bold text-red-500 mt-1">{totalCeOi.toFixed(1)}L</p>
@@ -361,7 +361,7 @@ export function Dashboard() {
       </div>
 
       {/* FINAL AI DECISION */}
-      <div className="bg-card border border-0 rounded-xl overflow-hidden ">
+      <div className="bg-card border border-border rounded-xl overflow-hidden">
         <div className="flex items-center justify-between p-4 border-b border-0">
           <div className="flex items-center gap-2 text-[10px] font-bold text-foreground tracking-widest uppercase">
             <Activity className="w-3 h-3 text-muted-foreground" />
@@ -399,7 +399,7 @@ export function Dashboard() {
            </div>
 
            {/* Biases Split */}
-           <div className="grid grid-cols-2 gap-8 mb-8">
+           <div className="grid grid-cols-2 gap-4 md:gap-8 mb-6 md:mb-8">
              <div className="space-y-4">
                 <div className="flex items-center gap-2 text-[10px] uppercase text-muted-foreground tracking-widest border-b border-0 pb-2">
                    <TrendingUp className="w-3 h-3" /> TA CONTEXT
@@ -419,28 +419,28 @@ export function Dashboard() {
              </div>
            </div>
 
-           <div className="space-y-4 text-xs font-mono bg-secondary/30 dark:bg-black/20 p-5 rounded-lg border border-0">
+           <div className="space-y-4 text-xs font-mono bg-secondary/30 dark:bg-black/20 p-5 rounded-xl border border-border">
              <div className="grid grid-cols-[130px_1fr] items-center gap-4">
                <span className="text-primary uppercase tracking-wider font-bold text-[10px] bg-primary/10 px-2 py-1 rounded w-fit">ENTRY</span>
-               <span className="text-[#94a3b8] font-sans">{decision.entry}</span>
+               <span className="text-muted-foreground font-sans">{decision.entry}</span>
              </div>
              <div className="grid grid-cols-[130px_1fr] items-center gap-4">
                <span className="text-primary uppercase tracking-wider font-bold text-[10px] bg-primary/10 px-2 py-1 rounded w-fit">STOP LOSS</span>
-               <span className="text-[#94a3b8] font-sans">{decision.stopLoss}</span>
+               <span className="text-muted-foreground font-sans">{decision.stopLoss}</span>
              </div>
              <div className="grid grid-cols-[130px_1fr] items-center gap-4">
                <span className="text-primary uppercase tracking-wider font-bold text-[10px] bg-primary/10 px-2 py-1 rounded w-fit">TARGET 1</span>
-               <span className="text-[#94a3b8] font-sans">{decision.target1}</span>
+               <span className="text-muted-foreground font-sans">{decision.target1}</span>
              </div>
              <div className="grid grid-cols-[130px_1fr] items-center gap-4">
                <span className="text-primary uppercase tracking-wider font-bold text-[10px] bg-primary/10 px-2 py-1 rounded w-fit flex gap-1">INVALIDATION</span>
-               <span className="text-[#94a3b8] font-sans">{decision.invalidation}</span>
+               <span className="text-muted-foreground font-sans">{decision.invalidation}</span>
              </div>
            </div>
 
            <div className="mt-8">
-             <p className="text-[9px] uppercase tracking-widest text-[#64748b] mb-2 font-bold flex items-center gap-1">REASON</p>
-             <ul className="text-xs text-[#94a3b8] leading-relaxed list-disc list-inside space-y-1">
+             <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-2 font-bold flex items-center gap-1">REASON</p>
+             <ul className="text-xs text-muted-foreground leading-relaxed list-disc list-inside space-y-1">
                 {decision.reasons.map((r, i) => <li key={i}>{r}</li>)}
              </ul>
            </div>
@@ -448,19 +448,19 @@ export function Dashboard() {
       </div>
 
       {/* TREND SUMMARY */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="bg-card border-0 p-6 rounded-xl flex flex-col justify-center">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+        <Card className="bg-card border border-border p-6 rounded-xl flex flex-col justify-center">
           <p className="text-[10px] tracking-widest uppercase text-muted-foreground font-bold mb-2">Market Regime</p>
           <p className="text-xl font-bold uppercase text-foreground">{decision.regime}</p>
         </Card>
 
-        <Card className="bg-card border-0 p-6 rounded-xl flex flex-col justify-center">
+        <Card className="bg-card border border-border p-6 rounded-xl flex flex-col justify-center">
           <p className="text-[10px] tracking-widest uppercase text-muted-foreground font-bold mb-2">Trend Direction</p>
           <p className={cn("text-xl font-bold uppercase", trendDirection === 'Bullish' ? "text-green-500" : trendDirection === 'Bearish' ? "text-red-500" : "text-primary")}>{trendDirection}</p>
           <p className="text-xs text-muted-foreground mt-1">{trendExplanation}</p>
         </Card>
 
-        <Card className="bg-card border-0 p-6 rounded-xl flex flex-col justify-center">
+        <Card className="bg-card border border-border p-6 rounded-xl flex flex-col justify-center">
           <p className="text-[10px] tracking-widest uppercase text-muted-foreground font-bold mb-2">Trend Strength</p>
           <p className="text-xl font-bold text-foreground">{trendStrength} <span className="text-sm font-mono text-muted-foreground ml-1">(ADX {adx.toFixed(1)})</span></p>
           <div className="flex items-center gap-2 mt-2">
@@ -478,26 +478,26 @@ export function Dashboard() {
          </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6">
          {/* PCR */}
-         <Card className="bg-card border-0 p-6 rounded-xl flex flex-col items-center justify-center text-center ">
+         <Card className="bg-card border border-border p-6 rounded-xl flex flex-col items-center justify-center text-center">
             <p className="text-[10px] tracking-widest uppercase text-muted-foreground font-bold mb-4">PCR Context</p>
             <p className={cn("text-4xl font-mono font-bold", pcr < 0.7 ? "text-red-500" : pcr > 1.2 ? "text-green-500" : "text-primary")}>{pcr.toFixed(2)}</p>
             <p className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground mt-2">{pcr < 0.7 ? "Oversold" : pcr > 1.2 ? "Overbought" : "Neutral"}</p>
          </Card>
 
          {/* Max Pain */}
-         <Card className="bg-card border-0 p-6 rounded-xl flex flex-col justify-center items-center text-center">
+         <Card className="bg-card border border-border p-6 rounded-xl flex flex-col justify-center items-center text-center">
             <p className="text-[10px] tracking-widest uppercase text-muted-foreground font-bold mb-3">MAX PAIN LEVEL</p>
             <p className="text-4xl font-mono font-bold text-foreground mb-2 mt-auto">{maxPain}</p>
             {Math.abs(spot - maxPain) <= 300 ? (
               <>
-                <p className="text-[11px] text-[#94a3b8] mb-1">Spot is <span className={cn("font-bold", spot > maxPain ? "text-green-500" : "text-red-500")}>{Math.abs(spot - maxPain).toFixed(0)} pts</span> {spot > maxPain ? "above" : "below"}</p>
+                <p className="text-[11px] text-muted-foreground mb-1">Spot is <span className={cn("font-bold", spot > maxPain ? "text-green-500" : "text-red-500")}>{Math.abs(spot - maxPain).toFixed(0)} pts</span> {spot > maxPain ? "above" : "below"}</p>
                 <p className="text-[9px] uppercase tracking-widest text-primary font-bold mt-1">Intraday Relevant</p>
               </>
             ) : (
               <>
-                <p className="text-[11px] text-[#94a3b8] mb-1">Max Pain far from spot ({Math.abs(spot - maxPain).toFixed(0)} pts)</p>
+                <p className="text-[11px] text-muted-foreground mb-1">Max Pain far from spot ({Math.abs(spot - maxPain).toFixed(0)} pts)</p>
                 <p className="text-[9px] uppercase tracking-widest text-muted-foreground font-bold mt-1">Influence: Weak for intraday</p>
               </>
             )}
@@ -509,7 +509,7 @@ export function Dashboard() {
             <p className={cn("text-4xl font-mono font-bold", taData.rsi > 60 ? "text-green-500" : taData.rsi < 40 ? "text-red-500" : "text-primary")}>
               {taData.rsi.toFixed(1)}
             </p>
-            <ul className="text-[11px] text-[#94a3b8] mt-4 text-center">
+            <ul className="text-[11px] text-muted-foreground mt-4 text-center">
               <li>{taData.rsiZoneShift || (taData.rsi > 60 ? "Overbought Zone" : taData.rsi < 40 ? "Oversold Zone" : "Transition Zone")}</li>
             </ul>
          </Card>
