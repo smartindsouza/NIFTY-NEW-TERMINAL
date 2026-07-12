@@ -863,6 +863,11 @@ setInterval(() => {
         { key: 'SPX', label: 'S&P 500 Fut', sym: 'ES=F' },
         { key: 'NDX', label: 'Nasdaq Fut', sym: 'NQ=F' },
         { key: 'DJI', label: 'Dow Fut', sym: 'YM=F' },
+        { key: 'HSI', label: 'Hang Seng', sym: '^HSI' },
+        { key: 'KOSPI', label: 'KOSPI', sym: '^KS11' },
+        { key: 'GOLD', label: 'Gold', sym: 'GC=F' },
+        { key: 'SILVER', label: 'Silver', sym: 'SI=F' },
+        { key: 'OIL', label: 'Crude Oil', sym: 'CL=F' },
       ];
       await Promise.all(US.map(async (u) => {
         try {

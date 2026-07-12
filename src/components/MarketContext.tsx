@@ -115,7 +115,7 @@ export default function MarketContext() {
           ))}
 
           <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-slate-500 font-bold bg-white/[0.02] flex items-center justify-between">
-            <span>US Futures</span>
+            <span>Global &amp; Commodities</span>
             {usAsOf ? <span className="text-slate-600 normal-case font-mono">{freshnessLabel(usAsOf)}</span> : null}
           </div>
           {us.length === 0 && (
@@ -126,13 +126,13 @@ export default function MarketContext() {
           ))}
           {us.length > 0 && us.every((m) => !m.available) && (
             <div className="px-3 py-2 text-[10px] text-slate-500 leading-relaxed">
-              US data source unreachable from the server right now. Indian indices above are unaffected.
+              Global data source unreachable from the server right now. Indian indices above are unaffected.
             </div>
           )}
         </div>
 
         <div className="px-3 py-2 border-t border-white/10 text-[9px] text-slate-500 leading-tight">
-          Indian: live via Kite. US: index futures via a free third-party feed (may lag or drop out) — context only, confirm before trading.
+          Indian: live via Kite. Global indices & commodities via a free third-party feed (may lag or drop out) — context only, confirm before trading.
         </div>
       </div>
     </>
