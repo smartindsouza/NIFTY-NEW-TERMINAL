@@ -310,67 +310,78 @@ export function Dashboard() {
 
   return (
     <div className="p-4 md:p-8 space-y-4 md:space-y-6 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto font-sans tracking-wide pb-20">
-      {/* Header */}
-      <div className="flex justify-between items-end gap-3 pb-4 border-b border-0 border-dashed">
-        <div className="min-w-0">
-          <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight">NIFTY 50</h1>
-          <div className="flex items-center flex-wrap gap-2 mt-1">
-            <p className="text-xs text-muted-foreground whitespace-nowrap">Expiry: Live Data</p>
-            {isMarketOpen ? (
-              <span className="text-[9px] font-bold bg-green-500/10 dark:bg-green-500/20 text-green-600 dark:text-green-500 px-2 py-0.5 rounded uppercase tracking-wider whitespace-nowrap">Market Open</span>
-            ) : (
-              <span className="text-[9px] font-bold bg-secondary/50 dark:bg-gray-500/20 text-muted-foreground px-2 py-0.5 rounded uppercase tracking-wider whitespace-nowrap">Market Closed</span>
-            )}
+      {/* Header — elevated hero */}
+      <div className="relative bg-card border border-border rounded-xl overflow-hidden">
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
+        <div className="flex justify-between items-center gap-3 p-4 md:p-6">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight">NIFTY 50</h1>
+              {isMarketOpen ? (
+                <span className="inline-flex items-center gap-1.5 text-[9px] font-bold bg-green-500/15 text-green-500 px-2 py-1 rounded-full uppercase tracking-wider whitespace-nowrap">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> Market Open
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-[9px] font-bold bg-muted text-muted-foreground px-2 py-1 rounded-full uppercase tracking-wider whitespace-nowrap">
+                  <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60" /> Market Closed
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground whitespace-nowrap mt-1.5">Expiry: Live Data</p>
           </div>
-        </div>
-        <div className="text-right flex flex-col items-end shrink-0">
-          <motion.h1 
-            key={spot}
-            initial={{ color: '#4ade80', scale: 1.05 }}
-            animate={{ color: 'var(--foreground)', scale: 1 }}
-            transition={{ duration: 0.8, ease: "easeOut" }}
-            className="text-3xl md:text-4xl font-mono font-bold tracking-tighter whitespace-nowrap"
-          >
-            {spot.toFixed(2)}
-          </motion.h1>
-          <p className="text-[10px] uppercase text-muted-foreground tracking-widest mt-1">SPOT PRICE</p>
+          <div className="text-right flex flex-col items-end shrink-0">
+            <motion.h1 
+              key={spot}
+              initial={{ color: '#4ade80', scale: 1.05 }}
+              animate={{ color: 'var(--foreground)', scale: 1 }}
+              transition={{ duration: 0.8, ease: "easeOut" }}
+              className="text-3xl md:text-5xl font-mono font-bold tracking-tighter whitespace-nowrap"
+            >
+              {spot.toFixed(2)}
+            </motion.h1>
+            <p className="text-[10px] uppercase text-muted-foreground tracking-widest mt-1">SPOT PRICE</p>
+          </div>
         </div>
       </div>
 
-      {/* OI Bars */}
-      <div className="grid grid-cols-[1fr_2fr_1fr] items-center gap-3 md:gap-8 py-2">
-        <div className="text-center">
-          <p className="text-[10px] uppercase text-muted-foreground tracking-widest">Total CE OI</p>
-          <p className="text-lg font-mono font-bold text-red-500 mt-1">{totalCeOi.toFixed(1)}L</p>
-        </div>
-        <div className="text-center w-full px-4">
-          <p className="text-[10px] uppercase text-muted-foreground tracking-widest mb-2">CE / PE Split</p>
-          <div className="h-2 w-full bg-muted flex overflow-hidden rounded-full">
-            <div className="bg-red-500 rounded-l-full" style={{ width: `${cePercent}%` }}></div>
-            <div className="bg-green-500 rounded-r-full" style={{ width: `${pePercent}%` }}></div>
+      {/* OI Bars — carded with section label */}
+      <div className="bg-card border border-border rounded-xl p-4 md:p-5">
+        <p className="text-[10px] font-bold text-muted-foreground tracking-widest uppercase mb-3">Open Interest Distribution</p>
+        <div className="grid grid-cols-[1fr_2fr_1fr] items-center gap-3 md:gap-8">
+          <div className="text-center">
+            <p className="text-[10px] uppercase text-muted-foreground tracking-widest">Total CE OI</p>
+            <p className="text-lg font-mono font-bold text-red-500 mt-1">{totalCeOi.toFixed(1)}L</p>
           </div>
-          <div className="flex justify-between text-[10px] mt-2 font-mono">
-            <span className="text-red-500/80">{cePercent.toFixed(1)}% CE</span>
-            <span className="text-green-500/80">{pePercent.toFixed(1)}% PE</span>
+          <div className="text-center w-full px-2 md:px-4">
+            <p className="text-[10px] uppercase text-muted-foreground tracking-widest mb-2">CE / PE Split</p>
+            <div className="h-2 w-full bg-muted flex overflow-hidden rounded-full">
+              <div className="bg-red-500 rounded-l-full" style={{ width: `${cePercent}%` }}></div>
+              <div className="bg-green-500 rounded-r-full" style={{ width: `${pePercent}%` }}></div>
+            </div>
+            <div className="flex justify-between text-[10px] mt-2 font-mono">
+              <span className="text-red-500/80">{cePercent.toFixed(1)}% CE</span>
+              <span className="text-green-500/80">{pePercent.toFixed(1)}% PE</span>
+            </div>
           </div>
-        </div>
-        <div className="text-center">
-          <p className="text-[10px] uppercase text-muted-foreground tracking-widest">Total PE OI</p>
-          <p className="text-lg font-mono font-bold text-green-500 mt-1">{totalPeOi.toFixed(1)}L</p>
+          <div className="text-center">
+            <p className="text-[10px] uppercase text-muted-foreground tracking-widest">Total PE OI</p>
+            <p className="text-lg font-mono font-bold text-green-500 mt-1">{totalPeOi.toFixed(1)}L</p>
+          </div>
         </div>
       </div>
 
       {/* FINAL AI DECISION */}
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
-        <div className="flex items-center justify-between p-4 border-b border-0">
+      <div className="relative bg-card border border-border rounded-xl overflow-hidden">
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
+        <div className="flex items-center justify-between p-4 border-b border-border">
           <div className="flex items-center gap-2 text-[10px] font-bold text-foreground tracking-widest uppercase">
-            <Activity className="w-3 h-3 text-muted-foreground" />
+            <Activity className="w-3 h-3 text-primary" />
             FINAL AI DECISION
             <span className="text-muted-foreground ml-2 font-mono text-[9px] lowercase">
               live at {new Date().toLocaleTimeString()}
             </span>
           </div>
-          <div className={cn("text-[10px] font-bold tracking-widest border px-3 py-1 rounded uppercase", signalColor, signalBorder, signalBgMuted)}>
+          <div className={cn("text-[10px] font-bold tracking-widest border px-3 py-1 rounded-full uppercase", signalColor, signalBorder, signalBgMuted)}>
             REGIME: {decision.regime}
           </div>
         </div>
@@ -448,6 +459,10 @@ export function Dashboard() {
       </div>
 
       {/* TREND SUMMARY */}
+      <div className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground tracking-widest uppercase pt-2">
+        <Activity className="w-3 h-3 text-primary" />
+        TREND SUMMARY
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
         <Card className="bg-card border border-border p-6 rounded-xl flex flex-col justify-center">
           <p className="text-[10px] tracking-widest uppercase text-muted-foreground font-bold mb-2">Market Regime</p>
@@ -471,11 +486,9 @@ export function Dashboard() {
       </div>
 
       {/* TECH INDICATORS TITLE */}
-      <div className="flex items-center justify-between pt-4 mt-8 mb-4 border-b border-0 pb-2">
-         <div className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground tracking-widest uppercase">
-            <BarChart2 className="w-3 h-3" />
-            SUPPORTING EVIDENCE
-         </div>
+      <div className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground tracking-widest uppercase pt-2">
+         <BarChart2 className="w-3 h-3 text-primary" />
+         SUPPORTING EVIDENCE
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6">
@@ -504,7 +517,7 @@ export function Dashboard() {
          </Card>
 
          {/* RSI */}
-         <Card className="bg-card border-0 p-6 rounded-xl flex flex-col justify-center items-center">
+         <Card className="bg-card border border-border p-6 rounded-xl flex flex-col justify-center items-center">
             <p className="text-[10px] tracking-widest uppercase text-muted-foreground font-bold mb-6">RSI (14, 15m)</p>
             <p className={cn("text-4xl font-mono font-bold", taData.rsi > 60 ? "text-green-500" : taData.rsi < 40 ? "text-red-500" : "text-primary")}>
               {taData.rsi.toFixed(1)}
