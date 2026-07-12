@@ -825,6 +825,11 @@ setInterval(() => {
       const IND = [
         { key: 'BANKNIFTY', label: 'Bank Nifty', sym: 'NSE:NIFTY BANK' },
         { key: 'FINNIFTY', label: 'Fin Nifty', sym: 'NSE:NIFTY FIN SERVICE' },
+        { key: 'MIDCAP', label: 'Midcap 100', sym: 'NSE:NIFTY MIDCAP 100' },
+        { key: 'SMLCAP', label: 'Smallcap 100', sym: 'NSE:NIFTY SMLCAP 100' },
+        { key: 'MICROCAP', label: 'Microcap 250', sym: 'NSE:NIFTY MICROCAP250' },
+        { key: 'PHARMA', label: 'Pharma', sym: 'NSE:NIFTY PHARMA' },
+        { key: 'IT', label: 'IT', sym: 'NSE:NIFTY IT' },
         { key: 'VIX', label: 'India VIX', sym: 'NSE:INDIA VIX' },
         { key: 'SENSEX', label: 'Sensex', sym: 'BSE:SENSEX' },
       ];
