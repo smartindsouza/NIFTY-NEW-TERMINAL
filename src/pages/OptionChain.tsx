@@ -50,10 +50,10 @@ export function OptionChain() {
 
   if (isChainLoading || isAnalyticsLoading || !chain || !analytics) {
     return (
-      <div className="p-8 space-y-6">
-        <Skeleton className="h-12 w-64 bg-card/50 backdrop-blur-md rounded-2xl" />
-        <Skeleton className="h-[200px] w-full bg-card/50 backdrop-blur-md rounded-2xl" />
-        <Skeleton className="h-[600px] w-full bg-card/50 backdrop-blur-md rounded-3xl" />
+      <div className="p-4 md:p-8 space-y-6">
+        <Skeleton className="h-12 w-64 bg-card/50 backdrop-blur-md rounded-xl" />
+        <Skeleton className="h-[200px] w-full bg-card/50 backdrop-blur-md rounded-xl" />
+        <Skeleton className="h-[600px] w-full bg-card/50 backdrop-blur-md rounded-xl" />
       </div>
     );
   }
@@ -131,7 +131,7 @@ export function OptionChain() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
          
          {/* Support Zone */}
-         <Card className="bg-card backdrop-blur-xl border-green-500/20 p-5 rounded-2xl relative overflow-hidden flex flex-col justify-between">
+         <Card className="bg-card backdrop-blur-xl border-green-500/20 p-5 rounded-xl relative overflow-hidden flex flex-col justify-between">
             <div className="absolute top-0 left-0 w-[4px] h-full bg-green-500/60"></div>
             <div>
               <p className="text-[11px] text-green-500 font-bold uppercase tracking-widest flex items-center gap-1.5 mb-2">
@@ -165,7 +165,7 @@ export function OptionChain() {
          </Card>
 
          {/* Resistance Zone */}
-         <Card className="bg-card backdrop-blur-xl border-red-500/20 p-5 rounded-2xl relative overflow-hidden flex flex-col justify-between">
+         <Card className="bg-card backdrop-blur-xl border-red-500/20 p-5 rounded-xl relative overflow-hidden flex flex-col justify-between">
             <div className="absolute top-0 left-0 w-[4px] h-full bg-red-500/60"></div>
             <div>
               <p className="text-[11px] text-red-500 font-bold uppercase tracking-widest flex items-center gap-1.5 mb-2">
@@ -199,7 +199,7 @@ export function OptionChain() {
          </Card>
 
          {/* OI Context */}
-         <Card className="bg-card backdrop-blur-xl border-0 p-5 rounded-2xl flex flex-col">
+         <Card className="bg-card backdrop-blur-xl border-0 p-5 rounded-xl flex flex-col">
             <div className="flex justify-between items-start mb-6">
               <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-widest flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 bg-primary rounded-sm"></span> OI CONTEXT
@@ -236,7 +236,7 @@ export function OptionChain() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
          {/* IV Interpretation */}
-         <Card className="bg-card backdrop-blur-xl border-0 p-5 rounded-2xl">
+         <Card className="bg-card backdrop-blur-xl border-0 p-5 rounded-xl">
            <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-widest flex items-center gap-1.5 mb-5">
               <Activity className="w-3 h-3 text-primary" /> IV CONTEXT
            </p>
@@ -254,7 +254,7 @@ export function OptionChain() {
          </Card>
 
          {/* OI Interpretation */}
-         <Card className="bg-card backdrop-blur-xl border-0 p-5 rounded-2xl">
+         <Card className="bg-card backdrop-blur-xl border-0 p-5 rounded-xl">
            <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-widest flex items-center gap-1.5 mb-4">
               <Layers className="w-3 h-3 border border-muted-foreground p-0.5 rounded-sm" /> OI CONTEXT
            </p>
@@ -270,7 +270,7 @@ export function OptionChain() {
       </div>
 
       {/* Writers Chart (Visual Layout Mockup) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-card backdrop-blur-xl border border-0 rounded-2xl overflow-hidden">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-card backdrop-blur-xl border border-0 rounded-xl overflow-hidden">
         
         {/* Call Writers */}
         <div className="bg-transparent p-5 pb-8 relative">
@@ -342,7 +342,7 @@ export function OptionChain() {
       </div>
 
       {/* Option Chain Table */}
-      <div className="bg-card backdrop-blur-xl border border-0 rounded-2xl overflow-hidden mt-6">
+      <div className="bg-card backdrop-blur-xl border border-0 rounded-xl overflow-hidden mt-6">
         <div className="overflow-x-auto scroller-hidden">
           <Table className="w-full text-xs">
             <TableHeader>

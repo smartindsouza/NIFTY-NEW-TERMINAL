@@ -8,7 +8,7 @@ function OptionCard({ side, data, active }: { side: 'CE' | 'PE'; data: any; acti
   const label = side === 'CE' ? 'ATM Call (CE)' : 'ATM Put (PE)';
   if (!data || !data.available) {
     return (
-      <div className={cn('rounded-2xl p-4 border bg-card', active ? 'border-primary/40' : 'border-transparent')}>
+      <div className={cn('rounded-xl p-4 border bg-card', active ? 'border-primary/40' : 'border-transparent')}>
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">{label}</div>
         <div className="text-sm text-muted-foreground">No live option data</div>
       </div>
@@ -16,7 +16,7 @@ function OptionCard({ side, data, active }: { side: 'CE' | 'PE'; data: any; acti
   }
   const confirms = data.confirms;
   return (
-    <div className={cn('rounded-2xl p-4 border', active ? 'border-primary/50 bg-primary/5' : 'border-transparent bg-card')}>
+    <div className={cn('rounded-xl p-4 border', active ? 'border-primary/50 bg-primary/5' : 'border-transparent bg-card')}>
       <div className="flex items-center justify-between mb-1">
         <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</span>
         {active && <span className="text-[9px] font-bold text-primary uppercase">you'd buy this</span>}
@@ -86,7 +86,7 @@ export default function LiveSignal() {
           </div>
 
           {/* Index state */}
-          <div className="bg-card rounded-2xl p-4 mb-4">
+          <div className="bg-card rounded-xl p-4 mb-4">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Index RSI (NIFTY 5-min)</div>

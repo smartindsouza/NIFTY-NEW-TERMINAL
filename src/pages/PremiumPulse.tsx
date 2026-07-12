@@ -55,7 +55,7 @@ export default function PremiumPulse() {
       </div>
 
       {!ok ? (
-        <div className="rounded-2xl bg-card p-5 text-sm text-muted-foreground">{data?.error || 'Loading…'}</div>
+        <div className="rounded-xl bg-card p-5 text-sm text-muted-foreground">{data?.error || 'Loading…'}</div>
       ) : (
         <>
           {/* Verdict */}
@@ -67,7 +67,7 @@ export default function PremiumPulse() {
           </div>
 
           {/* Core numbers */}
-          <div className="grid grid-cols-3 md:grid-cols-6 gap-2.5 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-6 gap-2.5 mb-4">
             <Card label="ATM" value={String(data.atmStrike)} hint={`${side} \u20b9${data.premium ?? '—'}`} />
             <Card label="Realized" value={data.realizedDelta != null ? `\u20b9${Math.abs(data.realizedDelta).toFixed(2)}` : '—'} hint="per point" tone={lvl === 'RESPONSIVE' ? 'pos' : lvl === 'SLUGGISH' ? 'neg' : 'neutral'} />
             <Card label="Theoretical" value={`\u20b9${Math.abs(data.theoDelta).toFixed(2)}`} hint="delta/point" />
@@ -86,7 +86,7 @@ export default function PremiumPulse() {
 
           {/* Chart: realized ₹/pt and IV over the session */}
           {Array.isArray(data.series) && data.series.length > 2 && (
-            <div className="rounded-2xl bg-card p-4 mb-4">
+            <div className="rounded-xl bg-card p-4 mb-4">
               <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">Today — realized \u20b9/pt (left) vs IV% (right)</div>
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart data={data.series} margin={{ top: 5, right: 8, left: -10, bottom: 0 }}>

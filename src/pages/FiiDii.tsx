@@ -43,9 +43,9 @@ export function FiiDii() {
 
   if (isLoading || !fiiDiiData) {
     return (
-      <div className="p-8 space-y-6">
-        <Skeleton className="h-12 w-64 bg-card/50 backdrop-blur-md rounded-2xl" />
-        <Skeleton className="h-[200px] w-full bg-card/50 backdrop-blur-md rounded-2xl" />
+      <div className="p-4 md:p-8 space-y-6">
+        <Skeleton className="h-12 w-64 bg-card/50 backdrop-blur-md rounded-xl" />
+        <Skeleton className="h-[200px] w-full bg-card/50 backdrop-blur-md rounded-xl" />
       </div>
     );
   }
@@ -85,7 +85,7 @@ export function FiiDii() {
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-           <Card className="bg-card backdrop-blur-xl border-0 p-6 rounded-2xl flex flex-col md:col-span-2">
+           <Card className="bg-card backdrop-blur-xl border-0 p-6 rounded-xl flex flex-col md:col-span-2">
               <div className="flex justify-between items-center mb-6">
                 <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-widest flex items-center gap-2">
                   <span className="w-1.5 h-1.5 bg-primary rounded-sm"></span> NET FII POSITIONING (LATEST DAY)
@@ -116,7 +116,7 @@ export function FiiDii() {
 
            {/* Historical Data */}
            {fiiDiiData.data?.history && fiiDiiData.data.history.length > 0 && (
-             <Card className="bg-card backdrop-blur-xl border-0 p-6 rounded-2xl flex flex-col md:col-span-2">
+             <Card className="bg-card backdrop-blur-xl border-0 p-6 rounded-xl flex flex-col md:col-span-2">
                <div className="flex justify-between items-center mb-6 border-b border-0 pb-3">
                  <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-widest flex items-center gap-2">
                    <Building className="w-4 h-4" /> NET INDEX FUTURES CONTINUITY (PAST 5 DAYS)
@@ -144,7 +144,7 @@ export function FiiDii() {
                <div className="overflow-x-auto">
                  <table className="w-full text-left border-collapse">
                    <thead>
-                     <tr className="border-b border-0 text-[10px] uppercase tracking-widest text-[#64748b]">
+                     <tr className="border-b border-0 text-[10px] uppercase tracking-widest text-muted-foreground">
                        <th className="py-3 px-4 font-bold">Date</th>
                        <th className="py-3 px-4 font-bold text-right">FII Long Ratio</th>
                        <th className="py-3 px-4 font-bold text-right">FII Net Futures</th>
