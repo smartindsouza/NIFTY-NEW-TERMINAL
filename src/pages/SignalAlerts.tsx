@@ -146,7 +146,7 @@ export default function SignalAlerts() {
       </div>
 
       {/* Controls */}
-      <div className="rounded-2xl bg-card p-4 mb-4">
+      <div className="rounded-xl bg-card p-4 mb-4">
         {perm !== 'granted' && (
           <div className="flex items-start gap-2 mb-3 text-xs text-amber-400 bg-amber-500/10 rounded-lg p-2.5">
             <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -199,7 +199,7 @@ export default function SignalAlerts() {
 
       {/* Current candle verdict */}
       {!ok ? (
-        <div className="rounded-2xl bg-card p-5 text-sm text-muted-foreground">{data?.error || 'Loading…'}</div>
+        <div className="rounded-xl bg-card p-5 text-sm text-muted-foreground">{data?.error || 'Loading…'}</div>
       ) : sig ? (
         <div className={cn('rounded-2xl border p-5 mb-4', sig.dir === 'SHORT' ? 'bg-rose-500/10 border-rose-500/30' : 'bg-emerald-500/10 border-emerald-500/30')}>
           <div className="flex items-center gap-2 mb-2">
@@ -213,7 +213,7 @@ export default function SignalAlerts() {
           <div className="text-[11px] text-muted-foreground mt-2">Spot {sig.price} · candle {data.candleIst} IST · educational signal, not advice</div>
         </div>
       ) : (
-        <div className="rounded-2xl bg-card p-5 mb-4">
+        <div className="rounded-xl bg-card p-5 mb-4">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <CheckCircle2 className="w-4 h-4" />
             No alert on the last candle.

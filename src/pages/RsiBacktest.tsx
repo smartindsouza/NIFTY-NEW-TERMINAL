@@ -7,7 +7,7 @@ const DAY_OPTIONS = [30, 60, 90, 120, 180];
 
 function Stat({ label, value, tone, hint }: { label: string; value: string; tone?: 'pos' | 'neg' | 'neutral' | 'warn'; hint?: string }) {
   return (
-    <div className="bg-card rounded-2xl p-3.5 flex flex-col gap-0.5 min-w-0">
+    <div className="bg-card rounded-xl p-3.5 flex flex-col gap-0.5 min-w-0">
       <span className="text-[10px] uppercase tracking-wider text-muted-foreground truncate">{label}</span>
       <span className={cn('text-lg font-bold font-mono truncate',
         tone === 'pos' ? 'text-emerald-400' : tone === 'neg' ? 'text-rose-400' : tone === 'warn' ? 'text-amber-400' : 'text-foreground')}>{value}</span>
@@ -23,7 +23,7 @@ const REGIME_LABEL: Record<string, string> = { withTrend: 'With the trend', coun
 function BreakdownGroup({ title, rows, labelMap }: { title: string; rows: any[]; labelMap?: (k: string) => string }) {
   const maxAbs = Math.max(1, ...rows.map((r) => Math.abs(r.net)));
   return (
-    <div className="bg-card rounded-2xl p-4">
+    <div className="bg-card rounded-xl p-4">
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">{title}</div>
       <div className="space-y-2.5">
         {rows.filter((r) => r.n > 0).map((r) => (
@@ -240,7 +240,7 @@ export default function RsiBacktest() {
 
           {/* Equity curve */}
           {data.equity?.length > 1 && (
-            <div className="bg-card rounded-2xl p-3 mb-5">
+            <div className="bg-card rounded-xl p-3 mb-5">
               <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2 px-1">Cumulative points (last {data.equity.length} trades)</div>
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart data={data.equity} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
@@ -257,7 +257,7 @@ export default function RsiBacktest() {
 
           {/* What this means */}
           {insights.length > 0 && (
-            <div className="bg-card/60 rounded-2xl p-4 mb-5">
+            <div className="bg-card/60 rounded-xl p-4 mb-5">
               <div className="text-xs font-semibold uppercase tracking-wider text-foreground mb-2.5">What this means</div>
               <ul className="space-y-2">
                 {insights.map((ins, i) => (
@@ -282,7 +282,7 @@ export default function RsiBacktest() {
                 const tgt = b.byReason.find((r: any) => r.key === 'TARGET');
                 const worstHour = [...b.byHour].filter((r: any) => r.n > 0).sort((a: any, c: any) => a.net - c.net)[0];
                 return (
-                  <div className="bg-card/60 rounded-2xl p-4 mb-3 text-[12.5px] leading-relaxed text-muted-foreground space-y-1.5">
+                  <div className="bg-card/60 rounded-xl p-4 mb-3 text-[12.5px] leading-relaxed text-muted-foreground space-y-1.5">
                     {worstReg && worstReg.net < 0 && <p><span className="text-rose-400">•</span> <span className="text-foreground">{REGIME_LABEL[worstReg.key]}</span> trades are the worst bucket: {worstReg.net} pts over {worstReg.n} trades ({worstReg.winRate}% win).{worstReg.key === 'counterTrend' ? ' These fight the prevailing trend — the prime candidate for a trend filter.' : ''}</p>}
                     {eod && tgt && <p><span className="text-rose-400">•</span> By exit: targets net {tgt.net >= 0 ? '+' : ''}{tgt.net} pts ({tgt.n}), but EOD square-offs net {eod.net} pts ({eod.n}) — the no-reversion trades are the leak.</p>}
                     {worstHour && worstHour.net < 0 && <p><span className="text-rose-400">•</span> Worst entry hour: {worstHour.key}:00 IST ({worstHour.net} pts, {worstHour.n} trades) — a time-of-day cutoff would target this.</p>}
@@ -319,7 +319,7 @@ export default function RsiBacktest() {
                 const enough = strong && strong.n >= 5;
                 const helps = enough && strongA > allA;
                 return (
-                  <div className="bg-card rounded-2xl p-4 mb-3">
+                  <div className="bg-card rounded-xl p-4 mb-3">
                     <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">Bounce Conviction filter · LONG entries</div>
                     <div className="text-[11px] text-muted-foreground mb-3 leading-relaxed">{bs.note}</div>
                     <div className="rounded-lg overflow-hidden border border-border mb-4">
@@ -344,7 +344,7 @@ export default function RsiBacktest() {
                 );
               })()}
               {data.breakdown.worst?.length > 0 && (
-                <div className="bg-card rounded-2xl p-4">
+                <div className="bg-card rounded-xl p-4">
                   <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">5 worst trades</div>
                   <div className="space-y-1.5">
                     {data.breakdown.worst.map((w: any, i: number) => (
@@ -365,7 +365,7 @@ export default function RsiBacktest() {
 
           {/* Trades */}
           {data.trades?.length > 0 && (
-            <div className="bg-card rounded-2xl overflow-hidden">
+            <div className="bg-card rounded-xl overflow-hidden">
               <div className="text-[11px] uppercase tracking-wider text-muted-foreground px-4 pt-3 pb-2">Recent trades (last {data.trades.length})</div>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px] font-mono">
@@ -453,7 +453,7 @@ export default function RsiBacktest() {
             )}
 
             {optData.signals?.length > 0 && (
-              <div className="bg-card rounded-2xl overflow-hidden">
+              <div className="bg-card rounded-xl overflow-hidden">
                 <div className="text-[11px] uppercase tracking-wider text-muted-foreground px-4 pt-3 pb-2">Recent signals (IST)</div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-[11px] font-mono">

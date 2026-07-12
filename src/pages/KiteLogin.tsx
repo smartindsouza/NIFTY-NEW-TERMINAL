@@ -92,7 +92,7 @@ export function KiteLogin() {
   const appUrl = window.location.origin + '/kite-login';
 
   return (
-    <div className="p-8 max-w-[1600px] w-full mx-auto animate-in fade-in duration-500">
+    <div className="p-4 md:p-8 max-w-[1600px] w-full mx-auto animate-in fade-in duration-500">
       <div className="mb-8">
         <h1 className="text-3xl font-bold tracking-tight text-foreground mb-2">Zerodha Kite Connect</h1>
         <p className="text-muted-foreground">

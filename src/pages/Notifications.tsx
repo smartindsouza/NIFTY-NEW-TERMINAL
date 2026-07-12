@@ -244,7 +244,7 @@ export default function Notifications() {
           
           {/* Game Plan Display */}
           {(isGeneratingPlan || gamePlan) && (
-            <div className="bg-card border border-primary/30 p-5 rounded-2xl mb-6 animate-in slide-in-from-top-4 fade-in duration-300">
+            <div className="bg-card border border-primary/30 p-5 rounded-xl mb-6 animate-in slide-in-from-top-4 fade-in duration-300">
                <div className="flex items-center gap-3 mb-4">
                  <div className="p-2 bg-primary/20 border border-primary/30 rounded-xl">
                    <Bot className="w-5 h-5 text-primary" />
