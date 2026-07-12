@@ -54,7 +54,7 @@ export default function AiAnalysis() {
                </div>
             ) : quantData ? (
                 <>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+                  <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-2 mb-4">
                      <div className="bg-card p-3 rounded-lg border border-0 text-center">
                         <p className="text-[10px] text-muted-foreground uppercase font-bold mb-1">Final Regime</p>
                         <p className={`text-sm font-mono font-bold ${quantData.finalRegime === 'Bullish' ? 'text-emerald-400' : quantData.finalRegime === 'Bearish' ? 'text-rose-400' : 'text-foreground/90'}`}>

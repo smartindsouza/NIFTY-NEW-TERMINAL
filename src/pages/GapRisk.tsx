@@ -30,7 +30,7 @@ const STYLE: Record<Level, { text: string; bg: string; border: string; dot: stri
 
 function Metric({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="bg-card rounded-2xl p-4 flex flex-col gap-1 min-w-0">
+    <div className="bg-card rounded-xl p-4 flex flex-col gap-1 min-w-0">
       <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</span>
       <span className="text-xl font-bold font-mono text-foreground truncate">{value}</span>
       {sub && <span className="text-[11px] text-muted-foreground truncate">{sub}</span>}
@@ -129,7 +129,7 @@ export default function GapRisk() {
       {/* Event toggle */}
       <button
         onClick={() => setEventTonight((v) => !v)}
-        className={cn('w-full flex items-center justify-between gap-3 rounded-2xl p-4 border transition-colors mb-4',
+        className={cn('w-full flex items-center justify-between gap-3 rounded-xl p-4 border transition-colors mb-4',
           eventTonight ? 'bg-rose-500/10 border-rose-500/30' : 'bg-card border-transparent')}
       >
         <span className="flex items-center gap-2.5 text-left">
@@ -145,7 +145,7 @@ export default function GapRisk() {
       </button>
 
       {/* How to read */}
-      <div className="bg-card/60 rounded-2xl p-4 text-[12px] text-muted-foreground leading-relaxed">
+      <div className="bg-card/60 rounded-xl p-4 text-[12px] text-muted-foreground leading-relaxed">
         <div className="flex items-center gap-2 mb-2 text-foreground font-semibold text-xs uppercase tracking-wider">
           <Activity className="w-3.5 h-3.5 text-primary" /> How to read this
         </div>

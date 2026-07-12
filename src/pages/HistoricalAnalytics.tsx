@@ -40,7 +40,7 @@ export default function HistoricalAnalytics() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="bg-card border-0 relative overflow-hidden">
           <CardContent className="p-5 space-y-2 pt-4">
              <div className="flex justify-between items-start gap-2">

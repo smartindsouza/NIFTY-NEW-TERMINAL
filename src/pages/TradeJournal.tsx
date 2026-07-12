@@ -37,7 +37,7 @@ const fmtTime = (ms: number | null) => {
 
 function StatCard({ label, value, tone }: { label: string; value: string; tone?: 'pos' | 'neg' | 'neutral' }) {
   return (
-    <div className="bg-card rounded-2xl p-4 flex flex-col gap-1 min-w-0">
+    <div className="bg-card rounded-xl p-4 flex flex-col gap-1 min-w-0">
       <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</span>
       <span className={cn('text-lg font-bold font-mono truncate',
         tone === 'pos' ? 'text-emerald-400' : tone === 'neg' ? 'text-rose-400' : 'text-foreground')}>
@@ -105,7 +105,7 @@ export default function TradeJournal() {
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 md:gap-3 mb-4">
+      <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-3 mb-4">
         <StatCard label="Total Trades" value={String(trades.length)} />
         <StatCard label="Closed" value={String(closed.length)} />
         <StatCard label="Win Rate" value={closed.length ? `${winRate}%` : '—'} tone={winRate >= 50 ? 'pos' : closed.length ? 'neg' : 'neutral'} />
@@ -146,7 +146,7 @@ export default function TradeJournal() {
             const pnlPos = (t.pnl || 0) >= 0;
             const ctx = t.context || {};
             return (
-              <div key={t.id} className="bg-card rounded-2xl p-3.5 md:p-4">
+              <div key={t.id} className="bg-card rounded-xl p-3.5 md:p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', isBuy ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400')}>

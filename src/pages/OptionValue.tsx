@@ -64,7 +64,7 @@ export default function OptionValue() {
             ))}
           </div>
 
-          <div className="bg-card rounded-2xl overflow-hidden">
+          <div className="bg-card rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-[12px] font-mono">
                 <thead>

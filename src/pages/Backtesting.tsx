@@ -137,7 +137,7 @@ export default function Backtesting() {
 
         <div className="md:col-span-2">
           {running ? (
-            <div className="h-full min-h-[250px] flex flex-col items-center justify-center bg-card/40 border border-0 rounded-2xl p-8 text-center space-y-4">
+            <div className="h-full min-h-[250px] flex flex-col items-center justify-center bg-card/40 border border-0 rounded-xl p-8 text-center space-y-4">
               <div className="relative">
                 <div className="w-12 h-12 rounded-full border-4 border-primary/20 border-t-primary animate-spin"></div>
                 <TrendingUp className="w-5 h-5 text-primary absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
@@ -237,7 +237,7 @@ export default function Backtesting() {
               </Card>
             </div>
           ) : (
-            <div className="h-full min-h-[250px] flex flex-col items-center justify-center bg-card/30 border border-dashed border-0 rounded-2xl p-8 text-center space-y-2">
+            <div className="h-full min-h-[250px] flex flex-col items-center justify-center bg-card/30 border border-dashed border-0 rounded-xl p-8 text-center space-y-2">
               <Calendar className="w-8 h-8 text-muted-foreground" />
               <p className="text-sm font-semibold text-foreground/80">Ready to simulate</p>
               <p className="text-xs text-muted-foreground max-w-sm">

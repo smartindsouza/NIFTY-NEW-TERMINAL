@@ -123,7 +123,7 @@ export default function GammaBlast() {
 
       {/* In plain words — no-greeks translation of the whole screen */}
       {plain && (
-        <div className={cn('rounded-2xl border p-4 mb-4',
+        <div className={cn('rounded-xl border p-4 mb-4',
           plain.tone === 'high' ? 'bg-amber-500/10 border-amber-500/40' : plain.tone === 'mod' ? 'bg-sky-500/10 border-sky-500/30' : 'bg-card border-border')}>
           <div className={cn('text-xs font-bold uppercase tracking-wider mb-2',
             plain.tone === 'high' ? 'text-amber-400' : plain.tone === 'mod' ? 'text-sky-400' : 'text-muted-foreground')}>
@@ -143,7 +143,7 @@ export default function GammaBlast() {
       {ok && (
         <>
           {/* Core readouts */}
-          <div className="grid grid-cols-3 md:grid-cols-6 gap-2.5 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-6 gap-2.5 mb-4">
             <Card label="Spot" value={String(data.spot)} />
             <Card label="ATM" value={String(data.atmStrike)} />
             <Card label="ATM CE" value={data.ce != null ? `\u20b9${data.ce}` : '—'} />
@@ -153,7 +153,7 @@ export default function GammaBlast() {
           </div>
 
           {/* Gamma regime */}
-          <div className="rounded-2xl bg-card p-4 mb-4">
+          <div className="rounded-xl bg-card p-4 mb-4">
             <div className="flex items-center justify-between mb-3">
               <div className="text-sm font-bold uppercase tracking-wider text-foreground">Blast potential</div>
               <div className="flex items-center gap-1.5">
@@ -187,7 +187,7 @@ export default function GammaBlast() {
           </div>
 
           {/* Catalyst */}
-          <div className="rounded-2xl bg-card p-4 mb-4">
+          <div className="rounded-xl bg-card p-4 mb-4">
             <div className="text-sm font-bold uppercase tracking-wider text-foreground mb-2">Directional catalyst</div>
             <div className="flex items-center gap-2">
               {data.catalyst === 'UP' && <span className="flex items-center gap-1.5 text-sm font-semibold text-emerald-400"><TrendingUp className="w-4 h-4" /> Upside break (+{data.catalystStrength} pts past range)</span>}
@@ -198,9 +198,9 @@ export default function GammaBlast() {
 
           {/* Pinning / OI */}
           {data.pinning?.haveOi && (
-            <div className="rounded-2xl bg-card p-4 mb-4">
+            <div className="rounded-xl bg-card p-4 mb-4">
               <div className="text-sm font-bold uppercase tracking-wider text-foreground mb-3">Max-pain & OI walls</div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 mb-3">
+              <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-2.5 mb-3">
                 <Card label="Max pain" value={data.pinning.maxPain != null ? String(data.pinning.maxPain) : '—'} hint={data.pinning.pinDistPts != null ? `${data.pinning.pinDistPts > 0 ? '+' : ''}${data.pinning.pinDistPts} pts` : undefined} tone={data.pinning.pinned ? 'warn' : 'neutral'} />
                 <Card label="Put wall (support)" value={data.pinning.putWall != null ? String(data.pinning.putWall) : '—'} tone="pos" />
                 <Card label="Call wall (resist)" value={data.pinning.callWall != null ? String(data.pinning.callWall) : '—'} tone="neg" />
