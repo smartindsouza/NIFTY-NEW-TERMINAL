@@ -317,14 +317,18 @@ export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot
 
         if (ceInst && optionQuotes[`NFO:${ceInst.tradingsymbol}`]) {
             const q = optionQuotes[`NFO:${ceInst.tradingsymbol}`];
-            const prevOi = prevOiMap[q.instrument_token] || q.oi_day_low || q.oi;
+            // Only compute OI change against a REAL previous-day baseline. The old
+            // fallback (oi_day_low/current oi) fabricated a positive chgOi for every
+            // strike, mislabeling the whole chain as SHORT BUILDUP after login.
+            const hasOiBaseline = prevOiMap[q.instrument_token] !== undefined;
+            const prevOi = hasOiBaseline ? prevOiMap[q.instrument_token] : null;
             ceData[strike] = {
                 strikePrice: strike,
                 type: 'CE',
                 ltp: q.last_price,
                 chgLtp: ((q.net_change !== undefined && q.net_change !== 0) ? q.net_change : ((q.ohlc && q.ohlc.close > 0) ? (q.last_price - q.ohlc.close) : 0)),
                 oi: q.oi / 100000, // in lakhs
-                chgOi: (q.oi - prevOi) / 100000, 
+                chgOi: hasOiBaseline ? (q.oi - (prevOi as number)) / 100000 : null, 
                 volume: q.volume,
                 iv: 15.0, // require black_scholes for real IV
                 tradingsymbol: ceInst.tradingsymbol,
@@ -340,14 +344,15 @@ export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot
         }
         if (peInst && optionQuotes[`NFO:${peInst.tradingsymbol}`]) {
             const q = optionQuotes[`NFO:${peInst.tradingsymbol}`];
-            const prevOi = prevOiMap[q.instrument_token] || q.oi_day_low || q.oi;
+            const hasOiBaseline = prevOiMap[q.instrument_token] !== undefined;
+            const prevOi = hasOiBaseline ? prevOiMap[q.instrument_token] : null;
             peData[strike] = {
                 strikePrice: strike,
                 type: 'PE',
                 ltp: q.last_price,
                 chgLtp: ((q.net_change !== undefined && q.net_change !== 0) ? q.net_change : ((q.ohlc && q.ohlc.close > 0) ? (q.last_price - q.ohlc.close) : 0)),
                 oi: q.oi / 100000,
-                chgOi: (q.oi - prevOi) / 100000,
+                chgOi: hasOiBaseline ? (q.oi - (prevOi as number)) / 100000 : null,
                 volume: q.volume,
                 iv: 15.0,
                 tradingsymbol: peInst.tradingsymbol,
