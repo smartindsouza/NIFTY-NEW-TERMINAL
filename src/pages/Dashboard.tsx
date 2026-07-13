@@ -43,7 +43,8 @@ export function Dashboard() {
       const res = await axios.get(`/api/ta?symbol=NIFTY%2050&token=256265&timeframe=${timeframe}`);
       return res.data;
     }, 
-    refetchInterval: 10000 
+    refetchInterval: 15000,
+    staleTime: 8000
   });
   const { data: fiiDiiData } = useQuery({ queryKey: ['fii-dii'], queryFn: async () => (await axios.get('/api/fii-dii')).data, refetchInterval: 10000 });
 

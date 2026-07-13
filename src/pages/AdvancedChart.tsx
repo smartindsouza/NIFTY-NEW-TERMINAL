@@ -4331,7 +4331,8 @@ export function AdvancedChart() {
       if (!res.ok) return null;
       return res.json();
     },
-    refetchInterval: 10000,
+    refetchInterval: 15000,
+    staleTime: 8000,
     enabled: Boolean(timeframe && instrumentToken)
   });
 
