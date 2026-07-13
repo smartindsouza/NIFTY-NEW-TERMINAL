@@ -8,7 +8,6 @@ import { Progress } from '@/components/ui/progress';
 import { computeMasterSignal } from '@/lib/decisionEngine';
 import { motion } from 'motion/react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { toast } from 'sonner';
 import { notificationService } from '../lib/notificationService';
 
 export function Dashboard() {
@@ -181,19 +180,8 @@ export function Dashboard() {
             // - absoluteDistance <= 300
             // - writing/buying interpretation is clear
             if (isMarketOpen && absoluteDistance <= 300 && !isHedging && (actionLabel.includes('WRITING') || actionLabel.includes('BUYING'))) {
-              toast(`🚨 ${labelContext}`, {
-                description: (
-                  <div className="font-mono mt-1 space-y-1">
-                    <div className="font-bold">{strike} {type}</div>
-                    <div className="font-bold text-foreground">{actionLabel}</div>
-                    <div>OI {direction}: <span className={cn("font-bold", actionColor)}>{Math.abs(option.chgOi).toFixed(2)}L</span></div>
-                    <div>Distance from spot: {distance > 0 ? '+' : ''}{distance.toFixed(0)} pts</div>
-                    <div className="text-muted-foreground mt-2">Interpretation: {interpretation}</div>
-                  </div>
-                ),
-                duration: 8000,
-              });
-
+              // OI alert toast pop-up removed per user request — the alert is still
+              // recorded in the Notifications center below, just without a toast.
               notificationService.add('oi_alert', labelContext, `Strike: ${strike} ${type} at ${distance > 0 ? '+' : ''}${distance.toFixed(0)} pts: ${actionLabel}. Interpretation: ${interpretation}`, {
                 strike,
                 type,
@@ -202,19 +190,8 @@ export function Dashboard() {
                 interpretation
               });
             } else if (!isMarketOpen) {
-              toast(`📊 ${labelContext}`, {
-                description: (
-                  <div className="font-mono mt-1 space-y-1">
-                    <div className="font-bold">{strike} {type}</div>
-                    <div className="font-bold text-foreground">{actionLabel}</div>
-                    <div>OI {direction}: <span className={cn("font-bold", actionColor)}>{Math.abs(option.chgOi).toFixed(2)}L</span></div>
-                    <div>Distance from spot: {distance > 0 ? '+' : ''}{distance.toFixed(0)} pts</div>
-                    <div className="text-muted-foreground mt-2">Interpretation: {interpretation}</div>
-                  </div>
-                ),
-                duration: 8000,
-              });
-
+              // OI alert toast pop-up removed per user request — still recorded in
+              // the Notifications center below, just without a toast on login.
               notificationService.add('oi_alert', labelContext, `Strike: ${strike} ${type} at ${distance > 0 ? '+' : ''}${distance.toFixed(0)} pts: ${actionLabel}. Interpretation: ${interpretation}`, {
                 strike,
                 type,
