@@ -141,7 +141,7 @@ export function ActivePositions() {
         if (!data?.success || !Array.isArray(data.positions)) return;
         if (typeof data.netPnl === 'number') setNetPnl(data.netPnl);
         const bySymbol: Record<string, any> = {};
-        data.positions.forEach((kp: any) => { bySymbol[kp.tradingsymbol] = kp; });
+        data.positions.forEach((kp: any) => { if (Number(kp.quantity) !== 0) bySymbol[kp.tradingsymbol] = kp; });
 
         // Remember every symbol Kite currently reports as open
         Object.keys(bySymbol).forEach(sym => confirmedOpenRef.current.add(sym));
@@ -202,6 +202,11 @@ export function ActivePositions() {
 
     pollReal();
     const realTimer = setInterval(pollReal, 3000);
+    // When the app returns to the foreground (e.g., after exiting a trade in the
+    // Zerodha app), reconcile immediately instead of waiting for the next tick —
+    // iOS suspends timers in the background, which left closed trades looking open.
+    const onVisible = () => { if (document.visibilityState === 'visible') pollReal(); };
+    document.addEventListener('visibilitychange', onVisible);
 
     // Simulation strictly for test-mode cards
     const simTimer = setInterval(() => {
@@ -225,7 +230,7 @@ export function ActivePositions() {
       });
     }, 2000);
 
-    return () => { clearInterval(realTimer); clearInterval(simTimer); };
+    return () => { clearInterval(realTimer); clearInterval(simTimer); document.removeEventListener('visibilitychange', onVisible); };
   }, [positions.length, exitingIds]);
 
   // One-click exit function

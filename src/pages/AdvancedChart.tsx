@@ -3481,6 +3481,9 @@ export function AdvancedChart() {
   const tradeInstrumentRef = useRef<any>(null);
   const [tradeTabInstr, setTradeTabInstr] = useState<any>(null);
   const autoOpenedForRef = useRef<string>('');
+  // Chart-side manual exit: first tap arms (CONFIRM EXIT?), second tap fires.
+  const [exitArm, setExitArm] = useState(false);
+  const [exitBusy, setExitBusy] = useState(false);
   const slActivePosRef = useRef<any>(null);
   useEffect(() => { slActivePosRef.current = slActivePos; }, [slActivePos]);
 
@@ -4308,7 +4311,7 @@ export function AdvancedChart() {
     },
     // Fetch periodically while visible to sync indicator bias with dashboard
     // using false here and manual update interval below to prevent chart full redraws
-    refetchInterval: false,
+    refetchInterval: instrumentToken !== "256265" ? 15000 : false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     // Refetch full history whenever the chart (re)mounts — returning from another
@@ -6908,6 +6911,39 @@ export function AdvancedChart() {
             className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${selectedInstrument && String(selectedInstrument.instrument_token) === String(tradeTabInstr.instrument_token) ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
             {tradeTabInstr.tradingsymbol}
           </button>
+          {slActivePos && !slActivePos.testMode && (
+            <button
+              disabled={exitBusy}
+              onClick={async () => {
+                if (!exitArm) { setExitArm(true); setTimeout(() => setExitArm(false), 3500); return; }
+                setExitArm(false); setExitBusy(true);
+                const sym = slActivePos.symbol;
+                try {
+                  const r = await fetch('/api/exit-position', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tradingsymbol: sym })
+                  });
+                  const d = await r.json().catch(() => ({ success: false }));
+                  if (d.success || d.alreadyClosed) {
+                    try {
+                      const raw = localStorage.getItem('active_positions');
+                      const list = raw ? JSON.parse(raw) : [];
+                      localStorage.setItem('active_positions', JSON.stringify(list.filter((p: any) => p.symbol !== sym)));
+                      window.dispatchEvent(new Event('active_positions_updated'));
+                    } catch (e) {}
+                    toast.success(`${sym} exit order placed`);
+                  } else {
+                    toast.error(`Exit failed: ${d.error || 'order rejected'} — position still OPEN, check Zerodha.`);
+                  }
+                } catch (e) {
+                  toast.error('Exit failed: network error — position may still be OPEN, check Zerodha.');
+                }
+                setExitBusy(false);
+              }}
+              className={`ml-auto px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${exitArm ? 'bg-red-500 text-white animate-pulse' : 'bg-red-500/15 text-red-400 border border-red-500/30'} ${exitBusy ? 'opacity-50' : ''}`}>
+              {exitBusy ? 'EXITING…' : exitArm ? 'CONFIRM EXIT?' : 'EXIT'}
+            </button>
+          )}
         </div>
       )}
 
