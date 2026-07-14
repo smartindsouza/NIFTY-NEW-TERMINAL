@@ -4312,6 +4312,9 @@ export function AdvancedChart() {
   const instrumentToken = selectedInstrument ? String(selectedInstrument.instrument_token) : "256265";
   const instrumentTokenRef = useRef(instrumentToken);
   instrumentTokenRef.current = instrumentToken;
+  // On the traded OPTION's chart only Demand/Supply zones + RSI stay on; other
+  // overlays (BB, S&R, PDH/PDL, levels, OI bars, opening range) are index tools.
+  const isOptionView = instrumentToken !== "256265";
   const { data: taInfo, isLoading: isLoadingTa, isError: isTaError, error: taError, refetch: refetchTa } = useQuery({
     queryKey: ["ta-data-live-chart", timeframe, instrumentToken],
     queryFn: async () => {
@@ -4945,11 +4948,11 @@ export function AdvancedChart() {
       const p = Number(price);
       if (Number.isFinite(p) && p > 0) L.push({ key, label, price: p });
     };
-    if (showHLevels && Array.isArray(hLevels)) {
+    if (showHLevels && !isOptionView && Array.isArray(hLevels)) {
       const names = ['RED OUTER', 'RED INNER', 'TRAP UPPER', 'TRAP LOWER', 'GREEN INNER', 'GREEN OUTER'];
       hLevels.forEach((v, i) => { if (v > 0) add(`h${i}`, names[i] || `H-Level ${i + 1}`, v); });
     }
-    if (showFiftyPercentLevels && Array.isArray(hLevels)) {
+    if (showFiftyPercentLevels && !isOptionView && Array.isArray(hLevels)) {
       const active = hLevels.filter(v => v > 0).sort((a, b) => b - a);
       for (let i = 0; i < active.length - 1; i++) {
         const mid = Math.round((active[i] + active[i + 1]) / 2);
@@ -5380,7 +5383,7 @@ export function AdvancedChart() {
           const y = param.point.y;
 
           // Check PDH/PDL click
-          if (showPdhPdl && pdhPrice !== null && pdlPrice !== null) {
+          if (showPdhPdl && !isOptionView && pdhPrice !== null && pdlPrice !== null) {
             const pdhY = mainSeries.priceToCoordinate(pdhPrice);
             if (pdhY !== null && Math.abs(pdhY - y) < 10) {
               setIsEditingPdhPdl(true);
@@ -5456,7 +5459,7 @@ export function AdvancedChart() {
     bbUpperSeriesRef.current = null;
     bbMiddleSeriesRef.current = null;
     bbLowerSeriesRef.current = null;
-    if (showBB && bbData && bbData.length > 0) {
+    if (showBB && !isOptionView && bbData && bbData.length > 0) {
       const upperSeries = mainChart.addSeries(LineSeries, {
         color: hexToRgba(bbColor, 0.75),
         lineWidth: 1,
@@ -5907,7 +5910,7 @@ export function AdvancedChart() {
         }
 
         const liveBB = bbDataRef.current;
-        if (showBB && liveBB && liveBB.length > 0) {
+        if (showBB && !isOptionView && liveBB && liveBB.length > 0) {
           ctx.beginPath();
           let first = true;
           
@@ -6111,27 +6114,27 @@ export function AdvancedChart() {
               }
 
               const snrDash = snrStyle === 1 ? [5, 5] : snrStyle === 2 ? [2, 4] : [];
-              if (showSnR && localAnalytics?.supportZone?.strikePrice) {
+              if (showSnR && !isOptionView && localAnalytics?.supportZone?.strikePrice) {
                  const y = mainSeriesRef.current.priceToCoordinate(localAnalytics.supportZone.strikePrice);
                  if (y !== null) linesToDraw.push({ text: `SUP`, y, color: supportColor, dash: snrDash, lineWidth: snrWidth });
               }
-              if (showSnR && localAnalytics?.resistanceZone?.strikePrice) {
+              if (showSnR && !isOptionView && localAnalytics?.resistanceZone?.strikePrice) {
                  const y = mainSeriesRef.current.priceToCoordinate(localAnalytics.resistanceZone.strikePrice);
                  if (y !== null) linesToDraw.push({ text: `RES`, y, color: resistanceColor, dash: snrDash, lineWidth: snrWidth });
               }
               const pdhPdlDash = pdhPdlStyle === 1 ? [5, 5] : pdhPdlStyle === 2 ? [2, 4] : [];
-              if (showPdhPdl && pdhPrice !== null) {
+              if (showPdhPdl && !isOptionView && pdhPrice !== null) {
                  const y = mainSeriesRef.current.priceToCoordinate(pdhPrice);
                  if (y !== null) linesToDraw.push({ text: `PDH ${pdhPrice}`, y, color: pdhColor, dash: pdhPdlDash, lineWidth: pdhPdlWidth });
               }
-              if (showPdhPdl && pdlPrice !== null) {
+              if (showPdhPdl && !isOptionView && pdlPrice !== null) {
                  const y = mainSeriesRef.current.priceToCoordinate(pdlPrice);
                  if (y !== null) linesToDraw.push({ text: `PDL ${pdlPrice}`, y, color: pdlColor, dash: pdhPdlDash, lineWidth: pdhPdlWidth });
               }
               // 15m Opening Range (first 15 min high/low) — centered labels, no Y-axis value
               {
                 const or = (taInfo as any)?.openingRange;
-                if (showOpeningRange && or) {
+                if (showOpeningRange && !isOptionView && or) {
                   if (typeof or.high === 'number') {
                     const y = mainSeriesRef.current.priceToCoordinate(or.high);
                     if (y !== null) linesToDraw.push({ text: `15M HIGH`, y, color: '#ffffff', dash: [], lineWidth: 1 });
@@ -6142,7 +6145,7 @@ export function AdvancedChart() {
                   }
                 }
               }
-              if (showFiftyPercentLevels && hLevels) {
+              if (showFiftyPercentLevels && !isOptionView && hLevels) {
                  const activeLevels = hLevels.filter(v => v > 0).sort((a, b) => b - a);
                  for (let i = 0; i < activeLevels.length - 1; i++) {
                    const midPoint = Math.round((activeLevels[i] + activeLevels[i+1]) / 2);
@@ -6154,7 +6157,7 @@ export function AdvancedChart() {
               }
 
               // H Levels — drawn here (line + pill) so RED OUTER / RED INNER / TRAP UPPER / TRAP LOWER / GREEN OUTER / GREEN INNER text shows on the chart
-              if (showHLevels && hLevels) {
+              if (showHLevels && !isOptionView && hLevels) {
                  const hColors = ['#ef4444', '#ef4444', '#fbbf24', '#fbbf24', '#22c55e', '#22c55e'];
                  const hTexts = ['RED OUTER', 'RED INNER', 'TRAP UPPER', 'TRAP LOWER', 'GREEN INNER', 'GREEN OUTER'];
                  const hDash = hLevelsStyle === 1 ? [5, 5] : hLevelsStyle === 2 ? [2, 4] : [];
@@ -7103,7 +7106,7 @@ export function AdvancedChart() {
               className="absolute inset-0 w-full h-full pointer-events-none rounded-xl z-30"
             />
             {(() => {
-              if (showOiBars && oiData && crosshairInfo) {
+              if (showOiBars && !isOptionView && oiData && crosshairInfo) {
                 const priceScaleWidth = mainChartRef.current ? mainChartRef.current.priceScale('right').width() : 60;
                 const chartWidth = chartContainerRef.current?.getBoundingClientRect().width || 0;
                 
