@@ -3483,7 +3483,6 @@ export function AdvancedChart() {
   const [tradeTabInstr, setTradeTabInstr] = useState<any>(null);
   const autoOpenedForRef = useRef<string>('');
   // Chart-side manual exit: first tap arms (CONFIRM EXIT?), second tap fires.
-  const [exitArm, setExitArm] = useState(false);
   const [exitBusy, setExitBusy] = useState(false);
   const slActivePosRef = useRef<any>(null);
   useEffect(() => { slActivePosRef.current = slActivePos; }, [slActivePos]);
@@ -6933,8 +6932,8 @@ export function AdvancedChart() {
             <button
               disabled={exitBusy}
               onClick={async () => {
-                if (!exitArm) { setExitArm(true); setTimeout(() => setExitArm(false), 3500); return; }
-                setExitArm(false); setExitBusy(true);
+                if (exitBusy) return;
+                setExitBusy(true);
                 const sym = slActivePos.symbol;
                 try {
                   const r = await fetch('/api/exit-position', {
@@ -6958,8 +6957,8 @@ export function AdvancedChart() {
                 }
                 setExitBusy(false);
               }}
-              className={`ml-auto px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${exitArm ? 'bg-red-500 text-white animate-pulse' : 'bg-red-500/15 text-red-400 border border-red-500/30'} ${exitBusy ? 'opacity-50' : ''}`}>
-              {exitBusy ? 'EXITING…' : exitArm ? 'CONFIRM EXIT?' : 'EXIT'}
+              className={`ml-auto px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors bg-red-500/15 text-red-400 border border-red-500/30 active:bg-red-500 active:text-white ${exitBusy ? 'opacity-50' : ''}`}>
+              {exitBusy ? 'EXITING…' : 'EXIT'}
             </button>
           )}
         </div>
