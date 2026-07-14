@@ -3478,6 +3478,7 @@ export function AdvancedChart() {
   // Trade-follow: after a quick trade, open the traded OPTION's chart in a tab and
   // place SL(-10%)/TARGET(+30%) lines vs the actual entry price, with live % labels.
   const slEntryRef = useRef<number | null>(null);
+  const slEntryLineRef = useRef<any>(null);
   const tradeInstrumentRef = useRef<any>(null);
   const [tradeTabInstr, setTradeTabInstr] = useState<any>(null);
   const autoOpenedForRef = useRef<string>('');
@@ -3797,6 +3798,17 @@ export function AdvancedChart() {
         { kind: 'lower', price: lower, instance: lInst, label: loLabel, color: '#10b981' },
       ];
       slSeriesRef.current = s;
+      // Fixed ENTRY line on the traded option's chart (reference, not draggable)
+      try { if (slEntryLineRef.current) { s.removePriceLine(slEntryLineRef.current); } } catch (e) {}
+      slEntryLineRef.current = null;
+      if (slEntryRef.current) {
+        try {
+          slEntryLineRef.current = s.createPriceLine({
+            price: slEntryRef.current, color: '#94a3b8', lineWidth: 1, lineStyle: 0,
+            axisLabelVisible: true, title: `ENTRY ${slEntryRef.current.toFixed(2)}`
+          });
+        } catch (e) {}
+      }
       // Premium levels must NOT feed the spot-based exit panel; only sync when on NIFTY.
       if (!viewingTrade) setSlLevels({ upper, lower });
     };
