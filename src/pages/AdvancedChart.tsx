@@ -3741,7 +3741,10 @@ export function AdvancedChart() {
       slEntryRef.current = viewingTrade ? posNow.entryPrice : null;
 
       let upper: number, lower: number;
-      if (viewingTrade && !slArmedRule) {
+      // On the traded OPTION's chart, premium-based lines always take priority —
+      // an armed rule's levels are NIFTY SPOT values and would land wildly
+      // off-scale on a premium chart (lines vanished + became un-draggable).
+      if (viewingTrade) {
         // Option-premium chart: SL 10% against entry, TARGET 30% in favour (draggable).
         const entry = posNow.entryPrice;
         const long = posNow.side === 'BUY';
