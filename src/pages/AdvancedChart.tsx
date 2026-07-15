@@ -6103,10 +6103,10 @@ export function AdvancedChart() {
                   ctx.fillStyle = `rgba(${rgb},${pct})`;
                   ctx.fillRect(zx, Math.min(yTop, yBot), zw, Math.abs(yBot - yTop));
                   ctx.font = 'bold 9px monospace';
-                  ctx.textAlign = 'center';
+                  ctx.textAlign = 'left';
                   ctx.textBaseline = 'middle';
                   ctx.fillStyle = labelColor;
-                  ctx.fillText(label, textAlignX / 2, (yTop + yBot) / 2);
+                  ctx.fillText(label, 8, (yTop + yBot) / 2);
                 };
                 (dz.demand || []).forEach((z: any) => drawZone(z, '16,185,129', 'rgba(16,185,129,0.55)', 'DEMAND'));
                 (dz.supply || []).forEach((z: any) => drawZone(z, '244,63,94', 'rgba(244,63,94,0.55)', 'SUPPLY'));
@@ -6187,7 +6187,11 @@ export function AdvancedChart() {
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
               
-              const baseCenterX = textAlignX / 2;
+              // Line labels sit on the LEFT edge of the chart so the candlesticks are
+              // never covered. leftAnchor() returns the centre-x a pill of width w
+              // needs in order for its LEFT edge to land on the padding line.
+              const LABEL_LEFT_PAD = 8;
+              const leftAnchor = (w: number) => LABEL_LEFT_PAD + w / 2;
               
               // Sort labels top-to-bottom
               const labels = [...linesToDraw];
@@ -6202,27 +6206,28 @@ export function AdvancedChart() {
                  else if (displayText.startsWith('PDH')) displayText = 'PDH';
                  else if (displayText.startsWith('PDL')) displayText = 'PDL';
 
-                 // Find a non-colliding X position (if Y overlaps)
-                 let currentX = baseCenterX;
-                 let collision = true;
-                 let offsetMultiplier = 1;
-                 while (collision) {
-                    collision = assignedPositions.some(pos => 
-                       Math.abs(pos.y - label.y) < 20 && Math.abs(pos.x - currentX) < Math.max(120, ctx.measureText(displayText).width + 30)
-                    );
-                    if (collision) {
-                       const offset = (offsetMultiplier % 2 === 0 ? -1 : 1) * Math.ceil(offsetMultiplier / 2) * 140;
-                       currentX = baseCenterX + offset;
-                       offsetMultiplier++;
-                    }
-                 }
-                 assignedPositions.push({ x: currentX, y: label.y });
-
-                 // Calculate inline label dimensions
+                 // Measure first — the left anchor depends on the pill's width.
                  const textWidth = ctx.measureText(displayText).width;
                  const paddingX = 16; 
                  const totalWidth = textWidth + paddingX;
                  const totalHeight = 18;
+
+                 // Anchor on the LEFT edge. If another label already occupies this
+                 // row, step to the RIGHT only (stepping left would run off-chart).
+                 let currentX = leftAnchor(totalWidth);
+                 let collision = true;
+                 let offsetMultiplier = 1;
+                 while (collision) {
+                    collision = assignedPositions.some(pos => 
+                       Math.abs(pos.y - label.y) < 20 && Math.abs(pos.x - currentX) < Math.max(120, textWidth + 30)
+                    );
+                    if (collision) {
+                       currentX = leftAnchor(totalWidth) + offsetMultiplier * 140;
+                       offsetMultiplier++;
+                       if (offsetMultiplier > 8) break; // safety: never spin forever
+                    }
+                 }
+                 assignedPositions.push({ x: currentX, y: label.y });
                  
                  const bgX = currentX - totalWidth / 2;
                  const bgY = label.y - totalHeight / 2;
@@ -6263,8 +6268,8 @@ export function AdvancedChart() {
                     ctx.font = 'bold 10px sans-serif';
                     const tw = ctx.measureText(txt).width;
 
-                    // Find a non-colliding X (shift sideways if another label shares this row)
-                    let currentX = baseCenterX;
+                    // Left-anchored like every other line label; step RIGHT on collision.
+                    let currentX = leftAnchor(tw + 16);
                     let collision = true;
                     let offsetMultiplier = 1;
                     while (collision) {
@@ -6272,9 +6277,9 @@ export function AdvancedChart() {
                           Math.abs(pos.y - yy) < 20 && Math.abs(pos.x - currentX) < Math.max(120, tw + 30)
                        );
                        if (collision) {
-                          const offset = (offsetMultiplier % 2 === 0 ? -1 : 1) * Math.ceil(offsetMultiplier / 2) * 140;
-                          currentX = baseCenterX + offset;
+                          currentX = leftAnchor(tw + 16) + offsetMultiplier * 140;
                           offsetMultiplier++;
+                          if (offsetMultiplier > 8) break;
                        }
                     }
                     assignedPositions.push({ x: currentX, y: yy });
