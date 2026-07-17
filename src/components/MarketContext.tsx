@@ -46,6 +46,23 @@ function freshnessLabel(asOf?: number): string {
   return `~${ageMin}m old`;
 }
 
+// Small OPEN / CLOSED pill for a market group. Status comes from the server,
+// computed from each exchange's regular weekday session hours in its own
+// timezone (holidays aren't tracked).
+function StatusPill({ open }: { open?: boolean }) {
+  if (open === undefined) return null;
+  return (
+    <span
+      className={`normal-case inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold font-mono tracking-normal ${
+        open ? "bg-emerald-500/15 text-emerald-400" : "bg-white/5 text-slate-500"
+      }`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${open ? "bg-emerald-400 animate-pulse" : "bg-slate-600"}`} />
+      {open ? "OPEN" : "CLOSED"}
+    </span>
+  );
+}
+
 export default function MarketContext() {
   const [open, setOpen] = useState(false);
 
@@ -62,7 +79,10 @@ export default function MarketContext() {
 
   const indian: Market[] = data?.indian || [];
   const us: Market[] = data?.us || [];
+  const uk: Market[] = data?.uk || [];
   const usAsOf = us.find((m) => m.available && m.asOf)?.asOf;
+  const ukAsOf = uk.find((m) => m.available && m.asOf)?.asOf;
+  const status: { indian?: boolean; us?: boolean; uk?: boolean } = data?.status || {};
 
   return (
     <>
@@ -107,16 +127,20 @@ export default function MarketContext() {
         </div>
 
         <div className="overflow-y-auto flex-1">
-          <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-slate-500 font-bold bg-white/[0.02]">
-            Indian Indices · live
+          <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-slate-500 font-bold bg-white/[0.02] flex items-center justify-between">
+            <span>Indian Indices</span>
+            <StatusPill open={status.indian} />
           </div>
           {indian.map((m) => (
             <Row key={m.key} m={m} />
           ))}
 
           <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-slate-500 font-bold bg-white/[0.02] flex items-center justify-between">
-            <span>Global &amp; Commodities</span>
-            {usAsOf ? <span className="text-slate-600 normal-case font-mono">{freshnessLabel(usAsOf)}</span> : null}
+            <span>US Futures</span>
+            <span className="flex items-center gap-1.5">
+              {usAsOf ? <span className="text-slate-600 normal-case font-mono">{freshnessLabel(usAsOf)}</span> : null}
+              <StatusPill open={status.us} />
+            </span>
           </div>
           {us.length === 0 && (
             <div className="px-3 py-3 text-xs text-slate-500">Loading…</div>
@@ -126,13 +150,32 @@ export default function MarketContext() {
           ))}
           {us.length > 0 && us.every((m) => !m.available) && (
             <div className="px-3 py-2 text-[10px] text-slate-500 leading-relaxed">
-              Global data source unreachable from the server right now. Indian indices above are unaffected.
+              US data source unreachable from the server right now. Indian indices above are unaffected.
+            </div>
+          )}
+
+          <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-slate-500 font-bold bg-white/[0.02] flex items-center justify-between">
+            <span>UK Markets</span>
+            <span className="flex items-center gap-1.5">
+              {ukAsOf ? <span className="text-slate-600 normal-case font-mono">{freshnessLabel(ukAsOf)}</span> : null}
+              <StatusPill open={status.uk} />
+            </span>
+          </div>
+          {uk.length === 0 && (
+            <div className="px-3 py-3 text-xs text-slate-500">Loading…</div>
+          )}
+          {uk.map((m) => (
+            <Row key={m.key} m={m} />
+          ))}
+          {uk.length > 0 && uk.every((m) => !m.available) && (
+            <div className="px-3 py-2 text-[10px] text-slate-500 leading-relaxed">
+              UK data source unreachable from the server right now. Sections above are unaffected.
             </div>
           )}
         </div>
 
         <div className="px-3 py-2 border-t border-white/10 text-[9px] text-slate-500 leading-tight">
-          Indian: live via Kite. Global indices & commodities via a free third-party feed (may lag or drop out) — context only, confirm before trading.
+          Indian: live via Kite. US &amp; UK: via a free third-party feed (may lag or drop out) — context only, confirm before trading. Open/Closed reflects regular session hours; exchange holidays aren't tracked.
         </div>
       </div>
     </>
