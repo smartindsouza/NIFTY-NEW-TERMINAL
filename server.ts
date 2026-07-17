@@ -840,9 +840,33 @@ setInterval(() => {
       const kc = getKiteClient();
       // @ts-ignore
       const hasKite = kc && kc.access_token;
+      // Symbols verified against the Kite instrument dump (exchange NSE, segment
+      // INDICES) rather than guessed. Note NIFTY OIL AND GAS / NIFTY HEALTHCARE
+      // do NOT exist there, so they're deliberately not listed.
+      // All of these are fetched in ONE batched getQuote call, so extra rows cost
+      // no additional broker API calls.
       const IND = [
+        // Broad
         { key: 'BANKNIFTY', label: 'Bank Nifty', sym: 'NSE:NIFTY BANK' },
         { key: 'FINNIFTY', label: 'Fin Nifty', sym: 'NSE:NIFTY FIN SERVICE' },
+        { key: 'MIDCAP100', label: 'Midcap 100', sym: 'NSE:NIFTY MIDCAP 100' },
+        { key: 'SMLCAP100', label: 'Smallcap 100', sym: 'NSE:NIFTY SMLCAP 100' },
+        { key: 'MICROCAP250', label: 'Microcap 250', sym: 'NSE:NIFTY MICROCAP250' },
+        // Sectors
+        { key: 'AUTO', label: 'Auto', sym: 'NSE:NIFTY AUTO' },
+        { key: 'COMMODITIES', label: 'Commodities', sym: 'NSE:NIFTY COMMODITIES' },
+        { key: 'CONSUMPTION', label: 'Consumption', sym: 'NSE:NIFTY CONSUMPTION' },
+        { key: 'ENERGY', label: 'Energy', sym: 'NSE:NIFTY ENERGY' },
+        { key: 'FMCG', label: 'FMCG', sym: 'NSE:NIFTY FMCG' },
+        { key: 'INFRA', label: 'Infra', sym: 'NSE:NIFTY INFRA' },
+        { key: 'IT', label: 'IT', sym: 'NSE:NIFTY IT' },
+        { key: 'MEDIA', label: 'Media', sym: 'NSE:NIFTY MEDIA' },
+        { key: 'METAL', label: 'Metal', sym: 'NSE:NIFTY METAL' },
+        { key: 'PHARMA', label: 'Pharma', sym: 'NSE:NIFTY PHARMA' },
+        { key: 'PSUBANK', label: 'PSU Bank', sym: 'NSE:NIFTY PSU BANK' },
+        { key: 'PVTBANK', label: 'Private Bank', sym: 'NSE:NIFTY PVT BANK' },
+        { key: 'REALTY', label: 'Realty', sym: 'NSE:NIFTY REALTY' },
+        // Volatility / BSE
         { key: 'VIX', label: 'India VIX', sym: 'NSE:INDIA VIX' },
         { key: 'SENSEX', label: 'Sensex', sym: 'BSE:SENSEX' },
       ];
