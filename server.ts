@@ -809,6 +809,22 @@ setInterval(() => {
   // Market-context sidebar: Indian indices (live from Kite) + US index futures
   // (near-real-time from Yahoo's free endpoint, with a graceful "unavailable"
   // fallback if the server can't reach it). Cached ~5s to stay light.
+  // Approximate market open/closed check: minutes-of-day windows per weekday
+  // (0=Sun..6=Sat) evaluated in the exchange's own timezone. Regular sessions
+  // only — exchange holidays are not tracked.
+  function marketOpenNow(tz: string, schedule: Record<number, Array<[number, number]>>): boolean {
+    try {
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: tz, weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false,
+      }).formatToParts(new Date());
+      const get = (t: string) => parts.find((p) => p.type === t)?.value || '';
+      const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+      const dow = dayMap[get('weekday')] ?? -1;
+      const mins = (parseInt(get('hour'), 10) % 24) * 60 + parseInt(get('minute'), 10);
+      return (schedule[dow] || []).some(([a, b]) => mins >= a && mins < b);
+    } catch { return false; }
+  }
+
   let marketContextCache: { at: number; data: any } | null = null;
   app.get('/api/market-context', async (_req, res) => {
     try {
@@ -817,6 +833,7 @@ setInterval(() => {
       }
       const indian: any[] = [];
       const us: any[] = [];
+      const uk: any[] = [];
 
       // --- Indian indices via Kite ---
       const kc = getKiteClient();
@@ -825,11 +842,6 @@ setInterval(() => {
       const IND = [
         { key: 'BANKNIFTY', label: 'Bank Nifty', sym: 'NSE:NIFTY BANK' },
         { key: 'FINNIFTY', label: 'Fin Nifty', sym: 'NSE:NIFTY FIN SERVICE' },
-        { key: 'MIDCAP', label: 'Midcap 100', sym: 'NSE:NIFTY MIDCAP 100' },
-        { key: 'SMLCAP', label: 'Smallcap 100', sym: 'NSE:NIFTY SMLCAP 100' },
-        { key: 'MICROCAP', label: 'Microcap 250', sym: 'NSE:NIFTY MICROCAP250' },
-        { key: 'PHARMA', label: 'Pharma', sym: 'NSE:NIFTY PHARMA' },
-        { key: 'IT', label: 'IT', sym: 'NSE:NIFTY IT' },
         { key: 'VIX', label: 'India VIX', sym: 'NSE:INDIA VIX' },
         { key: 'SENSEX', label: 'Sensex', sym: 'BSE:SENSEX' },
       ];
@@ -863,11 +875,6 @@ setInterval(() => {
         { key: 'SPX', label: 'S&P 500 Fut', sym: 'ES=F' },
         { key: 'NDX', label: 'Nasdaq Fut', sym: 'NQ=F' },
         { key: 'DJI', label: 'Dow Fut', sym: 'YM=F' },
-        { key: 'HSI', label: 'Hang Seng', sym: '^HSI' },
-        { key: 'KOSPI', label: 'KOSPI', sym: '^KS11' },
-        { key: 'GOLD', label: 'Gold', sym: 'GC=F' },
-        { key: 'SILVER', label: 'Silver', sym: 'SI=F' },
-        { key: 'OIL', label: 'Crude Oil', sym: 'CL=F' },
       ];
       await Promise.all(US.map(async (u) => {
         try {
@@ -902,11 +909,66 @@ setInterval(() => {
       // keep US in declared order
       us.sort((a, b) => US.findIndex(x => x.key === a.key) - US.findIndex(x => x.key === b.key));
 
-      const payload = { success: true, indian, us, ts: Date.now() };
+      // --- UK indices via Yahoo (same free feed as US) ---
+      const UK = [
+        { key: 'FTSE', label: 'FTSE 100', sym: '^FTSE' },
+        { key: 'FTMC', label: 'FTSE 250', sym: '^FTMC' },
+      ];
+      await Promise.all(UK.map(async (u) => {
+        try {
+          const r = await axios.get(
+            `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(u.sym)}?interval=5m&range=1d`,
+            { timeout: 4000, headers: { 'User-Agent': 'Mozilla/5.0' } }
+          );
+          const result = r.data?.chart?.result?.[0];
+          const meta = result?.meta;
+          if (meta && typeof meta.regularMarketPrice === 'number') {
+            const prev = meta.chartPreviousClose ?? meta.previousClose ?? meta.regularMarketPrice;
+            const chg = meta.regularMarketPrice - prev;
+            const chgPct = prev ? (chg / prev) * 100 : 0;
+            uk.push({
+              key: u.key, label: u.label, price: +meta.regularMarketPrice.toFixed(2),
+              change: +chg.toFixed(2), changePct: +chgPct.toFixed(2),
+              asOf: meta.regularMarketTime ? meta.regularMarketTime * 1000 : Date.now(),
+              available: true,
+            });
+          } else {
+            uk.push({ key: u.key, label: u.label, available: false });
+          }
+        } catch (e) {
+          uk.push({ key: u.key, label: u.label, available: false });
+        }
+      }));
+      // keep UK in declared order
+      uk.sort((a, b) => UK.findIndex(x => x.key === a.key) - UK.findIndex(x => x.key === b.key));
+
+      // Open/closed per market group (regular weekday sessions in each exchange's
+      // timezone; holidays not tracked). Minutes-of-day windows, 0=Sun..6=Sat.
+      const status = {
+        // NSE/BSE cash session 09:15-15:30 IST, Mon-Fri
+        indian: marketOpenNow('Asia/Kolkata', {
+          1: [[555, 930]], 2: [[555, 930]], 3: [[555, 930]], 4: [[555, 930]], 5: [[555, 930]],
+        }),
+        // LSE 08:00-16:30 UK time, Mon-Fri
+        uk: marketOpenNow('Europe/London', {
+          1: [[480, 990]], 2: [[480, 990]], 3: [[480, 990]], 4: [[480, 990]], 5: [[480, 990]],
+        }),
+        // CME Globex (index futures): Sun 18:00 -> Fri 17:00 ET, daily 17:00-18:00 break
+        us: marketOpenNow('America/New_York', {
+          0: [[1080, 1440]],
+          1: [[0, 1020], [1080, 1440]],
+          2: [[0, 1020], [1080, 1440]],
+          3: [[0, 1020], [1080, 1440]],
+          4: [[0, 1020], [1080, 1440]],
+          5: [[0, 1020]],
+        }),
+      };
+
+      const payload = { success: true, indian, us, uk, status, ts: Date.now() };
       marketContextCache = { at: Date.now(), data: payload };
       res.json(payload);
     } catch (e: any) {
-      res.json({ success: false, error: e?.message || String(e), indian: [], us: [] });
+      res.json({ success: false, error: e?.message || String(e), indian: [], us: [], uk: [] });
     }
   });
 
