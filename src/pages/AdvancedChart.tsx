@@ -1135,9 +1135,9 @@ const isMarketOpen = (unixSeconds: number): boolean => {
   return true;
 };
 
-// Live Indian-market clock shown on top of the chart: HH:MM:SS in 12-hour format.
-// Ticks green through the NSE session (09:15 -> 15:30 IST, Mon-Fri) and goes
-// muted with CLOSED outside it. Self-contained so the per-second state change
+// Live Indian-market clock shown beside the chart title: HH:MM:SS in 12-hour
+// format. Renders ONLY during the NSE session (09:15 -> 15:30 IST, Mon-Fri) and
+// disappears outside it. Self-contained so the per-second state change
 // re-renders this pill alone, never the (very large) chart component.
 const IstSessionClock = () => {
   const [now, setNow] = useState<number>(() => Date.now());
@@ -1160,16 +1160,18 @@ const IstSessionClock = () => {
   const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
   const clock = `${two(h12)}:${two(ist.getUTCMinutes())}:${two(ist.getUTCSeconds())} ${ampm}`;
 
+  // Only visible while the Indian market is open.
+  if (!marketOpen) return null;
+
   return (
-    <div
-      className="absolute top-2 left-1/2 -translate-x-1/2 z-[35] pointer-events-none select-none flex items-center gap-1.5 font-mono text-[10px] md:text-xs font-bold whitespace-nowrap"
-      style={{ textShadow: '0 1px 3px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.9)' }}
-      title={marketOpen ? 'Indian market open (IST)' : 'Indian market closed (IST)'}
+    <span
+      className="inline-flex items-center gap-1.5 select-none whitespace-nowrap font-mono text-sm md:text-base font-bold text-emerald-400"
+      title="Indian market open (IST)"
     >
-      <span className={`w-1.5 h-1.5 rounded-full ${marketOpen ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
-      <span className={marketOpen ? 'text-emerald-400' : 'text-muted-foreground'}>{clock}</span>
-      <span className="text-muted-foreground/80 font-normal">{marketOpen ? 'IST' : 'IST · CLOSED'}</span>
-    </div>
+      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+      {clock}
+      <span className="text-muted-foreground/80 font-normal text-xs md:text-sm">IST</span>
+    </span>
   );
 };
 
@@ -6606,7 +6608,7 @@ export function AdvancedChart() {
       )}
 
       <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2 md:gap-3 pb-2 mb-2 md:mb-4">
-        <div className="relative flex items-center gap-2 md:gap-4 md:flex-wrap">
+        <div className="relative flex items-center gap-2 md:gap-4 flex-wrap max-md:pr-28">
           <h1 className="text-base md:text-2xl font-bold text-foreground tracking-tight whitespace-nowrap">
             Advanced Trading Chart
           </h1>
@@ -6618,6 +6620,7 @@ export function AdvancedChart() {
           >
             <ChevronDown size={16} className={`transition-transform ${showBiases ? 'rotate-180' : ''}`} />
           </button>
+          <IstSessionClock />
           <div className={`${showBiases ? 'flex' : 'hidden'} md:flex absolute md:static top-full left-0 mt-1 md:mt-0 z-[80] md:z-auto flex-col md:flex-row items-start md:items-center gap-1.5 md:gap-4 bg-card md:bg-transparent border border-white/10 md:border-0 rounded-lg md:rounded-none p-2 md:p-0 shadow-xl md:shadow-none max-h-[60vh] md:max-h-none overflow-y-auto md:overflow-visible md:flex-wrap`}>
           {lastTickMessage && (
              <span className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-md text-xs font-mono font-bold animate-pulse whitespace-nowrap">
@@ -7056,7 +7059,6 @@ export function AdvancedChart() {
 
           {/* Main Chart (Price & Volume) */}
           <div className="relative flex-grow flex w-full bg-card rounded-none md:rounded-xl min-h-0 md:min-h-[450px]" onMouseLeave={() => setCrosshairInfo(null)}>
-            <IstSessionClock />
             <div
               ref={chartContainerRef}
               onPointerDownCapture={handlePointerDown}
