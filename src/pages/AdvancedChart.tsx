@@ -2524,6 +2524,11 @@ export function AdvancedChart() {
   const volumeSeriesRef = useRef<any>(null);
   const lastCandleTimeRef = useRef<number | null>(null);
   const lastCandleDataRef = useRef<any>(null);
+  // Candles that COMPLETED after the initial fetch. The fetched history is frozen
+  // (tick-driven chart, no refetch), so without this archive every candle that
+  // closes after page load silently drops out of live indicator windows --
+  // Bollinger Bands drifted stale until a manual refresh (the reported bug).
+  const liveClosedCandlesRef = useRef<any[]>([]);
   const chartDataRef = useRef<any>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const serverTimeOffsetRef = useRef<number>(0);
@@ -4554,6 +4559,7 @@ export function AdvancedChart() {
 
     lastCandleTimeRef.current = null;
     lastCandleDataRef.current = null;
+    liveClosedCandlesRef.current = [];
 
     // 1. Subscribe ONLY the active symbol
     subscribeToTicks(currentSymbol);
@@ -4665,6 +4671,14 @@ export function AdvancedChart() {
             };
             lastCandleTimeRef.current = updateTime;
           }
+          {
+            const prevC = lastCandleDataRef.current;
+            if (prevC && prevC.time < updatedCandle.time) {
+              const arc = liveClosedCandlesRef.current;
+              if (!arc.length || arc[arc.length - 1].time < prevC.time) arc.push(prevC);
+              if (arc.length > 600) arc.splice(0, arc.length - 600);
+            }
+          }
           lastCandleDataRef.current = updatedCandle;
           lastTickAtRef.current = Date.now();
 
@@ -4774,6 +4788,14 @@ export function AdvancedChart() {
                close: latestCandle.close,
                rsi14: latestCandle.rsi14,
              };
+           }
+           {
+             const prevC = lastCandleDataRef.current;
+             if (prevC && prevC.time < updatedCandle.time) {
+               const arc = liveClosedCandlesRef.current;
+               if (!arc.length || arc[arc.length - 1].time < prevC.time) arc.push(prevC);
+               if (arc.length > 600) arc.splice(0, arc.length - 600);
+             }
            }
            lastCandleTimeRef.current = updateTime;
            lastCandleDataRef.current = updatedCandle;
@@ -4885,6 +4907,17 @@ export function AdvancedChart() {
 
   useEffect(() => {
     chartDataRef.current = chartData;
+    // Fresh history supersedes the live archive up to its last candle -- prune to
+    // avoid double-counting (option charts refetch every 15s; NIFTY on reload).
+    {
+      const cs = chartData?.candles;
+      if (cs && cs.length) {
+        const lastT = cs[cs.length - 1].time;
+        liveClosedCandlesRef.current = liveClosedCandlesRef.current.filter((k: any) => k.time > lastT);
+      } else {
+        liveClosedCandlesRef.current = [];
+      }
+    }
     const latest = chartData?.candles?.[chartData.candles.length - 1];
     if (!latest) return;
     if (lastCandleTimeRef.current === null || latest.time > lastCandleTimeRef.current) {
@@ -5428,6 +5461,7 @@ export function AdvancedChart() {
     } else {
       lastCandleTimeRef.current = null;
       lastCandleDataRef.current = null;
+    liveClosedCandlesRef.current = [];
     }
     
     const isFirstChartLoad = !chartFirstLoadDone;
@@ -5885,23 +5919,35 @@ export function AdvancedChart() {
         if (showBB) {
           const baseC = chartDataRef.current?.candles || [];
           const liveC = lastCandleDataRef.current;
-          const sig = `${baseC.length}|${liveC?.time || 0}|${liveC?.close ?? 0}|${liveC?.high ?? 0}|${liveC?.low ?? 0}|${bbPeriod}|${bbStdDev}`;
+          const closedArc = liveClosedCandlesRef.current;
+          const arcTailT = closedArc.length ? closedArc[closedArc.length - 1].time : 0;
+          const sig = `${baseC.length}|${closedArc.length}|${arcTailT}|${liveC?.time || 0}|${liveC?.close ?? 0}|${liveC?.high ?? 0}|${liveC?.low ?? 0}|${bbPeriod}|${bbStdDev}`;
           if (sig !== bbSigRef.current) {
             let candlesForBB: any[] = baseC;
-            if (liveC && baseC.length) {
-              const lastT = baseC[baseC.length - 1].time;
-              if (liveC.time === lastT) candlesForBB = [...baseC.slice(0, -1), liveC];
-              else if (liveC.time > lastT) candlesForBB = [...baseC, liveC];
+            if (baseC.length) {
+              const lastFetchedT = baseC[baseC.length - 1].time;
+              // fetched history + candles closed since the fetch + the forming candle
+              const closedSince = closedArc.filter((k: any) => k.time > lastFetchedT);
+              candlesForBB = closedSince.length ? [...baseC, ...closedSince] : baseC;
+              if (liveC) {
+                const lastT = candlesForBB[candlesForBB.length - 1].time;
+                if (liveC.time === lastT) candlesForBB = [...candlesForBB.slice(0, -1), liveC];
+                else if (liveC.time > lastT) candlesForBB = [...candlesForBB, liveC];
+              }
             }
             const live = calculateBollingerBands(candlesForBB, bbPeriod, bbStdDev);
             bbDataRef.current = live;
             bbSigRef.current = sig;
-            // Extend the line series to the latest point (update = upsert on the most recent bar)
+            // Extend the line series with the last few band points -- update()
+            // upserts the newest bar and appends newer ones, so the lines advance
+            // across candle rolls instead of freezing at the fetch-time last bar.
             if (live.length) {
-              const lp = live[live.length - 1];
-              try { bbUpperSeriesRef.current?.update({ time: lp.time as any, value: lp.upper }); } catch (e) {}
-              try { bbMiddleSeriesRef.current?.update({ time: lp.time as any, value: lp.middle }); } catch (e) {}
-              try { bbLowerSeriesRef.current?.update({ time: lp.time as any, value: lp.lower }); } catch (e) {}
+              const tail = live.slice(-3);
+              for (const lp of tail) {
+                try { bbUpperSeriesRef.current?.update({ time: lp.time as any, value: lp.upper }); } catch (e) {}
+                try { bbMiddleSeriesRef.current?.update({ time: lp.time as any, value: lp.middle }); } catch (e) {}
+                try { bbLowerSeriesRef.current?.update({ time: lp.time as any, value: lp.lower }); } catch (e) {}
+              }
             }
           }
         } else {
