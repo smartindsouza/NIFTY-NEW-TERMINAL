@@ -834,6 +834,7 @@ setInterval(() => {
       const indian: any[] = [];
       const us: any[] = [];
       const uk: any[] = [];
+      const globalMkts: any[] = [];
 
       // --- Indian indices via Kite ---
       const kc = getKiteClient();
@@ -942,6 +943,63 @@ setInterval(() => {
       // keep UK in declared order
       uk.sort((a, b) => UK.findIndex(x => x.key === a.key) - UK.findIndex(x => x.key === b.key));
 
+      // --- Global indices & commodities via Yahoo (same free feed) ---
+      // Per-market sessions: these don't share one schedule (HK breaks for lunch,
+      // KOSPI differs, metals/energy run nearly 24h on Globex), so each row
+      // carries its own open/closed rather than a single section-level pill.
+      const CME_GLOBEX: Record<number, Array<[number, number]>> = {
+        0: [[1080, 1440]],
+        1: [[0, 1020], [1080, 1440]],
+        2: [[0, 1020], [1080, 1440]],
+        3: [[0, 1020], [1080, 1440]],
+        4: [[0, 1020], [1080, 1440]],
+        5: [[0, 1020]],
+      };
+      const GLOBAL: Array<{ key: string; label: string; sym: string; tz: string; sched: Record<number, Array<[number, number]>> }> = [
+        // HKEX 09:30-12:00 & 13:00-16:00 HKT, Mon-Fri
+        { key: 'HSI', label: 'Hang Seng', sym: '^HSI', tz: 'Asia/Hong_Kong', sched: {
+          1: [[570, 720], [780, 960]], 2: [[570, 720], [780, 960]], 3: [[570, 720], [780, 960]],
+          4: [[570, 720], [780, 960]], 5: [[570, 720], [780, 960]],
+        } },
+        // KRX 09:00-15:30 KST, Mon-Fri
+        { key: 'KOSPI', label: 'KOSPI', sym: '^KS11', tz: 'Asia/Seoul', sched: {
+          1: [[540, 930]], 2: [[540, 930]], 3: [[540, 930]], 4: [[540, 930]], 5: [[540, 930]],
+        } },
+        { key: 'GOLD', label: 'Gold', sym: 'GC=F', tz: 'America/New_York', sched: CME_GLOBEX },
+        { key: 'SILVER', label: 'Silver', sym: 'SI=F', tz: 'America/New_York', sched: CME_GLOBEX },
+        { key: 'OIL', label: 'Crude Oil', sym: 'CL=F', tz: 'America/New_York', sched: CME_GLOBEX },
+      ];
+      await Promise.all(GLOBAL.map(async (g) => {
+        // Session status comes from the clock, so it's still honest even if the
+        // price feed is unreachable.
+        const isOpen = marketOpenNow(g.tz, g.sched);
+        try {
+          const r = await axios.get(
+            `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(g.sym)}?interval=5m&range=1d`,
+            { timeout: 4000, headers: { 'User-Agent': 'Mozilla/5.0' } }
+          );
+          const result = r.data?.chart?.result?.[0];
+          const meta = result?.meta;
+          if (meta && typeof meta.regularMarketPrice === 'number') {
+            const prev = meta.chartPreviousClose ?? meta.previousClose ?? meta.regularMarketPrice;
+            const chg = meta.regularMarketPrice - prev;
+            const chgPct = prev ? (chg / prev) * 100 : 0;
+            globalMkts.push({
+              key: g.key, label: g.label, price: +meta.regularMarketPrice.toFixed(2),
+              change: +chg.toFixed(2), changePct: +chgPct.toFixed(2),
+              asOf: meta.regularMarketTime ? meta.regularMarketTime * 1000 : Date.now(),
+              available: true, open: isOpen,
+            });
+          } else {
+            globalMkts.push({ key: g.key, label: g.label, available: false, open: isOpen });
+          }
+        } catch (e) {
+          globalMkts.push({ key: g.key, label: g.label, available: false, open: isOpen });
+        }
+      }));
+      // keep GLOBAL in declared order
+      globalMkts.sort((a, b) => GLOBAL.findIndex(x => x.key === a.key) - GLOBAL.findIndex(x => x.key === b.key));
+
       // Open/closed per market group (regular weekday sessions in each exchange's
       // timezone; holidays not tracked). Minutes-of-day windows, 0=Sun..6=Sat.
       const status = {
@@ -964,11 +1022,11 @@ setInterval(() => {
         }),
       };
 
-      const payload = { success: true, indian, us, uk, status, ts: Date.now() };
+      const payload = { success: true, indian, us, uk, global: globalMkts, status, ts: Date.now() };
       marketContextCache = { at: Date.now(), data: payload };
       res.json(payload);
     } catch (e: any) {
-      res.json({ success: false, error: e?.message || String(e), indian: [], us: [], uk: [] });
+      res.json({ success: false, error: e?.message || String(e), indian: [], us: [], uk: [], global: [] });
     }
   });
 

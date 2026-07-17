@@ -5,14 +5,36 @@ import { ChevronLeft, TrendingUp, TrendingDown, Globe, X } from "lucide-react";
 interface Market {
   key: string; label: string; price?: number; change?: number; changePct?: number;
   asOf?: number; available: boolean;
+  // Per-market session status (used by Global & Commodities, whose rows don't
+  // share one schedule). Undefined => the row shows no pill.
+  open?: boolean;
+}
+
+// Compact per-row OPEN / CLOSED tag.
+function MiniStatus({ open }: { open?: boolean }) {
+  if (open === undefined) return null;
+  return (
+    <span
+      title={open ? "Regular session open" : "Regular session closed"}
+      className={`shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[8px] font-bold font-mono tracking-normal ${
+        open ? "bg-emerald-500/15 text-emerald-400" : "bg-white/5 text-slate-500"
+      }`}
+    >
+      <span className={`w-1 h-1 rounded-full ${open ? "bg-emerald-400 animate-pulse" : "bg-slate-600"}`} />
+      {open ? "OPEN" : "CLOSED"}
+    </span>
+  );
 }
 
 function Row({ m }: { m: Market }) {
   if (!m.available) {
     return (
-      <div className="flex items-center justify-between px-3 py-2 border-b border-white/5">
-        <span className="text-sm text-slate-300">{m.label}</span>
-        <span className="text-[10px] text-slate-500 font-mono">unavailable</span>
+      <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-white/5">
+        <span className="text-sm text-slate-300 flex items-center gap-1.5 min-w-0">
+          <span className="truncate">{m.label}</span>
+          <MiniStatus open={m.open} />
+        </span>
+        <span className="text-[10px] text-slate-500 font-mono shrink-0">unavailable</span>
       </div>
     );
   }
@@ -21,7 +43,10 @@ function Row({ m }: { m: Market }) {
   return (
     <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-white/5">
       <div className="min-w-0">
-        <div className="text-sm text-white truncate">{m.label}</div>
+        <div className="text-sm text-white flex items-center gap-1.5 min-w-0">
+          <span className="truncate">{m.label}</span>
+          <MiniStatus open={m.open} />
+        </div>
         <div className="text-xs font-mono text-slate-300 tabular-nums">
           {m.price?.toLocaleString(undefined, { maximumFractionDigits: 2 })}
         </div>
@@ -80,8 +105,10 @@ export default function MarketContext() {
   const indian: Market[] = data?.indian || [];
   const us: Market[] = data?.us || [];
   const uk: Market[] = data?.uk || [];
+  const globalMkts: Market[] = data?.global || [];
   const usAsOf = us.find((m) => m.available && m.asOf)?.asOf;
   const ukAsOf = uk.find((m) => m.available && m.asOf)?.asOf;
+  const globalAsOf = globalMkts.find((m) => m.available && m.asOf)?.asOf;
   const status: { indian?: boolean; us?: boolean; uk?: boolean } = data?.status || {};
 
   return (
@@ -172,10 +199,26 @@ export default function MarketContext() {
               UK data source unreachable from the server right now. Sections above are unaffected.
             </div>
           )}
+
+          <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-slate-500 font-bold bg-white/[0.02] flex items-center justify-between">
+            <span>Global &amp; Commodities</span>
+            {globalAsOf ? <span className="text-slate-600 normal-case font-mono">{freshnessLabel(globalAsOf)}</span> : null}
+          </div>
+          {globalMkts.length === 0 && (
+            <div className="px-3 py-3 text-xs text-slate-500">Loading…</div>
+          )}
+          {globalMkts.map((m) => (
+            <Row key={m.key} m={m} />
+          ))}
+          {globalMkts.length > 0 && globalMkts.every((m) => !m.available) && (
+            <div className="px-3 py-2 text-[10px] text-slate-500 leading-relaxed">
+              Global data source unreachable from the server right now. Sections above are unaffected.
+            </div>
+          )}
         </div>
 
         <div className="px-3 py-2 border-t border-white/10 text-[9px] text-slate-500 leading-tight">
-          Indian: live via Kite. US &amp; UK: via a free third-party feed (may lag or drop out) — context only, confirm before trading. Open/Closed reflects regular session hours; exchange holidays aren't tracked.
+          Indian: live via Kite. US, UK, global &amp; commodities: via a free third-party feed (may lag or drop out) — context only, confirm before trading. Open/Closed reflects regular session hours; exchange holidays aren't tracked.
         </div>
       </div>
     </>
