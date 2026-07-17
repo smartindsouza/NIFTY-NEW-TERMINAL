@@ -1135,6 +1135,44 @@ const isMarketOpen = (unixSeconds: number): boolean => {
   return true;
 };
 
+// Live Indian-market clock shown on top of the chart: HH:MM:SS in 12-hour format.
+// Ticks green through the NSE session (09:15 -> 15:30 IST, Mon-Fri) and goes
+// muted with CLOSED outside it. Self-contained so the per-second state change
+// re-renders this pill alone, never the (very large) chart component.
+const IstSessionClock = () => {
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // IST is UTC+5:30 with no DST, so this offset is exact (same approach the
+  // canvas badges use).
+  const ist = new Date(now + 5.5 * 60 * 60 * 1000);
+  const istDay = ist.getUTCDay();
+  const istMinutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  // Matches the server's NSE window: open at 09:15, closed from 15:30.
+  const marketOpen = istDay !== 0 && istDay !== 6 && istMinutes >= 9 * 60 + 15 && istMinutes < 15 * 60 + 30;
+
+  const two = (n: number) => String(n).padStart(2, '0');
+  const h24 = ist.getUTCHours();
+  const ampm = h24 >= 12 ? 'PM' : 'AM';
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  const clock = `${two(h12)}:${two(ist.getUTCMinutes())}:${two(ist.getUTCSeconds())} ${ampm}`;
+
+  return (
+    <div
+      className="absolute top-2 left-1/2 -translate-x-1/2 z-[35] pointer-events-none select-none flex items-center gap-1.5 font-mono text-[10px] md:text-xs font-bold whitespace-nowrap"
+      style={{ textShadow: '0 1px 3px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.9)' }}
+      title={marketOpen ? 'Indian market open (IST)' : 'Indian market closed (IST)'}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${marketOpen ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+      <span className={marketOpen ? 'text-emerald-400' : 'text-muted-foreground'}>{clock}</span>
+      <span className="text-muted-foreground/80 font-normal">{marketOpen ? 'IST' : 'IST · CLOSED'}</span>
+    </div>
+  );
+};
+
 const toUnixSeconds = (value: any): number => {
   if (typeof value === "number") {
     return value > 1_000_000_000_000 ? Math.floor(value / 1000) : Math.floor(value);
@@ -7018,6 +7056,7 @@ export function AdvancedChart() {
 
           {/* Main Chart (Price & Volume) */}
           <div className="relative flex-grow flex w-full bg-card rounded-none md:rounded-xl min-h-0 md:min-h-[450px]" onMouseLeave={() => setCrosshairInfo(null)}>
+            <IstSessionClock />
             <div
               ref={chartContainerRef}
               onPointerDownCapture={handlePointerDown}
