@@ -845,6 +845,28 @@ setInterval(() => {
       // do NOT exist there, so they're deliberately not listed.
       // All of these are fetched in ONE batched getQuote call, so extra rows cost
       // no additional broker API calls.
+      // Regular-session windows (minutes-of-day, 0=Sun..6=Sat) in each exchange's
+      // own timezone. Defined once and reused for both the per-row tags and the
+      // section pills so the two can never disagree. Holidays aren't tracked.
+      const NSE_SCHED: Record<number, Array<[number, number]>> = {
+        1: [[555, 930]], 2: [[555, 930]], 3: [[555, 930]], 4: [[555, 930]], 5: [[555, 930]],
+      };
+      const LSE_SCHED: Record<number, Array<[number, number]>> = {
+        1: [[480, 990]], 2: [[480, 990]], 3: [[480, 990]], 4: [[480, 990]], 5: [[480, 990]],
+      };
+      // CME Globex: Sun 18:00 -> Fri 17:00 ET with a daily 17:00-18:00 halt
+      const CME_GLOBEX: Record<number, Array<[number, number]>> = {
+        0: [[1080, 1440]],
+        1: [[0, 1020], [1080, 1440]],
+        2: [[0, 1020], [1080, 1440]],
+        3: [[0, 1020], [1080, 1440]],
+        4: [[0, 1020], [1080, 1440]],
+        5: [[0, 1020]],
+      };
+      const indOpenNow = marketOpenNow('Asia/Kolkata', NSE_SCHED);
+      const ukOpenNow = marketOpenNow('Europe/London', LSE_SCHED);
+      const usOpenNow = marketOpenNow('America/New_York', CME_GLOBEX);
+
       const IND = [
         // Broad
         { key: 'BANKNIFTY', label: 'Bank Nifty', sym: 'NSE:NIFTY BANK' },
@@ -922,13 +944,13 @@ setInterval(() => {
               change: +chg.toFixed(2), changePct: +chgPct.toFixed(2),
               spark: sparkTrim.map((v) => +v.toFixed(2)),
               asOf: meta.regularMarketTime ? meta.regularMarketTime * 1000 : Date.now(),
-              available: true,
+              available: true, open: usOpenNow,
             });
           } else {
-            us.push({ key: u.key, label: u.label, available: false });
+            us.push({ key: u.key, label: u.label, available: false, open: usOpenNow });
           }
         } catch (e) {
-          us.push({ key: u.key, label: u.label, available: false });
+          us.push({ key: u.key, label: u.label, available: false, open: usOpenNow });
         }
       }));
       // keep US in declared order
@@ -955,13 +977,13 @@ setInterval(() => {
               key: u.key, label: u.label, price: +meta.regularMarketPrice.toFixed(2),
               change: +chg.toFixed(2), changePct: +chgPct.toFixed(2),
               asOf: meta.regularMarketTime ? meta.regularMarketTime * 1000 : Date.now(),
-              available: true,
+              available: true, open: ukOpenNow,
             });
           } else {
-            uk.push({ key: u.key, label: u.label, available: false });
+            uk.push({ key: u.key, label: u.label, available: false, open: ukOpenNow });
           }
         } catch (e) {
-          uk.push({ key: u.key, label: u.label, available: false });
+          uk.push({ key: u.key, label: u.label, available: false, open: ukOpenNow });
         }
       }));
       // keep UK in declared order
@@ -971,14 +993,6 @@ setInterval(() => {
       // Per-market sessions: these don't share one schedule (HK breaks for lunch,
       // KOSPI differs, metals/energy run nearly 24h on Globex), so each row
       // carries its own open/closed rather than a single section-level pill.
-      const CME_GLOBEX: Record<number, Array<[number, number]>> = {
-        0: [[1080, 1440]],
-        1: [[0, 1020], [1080, 1440]],
-        2: [[0, 1020], [1080, 1440]],
-        3: [[0, 1020], [1080, 1440]],
-        4: [[0, 1020], [1080, 1440]],
-        5: [[0, 1020]],
-      };
       const GLOBAL: Array<{ key: string; label: string; sym: string; tz: string; sched: Record<number, Array<[number, number]>> }> = [
         // HKEX 09:30-12:00 & 13:00-16:00 HKT, Mon-Fri
         { key: 'HSI', label: 'Hang Seng', sym: '^HSI', tz: 'Asia/Hong_Kong', sched: {
@@ -1026,25 +1040,7 @@ setInterval(() => {
 
       // Open/closed per market group (regular weekday sessions in each exchange's
       // timezone; holidays not tracked). Minutes-of-day windows, 0=Sun..6=Sat.
-      const status = {
-        // NSE/BSE cash session 09:15-15:30 IST, Mon-Fri
-        indian: marketOpenNow('Asia/Kolkata', {
-          1: [[555, 930]], 2: [[555, 930]], 3: [[555, 930]], 4: [[555, 930]], 5: [[555, 930]],
-        }),
-        // LSE 08:00-16:30 UK time, Mon-Fri
-        uk: marketOpenNow('Europe/London', {
-          1: [[480, 990]], 2: [[480, 990]], 3: [[480, 990]], 4: [[480, 990]], 5: [[480, 990]],
-        }),
-        // CME Globex (index futures): Sun 18:00 -> Fri 17:00 ET, daily 17:00-18:00 break
-        us: marketOpenNow('America/New_York', {
-          0: [[1080, 1440]],
-          1: [[0, 1020], [1080, 1440]],
-          2: [[0, 1020], [1080, 1440]],
-          3: [[0, 1020], [1080, 1440]],
-          4: [[0, 1020], [1080, 1440]],
-          5: [[0, 1020]],
-        }),
-      };
+      const status = { indian: indOpenNow, uk: ukOpenNow, us: usOpenNow };
 
       const payload = { success: true, indian, us, uk, global: globalMkts, status, ts: Date.now() };
       marketContextCache = { at: Date.now(), data: payload };

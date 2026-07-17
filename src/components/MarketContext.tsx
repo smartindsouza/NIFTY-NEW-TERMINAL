@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, TrendingUp, TrendingDown, Globe, X } from "lucide-react";
+import { ChevronLeft, ChevronDown, TrendingUp, TrendingDown, Globe, X } from "lucide-react";
 
 interface Market {
   key: string; label: string; price?: number; change?: number; changePct?: number;
@@ -64,6 +64,28 @@ function Row({ m }: { m: Market }) {
   );
 }
 
+// Collapsible category header. Tapping it shows/hides that category's rows;
+// the choice is remembered across sessions.
+function SectionHeader({
+  title, count, collapsed, onToggle, right,
+}: { title: string; count: number; collapsed: boolean; onToggle: () => void; right?: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+      className="w-full px-3 py-2 text-[10px] uppercase tracking-wider text-slate-500 font-bold bg-white/[0.02] hover:bg-white/[0.05] transition-colors flex items-center justify-between gap-2"
+    >
+      <span className="flex items-center gap-1.5 min-w-0">
+        <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${collapsed ? "-rotate-90" : ""}`} />
+        <span className="truncate">{title}</span>
+        {count > 0 && <span className="text-slate-600 normal-case font-mono">({count})</span>}
+      </span>
+      <span className="flex items-center gap-1.5 shrink-0">{right}</span>
+    </button>
+  );
+}
+
 function freshnessLabel(asOf?: number): string {
   if (!asOf) return "";
   const ageMin = Math.floor((Date.now() - asOf) / 60000);
@@ -90,6 +112,16 @@ function StatusPill({ open }: { open?: boolean }) {
 
 export default function MarketContext() {
   const [open, setOpen] = useState(false);
+  // Which categories are hidden. Persisted so the sidebar opens how you left it.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
+    try { return JSON.parse(localStorage.getItem("mc_collapsed") || "{}"); } catch { return {}; }
+  });
+  const toggle = (k: string) =>
+    setCollapsed((prev) => {
+      const next = { ...prev, [k]: !prev[k] };
+      try { localStorage.setItem("mc_collapsed", JSON.stringify(next)); } catch {}
+      return next;
+    });
 
   const { data } = useQuery({
     queryKey: ["market-context"],
@@ -154,63 +186,69 @@ export default function MarketContext() {
         </div>
 
         <div className="overflow-y-auto flex-1">
-          <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-slate-500 font-bold bg-white/[0.02] flex items-center justify-between">
-            <span>Indian Indices</span>
-            <StatusPill open={status.indian} />
-          </div>
-          {indian.map((m) => (
+          <SectionHeader
+            title="Indian Indices"
+            count={indian.length}
+            collapsed={!!collapsed.indian}
+            onToggle={() => toggle("indian")}
+            right={<StatusPill open={status.indian} />}
+          />
+          {!collapsed.indian && indian.map((m) => (
             <Row key={m.key} m={m} />
           ))}
 
-          <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-slate-500 font-bold bg-white/[0.02] flex items-center justify-between">
-            <span>US Futures</span>
-            <span className="flex items-center gap-1.5">
-              {usAsOf ? <span className="text-slate-600 normal-case font-mono">{freshnessLabel(usAsOf)}</span> : null}
-              <StatusPill open={status.us} />
-            </span>
-          </div>
-          {us.length === 0 && (
+          <SectionHeader
+            title="US Futures"
+            count={us.length}
+            collapsed={!!collapsed.us}
+            onToggle={() => toggle("us")}
+            right={usAsOf ? <span className="text-slate-600 normal-case font-mono">{freshnessLabel(usAsOf)}</span> : null}
+          />
+          {!collapsed.us && us.length === 0 && (
             <div className="px-3 py-3 text-xs text-slate-500">Loading…</div>
           )}
-          {us.map((m) => (
+          {!collapsed.us && us.map((m) => (
             <Row key={m.key} m={m} />
           ))}
-          {us.length > 0 && us.every((m) => !m.available) && (
+          {!collapsed.us && us.length > 0 && us.every((m) => !m.available) && (
             <div className="px-3 py-2 text-[10px] text-slate-500 leading-relaxed">
               US data source unreachable from the server right now. Indian indices above are unaffected.
             </div>
           )}
 
-          <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-slate-500 font-bold bg-white/[0.02] flex items-center justify-between">
-            <span>UK Markets</span>
-            <span className="flex items-center gap-1.5">
-              {ukAsOf ? <span className="text-slate-600 normal-case font-mono">{freshnessLabel(ukAsOf)}</span> : null}
-              <StatusPill open={status.uk} />
-            </span>
-          </div>
-          {uk.length === 0 && (
+          <SectionHeader
+            title="UK Markets"
+            count={uk.length}
+            collapsed={!!collapsed.uk}
+            onToggle={() => toggle("uk")}
+            right={ukAsOf ? <span className="text-slate-600 normal-case font-mono">{freshnessLabel(ukAsOf)}</span> : null}
+          />
+          {!collapsed.uk && uk.length === 0 && (
             <div className="px-3 py-3 text-xs text-slate-500">Loading…</div>
           )}
-          {uk.map((m) => (
+          {!collapsed.uk && uk.map((m) => (
             <Row key={m.key} m={m} />
           ))}
-          {uk.length > 0 && uk.every((m) => !m.available) && (
+          {!collapsed.uk && uk.length > 0 && uk.every((m) => !m.available) && (
             <div className="px-3 py-2 text-[10px] text-slate-500 leading-relaxed">
               UK data source unreachable from the server right now. Sections above are unaffected.
             </div>
           )}
 
-          <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-slate-500 font-bold bg-white/[0.02] flex items-center justify-between">
-            <span>Global &amp; Commodities</span>
-            {globalAsOf ? <span className="text-slate-600 normal-case font-mono">{freshnessLabel(globalAsOf)}</span> : null}
-          </div>
-          {globalMkts.length === 0 && (
+          <SectionHeader
+            title="Global & Commodities"
+            count={globalMkts.length}
+            collapsed={!!collapsed.global}
+            onToggle={() => toggle("global")}
+            right={globalAsOf ? <span className="text-slate-600 normal-case font-mono">{freshnessLabel(globalAsOf)}</span> : null}
+          />
+          {!collapsed.global && globalMkts.length === 0 && (
             <div className="px-3 py-3 text-xs text-slate-500">Loading…</div>
           )}
-          {globalMkts.map((m) => (
+          {!collapsed.global && globalMkts.map((m) => (
             <Row key={m.key} m={m} />
           ))}
-          {globalMkts.length > 0 && globalMkts.every((m) => !m.available) && (
+          {!collapsed.global && globalMkts.length > 0 && globalMkts.every((m) => !m.available) && (
             <div className="px-3 py-2 text-[10px] text-slate-500 leading-relaxed">
               Global data source unreachable from the server right now. Sections above are unaffected.
             </div>
