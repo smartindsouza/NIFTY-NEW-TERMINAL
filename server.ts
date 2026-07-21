@@ -28,6 +28,14 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 
 const KITE_DATA_DIR = process.env.KITE_DATA_DIR || '.';
 const db = new Database(`${KITE_DATA_DIR}/kite_session.db`);
+// Premium-based auto-exit rules: the draggable SL/TP lines on the traded
+// option's chart. One rule per symbol; the engine below watches option LTP and
+// fires a real exit through closePositionBySymbol when a level is crossed.
+db.exec(`CREATE TABLE IF NOT EXISTS premium_exit_rules (
+  tradingsymbol TEXT PRIMARY KEY, exchange TEXT, side TEXT, qty INTEGER,
+  entry REAL, sl REAL, tp REAL, status TEXT, attempts INTEGER DEFAULT 0,
+  last_ltp REAL, detail TEXT, created_at INTEGER, updated_at INTEGER
+);`);
 // WAL lets readers and a writer work concurrently; busy_timeout makes writes wait
 // instead of failing with "database is locked" (the two DB connections share one file).
 try { db.pragma('journal_mode = WAL'); db.pragma('busy_timeout = 5000'); } catch (e) { console.error('DB pragma error', e); }
@@ -620,11 +628,118 @@ setInterval(() => {
     }
   });
 
+  // ===== Premium-based auto-exit (draggable SL/TP lines on the option chart) =====
+  // set: validates the position live on Zerodha, then arms/updates the rule.
+  app.post('/api/premium-exit/set', express.json(), async (req, res) => {
+    try {
+      const { tradingsymbol, sl, tp, entry } = req.body || {};
+      const slN = Number(sl), tpN = Number(tp);
+      if (!tradingsymbol || !isFinite(slN) || !isFinite(tpN) || slN <= 0 || tpN <= 0) {
+        return res.status(400).json({ success: false, error: 'Missing tradingsymbol / sl / tp' });
+      }
+      const kc = getKiteClient();
+      // @ts-ignore
+      if (!kc || !kc.access_token) return res.json({ success: false, error: 'No active Kite session — please log in to Zerodha today.' });
+      let positions: any;
+      try { positions = await kc.getPositions(); } catch (e: any) { return res.json({ success: false, error: 'Could not read positions: ' + (e?.message || e) }); }
+      const pos = ((positions && positions.net) || []).find((p: any) => p.tradingsymbol === tradingsymbol && p.quantity !== 0);
+      if (!pos) return res.json({ success: false, error: `No open position for ${tradingsymbol} on Zerodha.` });
+      const side = pos.quantity > 0 ? 'BUY' : 'SELL';
+      const long = side === 'BUY';
+      // Orientation sanity: a long option exits DOWN at SL and UP at target.
+      if (long ? !(slN < tpN) : !(slN > tpN)) {
+        return res.json({ success: false, error: long ? 'For a long option, SL must be below TARGET.' : 'For a short option, SL must be above TARGET.' });
+      }
+      const entryPx = Number(entry) > 0 ? Number(entry) : (pos.average_price || 0);
+      db.prepare(`INSERT INTO premium_exit_rules (tradingsymbol, exchange, side, qty, entry, sl, tp, status, attempts, last_ltp, detail, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 0, NULL, '', ?, ?)
+        ON CONFLICT(tradingsymbol) DO UPDATE SET exchange=excluded.exchange, side=excluded.side, qty=excluded.qty,
+          entry=excluded.entry, sl=excluded.sl, tp=excluded.tp, status='ACTIVE', attempts=0, detail='', updated_at=excluded.updated_at`)
+        .run(tradingsymbol, pos.exchange || 'NFO', side, Math.abs(pos.quantity), entryPx, slN, tpN, Date.now(), Date.now());
+      console.log(`[premium-exit] ARMED ${tradingsymbol} side=${side} entry=${entryPx} sl=${slN} tp=${tpN}`);
+      return res.json({ success: true, rule: { tradingsymbol, side, entry: entryPx, sl: slN, tp: tpN, status: 'ACTIVE' } });
+    } catch (e: any) {
+      console.error('[premium-exit set]', e);
+      return res.status(500).json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
+  app.get('/api/premium-exit/get', (req, res) => {
+    try {
+      const sym = String(req.query.tradingsymbol || '');
+      if (!sym) return res.json({ rule: null });
+      const row: any = db.prepare("SELECT * FROM premium_exit_rules WHERE tradingsymbol=?").get(sym);
+      return res.json({ rule: row && row.status === 'ACTIVE' ? row : null });
+    } catch (e: any) { return res.status(500).json({ rule: null, error: e?.message || String(e) }); }
+  });
+
+  app.post('/api/premium-exit/clear', express.json(), (req, res) => {
+    try {
+      const { tradingsymbol } = req.body || {};
+      if (!tradingsymbol) return res.status(400).json({ success: false, error: 'Missing tradingsymbol' });
+      db.prepare("UPDATE premium_exit_rules SET status='CANCELLED', updated_at=? WHERE tradingsymbol=? AND status='ACTIVE'").run(Date.now(), tradingsymbol);
+      return res.json({ success: true });
+    } catch (e: any) { return res.status(500).json({ success: false, error: e?.message || String(e) }); }
+  });
+
+  // Watcher: every 3s, batch-fetch LTP for all ACTIVE rules and fire a real exit
+  // when a level is crossed. closePositionBySymbol re-verifies the position live
+  // before placing anything, so a stale rule can never fire an order into a
+  // position that no longer exists (that path resolves to DONE, order-free).
+  const premiumExitBusy = new Set<string>();
+  setInterval(async () => {
+    try {
+      const rules: any[] = db.prepare("SELECT * FROM premium_exit_rules WHERE status='ACTIVE'").all() as any[];
+      if (!rules.length) return;
+      const kc = getKiteClient();
+      // @ts-ignore
+      if (!kc || !kc.access_token) return;
+      const keys = rules.map(r => `${r.exchange || 'NFO'}:${r.tradingsymbol}`);
+      let ltpMap: any = {};
+      try { ltpMap = await kc.getLTP(keys); } catch { return; }
+      for (const r of rules) {
+        const k = `${r.exchange || 'NFO'}:${r.tradingsymbol}`;
+        const ltp = ltpMap && ltpMap[k] && ltpMap[k].last_price;
+        if (typeof ltp !== 'number' || ltp <= 0) continue;
+        try { db.prepare("UPDATE premium_exit_rules SET last_ltp=?, updated_at=? WHERE tradingsymbol=?").run(ltp, Date.now(), r.tradingsymbol); } catch (e) {}
+        const long = r.side === 'BUY';
+        const hitSl = long ? ltp <= r.sl : ltp >= r.sl;
+        const hitTp = long ? ltp >= r.tp : ltp <= r.tp;
+        if ((!hitSl && !hitTp) || premiumExitBusy.has(r.tradingsymbol)) continue;
+        premiumExitBusy.add(r.tradingsymbol);
+        const reason = hitSl ? `PREMIUM SL @ ${ltp}` : `PREMIUM TARGET @ ${ltp}`;
+        db.prepare("UPDATE premium_exit_rules SET status='TRIGGERED', detail=?, updated_at=? WHERE tradingsymbol=?").run(reason, Date.now(), r.tradingsymbol);
+        console.log(`[premium-exit] ${reason} -> exiting ${r.tradingsymbol}`);
+        try {
+          const result = await closePositionBySymbol(r.tradingsymbol, reason);
+          if (result.ok || result.alreadyClosed) {
+            db.prepare("UPDATE premium_exit_rules SET status='DONE', detail=?, updated_at=? WHERE tradingsymbol=?")
+              .run(reason + (result.alreadyClosed ? ' | position was already closed' : ' | exit placed'), Date.now(), r.tradingsymbol);
+          } else {
+            const attempts = (r.attempts || 0) + 1;
+            db.prepare("UPDATE premium_exit_rules SET status=?, attempts=?, detail=?, updated_at=? WHERE tradingsymbol=?")
+              .run(attempts >= 3 ? 'ERROR' : 'ACTIVE', attempts, reason + ' | exit FAILED: ' + (result.error || 'rejected'), Date.now(), r.tradingsymbol);
+            console.error(`[premium-exit] exit failed for ${r.tradingsymbol} (attempt ${attempts}):`, result.error);
+          }
+        } catch (e: any) {
+          db.prepare("UPDATE premium_exit_rules SET status='ACTIVE', attempts=attempts+1, detail=?, updated_at=? WHERE tradingsymbol=?")
+            .run(reason + ' | exit threw: ' + (e?.message || e), Date.now(), r.tradingsymbol);
+        } finally {
+          premiumExitBusy.delete(r.tradingsymbol);
+        }
+      }
+    } catch (e) { /* the watcher must never crash the server */ }
+  }, 3000);
+
   app.post('/api/exit-position', express.json(), async (req, res) => {
     try {
       const { tradingsymbol, reason } = req.body || {};
       if (!tradingsymbol) return res.status(400).json({ success: false, error: 'Missing tradingsymbol' });
       const result = await closePositionBySymbol(tradingsymbol, reason || 'MANUAL');
+      // A manual exit disarms any premium SL/TP rule for the symbol.
+      if (result.ok || result.alreadyClosed) {
+        try { db.prepare("UPDATE premium_exit_rules SET status='CANCELLED', updated_at=? WHERE tradingsymbol=? AND status='ACTIVE'").run(Date.now(), tradingsymbol); } catch (e) {}
+      }
       if (result.ok) return res.json({ success: true, orderId: result.orderId });
       return res.json({ success: false, error: result.error, alreadyClosed: !!result.alreadyClosed });
     } catch (e: any) {

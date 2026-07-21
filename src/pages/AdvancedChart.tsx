@@ -1175,6 +1175,37 @@ const IstSessionClock = () => {
   );
 };
 
+// Live P&L chip for the active position — replaces the old EXIT banner in the
+// tab strip. Reads the broker-updated position from localStorage every 2s.
+const TradePnl = ({ sync }: { sync: string }) => {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => setTick(t => t + 1), 2000);
+    return () => clearInterval(iv);
+  }, []);
+  let pos: any = null;
+  try {
+    const arr = JSON.parse(localStorage.getItem('active_positions') || '[]');
+    pos = Array.isArray(arr) && arr.length ? arr[0] : null;
+  } catch (e) { pos = null; }
+  if (!pos || !pos.entryPrice) return null;
+  const qty = Number(pos.qty ?? pos.quantity ?? 0);
+  const px = Number(pos.currentPrice || pos.entryPrice);
+  const diff = pos.side === 'BUY' ? px - pos.entryPrice : pos.entryPrice - px;
+  const pnl = diff * qty;
+  const pct = pos.entryPrice ? (diff / pos.entryPrice) * 100 : 0;
+  const up = pnl >= 0;
+  return (
+    <span className={`ml-auto px-2.5 h-7 inline-flex items-center gap-1.5 rounded-md text-xs font-mono font-bold whitespace-nowrap ${up ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'}`}
+      title={sync === 'ACTIVE' ? 'Live P&L — SL/TP armed' : sync === 'ERROR' ? 'Live P&L — SL/TP NOT armed!' : 'Live P&L'}>
+      {up ? '+' : ''}₹{pnl.toFixed(0)}
+      <span className="opacity-70">({up ? '+' : ''}{pct.toFixed(1)}%)</span>
+      {sync === 'ERROR' && <span className="text-amber-400 font-bold" title="SL/TP rule failed to arm — drag a line to retry">!</span>}
+      {sync === 'SYNCING' && <span className="opacity-60">…</span>}
+    </span>
+  );
+};
+
 const toUnixSeconds = (value: any): number => {
   if (typeof value === "number") {
     return value > 1_000_000_000_000 ? Math.floor(value / 1000) : Math.floor(value);
@@ -3517,6 +3548,9 @@ export function AdvancedChart() {
   const [slArmedRule, setSlArmedRule] = useState<any>(null);
   const [slSaving, setSlSaving] = useState(false);
   const [slPanelOpen, setSlPanelOpen] = useState(false);
+  // Premium SL/TP rule sync status: shown as a tiny marker on the P&L chip.
+  const [premSync, setPremSync] = useState<'OFF' | 'SYNCING' | 'ACTIVE' | 'ERROR'>('OFF');
+  const premSyncedForRef = useRef<string>('');
   const [slTrail, setSlTrail] = useState(true);
   const [slTrailCandles, setSlTrailCandles] = useState<string>('3');
   const [slStructureStop, setSlStructureStop] = useState<'' | 'VWAP' | 'OR'>('');
@@ -3532,6 +3566,24 @@ export function AdvancedChart() {
   const slActivePosRef = useRef<any>(null);
   useEffect(() => { slActivePosRef.current = slActivePos; }, [slActivePos]);
 
+  // Push the premium SL/TP rule to the server — the dragged lines become the
+  // LIVE protective rule immediately, no confirmation step.
+  const pushPremiumRule = async (slPx: number, tpPx: number) => {
+    const pos = slActivePosRef.current;
+    if (!pos) return;
+    setPremSync('SYNCING');
+    try {
+      const r = await fetch('/api/premium-exit/set', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tradingsymbol: pos.symbol, sl: +(+slPx).toFixed(2), tp: +(+tpPx).toFixed(2), entry: pos.entryPrice })
+      });
+      const d = await r.json().catch(() => null);
+      setPremSync(d && d.success ? 'ACTIVE' : 'ERROR');
+      if (d && !d.success && d.error) console.warn('[premium-exit] not armed:', d.error);
+    } catch { setPremSync('ERROR'); }
+  };
+
+
   const handlePointerDown = (e: React.PointerEvent) => {
     if (!chartContainerRef.current || !mainSeriesRef.current || !mainChartRef.current) return;
     const rect = chartContainerRef.current.getBoundingClientRect();
@@ -3540,7 +3592,8 @@ export function AdvancedChart() {
     // SL/Target lines take priority for dragging
     for (const sl of slLinesRef.current) {
         const lineY = mainSeriesRef.current.priceToCoordinate(sl.price);
-        if (lineY !== null && Math.abs(lineY - y) < 15) {
+        // 24px grab zone — draggable with a thumb on mobile, not just a mouse.
+        if (lineY !== null && Math.abs(lineY - y) < 24) {
             draggingLineRef.current = { id: -1, startY: y, dragged: false, sl: sl.kind };
             mainChartRef.current.applyOptions({ handleScroll: false, handleScale: false });
             return;
@@ -3606,6 +3659,17 @@ export function AdvancedChart() {
   const handlePointerUp = (e: React.PointerEvent) => {
     // SL/Target line release — restore scroll and clear (levels already synced during move)
     if (draggingLineRef.current && draggingLineRef.current.sl) {
+        // On the traded option's chart the lines ARE the live rule: apply the new
+        // SL/TP the moment the finger lifts. No confirmation.
+        if (slEntryRef.current) {
+          const posNow = slActivePosRef.current;
+          const u = slLinesRef.current.find((l: any) => l.kind === 'upper');
+          const lo = slLinesRef.current.find((l: any) => l.kind === 'lower');
+          if (posNow && u && lo) {
+            const long = posNow.side === 'BUY';
+            pushPremiumRule(long ? lo.price : u.price, long ? u.price : lo.price);
+          }
+        }
         if (mainChartRef.current) {
            mainChartRef.current.applyOptions({
               handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
@@ -3678,6 +3742,45 @@ export function AdvancedChart() {
           setSelectedInstrument(exact); // open the traded option's chart
         }
       } catch (e) {}
+    })();
+    return () => { cancelled = true; };
+  }, [slActivePos]);
+
+  // When a trade appears: restore an existing rule (reload case) or arm the
+  // defaults (-10% SL / +20% TARGET) immediately — protection from second one.
+  useEffect(() => {
+    const pos = slActivePos;
+    if (!pos || !pos.entryPrice) { setPremSync('OFF'); premSyncedForRef.current = ''; return; }
+    if (premSyncedForRef.current === pos.symbol) return;
+    premSyncedForRef.current = pos.symbol;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/premium-exit/get?tradingsymbol=${encodeURIComponent(pos.symbol)}`);
+        const d = await r.json();
+        if (cancelled) return;
+        const rule = d?.rule;
+        const long = pos.side === 'BUY';
+        if (rule && rule.status === 'ACTIVE') {
+          setPremSync('ACTIVE');
+          // Snap the lines to the saved rule once they exist (they're created async).
+          const apply = (attempt: number) => {
+            const u = slLinesRef.current.find((l: any) => l.kind === 'upper');
+            const lo = slLinesRef.current.find((l: any) => l.kind === 'lower');
+            if (u && lo) {
+              const upVal = long ? rule.tp : rule.sl;
+              const loVal = long ? rule.sl : rule.tp;
+              u.price = upVal; lo.price = loVal;
+              try { u.instance.applyOptions({ price: upVal }); lo.instance.applyOptions({ price: loVal }); } catch (e) {}
+            } else if (attempt < 10) setTimeout(() => apply(attempt + 1), 300);
+          };
+          apply(0);
+        } else {
+          const slP = +((long ? pos.entryPrice * 0.9 : pos.entryPrice * 1.1)).toFixed(2);
+          const tpP = +((long ? pos.entryPrice * 1.2 : pos.entryPrice * 0.8)).toFixed(2);
+          pushPremiumRule(slP, tpP);
+        }
+      } catch { if (!cancelled) setPremSync('ERROR'); }
     })();
     return () => { cancelled = true; };
   }, [slActivePos]);
@@ -3763,7 +3866,8 @@ export function AdvancedChart() {
   // Create / destroy the two draggable lines for the active position
   useEffect(() => {
     if (!slActivePos) { setSlPanelOpen(false); return; }
-    setSlPanelOpen(true);
+    // The SL/TP setup box no longer auto-opens after a trade: the draggable
+    // premium lines ARE the live SL/TP now, applied instantly on drag release.
     const ensure = () => {
       const s = mainSeriesRef.current;
       if (!s) return;
@@ -3789,11 +3893,12 @@ export function AdvancedChart() {
       // an armed rule's levels are NIFTY SPOT values and would land wildly
       // off-scale on a premium chart (lines vanished + became un-draggable).
       if (viewingTrade) {
-        // Option-premium chart: SL 10% against entry, TARGET 30% in favour (draggable).
+        // Option-premium chart: SL 10% against entry, TARGET +20% in favour
+        // (both draggable; dragging applies the LIVE rule instantly).
         const entry = posNow.entryPrice;
         const long = posNow.side === 'BUY';
         const slP = +((long ? entry * 0.9 : entry * 1.1)).toFixed(2);
-        const tpP = +((long ? entry * 1.3 : entry * 0.7)).toFixed(2);
+        const tpP = +((long ? entry * 1.2 : entry * 0.8)).toFixed(2);
         upper = long ? tpP : slP;
         lower = long ? slP : tpP;
       } else if (slArmedRule) {
@@ -4382,10 +4487,16 @@ export function AdvancedChart() {
     refetchOnMount: 'always',
     staleTime: 10 * 1000,
     gcTime: 10 * 60000,
-    // Keep the previous timeframe's candles on screen while the new ones load, so a
-    // switch feels instant instead of blanking. The chartData memo guards against
-    // rendering mismatched-timeframe data, so this never shows corrupt bars.
-    placeholderData: keepPreviousData,
+    // Keep previous candles on screen while new ones load — but ONLY when the
+    // instrument is the same (timeframe switches). When switching between the
+    // NIFTY and option tabs, showing the other instrument's candles at a wildly
+    // different price scale looked like the chart "not refreshing"; a brief
+    // loading state is honest and correct there.
+    placeholderData: (prev: any, prevQuery: any) => {
+      const prevKey = prevQuery && prevQuery.queryKey;
+      const prevToken = Array.isArray(prevKey) ? prevKey[prevKey.length - 1] : undefined;
+      return String(prevToken) === String(instrumentToken) ? prev : undefined;
+    },
     enabled: Boolean(timeframe && instrumentToken)
   });
 
@@ -5040,7 +5151,7 @@ export function AdvancedChart() {
       add('orh', '15m High', (taInfo as any)?.openingRange?.high);
       add('orl', '15m Low', (taInfo as any)?.openingRange?.low);
     }
-    if (showDsZones) {
+    if (showDsZones && !isOptionView) {
       const dz = (taInfo as any)?.dsZones;
       (dz?.demand || []).forEach((z: any, i: number) => add(`dz${i}`, 'Demand zone', z.top));
       (dz?.supply || []).forEach((z: any, i: number) => add(`sz${i}`, 'Supply zone', z.bottom));
@@ -6179,7 +6290,7 @@ export function AdvancedChart() {
 
               // Demand/Supply zones — borderless shaded bands, adjustable opacity
               const dz = (taInfo as any)?.dsZones;
-              if (showDsZones && dz && mainSeriesRef.current) {
+              if (showDsZones && !isOptionView && dz && mainSeriesRef.current) {
                 const pct = Math.min(100, Math.max(1, parseFloat(dsZoneOpacity) || 8)) / 100;
                 const drawZone = (z: any, rgb: string, labelColor: string, label: string) => {
                   const yTop = mainSeriesRef.current.priceToCoordinate(z.top);
@@ -7020,39 +7131,7 @@ export function AdvancedChart() {
             className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${selectedInstrument && String(selectedInstrument.instrument_token) === String(tradeTabInstr.instrument_token) ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
             {tradeTabInstr.tradingsymbol}
           </button>
-          {slActivePos && !slActivePos.testMode && (
-            <button
-              disabled={exitBusy}
-              onClick={async () => {
-                if (exitBusy) return;
-                setExitBusy(true);
-                const sym = slActivePos.symbol;
-                try {
-                  const r = await fetch('/api/exit-position', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ tradingsymbol: sym })
-                  });
-                  const d = await r.json().catch(() => ({ success: false }));
-                  if (d.success || d.alreadyClosed) {
-                    try {
-                      const raw = localStorage.getItem('active_positions');
-                      const list = raw ? JSON.parse(raw) : [];
-                      localStorage.setItem('active_positions', JSON.stringify(list.filter((p: any) => p.symbol !== sym)));
-                      window.dispatchEvent(new Event('active_positions_updated'));
-                    } catch (e) {}
-                    toast.success(`${sym} exit order placed`);
-                  } else {
-                    toast.error(`Exit failed: ${d.error || 'order rejected'} — position still OPEN, check Zerodha.`);
-                  }
-                } catch (e) {
-                  toast.error('Exit failed: network error — position may still be OPEN, check Zerodha.');
-                }
-                setExitBusy(false);
-              }}
-              className={`ml-auto px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors bg-red-500/15 text-red-400 border border-red-500/30 active:bg-red-500 active:text-white ${exitBusy ? 'opacity-50' : ''}`}>
-              {exitBusy ? 'EXITING…' : 'EXIT'}
-            </button>
-          )}
+          <TradePnl sync={premSync} />
         </div>
       )}
 
@@ -7384,6 +7463,42 @@ export function AdvancedChart() {
             >
               <div className="w-10 h-1 rounded-full bg-white/25" />
             </div>
+          )}
+
+          {/* One-tap EXIT — its own full-width bar BELOW the chart, so it never
+              covers a single candle and is an easy thumb target on mobile. */}
+          {tradeTabInstr && slActivePos && !slActivePos.testMode && (
+            <button
+              disabled={exitBusy}
+              onClick={async () => {
+                if (exitBusy) return;
+                setExitBusy(true);
+                const sym = slActivePos.symbol;
+                try {
+                  const r = await fetch('/api/exit-position', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tradingsymbol: sym })
+                  });
+                  const d = await r.json().catch(() => ({ success: false }));
+                  if (d.success || d.alreadyClosed) {
+                    try {
+                      const raw = localStorage.getItem('active_positions');
+                      const list = raw ? JSON.parse(raw) : [];
+                      localStorage.setItem('active_positions', JSON.stringify(list.filter((p: any) => p.symbol !== sym)));
+                      window.dispatchEvent(new Event('active_positions_updated'));
+                    } catch (e) {}
+                    toast.success(`${sym} exit order placed`);
+                  } else {
+                    toast.error(`Exit failed: ${d.error || 'order rejected'} — position still OPEN, check Zerodha.`);
+                  }
+                } catch (e) {
+                  toast.error('Exit failed: network error — position may still be OPEN, check Zerodha.');
+                }
+                setExitBusy(false);
+              }}
+              className={`w-full shrink-0 h-11 mt-1.5 rounded-lg text-sm font-mono font-bold tracking-widest transition-colors bg-red-500/15 text-red-400 border border-red-500/40 active:bg-red-500 active:text-white ${exitBusy ? 'opacity-50' : ''}`}>
+              {exitBusy ? 'EXITING…' : `EXIT ${slActivePos.symbol}`}
+            </button>
           )}
           {/* RSI Chart */}
           <div ref={rsiPaneRef} style={rsiPaneHeight ? { height: `${rsiPaneHeight}px` } : undefined} className={`relative w-full shrink-0 h-[140px] md:h-[200px] ${!showRsi ? 'hidden' : ''}`}>
