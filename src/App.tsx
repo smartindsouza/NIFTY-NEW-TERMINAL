@@ -30,6 +30,7 @@ const TerminalControl = lazy(() => import('./pages/TerminalControl'));
 const Notifications = lazy(() => import('./pages/Notifications'));
 const TradeJournal = lazy(() => import('./pages/TradeJournal'));
 const GapRisk = lazy(() => import('./pages/GapRisk'));
+const GapScorecard = lazy(() => import('./pages/GapScorecard'));
 const RsiBacktest = lazy(() => import('./pages/RsiBacktest'));
 const LiveSignal = lazy(() => import('./pages/LiveSignal'));
 const SignalAlerts = lazy(() => import('./pages/SignalAlerts'));
@@ -165,6 +166,7 @@ export default function App() {
               <Route path="/notifications" component={Notifications} />
               <Route path="/journal" component={TradeJournal} />
               <Route path="/gap-risk" component={GapRisk} />
+              <Route path="/gap-scorecard" component={GapScorecard} />
               <Route path="/rsi-backtest" component={RsiBacktest} />
               <Route path="/live-signal" component={LiveSignal} />
               <Route path="/signal-alerts" component={SignalAlerts} />
