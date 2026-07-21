@@ -218,8 +218,8 @@ export async function runSnapshot(db: AnyDb, opts: { dryRun?: boolean } = {}): P
           const prevBasis = prevRow ? (JSON.parse(prevRow.json)?.signals?.basis?.raw ?? null) : null;
           let score = 0;
           if (typeof prevBasis === 'number') score = basis > prevBasis ? 1 : basis < prevBasis || basis < 0 ? -1 : 0;
+          else if (basis < 0) { score = -1; dataGaps.push('basis: no prior snapshot — scored -1 on negative premium alone'); }
           else dataGaps.push('basis: no prior snapshot to compare — scored 0');
-          if (basis < 0 && score === 0) score = -1; // negative premium is bearish on its own
           signals.basis = sig(basis, score);
         } else dataGaps.push('basis: future LTP unavailable');
       } else if (!spot) dataGaps.push('basis: no spot');
@@ -296,127 +296,10 @@ export async function runSnapshot(db: AnyDb, opts: { dryRun?: boolean } = {}): P
   return snapshot;
 }
 
-// ---------------------------------------------------------------- Part 5: strike advisor
-// Picks the deep-ITM strike (|delta| ≈ 0.87) to express a fired bias.
-// Reuses the SAME chain plumbing as the Gap Risk gauge (getLiveOptionChain) and
-// the SAME futures source as the basis signal. Advisory only — never places.
-async function buildRecommendation(decision: string, spotIn: number | null, db: AnyDb): Promise<any | null> {
-  const kc = getKiteClient();
-  // @ts-ignore
-  if (!kc || !kc.access_token) return { skipped: true, reason: 'no Kite session' };
-  const chain: any = await getLiveOptionChain('NSE:NIFTY 50');
-  const s = chain?.spot || spotIn;
-  if (!chain || !Array.isArray(chain.strikes) || !chain.strikes.length || !s) {
-    return { skipped: true, reason: 'option chain unavailable' };
-  }
-
-  // Expiry rule: nearest weekly, but never hold into tomorrow's expiry — roll.
-  const today = istDateStr();
-  const tomorrow = addDaysIST(today, 1);
-  let expiryDate: string | null = chain.expiryDate ? String(chain.expiryDate).slice(0, 10) : null;
-  let ceMap = chain.ceData || {}, peMap = chain.peData || {};
-  if (GAP_CONFIG.skipExpiryTomorrow && expiryDate && expiryDate <= tomorrow) {
-    const list: string[] = Array.isArray(chain.expiries) ? chain.expiries.map((e: any) => String(e).slice(0, 10)).sort() : [];
-    const next = list.find(e => e > tomorrow);
-    if (!next) return { skipped: true, reason: `nearest expiry ${expiryDate} is today/tomorrow and no later expiry exposed to roll to` };
-    const rolled: any = await getLiveOptionChain('NSE:NIFTY 50', undefined, next).catch(() => null);
-    if (!rolled || !rolled.ceData) return { skipped: true, reason: `expiry ${expiryDate} is today/tomorrow; roll to ${next} failed` };
-    ceMap = rolled.ceData; peMap = rolled.peData; expiryDate = String(rolled.expiryDate || next).slice(0, 10);
-  }
-  if (!expiryDate) return { skipped: true, reason: 'expiry unknown' };
-
-  const isUp = decision === 'GAP-UP BIAS';
-  const type: 'CE' | 'PE' = isUp ? 'CE' : 'PE';
-  const step = GAP_CONFIG.strikeStepPts, range = GAP_CONFIG.candidateRangePts;
-  const atm = Math.round(s / step) * step;
-  const wanted: number[] = [];
-  for (let k = atm; isUp ? k >= atm - range : k <= atm + range; k += isUp ? -step : step) wanted.push(k);
-  const map: any = isUp ? ceMap : peMap;
-  const cands = wanted.map(k => map[k]).filter(Boolean);
-  if (!cands.length) return { skipped: true, reason: 'no candidate contracts in chain' };
-
-  // One bulk quote for live depth (bid/ask) + OI in contracts.
-  const q: any = await kc.getQuote(cands.map((c: any) => `NFO:${c.tradingsymbol}`));
-
-  // F = current-month NIFTY futures LTP — identical source to the basis signal.
-  let F: number | null = null;
-  let fNote: string | null = null;
-  try {
-    const futs = await getIndexFuturesTokens('NIFTY');
-    const cur = (futs || []).slice().sort((a, b) => a.expiry.localeCompare(b.expiry))[0];
-    if (cur) {
-      const lq = await kc.getLTP([String(cur.token)]).catch(() => null);
-      const f: any = lq ? Object.values(lq)[0] : null;
-      if (f && f.last_price > 0) F = f.last_price;
-    }
-  } catch (e) { /* fall through */ }
-  if (!F) { F = s; fNote = 'futures LTP unavailable — spot used as forward proxy'; }
-
-  // T = years to expiry at 15:30 IST (= 10:00 UTC).
-  const [ey, em, ed] = expiryDate.split('-').map(Number);
-  const expiryTs = Date.UTC(ey, em - 1, ed, 10, 0, 0);
-  const T = Math.max(1 / (365 * 24), (expiryTs - Date.now()) / (365 * 24 * 3600 * 1000));
-  const r = GAP_CONFIG.riskFreeRate;
-
-  type Cand = { strike: number; sym: string; bid: number; ask: number; mid: number; oi: number; intrinsic: number; iv: number | null; delta: number | null; lot: number; ivBorrowedFrom?: number };
-  const rows: Cand[] = [];
-  for (const c of cands) {
-    const qq: any = q[`NFO:${c.tradingsymbol}`]; if (!qq) continue;
-    const bid = qq.depth?.buy?.[0]?.price ?? 0;
-    const ask = qq.depth?.sell?.[0]?.price ?? 0;
-    const oi = (typeof qq.oi === 'number' && qq.oi > 0) ? qq.oi : (typeof c.oi === 'number' ? c.oi * 100000 : 0); // chain stores lakhs
-    if (!(bid > 0) || !(ask > 0)) continue;                     // bid=0 → drop
-    if (ask - bid > GAP_CONFIG.maxSpreadRs) continue;           // wide spread → drop
-    if (oi < GAP_CONFIG.minOI) continue;                        // illiquid → drop
-    const mid = (bid + ask) / 2;
-    const strike = Number(c.strikePrice);
-    const intrinsic = isUp ? Math.max(0, s - strike) : Math.max(0, strike - s);
-    if (mid <= intrinsic) continue;                             // stale quote → drop
-    const { iv, delta } = black76IvDelta(type, F, strike, T, r, mid);
-    rows.push({ strike, sym: c.tradingsymbol, bid, ask, mid, oi, intrinsic, iv, delta, lot: Number(c.lot_size) || 75 });
-  }
-  if (!rows.length) return { skipped: true, reason: 'all candidates failed liquidity/quote filters' };
-
-  // Deep-ITM inversions can be unstable (vega ≈ 0): borrow IV from the nearest
-  // strike that solved — delta is insensitive to small IV error at that depth.
-  const solvedRows = rows.filter(x => x.iv !== null);
-  for (const x of rows) {
-    if (x.iv === null && solvedRows.length) {
-      const near = solvedRows.reduce((b, y) => Math.abs(y.strike - x.strike) < Math.abs(b.strike - x.strike) ? y : b, solvedRows[0]);
-      const S = F * Math.exp(-r * T);
-      x.delta = Math.exp(-r * T) * bsDelta(type, S, x.strike, T, r, near.iv as number);
-      x.ivBorrowedFrom = near.strike;
-    }
-  }
-  const usable = rows.filter(x => x.delta !== null);
-  if (!usable.length) return { skipped: true, reason: 'no candidate produced a usable delta' };
-
-  const target = GAP_CONFIG.targetDelta;
-  const dist = (x: Cand) => Math.abs(Math.abs(x.delta as number) - target);
-  usable.sort((a, b) => dist(a) - dist(b));
-  const inBand = usable.filter(x => Math.abs(x.delta as number) >= GAP_CONFIG.deltaBandLo && Math.abs(x.delta as number) <= GAP_CONFIG.deltaBandHi);
-  const pick = inBand[0] || usable[0];
-
-  // Expected capture = |delta| × avg |gap| for the ≥5 bucket (backtest stats).
-  let expectedCapturePts: number | null = null;
-  try {
-    const bt: any = db.prepare('SELECT json FROM gap_stats WHERE key=?').get('backtest');
-    if (bt) {
-      const b5 = (JSON.parse(bt.json).buckets || []).find((x: any) => x.minScore === GAP_CONFIG.decisionThreshold);
-      if (b5 && b5.avgGapPct != null) expectedCapturePts = +((Math.abs(pick.delta as number) * Math.abs(b5.avgGapPct) / 100) * s).toFixed(1);
-    }
-  } catch (e) { /* optional */ }
-
-  return {
-    decision, type, expiry: expiryDate, tradingsymbol: pick.sym, strike: pick.strike,
-    premium: +pick.mid.toFixed(2), bid: pick.bid, ask: pick.ask, spread: +(pick.ask - pick.bid).toFixed(2),
-    delta: +(pick.delta as number).toFixed(3),
-    ivPct: pick.iv !== null ? +((pick.iv as number) * 100).toFixed(2) : null,
-    ivBorrowedFrom: pick.ivBorrowedFrom ?? null,
-    intrinsic: +pick.intrinsic.toFixed(2), timeValue: +(pick.mid - pick.intrinsic).toFixed(2),
-    lotSize: pick.lot, capitalPerLot: Math.round(pick.mid * pick.lot), maxLossPerLot: Math.round(pick.mid * pick.lot),
-    expectedCapturePts, futuresRef: F, fNote, computedAt: Date.now(),
-  };
+// ---------------------------------------------------------------- Part 5 stub
+// Implemented in the strike-advisor stage; kept compiling until then.
+async function buildRecommendation(_decision: string, _spot: number | null, _db: AnyDb): Promise<any | null> {
+  return null;
 }
 
 // ---------------------------------------------------------------- Outcome
@@ -565,18 +448,8 @@ export function registerGapScorecard(app: any, db: AnyDb) {
     try { res.json(await runSnapshot(db, { dryRun: !!(req.body && req.body.dryRun) || req.query.dryRun === '1' })); }
     catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
   });
-  // GET alias for phone/browser testing: a GET is ALWAYS a dry run — it can
-  // never persist a snapshot, regardless of query params.
-  app.get('/api/gap/run-snapshot', guard, async (_req: any, res: any) => {
-    try { res.json(await runSnapshot(db, { dryRun: true })); }
-    catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
-  });
   app.post('/api/gap/run-outcome', express.json(), guard, async (req: any, res: any) => {
     try { res.json(await runOutcome(db, { dryRun: !!(req.body && req.body.dryRun) || req.query.dryRun === '1', date: req.body?.date })); }
-    catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
-  });
-  app.get('/api/gap/run-outcome', guard, async (_req: any, res: any) => {
-    try { res.json(await runOutcome(db, { dryRun: true })); }
     catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
   });
 
