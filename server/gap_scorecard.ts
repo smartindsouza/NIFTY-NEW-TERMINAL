@@ -10,6 +10,7 @@ import express from 'express';
 import { getKiteClient, getLiveOptionChain, getIndexFuturesTokens } from './kite_service';
 import { impliedVol, bsDelta } from './options_math';
 import { GAP_CONFIG } from './config/gapScorecard';
+import { registerGapBacktest } from './gap_backtest';
 
 type AnyDb = any; // better-sqlite3 Database (typed loosely to avoid a hard dep here)
 
@@ -471,6 +472,8 @@ export function registerGapScorecard(app: any, db: AnyDb) {
     if (isWeekendIST() || isNseHoliday(d)) return;
     try { await runRecoPrice(db); } catch (e) { console.error('[gap] reco-price job failed', e); }
   }, { timezone: 'Asia/Kolkata' });
+
+  registerGapBacktest(app, db, guard);
 
   console.log('[gap] scorecard registered: snapshot 15:15 IST, outcome 09:16 IST, reco price 09:21 IST');
 }
