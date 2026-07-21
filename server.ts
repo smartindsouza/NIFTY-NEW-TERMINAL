@@ -17,6 +17,7 @@ import { ivAndDelta } from './server/options_math';
 import { getGammaBlast } from './server/gamma_blast';
 import { getPremiumPulse, getPremiumPulseBias } from './server/premium_pulse';
 import { getFiiData } from './server/fii_service';
+import { registerGapScorecard } from './server/gap_scorecard';
 import { evaluateQuantSignals } from './server/quant_engine';
 import { generateGamePlan } from './server/game_plan_service';
 
@@ -1189,6 +1190,10 @@ setInterval(() => {
 
     res.json(latestChainData);
   });
+
+  // Overnight Gap Scorecard: direction prediction + strike advisor + accuracy
+  // tracking (tables, endpoints and IST crons live in server/gap_scorecard.ts).
+  registerGapScorecard(app, db);
 
   // Gap Risk Gauge: pre-close estimate of EXPECTED OVERNIGHT MAGNITUDE (not direction).
   // Combines India VIX with the nearest-expiry ATM straddle (the option market's own
