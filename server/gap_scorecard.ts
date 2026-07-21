@@ -565,8 +565,18 @@ export function registerGapScorecard(app: any, db: AnyDb) {
     try { res.json(await runSnapshot(db, { dryRun: !!(req.body && req.body.dryRun) || req.query.dryRun === '1' })); }
     catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
   });
+  // GET alias for phone/browser testing: a GET is ALWAYS a dry run — it can
+  // never persist a snapshot, regardless of query params.
+  app.get('/api/gap/run-snapshot', guard, async (_req: any, res: any) => {
+    try { res.json(await runSnapshot(db, { dryRun: true })); }
+    catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
+  });
   app.post('/api/gap/run-outcome', express.json(), guard, async (req: any, res: any) => {
     try { res.json(await runOutcome(db, { dryRun: !!(req.body && req.body.dryRun) || req.query.dryRun === '1', date: req.body?.date })); }
+    catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
+  });
+  app.get('/api/gap/run-outcome', guard, async (_req: any, res: any) => {
+    try { res.json(await runOutcome(db, { dryRun: true })); }
     catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
   });
 
