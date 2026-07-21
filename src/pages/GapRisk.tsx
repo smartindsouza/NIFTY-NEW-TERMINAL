@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
-import { Gauge, RefreshCw, AlertTriangle, Activity, ArrowLeftRight } from 'lucide-react';
+import { Gauge, RefreshCw, AlertTriangle, Activity, ArrowLeftRight, Compass } from 'lucide-react';
+import { Link } from 'wouter';
 
 interface GapRiskData {
   success: boolean;
@@ -83,9 +84,14 @@ export default function GapRisk() {
             <p className="text-xs text-muted-foreground">Expected overnight <span className="text-foreground">magnitude</span> — not direction.</p>
           </div>
         </div>
-        <button onClick={() => refetch()} className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-card hover:bg-popover transition-colors text-muted-foreground">
-          <RefreshCw className={cn('w-3.5 h-3.5', isFetching && 'animate-spin')} /> Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <Link href="/gap-scorecard" className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-card hover:bg-popover transition-colors text-muted-foreground border border-border">
+            <Compass className="w-3.5 h-3.5" /> Which way? → Gap Scorecard
+          </Link>
+          <button onClick={() => refetch()} className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-card hover:bg-popover transition-colors text-muted-foreground">
+            <RefreshCw className={cn('w-3.5 h-3.5', isFetching && 'animate-spin')} /> Refresh
+          </button>
+        </div>
       </div>
 
       {/* Main gauge */}
