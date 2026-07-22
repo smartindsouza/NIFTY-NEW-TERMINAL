@@ -27,7 +27,7 @@ import { GAP_CONFIG } from './config/gapScorecard';
 import { toISTString, istDateStr } from './gap_scorecard';
 
 const IST_MS = 5.5 * 3600 * 1000;
-type Series = Array<[number, number]>; // [epochMs, price] ascending
+export type Series = Array<[number, number]>; // [epochMs, price] ascending
 
 // ---------------------------------------------------------------- pure helpers (exported for the test harness)
 export function priceAtOrBefore(s: Series, t: number): number | null {
@@ -110,7 +110,7 @@ export function scoreDay(args: {
 }
 
 // ---------------------------------------------------------------- data loading
-async function yahooHourly(sym: string): Promise<Series> {
+export async function yahooHourly(sym: string): Promise<Series> {
   const r = await axios.get(
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=60m&range=730d`,
     { timeout: 20000, headers: { 'User-Agent': 'Mozilla/5.0' } }
@@ -123,7 +123,7 @@ async function yahooHourly(sym: string): Promise<Series> {
   return out;
 }
 
-async function kiteFifteenMin(token: number, days: number): Promise<DayCandle[]> {
+export async function kiteFifteenMin(token: number, days: number): Promise<DayCandle[]> {
   const kc = getKiteClient();
   // @ts-ignore
   if (!kc || !kc.access_token) throw new Error('no Kite session');
