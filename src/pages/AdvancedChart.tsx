@@ -1206,6 +1206,34 @@ const TradePnl = ({ sync }: { sync: string }) => {
   );
 };
 
+// Fair Value Gap scan — 3-candle imbalance. Bullish: candle[i+1]'s low sits
+// ABOVE candle[i-1]'s high (that empty space is the gap); bearish mirrored.
+// A gap is FILLED once any later candle trades fully through it; filled gaps
+// disappear. Definition matches the Sweep & Reclaim backtest exactly, so the
+// chart shows precisely what the data tested. Gaps under FVG_MIN_PTS are noise
+// and skipped; only the most recent FVG_MAX_ZONES unfilled gaps are drawn.
+const FVG_MIN_PTS = 4;
+const FVG_MAX_ZONES = 8;
+function computeFvgZones(candles: any[]): any[] {
+  const zones: any[] = [];
+  for (let i = 1; i < candles.length - 1; i++) {
+    const a = candles[i - 1], c = candles[i + 1];
+    if (c.low > a.high && c.low - a.high >= FVG_MIN_PTS) {
+      zones.push({ type: 'bull', top: c.low, bottom: a.high, time: candles[i].time, born: i });
+    } else if (c.high < a.low && a.low - c.high >= FVG_MIN_PTS) {
+      zones.push({ type: 'bear', top: a.low, bottom: c.high, time: candles[i].time, born: i });
+    }
+  }
+  const unfilled = zones.filter(z => {
+    for (let k = z.born + 2; k < candles.length; k++) {
+      if (z.type === 'bull' && candles[k].low <= z.bottom) return false;
+      if (z.type === 'bear' && candles[k].high >= z.top) return false;
+    }
+    return true;
+  });
+  return unfilled.slice(-FVG_MAX_ZONES);
+}
+
 const toUnixSeconds = (value: any): number => {
   if (typeof value === "number") {
     return value > 1_000_000_000_000 ? Math.floor(value / 1000) : Math.floor(value);
@@ -2666,6 +2694,10 @@ export function AdvancedChart() {
     } catch(e) {}
     return true;
   });
+  // Fair Value Gaps — drawn like Demand/Supply zones, index chart only.
+  const [showFvg, setShowFvg] = useState(() => {
+    try { const v = localStorage.getItem('showFvg'); return v === null ? true : v === 'true'; } catch (e) { return true; }
+  });
   const [showDsZones, setShowDsZones] = useState(() => {
     try {
       const v = localStorage.getItem('showDsZones');
@@ -2798,6 +2830,9 @@ export function AdvancedChart() {
       localStorage.setItem('showDsZones', String(showDsZones));
     } catch(e) {}
   }, [showDsZones]);
+  useEffect(() => {
+    try { localStorage.setItem('showFvg', String(showFvg)); } catch (e) {}
+  }, [showFvg]);
 
   useEffect(() => {
     try { localStorage.setItem('levelAlertsOn', String(levelAlertsOn)); } catch(e) {}
@@ -4461,8 +4496,8 @@ export function AdvancedChart() {
   const instrumentToken = selectedInstrument ? String(selectedInstrument.instrument_token) : "256265";
   const instrumentTokenRef = useRef(instrumentToken);
   instrumentTokenRef.current = instrumentToken;
-  // On the traded OPTION's chart only Demand/Supply zones + RSI stay on; other
-  // overlays (BB, S&R, PDH/PDL, levels, OI bars, opening range) are index tools.
+  // On the traded OPTION's chart only RSI stays on; index overlays (BB, S&R,
+  // PDH/PDL, levels, OI bars, opening range, D/S zones, FVG) are hidden there.
   const isOptionView = instrumentToken !== "256265";
   const { data: taInfo, isLoading: isLoadingTa, isError: isTaError, error: taError, refetch: refetchTa } = useQuery({
     queryKey: ["ta-data-live-chart", timeframe, instrumentToken],
@@ -5293,6 +5328,8 @@ export function AdvancedChart() {
   const bbLowerSeriesRef = useRef<any>(null);
   const bbDataRef = useRef<any[]>([]); // latest live BB (incl. forming candle) for the canvas fill
   const bbSigRef = useRef<string>(''); // change-signature so we only recompute when the candle moves
+  const fvgZonesRef = useRef<any[]>([]);
+  const fvgSigRef = useRef<string>('');
 
   const lastAlertedDivergenceRef = useRef<string | null>(null);
 
@@ -6290,6 +6327,44 @@ export function AdvancedChart() {
 
               // Demand/Supply zones — borderless shaded bands, adjustable opacity
               const dz = (taInfo as any)?.dsZones;
+              // Fair Value Gaps — recomputed only when a candle CLOSES (sig on
+              // closed-candle counts); the forming candle can FILL a zone live.
+              if (showFvg && !isOptionView && mainSeriesRef.current) {
+                const baseC = chartDataRef.current?.candles || [];
+                const arc = liveClosedCandlesRef.current;
+                const lastT = baseC.length ? baseC[baseC.length - 1].time : 0;
+                const closedSince = arc.filter((k: any) => k.time > lastT);
+                const sig = `${timeframe}|${baseC.length}|${closedSince.length}|${closedSince.length ? closedSince[closedSince.length - 1].time : 0}`;
+                if (sig !== fvgSigRef.current) {
+                  fvgSigRef.current = sig;
+                  fvgZonesRef.current = computeFvgZones(closedSince.length ? [...baseC, ...closedSince] : baseC);
+                }
+                const live = lastCandleDataRef.current;
+                const zonesNow = fvgZonesRef.current.filter((z: any) =>
+                  !live ? true : z.type === 'bull' ? !(live.low <= z.bottom) : !(live.high >= z.top));
+                const pctF = Math.min(100, Math.max(1, parseFloat(dsZoneOpacity) || 8)) / 100;
+                for (const z of zonesNow) {
+                  const yTop = mainSeriesRef.current.priceToCoordinate(z.top);
+                  const yBot = mainSeriesRef.current.priceToCoordinate(z.bottom);
+                  if (yTop === null || yBot === null) continue;
+                  const x0 = mainChartRef.current?.timeScale()?.timeToCoordinate(z.time as any);
+                  const zx = (x0 === null || x0 === undefined) ? 0 : Math.max(0, x0);
+                  const zw = Math.max(0, textAlignX - zx);
+                  if (zw <= 0) continue;
+                  const rgb = z.type === 'bull' ? '34,211,238' : '217,70,239';
+                  ctx.fillStyle = `rgba(${rgb},${Math.min(0.35, pctF + 0.04)})`;
+                  ctx.fillRect(zx, Math.min(yTop, yBot), zw, Math.abs(yBot - yTop));
+                  ctx.strokeStyle = `rgba(${rgb},0.5)`;
+                  ctx.lineWidth = 1;
+                  ctx.strokeRect(zx, Math.min(yTop, yBot), zw, Math.abs(yBot - yTop));
+                  ctx.font = 'bold 9px monospace';
+                  ctx.textAlign = 'left';
+                  ctx.textBaseline = 'middle';
+                  ctx.fillStyle = `rgba(${rgb},0.85)`;
+                  ctx.fillText(z.type === 'bull' ? 'FVG▲' : 'FVG▼', zx + 6, (yTop + yBot) / 2);
+                }
+              }
+
               if (showDsZones && !isOptionView && dz && mainSeriesRef.current) {
                 const pct = Math.min(100, Math.max(1, parseFloat(dsZoneOpacity) || 8)) / 100;
                 const drawZone = (z: any, rgb: string, labelColor: string, label: string) => {
@@ -6555,7 +6630,7 @@ export function AdvancedChart() {
     draw();
     
     return () => cancelAnimationFrame(animationFrameId);
-  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth, taInfo, showOpeningRange, showDsZones, dsZoneOpacity]);
+  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth, taInfo, showOpeningRange, showDsZones, dsZoneOpacity, showFvg]);
 
   const { data: serverStats } = useQuery({
     queryKey: ["server-diagnostics"],
@@ -6900,6 +6975,19 @@ export function AdvancedChart() {
                         {showOpeningRange && <Check size={14} className="text-emerald-400" />}
                       </div>
                       <span>15m Opening Range (High/Low)</span>
+                    </button>
+                  </div>
+
+                  {/* Fair Value Gaps */}
+                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                    <button
+                      onClick={() => setShowFvg(!showFvg)}
+                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
+                    >
+                      <div className="w-4 flex items-center justify-center">
+                        {showFvg && <Check size={14} className="text-emerald-400" />}
+                      </div>
+                      <span>Fair Value Gaps (3-candle)</span>
                     </button>
                   </div>
 
