@@ -110,7 +110,7 @@ export function detectDay(date: string, candles: DayCandle[], levels: Level[]): 
                 signals.push({
                   date, dir: 'LONG', levelType: L.type, level: L.price, entryIdx: j, entry, stop,
                   target, targetType: above ? above.type : '2R', riskPts: +risk.toFixed(1),
-                  fvg: hasFvg(candles, i, j + 1, 'LONG'), window: minOfDayIST(candles[j].t) < 720 ? 'AM' : 'PM',
+                  fvg: hasFvg(candles, i, Math.max(i, j - 1), 'LONG'), window: minOfDayIST(candles[j].t) < 720 ? 'AM' : 'PM',
                 });
                 busyUntil = candles.length;
               }
@@ -138,7 +138,7 @@ export function detectDay(date: string, candles: DayCandle[], levels: Level[]): 
                 signals.push({
                   date, dir: 'SHORT', levelType: L.type, level: L.price, entryIdx: j, entry, stop,
                   target, targetType: below ? below.type : '2R', riskPts: +risk.toFixed(1),
-                  fvg: hasFvg(candles, i, j + 1, 'SHORT'), window: minOfDayIST(candles[j].t) < 720 ? 'AM' : 'PM',
+                  fvg: hasFvg(candles, i, Math.max(i, j - 1), 'SHORT'), window: minOfDayIST(candles[j].t) < 720 ? 'AM' : 'PM',
                 });
                 busyUntil = candles.length;
               }
@@ -284,6 +284,19 @@ async function runSweepBacktest(db: any, days: number) {
       byWindow: { am: split(o => o.window === 'AM'), pm: split(o => o.window === 'PM') },
       byExit: { target: outcomes.filter(o => o.exitReason === 'TARGET').length, stop: outcomes.filter(o => o.exitReason === 'STOP').length, eod: outcomes.filter(o => o.exitReason === 'EOD').length },
       walkForwardAligned: { train: agg(aligned.slice(0, cut)), test: agg(aligned.slice(cut)) },
+      withFvgDetail: (() => {
+        const f = outcomes.filter(o => o.fvg);
+        const fc = Math.floor(f.length * 0.6);
+        let eq = 0;
+        return {
+          note: 'FVG tag is lookahead-free: the gap must be fully formed at the entry candle',
+          byDirection: { long: agg(f.filter(o => o.dir === 'LONG')), short: agg(f.filter(o => o.dir === 'SHORT')) },
+          byLevel: Object.fromEntries(['PDH', 'PDL', 'PDC', 'ORH', 'ORL', 'R100'].map(t => [t, agg(f.filter(o => o.levelType === t))])),
+          byWindow: { am: agg(f.filter(o => o.window === 'AM')), pm: agg(f.filter(o => o.window === 'PM')) },
+          walkForward: { train: agg(f.slice(0, fc)), test: agg(f.slice(fc)) },
+          equityLast120: f.slice(-120).map(o => ({ date: o.date, eq: +(eq += o.pnlPts).toFixed(1) })),
+        };
+      })(),
       equityAlignedLast120: (() => { let eq = 0; return aligned.slice(-120).map(o => ({ date: o.date, eq: +(eq += o.pnlPts).toFixed(1) })); })(),
     };
     db.prepare('INSERT INTO gap_stats (key, json, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at')
