@@ -179,7 +179,7 @@ export function simulate(sig: Signal, candles: DayCandle[]): Omit<Outcome, 'bias
 }
 
 // ---------------------------------------------------------------- data + job
-async function kiteFiveMin(token: number, days: number): Promise<DayCandle[]> {
+export async function kiteFiveMin(token: number, days: number): Promise<DayCandle[]> {
   const kc = getKiteClient();
   // @ts-ignore
   if (!kc || !kc.access_token) throw new Error('no Kite session');

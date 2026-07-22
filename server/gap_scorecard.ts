@@ -12,6 +12,7 @@ import { impliedVol, bsDelta } from './options_math';
 import { GAP_CONFIG } from './config/gapScorecard';
 import { registerGapBacktest } from './gap_backtest';
 import { registerSweepReclaim } from './sweep_reclaim';
+import { registerOrb } from './orb_backtest';
 
 type AnyDb = any; // better-sqlite3 Database (typed loosely to avoid a hard dep here)
 
@@ -476,6 +477,7 @@ export function registerGapScorecard(app: any, db: AnyDb) {
 
   registerGapBacktest(app, db, guard);
   registerSweepReclaim(app, db, guard);
+  registerOrb(app, db, guard);
 
   console.log('[gap] scorecard registered: snapshot 15:15 IST, outcome 09:16 IST, reco price 09:21 IST');
 }
