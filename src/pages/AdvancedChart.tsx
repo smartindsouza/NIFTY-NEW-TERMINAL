@@ -1215,23 +1215,40 @@ const TradePnl = ({ sync }: { sync: string }) => {
 const FVG_MIN_PTS = 4;
 const FVG_MAX_ZONES = 8;
 function computeFvgZones(candles: any[]): any[] {
+  // Adaptive minimum: on violent days (big candles) small imbalances form
+  // everywhere and mean nothing — the bar scales with recent candle size.
+  // Calm 5-min day: ~4 pts (unchanged). Panic day: roughly double.
+  const tail = candles.slice(-20);
+  const avgRange = tail.length ? tail.reduce((a: number, c: any) => a + (c.high - c.low), 0) / tail.length : 0;
+  const minGap = Math.max(FVG_MIN_PTS, +(0.3 * avgRange).toFixed(1));
+
   const zones: any[] = [];
   for (let i = 1; i < candles.length - 1; i++) {
     const a = candles[i - 1], c = candles[i + 1];
-    if (c.low > a.high && c.low - a.high >= FVG_MIN_PTS) {
+    if (c.low > a.high && c.low - a.high >= minGap) {
       zones.push({ type: 'bull', top: c.low, bottom: a.high, time: candles[i].time, born: i });
-    } else if (c.high < a.low && a.low - c.high >= FVG_MIN_PTS) {
+    } else if (c.high < a.low && a.low - c.high >= minGap) {
       zones.push({ type: 'bear', top: a.low, bottom: c.high, time: candles[i].time, born: i });
     }
   }
-  const unfilled = zones.filter(z => {
-    for (let k = z.born + 2; k < candles.length; k++) {
-      if (z.type === 'bull' && candles[k].low <= z.bottom) return false;
-      if (z.type === 'bear' && candles[k].high >= z.top) return false;
+  // Mitigation: price entering a gap consumes it — the box shrinks to the
+  // remaining unfilled slice and disappears when fully eaten (or when only a
+  // sliver under half the minimum is left).
+  const live: any[] = [];
+  for (const z of zones) {
+    let top = z.top, bottom = z.bottom, dead = false;
+    for (let k = z.born + 2; k < candles.length && !dead; k++) {
+      if (z.type === 'bull') {
+        if (candles[k].low <= bottom) dead = true;
+        else if (candles[k].low < top) top = candles[k].low;
+      } else {
+        if (candles[k].high >= top) dead = true;
+        else if (candles[k].high > bottom) bottom = candles[k].high;
+      }
     }
-    return true;
-  });
-  return unfilled.slice(-FVG_MAX_ZONES);
+    if (!dead && top - bottom >= minGap * 0.5) live.push({ ...z, top, bottom });
+  }
+  return live.slice(-FVG_MAX_ZONES);
 }
 
 const toUnixSeconds = (value: any): number => {
@@ -6340,8 +6357,17 @@ export function AdvancedChart() {
                   fvgZonesRef.current = computeFvgZones(closedSince.length ? [...baseC, ...closedSince] : baseC);
                 }
                 const live = lastCandleDataRef.current;
-                const zonesNow = fvgZonesRef.current.filter((z: any) =>
-                  !live ? true : z.type === 'bull' ? !(live.low <= z.bottom) : !(live.high >= z.top));
+                const zonesNow = fvgZonesRef.current
+                  .map((z: any) => {
+                    if (!live) return z;
+                    if (z.type === 'bull') {
+                      if (live.low <= z.bottom) return null;
+                      return live.low < z.top ? { ...z, top: live.low } : z;
+                    }
+                    if (live.high >= z.top) return null;
+                    return live.high > z.bottom ? { ...z, bottom: live.high } : z;
+                  })
+                  .filter((z: any) => z && z.top - z.bottom > 0.5);
                 const pctF = Math.min(100, Math.max(1, parseFloat(dsZoneOpacity) || 8)) / 100;
                 for (const z of zonesNow) {
                   const yTop = mainSeriesRef.current.priceToCoordinate(z.top);
