@@ -129,6 +129,9 @@ function simulatedInstrumentsFallback(q: string) {
 
 let nfoInstrumentsCache: any[] | null = null;
 let lastInstrumentsFetch = 0;
+// SENSEX/BANKEX options live on BSE's F&O segment (BFO) — separate contract file.
+let bfoInstrumentsCache: any[] | null = null;
+let lastBfoInstrumentsFetch = 0;
 
 export function clearInstrumentsCache() {
   allInstrumentsCache = null;
@@ -167,6 +170,21 @@ export async function getIndexFuturesTokens(name: string = 'NIFTY'): Promise<{ t
 
 let cachedSimulatedChain: any = null;
 
+// Best-effort index instrument token from the full dump (e.g. BSE:SENSEX).
+// Returns null when the dump isn't loaded yet — callers must treat it as optional.
+function resolveIndexToken(spotSymbol: string): number | null {
+  try {
+    const key = (spotSymbol.includes(':') ? spotSymbol.split(':')[1] : spotSymbol).trim();
+    const wantBse = spotSymbol.startsWith('BSE:') || key === 'SENSEX' || key === 'BANKEX';
+    const pool = allInstrumentsCache || [];
+    const hit = pool.find((i: any) =>
+      String(i.tradingsymbol).toUpperCase() === key.toUpperCase() &&
+      String(i.segment || '').toUpperCase().includes('INDICES') &&
+      (wantBse ? i.exchange === 'BSE' : i.exchange === 'NSE'));
+    return hit ? Number(hit.instrument_token) : null;
+  } catch (e) { return null; }
+}
+
 export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot?: number, expiry?: string) {
   const kc = getKiteClient();
   
@@ -180,6 +198,8 @@ export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot
     defaultSpot = 3850;
   } else if (spotSymbol.includes("INFY")) {
     defaultSpot = 1450;
+  } else if (spotSymbol.includes("SENSEX")) {
+    defaultSpot = 83000;
   } else if (spotSymbol.includes("NIFTY 50") || spotSymbol.includes("NIFTY")) {
     defaultSpot = 22000;
   } else {
@@ -223,13 +243,22 @@ export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot
 
     // 2. Fetch instruments if needed (cache for 1 day)
     const now = Date.now();
-    if (!nfoInstrumentsCache || (now - lastInstrumentsFetch > 24 * 60 * 60 * 1000)) {
+    // BSE underlyings (SENSEX/BANKEX) → BFO contract file; NSE underlyings → NFO.
+    const isBse = spotSymbol.startsWith('BSE:') || spotSymbol.includes('SENSEX') || spotSymbol.includes('BANKEX');
+    const optExchange = isBse ? 'BFO' : 'NFO';
+    if (isBse) {
+      if (!bfoInstrumentsCache || (now - lastBfoInstrumentsFetch > 24 * 60 * 60 * 1000)) {
+        bfoInstrumentsCache = await kc.getInstruments('BFO');
+        lastBfoInstrumentsFetch = now;
+      }
+    } else if (!nfoInstrumentsCache || (now - lastInstrumentsFetch > 24 * 60 * 60 * 1000)) {
         nfoInstrumentsCache = await kc.getInstruments('NFO');
         lastInstrumentsFetch = now;
     }
+    const instrumentPool = (isBse ? bfoInstrumentsCache : nfoInstrumentsCache) || [];
 
     // Filter for correct symbol options
-    const cleanSymbol = spotSymbol.replace("NSE:", "").replace("NFO:", "").trim();
+    const cleanSymbol = spotSymbol.replace("NSE:", "").replace("NFO:", "").replace("BSE:", "").replace("BFO:", "").trim();
     let nameFilter = cleanSymbol;
     if (cleanSymbol === "NIFTY 50" || cleanSymbol === "NIFTY") {
       nameFilter = "NIFTY";
@@ -239,7 +268,7 @@ export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot
       nameFilter = "FINNIFTY";
     }
 
-    const niftyInstruments = nfoInstrumentsCache!.filter((i: any) => 
+    const niftyInstruments = instrumentPool.filter((i: any) => 
         i.name === nameFilter && i.instrument_type !== 'FUT'
     );
     
@@ -260,7 +289,7 @@ export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot
         Math.abs(i.strike - spotPrice) < (nameFilter === 'NIFTY' ? 1500 : nameFilter === 'BANKNIFTY' ? 3000 : spotPrice * 0.1)
     );
 
-    const tradingsymbols = relevantOptions.map((i: any) => `NFO:${i.tradingsymbol}`);
+    const tradingsymbols = relevantOptions.map((i: any) => `${optExchange}:${i.tradingsymbol}`);
     
     if (tradingsymbols.length === 0) throw new Error("No option symbols found");
 
@@ -315,8 +344,8 @@ export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot
         const ceInst = relevantOptions.find((i: any) => Math.round(Number(i.strike)) === strike && i.instrument_type === 'CE');
         const peInst = relevantOptions.find((i: any) => Math.round(Number(i.strike)) === strike && i.instrument_type === 'PE');
 
-        if (ceInst && optionQuotes[`NFO:${ceInst.tradingsymbol}`]) {
-            const q = optionQuotes[`NFO:${ceInst.tradingsymbol}`];
+        if (ceInst && optionQuotes[`${optExchange}:${ceInst.tradingsymbol}`]) {
+            const q = optionQuotes[`${optExchange}:${ceInst.tradingsymbol}`];
             // Only compute OI change against a REAL previous-day baseline. The old
             // fallback (oi_day_low/current oi) fabricated a positive chgOi for every
             // strike, mislabeling the whole chain as SHORT BUILDUP after login.
@@ -342,8 +371,8 @@ export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot
                 source_of_lot_size: 'Kite Live Instrument Master'
             };
         }
-        if (peInst && optionQuotes[`NFO:${peInst.tradingsymbol}`]) {
-            const q = optionQuotes[`NFO:${peInst.tradingsymbol}`];
+        if (peInst && optionQuotes[`${optExchange}:${peInst.tradingsymbol}`]) {
+            const q = optionQuotes[`${optExchange}:${peInst.tradingsymbol}`];
             const hasOiBaseline = prevOiMap[q.instrument_token] !== undefined;
             const prevOi = hasOiBaseline ? prevOiMap[q.instrument_token] : null;
             peData[strike] = {
@@ -373,6 +402,8 @@ export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot
         strikes, 
         ceData, 
         peData, 
+        underlyingExchange: optExchange,
+        spotToken: resolveIndexToken(spotSymbol),
         expiryDate: targetExpiry,
         expiryDays: Math.max(1, Math.ceil((new Date(targetExpiry).getTime() - Date.now()) / (1000 * 60 * 60 * 24))),
         expiries

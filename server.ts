@@ -1176,6 +1176,10 @@ setInterval(() => {
       let spotSymbol = symbol;
       if (symbol === "NIFTY BANK" || symbol === "BANKNIFTY") {
         spotSymbol = "NSE:NIFTY BANK";
+      } else if (symbol === "SENSEX" || symbol === "BSE:SENSEX") {
+        spotSymbol = "BSE:SENSEX";
+      } else if (symbol === "BANKEX" || symbol === "BSE:BANKEX") {
+        spotSymbol = "BSE:BANKEX";
       } else if (!symbol.includes(":")) {
         spotSymbol = `NSE:${symbol}`;
       }
