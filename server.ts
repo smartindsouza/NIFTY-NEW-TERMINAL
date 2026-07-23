@@ -645,6 +645,13 @@ setInterval(() => {
       try { positions = await kc.getPositions(); } catch (e: any) { return res.json({ success: false, error: 'Could not read positions: ' + (e?.message || e) }); }
       const pos = ((positions && positions.net) || []).find((p: any) => p.tradingsymbol === tradingsymbol && p.quantity !== 0);
       if (!pos) return res.json({ success: false, error: `No open position for ${tradingsymbol} on Zerodha.` });
+      // SAFETY GUARD: the auto-exit engine has only ever been live-verified on
+      // NSE (NFO) orders. Refuse to arm on BSE/BFO positions rather than guard
+      // real money with an untested net. Removed only after the SENSEX stage-2
+      // one-lot test-trade ritual passes.
+      if ((pos.exchange || 'NFO') !== 'NFO') {
+        return res.json({ success: false, error: `${pos.exchange} auto SL/TP is not verified yet — manage this position's exit in the Kite app for now.` });
+      }
       const side = pos.quantity > 0 ? 'BUY' : 'SELL';
       const long = side === 'BUY';
       // Orientation sanity: a long option exits DOWN at SL and UP at target.
