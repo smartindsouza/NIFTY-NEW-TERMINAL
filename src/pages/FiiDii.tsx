@@ -32,6 +32,12 @@ function getLighterColor(hexColor: string, percent = 40) {
 
 export function FiiDii() {
   const { settings } = useUserSettings();
+  const { data: cashData } = useQuery({
+    queryKey: ['fii-cash'],
+    queryFn: async () => (await fetch('/api/fii-cash')).json(),
+    refetchInterval: 10 * 60 * 1000, refetchOnWindowFocus: false,
+  });
+
   const { data: fiiDiiData, isLoading } = useQuery({
     queryKey: ['fii-dii'],
     queryFn: async () => {
@@ -121,6 +127,48 @@ export function FiiDii() {
                      </p>
                   </div>
               </div>
+           </Card>
+
+           {/* Cash-segment activity (Rs crore) — the number most websites quote */}
+           <Card className="bg-card backdrop-blur-xl border-0 p-6 rounded-xl flex flex-col md:col-span-2">
+             <div className="flex justify-between items-center mb-2">
+               <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-widest flex items-center gap-2">
+                 <span className="w-1.5 h-1.5 bg-primary rounded-sm"></span> CASH MARKET ACTIVITY (PROVISIONAL, ₹ CR)
+               </p>
+               {cashData && !cashData.unavailable && cashData.date && (
+                 <span className="text-[10px] text-muted-foreground font-mono">{cashData.date}{cashData.stale ? ' · last known' : ''}</span>
+               )}
+             </div>
+             <p className="text-[11px] text-muted-foreground mb-4 leading-relaxed">
+               Stocks <span className="text-foreground font-semibold">bought/sold in cash</span> that day — the ₹-crore figure most
+               websites show. Separate from the futures <span className="text-foreground font-semibold">positions</span> above.
+             </p>
+             {(!cashData || cashData.unavailable) ? (
+               <div className="text-xs text-muted-foreground bg-muted/40 dark:bg-black/20 rounded-xl p-4">
+                 NSE cash feed unreachable right now — nothing shown rather than stale numbers. Futures data above is unaffected.
+               </div>
+             ) : (
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 {[{ label: 'FII', d: cashData.fii }, { label: 'DII', d: cashData.dii }].map(({ label, d }) => (
+                   <div key={label} className="bg-muted/40 dark:bg-black/20 rounded-xl p-5">
+                     <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest mb-1.5">{label} NET (CASH)</div>
+                     {d && d.net !== null ? (
+                       <>
+                         <div className={`text-2xl font-bold font-mono ${d.net >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                           {d.net >= 0 ? '+' : ''}₹{Math.abs(d.net).toLocaleString('en-IN', { maximumFractionDigits: 0 })} Cr
+                           <span className="text-xs font-semibold ml-2 opacity-80">{d.net >= 0 ? 'BOUGHT' : 'SOLD'}</span>
+                         </div>
+                         <div className="text-[11px] text-muted-foreground font-mono mt-1.5">
+                           buy ₹{d.buy?.toLocaleString('en-IN', { maximumFractionDigits: 0 }) ?? '—'} · sell ₹{d.sell?.toLocaleString('en-IN', { maximumFractionDigits: 0 }) ?? '—'}
+                         </div>
+                       </>
+                     ) : (
+                       <div className="text-xs text-muted-foreground">not reported</div>
+                     )}
+                   </div>
+                 ))}
+               </div>
+             )}
            </Card>
 
            {/* Historical Data */}

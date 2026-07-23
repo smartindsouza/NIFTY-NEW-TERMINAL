@@ -16,7 +16,7 @@ import { getLiveSignal, runOptionConfirmBacktest, getAlertSignal } from './serve
 import { ivAndDelta } from './server/options_math';
 import { getGammaBlast } from './server/gamma_blast';
 import { getPremiumPulse, getPremiumPulseBias } from './server/premium_pulse';
-import { getFiiData } from './server/fii_service';
+import { getFiiData, getCashFiiDii } from './server/fii_service';
 import { registerGapScorecard } from './server/gap_scorecard';
 import { evaluateQuantSignals } from './server/quant_engine';
 import { generateGamePlan } from './server/game_plan_service';
@@ -1539,6 +1539,11 @@ setInterval(() => {
       console.error("Error generating game plan:", err);
       res.status(500).json({ error: err.message || "Internal server error" });
     }
+  });
+
+  app.get('/api/fii-cash', async (_req, res) => {
+    try { res.json(await getCashFiiDii()); }
+    catch (e: any) { res.status(500).json({ unavailable: true, error: e?.message || String(e) }); }
   });
 
   app.get('/api/fii-dii', async (req, res) => {

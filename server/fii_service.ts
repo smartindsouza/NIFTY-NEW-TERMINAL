@@ -115,3 +115,49 @@ export async function getFiiData() {
     };
   }
 }
+
+
+// ---------------------------------------------------------------------------
+// CASH-SEGMENT FII/DII activity (provisional, in Rs crore) — the figure most
+// public websites show. Source: NSE's own fiidiiTradeReact API. NSE's main
+// site requires a cookie handshake and sometimes refuses datacenter IPs, so
+// this NEVER fabricates: on failure it returns the last good fetch flagged
+// stale, or an explicit unavailable marker. 30-min cache.
+let cashCache: { data: any; at: number } | null = null;
+
+export async function getCashFiiDii(): Promise<any> {
+    if (cashCache && Date.now() - cashCache.at < 30 * 60 * 1000) return cashCache.data;
+    try {
+        const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+        const home = await axios.get('https://www.nseindia.com/', {
+            headers: { 'User-Agent': ua, 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'Accept-Language': 'en-US,en;q=0.9' },
+            timeout: 8000,
+        });
+        const cookies = ((home.headers['set-cookie'] as any) || []).map((c: string) => c.split(';')[0]).join('; ');
+        const r = await axios.get('https://www.nseindia.com/api/fiidiiTradeReact', {
+            headers: {
+                'User-Agent': ua, 'Accept': 'application/json',
+                'Referer': 'https://www.nseindia.com/reports/fii-dii',
+                ...(cookies ? { Cookie: cookies } : {}),
+            },
+            timeout: 8000,
+        });
+        const arr = Array.isArray(r.data) ? r.data : [];
+        const pick = (cat: string) => arr.find((x: any) => String(x.category || '').toUpperCase().includes(cat));
+        const num = (v: any) => { const n = parseFloat(String(v).replace(/,/g, '')); return isFinite(n) ? n : null; };
+        const fii = pick('FII'); const dii = pick('DII');
+        if (!fii && !dii) throw new Error('unexpected NSE response shape');
+        const data = {
+            date: (fii && fii.date) || (dii && dii.date) || null,
+            fii: fii ? { buy: num(fii.buyValue), sell: num(fii.sellValue), net: num(fii.netValue) } : null,
+            dii: dii ? { buy: num(dii.buyValue), sell: num(dii.sellValue), net: num(dii.netValue) } : null,
+            source: 'NSE provisional — cash segment, Rs crore',
+            fetchedAt: Date.now(),
+        };
+        cashCache = { data, at: Date.now() };
+        return data;
+    } catch (e: any) {
+        if (cashCache) return { ...cashCache.data, stale: true };
+        return { unavailable: true, error: e?.message || String(e) };
+    }
+}
