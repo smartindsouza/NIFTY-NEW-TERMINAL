@@ -3192,6 +3192,17 @@ export function AdvancedChart() {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ value: hLevels }),
       }).catch(() => {});
+      // Auto-journal: file TODAY's set into the dated H-levels history
+      // (/h-levels page) — same edit, zero extra steps. Upsert semantics keep
+      // the latest values for the date; silent fire-and-forget.
+      if (Array.isArray(hLevels) && hLevels.length && hLevels.some((v: any) => Number(v) > 0)) {
+        const x = new Date(Date.now() + 5.5 * 3600 * 1000);
+        const d = `${x.getUTCFullYear()}-${String(x.getUTCMonth() + 1).padStart(2, '0')}-${String(x.getUTCDate()).padStart(2, '0')}`;
+        fetch('/api/h-levels', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date: d, levels: hLevels, note: 'auto from chart indicator' }),
+        }).catch(() => {});
+      }
     }, 600);
     return () => clearTimeout(t);
   }, [hLevels]);
