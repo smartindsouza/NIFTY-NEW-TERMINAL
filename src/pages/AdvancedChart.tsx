@@ -3207,6 +3207,30 @@ export function AdvancedChart() {
     return () => clearTimeout(t);
   }, [hLevels]);
 
+  // Morning ritual: on the FIRST app-open of each trading day (Mon-Fri IST),
+  // pop the H Levels settings so the day's values are confirmed before the
+  // chart is used. Tapping Save files them into the journal even when they are
+  // unchanged from yesterday. Once per day per device; weekends skipped here;
+  // on an NSE holiday the server refuses the journal write anyway, so simply
+  // closing (or saving) the popup stores nothing.
+  useEffect(() => {
+    const check = () => {
+      try {
+        if (!hLevelsHydratedRef.current) return;
+        const x = new Date(Date.now() + 5.5 * 3600 * 1000);
+        const day = x.getUTCDay();
+        if (day === 0 || day === 6) return;
+        const d = `${x.getUTCFullYear()}-${String(x.getUTCMonth() + 1).padStart(2, '0')}-${String(x.getUTCDate()).padStart(2, '0')}`;
+        if (localStorage.getItem('hLevelsPromptedFor') === d) return;
+        localStorage.setItem('hLevelsPromptedFor', d);
+        setIsEditingHLevels(true);
+      } catch (e) {}
+    };
+    check();
+    const iv = setInterval(check, 1500); // hydration lands async — retry briefly
+    return () => clearInterval(iv);
+  }, []);
+
   useEffect(() => {
     try {
       localStorage.setItem('hLevelsStyle', String(hLevelsStyle));
