@@ -92,6 +92,7 @@ export function Header() {
     { href: '/journal', label: 'Trade Journal', icon: BookOpen },
     { href: '/gap-risk', label: 'Gap Risk', icon: Gauge },
     { href: '/gap-scorecard', label: 'Gap Scorecard', icon: Compass },
+    { href: '/h-levels', label: 'H Levels', icon: Layers },
     { href: '/rsi-backtest', label: 'RSI Backtest', icon: FlaskConical },
     { href: '/live-signal', label: 'Live Signal', icon: Radio },
     { href: '/signal-alerts', label: 'Signal Alerts', icon: BellRing },

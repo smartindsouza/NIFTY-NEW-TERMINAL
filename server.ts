@@ -32,6 +32,12 @@ const db = new Database(`${KITE_DATA_DIR}/kite_session.db`);
 // Premium-based auto-exit rules: the draggable SL/TP lines on the traded
 // option's chart. One rule per symbol; the engine below watches option LTP and
 // fires a real exit through closePositionBySymbol when a level is crossed.
+// Daily journal of externally-supplied "H levels" (formula undisclosed).
+// Stored dated for later reverse-engineering against price data.
+db.exec(`CREATE TABLE IF NOT EXISTS h_levels (
+  date TEXT PRIMARY KEY, levels TEXT NOT NULL, note TEXT DEFAULT '',
+  created_at INTEGER, updated_at INTEGER
+);`);
 db.exec(`CREATE TABLE IF NOT EXISTS premium_exit_rules (
   tradingsymbol TEXT PRIMARY KEY, exchange TEXT, side TEXT, qty INTEGER,
   entry REAL, sl REAL, tp REAL, status TEXT, attempts INTEGER DEFAULT 0,
@@ -1539,6 +1545,33 @@ setInterval(() => {
       console.error("Error generating game plan:", err);
       res.status(500).json({ error: err.message || "Internal server error" });
     }
+  });
+
+  // ---- H-levels journal (manual daily entry; analysis comes later) ----
+  app.post('/api/h-levels', express.json(), (req, res) => {
+    try {
+      const { date, levels, note } = req.body || {};
+      const d = String(date || '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return res.status(400).json({ ok: false, error: 'date must be YYYY-MM-DD' });
+      const arr = Array.isArray(levels) ? levels.map(Number).filter((v: number) => isFinite(v)) : [];
+      if (!arr.length) return res.status(400).json({ ok: false, error: 'levels must be a non-empty number array' });
+      db.prepare(`INSERT INTO h_levels (date, levels, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(date) DO UPDATE SET levels = excluded.levels, note = excluded.note, updated_at = excluded.updated_at`)
+        .run(d, JSON.stringify(arr), String(note || ''), Date.now(), Date.now());
+      res.json({ ok: true, date: d, count: arr.length });
+    } catch (e: any) { res.status(500).json({ ok: false, error: e?.message || String(e) }); }
+  });
+  app.get('/api/h-levels', (req, res) => {
+    try {
+      const limit = Math.min(500, parseInt(String(req.query.limit || '200'), 10) || 200);
+      const rows = (db.prepare('SELECT * FROM h_levels ORDER BY date DESC LIMIT ?').all(limit) as any[])
+        .map(r => ({ date: r.date, levels: JSON.parse(r.levels), note: r.note || '' }));
+      res.json({ rows });
+    } catch (e: any) { res.status(500).json({ ok: false, error: e?.message || String(e) }); }
+  });
+  app.delete('/api/h-levels/:date', (req, res) => {
+    try { db.prepare('DELETE FROM h_levels WHERE date = ?').run(String(req.params.date)); res.json({ ok: true }); }
+    catch (e: any) { res.status(500).json({ ok: false, error: e?.message || String(e) }); }
   });
 
   app.get('/api/fii-cash', async (_req, res) => {
