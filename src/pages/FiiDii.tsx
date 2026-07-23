@@ -94,6 +94,12 @@ export function FiiDii() {
                   <span className="w-1.5 h-1.5 bg-primary rounded-sm"></span> NET FII POSITIONING (LATEST DAY)
                 </p>
               </div>
+              <p className="text-[11px] text-muted-foreground -mt-4 mb-5 leading-relaxed">
+                Index <span className="text-foreground font-semibold">FUTURES positions</span> in contracts, from NSE's official
+                participant-wise OI file. This is a <span className="text-foreground font-semibold">different report</span> from the
+                cash-market ₹&nbsp;crore buy/sell figures most websites show — the same institution can buy stocks in cash and hold
+                short futures on the same day, so these two numbers are not supposed to match.
+              </p>
               
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-8 bg-muted/40 dark:bg-black/20 p-6 rounded-xl border border-0">
                   <div className="flex items-center gap-4">
