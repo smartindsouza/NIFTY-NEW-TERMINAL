@@ -17,7 +17,7 @@ import { ivAndDelta } from './server/options_math';
 import { getGammaBlast } from './server/gamma_blast';
 import { getPremiumPulse, getPremiumPulseBias } from './server/premium_pulse';
 import { getFiiData, getCashFiiDii } from './server/fii_service';
-import { registerGapScorecard } from './server/gap_scorecard';
+import { registerGapScorecard, toISTString } from './server/gap_scorecard';
 import { GAP_CONFIG } from './server/config/gapScorecard';
 import { evaluateQuantSignals } from './server/quant_engine';
 import { generateGamePlan } from './server/game_plan_service';
@@ -895,17 +895,66 @@ setInterval(() => {
     });
   });
 
-  app.get('/api/diagnostics/proxy', async (req, res) => {
+  // ---- Proxy health: hardened check + 24/7 monitor with an outage log ----
+  // Orders (incl. the auto SL/TP engine) MUST egress via the whitelisted
+  // Bangalore proxy, so its health is trading-critical. The old check asked ONE
+  // IP-echo service once with a 4s timeout — a hiccup at that service faked a
+  // red light. Now: two independent services, tried in turn, and a server-side
+  // monitor every 60s that records every RED<->GREEN transition with IST
+  // timestamps, so an outage report is data instead of a mystery.
+  const proxyBootAt = Date.now();
+  const proxyHealth: {
+    alive: boolean | null; lastCheck: number; egressIp: string | null; detail: string;
+    transitions: Array<{ ts: number; alive: boolean; detail: string }>;
+  } = { alive: null, lastCheck: 0, egressIp: null, detail: '', transitions: [] };
+
+  async function checkProxyOnce(): Promise<{ alive: boolean; egressIp: string | null; expectedIp: string | null; detail: string }> {
     const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '';
-    let expectedIp = null;
-    try { expectedIp = new URL(proxyUrl).hostname; } catch {}
-    try {
-      const r = await axios.get('https://api.ipify.org', { timeout: 4000 });
-      const egressIp = String(r.data || '').trim();
-      res.json({ alive: !!expectedIp && egressIp === expectedIp, egressIp, expectedIp });
-    } catch (e: any) {
-      res.json({ alive: false, egressIp: null, expectedIp, error: String((e && e.message) || e) });
+    let expectedIp: string | null = null;
+    try { expectedIp = new URL(proxyUrl).hostname; } catch (e) {}
+    const services = ['https://api.ipify.org', 'https://checkip.amazonaws.com'];
+    let lastErr = '';
+    for (const url of services) {
+      try {
+        const r = await axios.get(url, { timeout: 5000 });
+        const egressIp = String(r.data || '').trim();
+        if (egressIp) {
+          const alive = !!expectedIp && egressIp === expectedIp;
+          return { alive, egressIp, expectedIp, detail: alive ? 'ok' : `egress ${egressIp} ≠ expected ${expectedIp} — traffic is BYPASSING the proxy` };
+        }
+      } catch (e: any) {
+        lastErr = `${url.replace('https://', '')}: ${String((e && (e.code || e.message)) || e)}`;
+      }
     }
+    return { alive: false, egressIp: null, expectedIp, detail: `proxy unreachable — both IP checks failed (${lastErr})` };
+  }
+
+  setInterval(async () => {
+    try {
+      const r = await checkProxyOnce();
+      const prev = proxyHealth.alive;
+      proxyHealth.alive = r.alive; proxyHealth.lastCheck = Date.now();
+      proxyHealth.egressIp = r.egressIp; proxyHealth.detail = r.detail;
+      if (prev === null || prev !== r.alive) {
+        proxyHealth.transitions.push({ ts: Date.now(), alive: r.alive, detail: r.detail });
+        if (proxyHealth.transitions.length > 100) proxyHealth.transitions.splice(0, proxyHealth.transitions.length - 100);
+        console.log(`[proxy-monitor] ${r.alive ? 'GREEN' : 'RED'} — ${r.detail}`);
+      }
+    } catch (e) { /* the monitor must never crash the server */ }
+  }, 60000);
+
+  app.get('/api/diagnostics/proxy', async (_req, res) => {
+    const r = await checkProxyOnce();
+    res.json({
+      ...r,
+      monitor: {
+        watchingSince: toISTString(proxyBootAt) + ' IST (server start — log resets on restart)',
+        lastBackgroundCheck: proxyHealth.lastCheck ? toISTString(proxyHealth.lastCheck) + ' IST' : 'not yet',
+        transitions: proxyHealth.transitions.slice(-20).map(t => ({
+          at: toISTString(t.ts) + ' IST', became: t.alive ? 'GREEN' : 'RED', detail: t.detail,
+        })),
+      },
+    });
   });
 
   app.get('/api/instruments/search', async (req, res) => {
