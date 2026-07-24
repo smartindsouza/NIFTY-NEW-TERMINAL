@@ -441,7 +441,7 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
                 <span>⚠️ Lot size unavailable. Refresh instruments.</span>
               </div>
               <div className="text-muted-foreground text-[11px] leading-relaxed">
-                NIFTY options require a dynamic lot size from the latest instrument master. Click below to refresh the cached database.
+                Options require a dynamic lot size from the latest instrument master. Click below to refresh the cached database.
               </div>
               <button
                 type="button"
@@ -3334,6 +3334,16 @@ export function AdvancedChart() {
     return null;
   });
 
+  // Which INDEX the chart's index view shows (the tab-strip switcher). Options
+  // open on top of either; switching back to index mode lands on this one.
+  const [underlying, setUnderlying] = useState<'NIFTY' | 'SENSEX'>(() => {
+    try { return localStorage.getItem('chartUnderlying') === 'SENSEX' ? 'SENSEX' : 'NIFTY'; } catch(e) {}
+    return 'NIFTY';
+  });
+  useEffect(() => {
+    try { localStorage.setItem('chartUnderlying', underlying); } catch(e) {}
+  }, [underlying]);
+
   useEffect(() => {
     try {
       if (selectedInstrument) {
@@ -4156,7 +4166,9 @@ export function AdvancedChart() {
     // Determine the symbol and rounding rules
     const sym = currentSymbol.toUpperCase();
     let strikeInterval = 50;
-    if (sym.includes('BANKNIFTY') || sym.includes('BANK')) {
+    if (sym.includes('SENSEX')) {
+      strikeInterval = 100;
+    } else if (sym.includes('BANKNIFTY') || sym.includes('BANK')) {
       strikeInterval = 100;
     } else if (sym.includes('FINNIFTY')) {
       strikeInterval = 50;
@@ -4258,6 +4270,7 @@ export function AdvancedChart() {
             body: JSON.stringify({
               action: oppositeAction,
               tradingsymbol: pos.symbol,
+              exchange: (pos as any).exchange,
               quantity: pos.qty,
               product: 'MIS',
               orderType: 'MARKET',
@@ -4442,7 +4455,10 @@ export function AdvancedChart() {
       const res = await fetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({...data, test_mode: testOrderMode, journal: true, context: journalContext})
+        // exchange comes from the contract the ticket was opened with (NFO for
+        // NIFTY, BFO for SENSEX) — without it the server defaults to NFO and a
+        // SENSEX order would be sent to the wrong exchange and rejected.
+        body: JSON.stringify({...data, exchange: ticketData?.exchange || 'NFO', test_mode: testOrderMode, journal: true, context: journalContext})
       });
       const result = await res.json();
       
@@ -4492,6 +4508,7 @@ export function AdvancedChart() {
         const activeTrade = {
           id: result.orderId || `ORD-${Date.now()}`,
           symbol: data.tradingsymbol || 'Option Contract',
+          exchange: ticketData?.exchange || 'NFO',
           side: data.action,
           qty: data.quantity,
           entryPrice: data.price || currentPrice,
@@ -4545,16 +4562,35 @@ export function AdvancedChart() {
     }
   };
 
-  const instrumentToken = selectedInstrument ? String(selectedInstrument.instrument_token) : "256265";
+  // Index token for the active underlying. NIFTY 50 is the constant the whole
+  // app was built around; the SENSEX token comes from Zerodha's instrument dump
+  // via the server (never hardcoded). Until it resolves, index-mode queries stay
+  // disabled (brief spinner) rather than silently falling back to NIFTY candles
+  // under a SENSEX label.
+  const { data: sensexTokenData } = useQuery({
+    queryKey: ['index-token', 'SENSEX'],
+    queryFn: async () => {
+      const res = await fetch('/api/index-token?symbol=SENSEX');
+      if (!res.ok) throw new Error('index token fetch failed');
+      return res.json();
+    },
+    enabled: underlying === 'SENSEX',
+    staleTime: Infinity,
+    gcTime: Infinity,
+    retry: 2,
+  });
+  const indexToken: string | null = underlying === 'NIFTY' ? '256265' : (sensexTokenData?.token ? String(sensexTokenData.token) : null);
+  const indexLabel = underlying === 'NIFTY' ? 'NIFTY 50' : 'SENSEX';
+  const instrumentToken = selectedInstrument ? String(selectedInstrument.instrument_token) : indexToken;
   const instrumentTokenRef = useRef(instrumentToken);
   instrumentTokenRef.current = instrumentToken;
   // On the traded OPTION's chart only RSI stays on; index overlays (BB, S&R,
   // PDH/PDL, levels, OI bars, opening range, D/S zones, FVG) are hidden there.
-  const isOptionView = instrumentToken !== "256265";
+  const isOptionView = !!selectedInstrument && (indexToken === null || instrumentToken !== indexToken);
   const { data: taInfo, isLoading: isLoadingTa, isError: isTaError, error: taError, refetch: refetchTa } = useQuery({
     queryKey: ["ta-data-live-chart", timeframe, instrumentToken],
     queryFn: async () => {
-      const res = await fetch(`/api/ta?timeframe=${timeframe}&token=${instrumentToken}&symbol=${encodeURIComponent(selectedInstrument ? selectedInstrument.tradingsymbol : "NIFTY 50")}`);
+      const res = await fetch(`/api/ta?timeframe=${timeframe}&token=${instrumentToken}&symbol=${encodeURIComponent(selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel)}`);
       if (!res.ok) {
         if (res.status === 429) {
           throw Object.assign(new Error("Rate Limit Exceeded"), { status: 429 });
@@ -4565,7 +4601,7 @@ export function AdvancedChart() {
     },
     // Fetch periodically while visible to sync indicator bias with dashboard
     // using false here and manual update interval below to prevent chart full redraws
-    refetchInterval: instrumentToken !== "256265" ? 15000 : false,
+    refetchInterval: isOptionView ? 15000 : false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     // Refetch full history whenever the chart (re)mounts — returning from another
@@ -4590,7 +4626,7 @@ export function AdvancedChart() {
   const { data: liveTa } = useQuery({
     queryKey: ["ta-data-decision", timeframe, instrumentToken],
     queryFn: async () => {
-      const res = await fetch(`/api/ta?timeframe=${timeframe}&token=${instrumentToken}&symbol=${encodeURIComponent(selectedInstrument ? selectedInstrument.tradingsymbol : "NIFTY 50")}`);
+      const res = await fetch(`/api/ta?timeframe=${timeframe}&token=${instrumentToken}&symbol=${encodeURIComponent(selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel)}`);
       if (!res.ok) return null;
       return res.json();
     },
@@ -4599,7 +4635,7 @@ export function AdvancedChart() {
     enabled: Boolean(timeframe && instrumentToken)
   });
 
-  const currentSymbol = selectedInstrument ? selectedInstrument.tradingsymbol : "NIFTY 50";
+  const currentSymbol = selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel;
   const lastSpotValue = taInfo && taInfo.candles && taInfo.candles.length > 0 
     ? taInfo.candles[taInfo.candles.length - 1].close 
     : undefined;
@@ -6965,7 +7001,7 @@ export function AdvancedChart() {
           <div className="w-28 max-w-[112px] sm:max-w-none shrink-0 sm:w-auto md:order-1">
           <SymbolSearch 
             onSelect={setSelectedInstrument} 
-            currentSymbol={selectedInstrument ? selectedInstrument.tradingsymbol : "NIFTY 50"} 
+            currentSymbol={selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel} 
           />
           </div>
           <div className="flex items-center gap-2 shrink-0 md:order-4">
@@ -7270,19 +7306,23 @@ export function AdvancedChart() {
         </div>
       ) : (
       <div className="flex flex-col flex-grow gap-0 md:gap-2 min-h-0">
-        {tradeTabInstr && (
         <div className="flex items-center gap-1.5 px-1 pb-1 shrink-0">
-          <button onClick={() => setSelectedInstrument(null)}
-            className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${!selectedInstrument ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
+          <button onClick={() => { setUnderlying('NIFTY'); setSelectedInstrument(null); }}
+            className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${!selectedInstrument && underlying === 'NIFTY' ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
             NIFTY 50
           </button>
+          <button onClick={() => { setUnderlying('SENSEX'); setSelectedInstrument(null); }}
+            className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${!selectedInstrument && underlying === 'SENSEX' ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
+            SENSEX
+          </button>
+          {tradeTabInstr && (
           <button onClick={() => setSelectedInstrument(tradeTabInstr)}
             className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${selectedInstrument && String(selectedInstrument.instrument_token) === String(tradeTabInstr.instrument_token) ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
             {tradeTabInstr.tradingsymbol}
           </button>
+          )}
           <TradePnl sync={premSync} />
         </div>
-      )}
 
 
           {/* Main Chart (Price & Volume) */}
