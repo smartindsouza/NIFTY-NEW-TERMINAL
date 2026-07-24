@@ -9,7 +9,7 @@ import Database from 'better-sqlite3';
 import { generateSimulatedChain } from './server/simulate_data';
 import { computeAnalytics } from './server/analytics_engine';
 import { getTechnicalAnalysis, kiteDiagnostics } from './server/technical_analysis';
-import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData, getIndexFuturesTokens } from './server/kite_service';
+import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData, getIndexFuturesTokens, getBseIndexToken, getOptionToken } from './server/kite_service';
 import { getHistoricalAnalytics } from './server/analytics_service';
 import { runRsiBacktest } from './server/rsi_backtest';
 import { getLiveSignal, runOptionConfirmBacktest, getAlertSignal } from './server/option_rsi';
@@ -44,6 +44,31 @@ db.exec(`CREATE TABLE IF NOT EXISTS premium_exit_rules (
   entry REAL, sl REAL, tp REAL, status TEXT, attempts INTEGER DEFAULT 0,
   last_ltp REAL, detail TEXT, created_at INTEGER, updated_at INTEGER
 );`);
+// Tick engine: the armed contract's instrument token, resolved at arm time so
+// the Kite ticker can stream it. Nullable — rules without a token still work
+// through the 3s poll. ALTER throws if the column already exists; that's fine.
+try { db.exec(`ALTER TABLE premium_exit_rules ADD COLUMN instrument_token INTEGER`); } catch (e) { /* column exists */ }
+
+// In-memory mirror of ACTIVE premium-exit rules, keyed by instrument token, so
+// the tick handler can evaluate SL/TP in O(1) per tick without touching sqlite.
+// The DB stays the source of truth; this map is rebuilt from it on start and
+// kept in sync by arm / clear / fire below.
+const premiumRulesByToken = new Map<number, any>();
+function premiumRuleTokens(): number[] { return Array.from(premiumRulesByToken.keys()); }
+function syncPremiumRuleInMemory(row: any | null, removeToken?: number | null) {
+  if (removeToken) premiumRulesByToken.delete(removeToken);
+  if (row && row.status === 'ACTIVE' && row.instrument_token) {
+    premiumRulesByToken.set(Number(row.instrument_token), row);
+  }
+}
+function loadActivePremiumRules() {
+  premiumRulesByToken.clear();
+  try {
+    const rows: any[] = db.prepare("SELECT * FROM premium_exit_rules WHERE status='ACTIVE'").all() as any[];
+    for (const r of rows) syncPremiumRuleInMemory(r);
+  } catch (e) { console.error('[premium-exit] load ACTIVE rules failed', e); }
+}
+loadActivePremiumRules();
 // WAL lets readers and a writer work concurrently; busy_timeout makes writes wait
 // instead of failing with "database is locked" (the two DB connections share one file).
 try { db.pragma('journal_mode = WAL'); db.pragma('busy_timeout = 5000'); } catch (e) { console.error('DB pragma error', e); }
@@ -233,6 +258,66 @@ async function closePositionBySymbol(tradingsymbol: string, reason: string = 'MA
   }
 }
 
+// ===== Premium-exit shared core (used by BOTH the tick path and the 3s poll) =====
+// One evaluation, one fire path, one atomic claim — the tick handler and the
+// poll can race freely and at most ONE exit order can ever result.
+function evalPremiumRule(rule: any, ltp: number): 'SL' | 'TARGET' | null {
+  const long = rule.side === 'BUY';
+  const hitSl = long ? ltp <= rule.sl : ltp >= rule.sl;
+  const hitTp = long ? ltp >= rule.tp : ltp <= rule.tp;
+  return hitSl ? 'SL' : hitTp ? 'TARGET' : null;
+}
+
+// Ticks arrive many times a second; sqlite doesn't need every one. last_ltp is a
+// display/debug field — 1 write/sec per symbol keeps it fresh without hammering.
+const lastRuleLtpWriteAt = new Map<string, number>();
+function persistRuleLtpThrottled(tradingsymbol: string, ltp: number) {
+  const now = Date.now();
+  if ((lastRuleLtpWriteAt.get(tradingsymbol) || 0) > now - 1000) return;
+  lastRuleLtpWriteAt.set(tradingsymbol, now);
+  try { db.prepare("UPDATE premium_exit_rules SET last_ltp=?, updated_at=? WHERE tradingsymbol=?").run(ltp, now, tradingsymbol); } catch (e) {}
+}
+
+const premiumExitBusy = new Set<string>();
+async function firePremiumExit(tradingsymbol: string, reason: string): Promise<void> {
+  if (premiumExitBusy.has(tradingsymbol)) return;
+  premiumExitBusy.add(tradingsymbol);
+  try {
+    // Atomic claim: only ONE caller can move ACTIVE → TRIGGERED. Everyone else
+    // sees changes === 0 and walks away order-free. On top of this,
+    // closePositionBySymbol re-verifies the position live on Zerodha, so even a
+    // logic bug here could at worst place one flattening order, never an entry.
+    const claim = db.prepare("UPDATE premium_exit_rules SET status='TRIGGERED', detail=?, updated_at=? WHERE tradingsymbol=? AND status='ACTIVE'")
+      .run(reason, Date.now(), tradingsymbol);
+    if (claim.changes === 0) return;
+    const row: any = db.prepare("SELECT * FROM premium_exit_rules WHERE tradingsymbol=?").get(tradingsymbol);
+    console.log(`[premium-exit] ${reason} -> exiting ${tradingsymbol}`);
+    try {
+      const result = await closePositionBySymbol(tradingsymbol, reason);
+      if (result.ok || result.alreadyClosed) {
+        db.prepare("UPDATE premium_exit_rules SET status='DONE', detail=?, updated_at=? WHERE tradingsymbol=?")
+          .run(reason + (result.alreadyClosed ? ' | position was already closed' : ' | exit placed'), Date.now(), tradingsymbol);
+        syncPremiumRuleInMemory(null, row?.instrument_token ? Number(row.instrument_token) : null);
+      } else {
+        const attempts = (row?.attempts || 0) + 1;
+        const nextStatus = attempts >= 3 ? 'ERROR' : 'ACTIVE';
+        db.prepare("UPDATE premium_exit_rules SET status=?, attempts=?, detail=?, updated_at=? WHERE tradingsymbol=?")
+          .run(nextStatus, attempts, reason + ' | exit FAILED: ' + (result.error || 'rejected'), Date.now(), tradingsymbol);
+        console.error(`[premium-exit] exit failed for ${tradingsymbol} (attempt ${attempts}):`, result.error);
+        const fresh: any = db.prepare("SELECT * FROM premium_exit_rules WHERE tradingsymbol=?").get(tradingsymbol);
+        syncPremiumRuleInMemory(nextStatus === 'ACTIVE' ? fresh : null, row?.instrument_token ? Number(row.instrument_token) : null);
+      }
+    } catch (e: any) {
+      db.prepare("UPDATE premium_exit_rules SET status='ACTIVE', attempts=attempts+1, detail=?, updated_at=? WHERE tradingsymbol=?")
+        .run(reason + ' | exit threw: ' + (e?.message || e), Date.now(), tradingsymbol);
+      const fresh: any = db.prepare("SELECT * FROM premium_exit_rules WHERE tradingsymbol=?").get(tradingsymbol);
+      syncPremiumRuleInMemory(fresh, row?.instrument_token ? Number(row.instrument_token) : null);
+    }
+  } finally {
+    premiumExitBusy.delete(tradingsymbol);
+  }
+}
+
 async function startServer() {
   const app = express();
   const server = http.createServer(app);
@@ -297,6 +382,31 @@ let lastRealSpotTickAt = 0; // ms timestamp of the last REAL spot tick (for watc
 let latestChainData: any = null;
 let latestAnalytics: any = null;
 
+// ===== SENSEX (BSE/BFO) support =====
+// The SENSEX index token streams ALWAYS (one token — powers the index chart's
+// live candle). The SENSEX option-chain cache + its option tokens only refresh
+// while someone is actually using SENSEX (chain page / chart / open ticket),
+// signalled by /api/option-chain?symbol=SENSEX hits — keeps the ticker set and
+// Kite quote calls small when Martin is trading NIFTY as usual.
+let sensexIndexToken: number | null = null;
+let latestSensexChainData: any = null;
+let latestSensexAnalytics: any = null;
+let latestSensexChainAt = 0;
+let sensexActiveUntil = 0;
+let lastNiftyChainTokens: number[] = [256265];
+let lastSensexChainTokens: number[] = [];
+
+// One place computes the full ticker subscription set. setSubscriptions REPLACES
+// the set on the Kite ticker, so every caller must go through this union or it
+// would silently unsubscribe someone else's tokens.
+function pushTickerSubscriptions() {
+  const all = new Set<number>(lastNiftyChainTokens);
+  if (sensexIndexToken) all.add(sensexIndexToken);
+  for (const t of lastSensexChainTokens) all.add(t);
+  for (const t of premiumRuleTokens()) all.add(t);
+  setSubscriptions(Array.from(all));
+}
+
 async function refreshData() {
   try {
     latestChainData = await getLiveOptionChain('NSE:NIFTY 50');
@@ -315,7 +425,32 @@ async function refreshData() {
           if (front?.token) { setDeltaFuturesToken(front.token); tokens.push(front.token); }
         }
       } catch (e) { /* delta is optional; don't break the feed */ }
-      setSubscriptions(tokens);
+      lastNiftyChainTokens = tokens;
+
+      // SENSEX side: resolve the index token once (24h-cached downstream), and
+      // refresh the SENSEX chain only inside the activity window. Best-effort —
+      // a SENSEX failure must never break the NIFTY feed.
+      try {
+        if (!sensexIndexToken) sensexIndexToken = await getBseIndexToken('SENSEX');
+        if (Date.now() < sensexActiveUntil) {
+          const sx = await getLiveOptionChain('BSE:SENSEX');
+          if (sx && !sx.isMock) {
+            latestSensexChainData = sx;
+            latestSensexAnalytics = computeAnalytics(sx);
+            latestSensexChainAt = Date.now();
+            const stok: number[] = [];
+            for (const k of (sx.strikes || [])) {
+              if (sx.ceData?.[k]?.instrument_token) stok.push(sx.ceData[k].instrument_token);
+              if (sx.peData?.[k]?.instrument_token) stok.push(sx.peData[k].instrument_token);
+            }
+            lastSensexChainTokens = stok;
+          }
+        } else if (lastSensexChainTokens.length) {
+          lastSensexChainTokens = []; // idle: drop SENSEX option tokens from the ticker
+        }
+      } catch (e) { /* SENSEX is optional; NIFTY feed continues */ }
+
+      pushTickerSubscriptions();
 
       if (latestChainData.isMock) {
         // Random walk for mock data so candlesticks aren't flat
@@ -351,11 +486,32 @@ function connectTicker() {
       const ts = Math.floor(Date.now() / 1000);
       broadcast({ type: 'tick', symbol: 'NSE:NIFTY 50', price: tick.ltp, timestamp: ts,
         candle: { time: ts, open: tick.ltp, high: tick.ltp, low: tick.ltp, close: tick.ltp } });
+    } else if (sensexIndexToken && tick.token === sensexIndexToken) {
+      // SENSEX index tick → same live-candle shape the chart consumes for NIFTY.
+      // Deliberately does NOT touch latestSpot/lastRealSpotTickAt — those are the
+      // NIFTY numbers every existing watcher and scorecard runs on.
+      const ts = Math.floor(Date.now() / 1000);
+      broadcast({ type: 'tick', symbol: 'BSE:SENSEX', price: tick.ltp, timestamp: ts,
+        candle: { time: ts, open: tick.ltp, high: tick.ltp, low: tick.ltp, close: tick.ltp } });
     } else if (tick.token === getDeltaFuturesToken()) {
       // Front-month future: update the delta (pressure) proxy. Also broadcast the
       // option tick shape is irrelevant here; the future isn't shown as an option.
       onFuturesTick({ token: tick.token, ltp: tick.ltp, volume: tick.volume, ts: Date.now() });
     } else {
+      // PRIMARY premium-exit path: evaluate the armed rule (if any) on the very
+      // tick that crossed the level — this is the expiry-day seatbelt. The 3s
+      // REST poll below stays alive as the fallback net; the atomic claim inside
+      // firePremiumExit makes the two paths race-safe.
+      const rule = premiumRulesByToken.get(tick.token);
+      if (rule && typeof tick.ltp === 'number' && tick.ltp > 0) {
+        const hit = evalPremiumRule(rule, tick.ltp);
+        persistRuleLtpThrottled(rule.tradingsymbol, tick.ltp);
+        if (hit) {
+          const reason = `PREMIUM ${hit} @ ${tick.ltp} (tick)`;
+          void firePremiumExit(rule.tradingsymbol, reason).catch((e) =>
+            console.error('[premium-exit] tick fire failed', e?.message || e));
+        }
+      }
       broadcast({ type: 'optionTick', token: tick.token, ltp: tick.ltp, oi: tick.oi, volume: tick.volume });
     }
   });
@@ -363,6 +519,24 @@ function connectTicker() {
 
 refreshData();
 connectTicker();
+
+// One-time best-effort: rules armed before this deploy have no instrument_token
+// yet — resolve them so the tick engine covers them too (poll covers them either
+// way). Runs once at boot; needs a live Kite session, silently skips without one.
+(async () => {
+  try {
+    const rows: any[] = db.prepare("SELECT * FROM premium_exit_rules WHERE status='ACTIVE' AND instrument_token IS NULL").all() as any[];
+    for (const r of rows) {
+      const tok = await getOptionToken(r.exchange || 'NFO', r.tradingsymbol);
+      if (tok) {
+        db.prepare("UPDATE premium_exit_rules SET instrument_token=?, updated_at=? WHERE tradingsymbol=?").run(tok, Date.now(), r.tradingsymbol);
+        const fresh: any = db.prepare("SELECT * FROM premium_exit_rules WHERE tradingsymbol=?").get(r.tradingsymbol);
+        syncPremiumRuleInMemory(fresh);
+      }
+    }
+    if (rows.length) pushTickerSubscriptions();
+  } catch (e) { /* backfill is optional */ }
+})();
 
 // Broadcast the futures delta (pressure) snapshot to all clients every 2s.
 setInterval(() => {
@@ -666,12 +840,20 @@ setInterval(() => {
         return res.json({ success: false, error: long ? 'For a long option, SL must be below TARGET.' : 'For a short option, SL must be above TARGET.' });
       }
       const entryPx = Number(entry) > 0 ? Number(entry) : (pos.average_price || 0);
-      db.prepare(`INSERT INTO premium_exit_rules (tradingsymbol, exchange, side, qty, entry, sl, tp, status, attempts, last_ltp, detail, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 0, NULL, '', ?, ?)
+      // Resolve the contract's instrument token so the ticker can stream it (the
+      // tick engine's primary path). null is fine — the 3s poll covers the rule.
+      let ruleToken: number | null = null;
+      try { ruleToken = await getOptionToken(pos.exchange || 'NFO', tradingsymbol); } catch (e) { ruleToken = null; }
+      db.prepare(`INSERT INTO premium_exit_rules (tradingsymbol, exchange, side, qty, entry, sl, tp, status, attempts, last_ltp, detail, instrument_token, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 0, NULL, '', ?, ?, ?)
         ON CONFLICT(tradingsymbol) DO UPDATE SET exchange=excluded.exchange, side=excluded.side, qty=excluded.qty,
-          entry=excluded.entry, sl=excluded.sl, tp=excluded.tp, status='ACTIVE', attempts=0, detail='', updated_at=excluded.updated_at`)
-        .run(tradingsymbol, pos.exchange || 'NFO', side, Math.abs(pos.quantity), entryPx, slN, tpN, Date.now(), Date.now());
-      console.log(`[premium-exit] ARMED ${tradingsymbol} side=${side} entry=${entryPx} sl=${slN} tp=${tpN}`);
+          entry=excluded.entry, sl=excluded.sl, tp=excluded.tp, status='ACTIVE', attempts=0, detail='',
+          instrument_token=excluded.instrument_token, updated_at=excluded.updated_at`)
+        .run(tradingsymbol, pos.exchange || 'NFO', side, Math.abs(pos.quantity), entryPx, slN, tpN, ruleToken, Date.now(), Date.now());
+      const armedRow: any = db.prepare("SELECT * FROM premium_exit_rules WHERE tradingsymbol=?").get(tradingsymbol);
+      syncPremiumRuleInMemory(armedRow);
+      pushTickerSubscriptions(); // stream the armed contract right away (don't wait for the 10s refresh)
+      console.log(`[premium-exit] ARMED ${tradingsymbol} side=${side} entry=${entryPx} sl=${slN} tp=${tpN} token=${ruleToken ?? 'unresolved (poll only)'}`);
       return res.json({ success: true, rule: { tradingsymbol, side, entry: entryPx, sl: slN, tp: tpN, status: 'ACTIVE' } });
     } catch (e: any) {
       console.error('[premium-exit set]', e);
@@ -692,16 +874,19 @@ setInterval(() => {
     try {
       const { tradingsymbol } = req.body || {};
       if (!tradingsymbol) return res.status(400).json({ success: false, error: 'Missing tradingsymbol' });
+      const prevRow: any = db.prepare("SELECT instrument_token FROM premium_exit_rules WHERE tradingsymbol=?").get(tradingsymbol);
       db.prepare("UPDATE premium_exit_rules SET status='CANCELLED', updated_at=? WHERE tradingsymbol=? AND status='ACTIVE'").run(Date.now(), tradingsymbol);
+      syncPremiumRuleInMemory(null, prevRow?.instrument_token ? Number(prevRow.instrument_token) : null);
       return res.json({ success: true });
     } catch (e: any) { return res.status(500).json({ success: false, error: e?.message || String(e) }); }
   });
 
-  // Watcher: every 3s, batch-fetch LTP for all ACTIVE rules and fire a real exit
-  // when a level is crossed. closePositionBySymbol re-verifies the position live
-  // before placing anything, so a stale rule can never fire an order into a
-  // position that no longer exists (that path resolves to DONE, order-free).
-  const premiumExitBusy = new Set<string>();
+  // FALLBACK watcher: every 3s, batch-fetch LTP over REST for all ACTIVE rules.
+  // The tick path above is the primary trigger (reacts within the tick that
+  // crossed the level — the expiry-day seatbelt); this poll is the net under it
+  // for rules with no resolved token, WS disconnects, or missed ticks. Both
+  // paths funnel into firePremiumExit, whose atomic ACTIVE→TRIGGERED claim
+  // guarantees at most one exit order no matter who sees the cross first.
   setInterval(async () => {
     try {
       const rules: any[] = db.prepare("SELECT * FROM premium_exit_rules WHERE status='ACTIVE'").all() as any[];
@@ -717,31 +902,10 @@ setInterval(() => {
         const ltp = ltpMap && ltpMap[k] && ltpMap[k].last_price;
         if (typeof ltp !== 'number' || ltp <= 0) continue;
         try { db.prepare("UPDATE premium_exit_rules SET last_ltp=?, updated_at=? WHERE tradingsymbol=?").run(ltp, Date.now(), r.tradingsymbol); } catch (e) {}
-        const long = r.side === 'BUY';
-        const hitSl = long ? ltp <= r.sl : ltp >= r.sl;
-        const hitTp = long ? ltp >= r.tp : ltp <= r.tp;
-        if ((!hitSl && !hitTp) || premiumExitBusy.has(r.tradingsymbol)) continue;
-        premiumExitBusy.add(r.tradingsymbol);
-        const reason = hitSl ? `PREMIUM SL @ ${ltp}` : `PREMIUM TARGET @ ${ltp}`;
-        db.prepare("UPDATE premium_exit_rules SET status='TRIGGERED', detail=?, updated_at=? WHERE tradingsymbol=?").run(reason, Date.now(), r.tradingsymbol);
-        console.log(`[premium-exit] ${reason} -> exiting ${r.tradingsymbol}`);
-        try {
-          const result = await closePositionBySymbol(r.tradingsymbol, reason);
-          if (result.ok || result.alreadyClosed) {
-            db.prepare("UPDATE premium_exit_rules SET status='DONE', detail=?, updated_at=? WHERE tradingsymbol=?")
-              .run(reason + (result.alreadyClosed ? ' | position was already closed' : ' | exit placed'), Date.now(), r.tradingsymbol);
-          } else {
-            const attempts = (r.attempts || 0) + 1;
-            db.prepare("UPDATE premium_exit_rules SET status=?, attempts=?, detail=?, updated_at=? WHERE tradingsymbol=?")
-              .run(attempts >= 3 ? 'ERROR' : 'ACTIVE', attempts, reason + ' | exit FAILED: ' + (result.error || 'rejected'), Date.now(), r.tradingsymbol);
-            console.error(`[premium-exit] exit failed for ${r.tradingsymbol} (attempt ${attempts}):`, result.error);
-          }
-        } catch (e: any) {
-          db.prepare("UPDATE premium_exit_rules SET status='ACTIVE', attempts=attempts+1, detail=?, updated_at=? WHERE tradingsymbol=?")
-            .run(reason + ' | exit threw: ' + (e?.message || e), Date.now(), r.tradingsymbol);
-        } finally {
-          premiumExitBusy.delete(r.tradingsymbol);
-        }
+        const hit = evalPremiumRule(r, ltp);
+        if (!hit) continue;
+        const reason = `PREMIUM ${hit} @ ${ltp} (poll)`;
+        await firePremiumExit(r.tradingsymbol, reason);
       }
     } catch (e) { /* the watcher must never crash the server */ }
   }, 3000);
@@ -753,7 +917,11 @@ setInterval(() => {
       const result = await closePositionBySymbol(tradingsymbol, reason || 'MANUAL');
       // A manual exit disarms any premium SL/TP rule for the symbol.
       if (result.ok || result.alreadyClosed) {
-        try { db.prepare("UPDATE premium_exit_rules SET status='CANCELLED', updated_at=? WHERE tradingsymbol=? AND status='ACTIVE'").run(Date.now(), tradingsymbol); } catch (e) {}
+        try {
+          const prevRow: any = db.prepare("SELECT instrument_token FROM premium_exit_rules WHERE tradingsymbol=?").get(tradingsymbol);
+          db.prepare("UPDATE premium_exit_rules SET status='CANCELLED', updated_at=? WHERE tradingsymbol=? AND status='ACTIVE'").run(Date.now(), tradingsymbol);
+          syncPremiumRuleInMemory(null, prevRow?.instrument_token ? Number(prevRow.instrument_token) : null);
+        } catch (e) {}
       }
       if (result.ok) return res.json({ success: true, orderId: result.orderId });
       return res.json({ success: false, error: result.error, alreadyClosed: !!result.alreadyClosed });
@@ -1233,13 +1401,29 @@ setInterval(() => {
     const symbol = req.query.symbol as string || 'NIFTY 50';
     const spotParam = req.query.spot as string;
     const expiryParam = req.query.expiry as string;
+    // withAnalytics=1 folds the chain analytics (PCR, max pain, zones…) into the
+    // same response — lets the OI Data page serve any underlying with ONE query.
+    const withAnalytics = req.query.withAnalytics === '1';
+    const isSensex = symbol === 'SENSEX' || symbol === 'BSE:SENSEX';
+
+    // Any SENSEX request keeps the server-side SENSEX loop alive for 2 minutes:
+    // refreshData refreshes the SENSEX chain cache every 10s and streams its
+    // option tokens while this window is open, then drops them when idle.
+    if (isSensex) sensexActiveUntil = Date.now() + 2 * 60 * 1000;
+
+    // SENSEX fast-path: the ticket polls this endpoint every 1.5s for the live
+    // premium — serving the 10s server cache instead of a fresh Kite quote batch
+    // per hit is what keeps that poll inside rate limits (mirrors NIFTY's path).
+    if (isSensex && !expiryParam && !spotParam && latestSensexChainData && (Date.now() - latestSensexChainAt < 30 * 1000)) {
+      return res.json(withAnalytics ? { ...latestSensexChainData, analytics: latestSensexAnalytics } : latestSensexChainData);
+    }
 
     if (symbol !== 'NIFTY 50' || expiryParam || !latestChainData) {
       const forcedSpot = spotParam ? parseFloat(spotParam) : undefined;
       let spotSymbol = symbol;
       if (symbol === "NIFTY BANK" || symbol === "BANKNIFTY") {
         spotSymbol = "NSE:NIFTY BANK";
-      } else if (symbol === "SENSEX" || symbol === "BSE:SENSEX") {
+      } else if (isSensex) {
         spotSymbol = "BSE:SENSEX";
       } else if (symbol === "BANKEX" || symbol === "BSE:BANKEX") {
         spotSymbol = "BSE:BANKEX";
@@ -1248,14 +1432,34 @@ setInterval(() => {
       }
       try {
         const chain = await getLiveOptionChain(spotSymbol, forcedSpot, expiryParam);
-        return res.json(chain);
+        // Seed the SENSEX cache from a default-shaped request so the very next
+        // hit (e.g. the ticket's 1.5s poll) is already served from cache.
+        if (isSensex && !expiryParam && !spotParam && chain && !chain.isMock) {
+          latestSensexChainData = chain;
+          latestSensexAnalytics = computeAnalytics(chain);
+          latestSensexChainAt = Date.now();
+        }
+        return res.json(withAnalytics ? { ...chain, analytics: computeAnalytics(chain) } : chain);
       } catch (e) {
         console.error(`Error fetching dynamic option chain for ${symbol}:`, e);
         return res.status(500).json({ error: "Failed to generate option chain" });
       }
     }
 
-    res.json(latestChainData);
+    res.json(withAnalytics ? { ...latestChainData, analytics: latestAnalytics } : latestChainData);
+  });
+
+  // Index instrument token for the chart switcher (e.g. ?symbol=SENSEX → BSE
+  // index token from Zerodha's instrument dump — never hardcoded).
+  app.get('/api/index-token', async (req, res) => {
+    try {
+      const symbol = String(req.query.symbol || '').toUpperCase();
+      if (symbol === 'NIFTY 50' || symbol === 'NIFTY') return res.json({ symbol, token: 256265 });
+      const token = await getBseIndexToken(symbol);
+      return res.json({ symbol, token });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || String(e) });
+    }
   });
 
   // Overnight Gap Scorecard: direction prediction + strike advisor + accuracy

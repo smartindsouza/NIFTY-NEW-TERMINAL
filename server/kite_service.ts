@@ -90,7 +90,7 @@ export async function searchInstruments(query: string) {
 
     // Filter instruments
     const results = allInstrumentsCache.filter((i: any) => {
-      if (i.exchange !== 'NSE' && i.exchange !== 'NFO' && i.exchange !== 'BSE') return false;
+      if (i.exchange !== 'NSE' && i.exchange !== 'NFO' && i.exchange !== 'BSE' && i.exchange !== 'BFO') return false;
       const ts = i.tradingsymbol?.toLowerCase() || '';
       const name = i.name?.toLowerCase() || '';
       return ts.includes(q) || name.includes(q);
@@ -169,6 +169,59 @@ export async function getIndexFuturesTokens(name: string = 'NIFTY'): Promise<{ t
 }
 
 let cachedSimulatedChain: any = null;
+
+// BSE index tokens (SENSEX/BANKEX) resolved from the BSE instrument dump — the
+// full-market dump used by resolveIndexToken only loads after a symbol search,
+// so the chart switcher needs its own reliable, cached source. 24h cache like
+// every other instrument file here.
+let bseIndicesCache: Record<string, number> | null = null;
+let lastBseIndicesFetch = 0;
+export async function getBseIndexToken(name: string): Promise<number | null> {
+  const key = String(name || '').toUpperCase().replace('BSE:', '').trim();
+  if (!key) return null;
+  const now = Date.now();
+  if (!bseIndicesCache || (now - lastBseIndicesFetch > 24 * 60 * 60 * 1000)) {
+    const kc = getKiteClient();
+    // @ts-ignore
+    if (!kc || !kc.access_token) return bseIndicesCache ? (bseIndicesCache[key] ?? null) : null;
+    const dump = await kc.getInstruments('BSE');
+    const next: Record<string, number> = {};
+    for (const i of dump || []) {
+      if (String(i.segment || '').toUpperCase().includes('INDICES')) {
+        next[String(i.tradingsymbol).toUpperCase()] = Number(i.instrument_token);
+      }
+    }
+    bseIndicesCache = next;
+    lastBseIndicesFetch = now;
+  }
+  return bseIndicesCache[key] ?? null;
+}
+
+// Instrument token for a specific option contract, from the same cached NFO/BFO
+// files the chain uses. The premium-exit tick engine stores this at arm time so
+// the ticker can stream that contract directly. Returns null when unresolvable —
+// callers must keep working without it (the 3s poll remains the fallback).
+export async function getOptionToken(exchange: string, tradingsymbol: string): Promise<number | null> {
+  try {
+    const kc = getKiteClient();
+    // @ts-ignore
+    if (!kc || !kc.access_token) return null;
+    const isBfo = String(exchange || '').toUpperCase() === 'BFO';
+    const now = Date.now();
+    if (isBfo) {
+      if (!bfoInstrumentsCache || (now - lastBfoInstrumentsFetch > 24 * 60 * 60 * 1000)) {
+        bfoInstrumentsCache = await kc.getInstruments('BFO');
+        lastBfoInstrumentsFetch = now;
+      }
+    } else if (!nfoInstrumentsCache || (now - lastInstrumentsFetch > 24 * 60 * 60 * 1000)) {
+      nfoInstrumentsCache = await kc.getInstruments('NFO');
+      lastInstrumentsFetch = now;
+    }
+    const pool = (isBfo ? bfoInstrumentsCache : nfoInstrumentsCache) || [];
+    const hit = pool.find((i: any) => i.tradingsymbol === tradingsymbol);
+    return hit ? Number(hit.instrument_token) : null;
+  } catch (e) { return null; }
+}
 
 // Best-effort index instrument token from the full dump (e.g. BSE:SENSEX).
 // Returns null when the dump isn't loaded yet — callers must treat it as optional.
@@ -403,7 +456,7 @@ export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot
         ceData, 
         peData, 
         underlyingExchange: optExchange,
-        spotToken: resolveIndexToken(spotSymbol),
+        spotToken: isBse ? await getBseIndexToken(cleanSymbol) : resolveIndexToken(spotSymbol),
         expiryDate: targetExpiry,
         expiryDays: Math.max(1, Math.ceil((new Date(targetExpiry).getTime() - Date.now()) / (1000 * 60 * 60 * 24))),
         expiries
