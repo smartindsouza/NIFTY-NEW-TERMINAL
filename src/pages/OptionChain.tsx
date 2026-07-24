@@ -12,6 +12,16 @@ import { addWsMessageListener } from '../hooks/useWebSocket';
 
 export function OptionChain() {
   const [selectedExpiry, setSelectedExpiry] = useState<string>('latest');
+  // Shares the chart's persisted underlying so both pages stay on the same index.
+  const [underlying, setUnderlying] = useState<'NIFTY' | 'SENSEX'>(() => {
+    try { return localStorage.getItem('chartUnderlying') === 'SENSEX' ? 'SENSEX' : 'NIFTY'; } catch (e) {}
+    return 'NIFTY';
+  });
+  const switchUnderlying = (u: 'NIFTY' | 'SENSEX') => {
+    setUnderlying(u);
+    setSelectedExpiry('latest'); // expiry lists differ per underlying
+    try { localStorage.setItem('chartUnderlying', u); } catch (e) {}
+  };
   const [liveTicks, setLiveTicks] = useState<Record<number, { ltp: number; oi?: number; volume?: number }>>({});
 
   useEffect(() => {
@@ -29,26 +39,26 @@ export function OptionChain() {
     };
   }, []);
 
+  // One query serves both underlyings: withAnalytics=1 folds the analytics
+  // (PCR, max pain, zones, bias) into the chain response server-side, computed
+  // on whichever chain was requested — the old separate /api/analytics endpoint
+  // is NIFTY-only.
   const { data: chain, isLoading: isChainLoading } = useQuery({
-    queryKey: ['option-chain', selectedExpiry],
+    queryKey: ['option-chain', underlying, selectedExpiry],
     queryFn: async () => {
-      const url = selectedExpiry === 'latest' ? '/api/option-chain' : `/api/option-chain?expiry=${selectedExpiry}`;
-      const res = await axios.get(url);
+      const params = new URLSearchParams();
+      if (underlying === 'SENSEX') params.set('symbol', 'SENSEX');
+      if (selectedExpiry !== 'latest') params.set('expiry', selectedExpiry);
+      params.set('withAnalytics', '1');
+      const res = await axios.get(`/api/option-chain?${params.toString()}`);
       return res.data;
     },
     refetchInterval: 5000
   });
 
-  const { data: analytics, isLoading: isAnalyticsLoading } = useQuery({
-    queryKey: ['analytics'],
-    queryFn: async () => {
-      const res = await axios.get('/api/analytics');
-      return res.data;
-    },
-    refetchInterval: 5000
-  });
+  const analytics = chain?.analytics;
 
-  if (isChainLoading || isAnalyticsLoading || !chain || !analytics) {
+  if (isChainLoading || !chain || !analytics) {
     return (
       <div className="p-4 md:p-8 space-y-6">
         <Skeleton className="h-12 w-64 bg-card/50 backdrop-blur-md rounded-xl" />
@@ -92,8 +102,12 @@ export function OptionChain() {
              <span className="text-foreground font-mono bg-card/80 backdrop-blur-md px-2 py-0.5 rounded-lg border border-0 whitespace-nowrap">Expiry: {formattedExpiry}</span>
           </p>
         </div>
-        {/* Row 2 (mobile): expiry dropdown + Min/Max */}
+        {/* Row 2 (mobile): underlying + expiry dropdown + Min/Max */}
         <div className="flex items-center gap-2 md:gap-4 flex-wrap">
+          <div className="flex gap-1 bg-card/80 backdrop-blur-md border border-0 rounded-lg p-1 shrink-0">
+            <button onClick={() => switchUnderlying('NIFTY')} className={`px-3 md:px-4 py-1 text-xs font-mono font-bold rounded-md transition ${underlying === 'NIFTY' ? 'bg-primary/20 text-primary border border-primary/30' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'}`}>NIFTY 50</button>
+            <button onClick={() => switchUnderlying('SENSEX')} className={`px-3 md:px-4 py-1 text-xs font-mono font-bold rounded-md transition ${underlying === 'SENSEX' ? 'bg-primary/20 text-primary border border-primary/30' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'}`}>SENSEX</button>
+          </div>
           <Select value={selectedExpiry} onValueChange={(val) => setSelectedExpiry(val)}>
             <SelectTrigger className="w-[150px] bg-card border-0 text-xs h-8 rounded-lg text-foreground">
               <SelectValue placeholder="Expiry" />
