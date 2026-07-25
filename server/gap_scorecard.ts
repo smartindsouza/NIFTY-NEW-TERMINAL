@@ -193,14 +193,28 @@ export async function runSnapshot(db: AnyDb, opts: { dryRun?: boolean } = {}): P
 
     // --- 5. Last-hour momentum 14:15 → 15:15 (weight 1)
     try {
-      const at = (hh: number, mm: number) => todayCandles.find((c: any) => {
-        const s = String(c.date);
-        return s.includes(`${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`);
-      });
-      const c1400 = at(14, 0);  // closes at 14:15
-      const c1500 = at(15, 0);  // closes at 15:15
-      if (c1400 && c1500 && c1400.close > 0) {
-        const pct = ((c1500.close - c1400.close) / c1400.close) * 100;
+      // Candle timestamps arrive as Date objects; String(date) renders in the
+      // SERVER's timezone (UTC on Railway), so substring-matching IST wall-clock
+      // times never hit — this factor was NA on every snapshot. Convert to IST
+      // explicitly and compare HH:mm exactly (also kills the false match where
+      // "T09:15:00" contains "15:00").
+      const istHM = (d: any) => {
+        const x = new Date(new Date(d).getTime() + IST_MS);
+        return `${String(x.getUTCHours()).padStart(2, '0')}:${String(x.getUTCMinutes()).padStart(2, '0')}`;
+      };
+      const at = (hm: string) => todayCandles.find((c: any) => istHM(c.date) === hm);
+      const c1400 = at('14:00');  // closes at 14:15
+      const c1500 = at('15:00');  // closes at 15:15
+      // The 15:00 candle completes at 15:15:00 — the very second the snapshot
+      // cron fires — so Kite may not have published it yet. The live quote
+      // fetched moments ago IS the 15:15 price; fall back to it.
+      let endClose: number | null = (c1500 && c1500.close > 0) ? c1500.close : null;
+      if (endClose === null && spot && spot > 0) {
+        endClose = spot;
+        dataGaps.push('lastHour: 15:00 candle not yet published — used live spot as the 15:15 endpoint');
+      }
+      if (c1400 && c1400.close > 0 && endClose !== null) {
+        const pct = ((endClose - c1400.close) / c1400.close) * 100;
         signals.lastHour = sig(+pct.toFixed(3), pct > GAP_CONFIG.lastHourPct ? 1 : pct < -GAP_CONFIG.lastHourPct ? -1 : 0);
       } else if (!staleData) dataGaps.push('lastHour: 14:00/15:00 candles missing');
     } catch (e: any) { dataGaps.push('lastHour: ' + (e?.message || e)); }
@@ -210,9 +224,11 @@ export async function runSnapshot(db: AnyDb, opts: { dryRun?: boolean } = {}): P
       const futs = await getIndexFuturesTokens('NIFTY');
       const cur = (futs || []).slice().sort((a, b) => a.expiry.localeCompare(b.expiry))[0];
       if (cur && spot) {
-        // Quote by instrument token — getIndexFuturesTokens returns {token, expiry}.
-        const lq = await kc.getLTP([String(cur.token)]).catch(() => null);
-        const f: any = lq ? Object.values(lq)[0] : null;
+        // Kite's quote/LTP API takes EXCHANGE:TRADINGSYMBOL keys — a bare
+        // numeric token is silently dropped, which is why this factor was NA on
+        // every snapshot (the response matched nothing).
+        const lq = await kc.getLTP([`NFO:${cur.tradingsymbol}`]).catch(() => null);
+        const f: any = lq ? lq[`NFO:${cur.tradingsymbol}`] : null;
         const futLtp: number | null = (f && f.last_price > 0) ? f.last_price : null;
         if (futLtp && futLtp > 0) {
           const basis = +(futLtp - spot).toFixed(2);

@@ -145,7 +145,7 @@ export function clearInstrumentsCache() {
 // borrow volume from the actual futures contract. Returning the two nearest expiries lets
 // the caller pick the MOST-ACTIVE one, which matters near expiry when volume rolls to the
 // next month. Reuses the shared NFO instruments cache. Nearest expiry first.
-export async function getIndexFuturesTokens(name: string = 'NIFTY'): Promise<{ token: number; expiry: string }[]> {
+export async function getIndexFuturesTokens(name: string = 'NIFTY'): Promise<{ token: number; expiry: string; tradingsymbol: string }[]> {
   const kc = getKiteClient();
   if (!kc || !(kc as any).access_token) return [];
   const now = Date.now();
@@ -157,10 +157,10 @@ export async function getIndexFuturesTokens(name: string = 'NIFTY'): Promise<{ t
   const today = new Date().toISOString().split('T')[0];
   const futs = (nfoInstrumentsCache || [])
     .filter((i: any) => i.name === name && i.instrument_type === 'FUT' && toDateStr(i.expiry) >= today)
-    .map((i: any) => ({ token: Number(i.instrument_token), expiry: toDateStr(i.expiry) }))
+    .map((i: any) => ({ token: Number(i.instrument_token), expiry: toDateStr(i.expiry), tradingsymbol: String(i.tradingsymbol) }))
     .sort((a: { expiry: string }, b: { expiry: string }) => a.expiry.localeCompare(b.expiry));
   const seen = new Set<string>();
-  const out: { token: number; expiry: string }[] = [];
+  const out: { token: number; expiry: string; tradingsymbol: string }[] = [];
   for (const f of futs) {
     if (!seen.has(f.expiry)) { seen.add(f.expiry); out.push(f); }
     if (out.length >= 2) break;
