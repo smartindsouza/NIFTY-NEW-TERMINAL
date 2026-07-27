@@ -18,6 +18,7 @@ import { getGammaBlast } from './server/gamma_blast';
 import { getPremiumPulse, getPremiumPulseBias } from './server/premium_pulse';
 import { getFiiData, getCashFiiDii } from './server/fii_service';
 import { registerGapScorecard, toISTString } from './server/gap_scorecard';
+import { registerCalendar, isNseHoliday as calIsNseHoliday, holidayName } from './server/calendar_service';
 import { GAP_CONFIG } from './server/config/gapScorecard';
 import { evaluateQuantSignals } from './server/quant_engine';
 import { generateGamePlan } from './server/game_plan_service';
@@ -1464,6 +1465,10 @@ setInterval(() => {
 
   // Overnight Gap Scorecard: direction prediction + strike advisor + accuracy
   // tracking (tables, endpoints and IST crons live in server/gap_scorecard.ts).
+  // Official NSE trading-holiday calendar (auto-refreshed daily) — feeds the
+  // H-levels prompt, the journal guard and the gap-scorecard crons.
+  registerCalendar(app, db);
+
   registerGapScorecard(app, db);
 
   // Gap Risk Gauge: pre-close estimate of EXPECTED OVERNIGHT MAGNITUDE (not direction).
@@ -1810,7 +1815,7 @@ setInterval(() => {
       // Never journal non-trading days: weekends + listed NSE holidays.
       const wd = new Date(d + 'T00:00:00Z').getUTCDay();
       if (wd === 0 || wd === 6) return res.json({ ok: false, skipped: true, error: 'weekend — market closed, not journaled' });
-      if (GAP_CONFIG.nseHolidays.includes(d)) return res.json({ ok: false, skipped: true, error: 'NSE holiday — not journaled' });
+      if (calIsNseHoliday(d)) return res.json({ ok: false, skipped: true, error: `${holidayName(d) || 'NSE holiday'} — market closed, not journaled` });
       const arr = Array.isArray(levels) ? levels.map(Number).filter((v: number) => isFinite(v)) : [];
       if (!arr.length) return res.status(400).json({ ok: false, error: 'levels must be a non-empty number array' });
       db.prepare(`INSERT INTO h_levels (date, levels, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?)

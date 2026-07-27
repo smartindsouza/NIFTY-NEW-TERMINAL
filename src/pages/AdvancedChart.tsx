@@ -3222,8 +3222,25 @@ export function AdvancedChart() {
         if (day === 0 || day === 6) return;
         const d = `${x.getUTCFullYear()}-${String(x.getUTCMonth() + 1).padStart(2, '0')}-${String(x.getUTCDate()).padStart(2, '0')}`;
         if (localStorage.getItem('hLevelsPromptedFor') === d) return;
-        localStorage.setItem('hLevelsPromptedFor', d);
-        setIsEditingHLevels(true);
+        // Ask the server whether today is actually a trading day — it holds the
+        // official NSE holiday list, which the phone does not. Only prompt on a
+        // real trading day; on a holiday stay silent (the journal would refuse
+        // the write anyway).
+        fetch('/api/calendar/trading-day')
+          .then(r => r.json())
+          .then(t => {
+            if (t && t.isTradingDay === false) return;
+            if (localStorage.getItem('hLevelsPromptedFor') === d) return;
+            localStorage.setItem('hLevelsPromptedFor', d);
+            setIsEditingHLevels(true);
+          })
+          .catch(() => {
+            // Server unreachable: fall back to the weekday check already done
+            // above rather than skipping the ritual entirely.
+            if (localStorage.getItem('hLevelsPromptedFor') === d) return;
+            localStorage.setItem('hLevelsPromptedFor', d);
+            setIsEditingHLevels(true);
+          });
       } catch (e) {}
     };
     check();

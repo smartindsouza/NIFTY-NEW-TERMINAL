@@ -10,6 +10,7 @@ import express from 'express';
 import { getKiteClient, getLiveOptionChain, getIndexFuturesTokens } from './kite_service';
 import { impliedVol, bsDelta } from './options_math';
 import { GAP_CONFIG } from './config/gapScorecard';
+import { isNseHoliday as calIsNseHoliday } from './calendar_service';
 import { registerGapBacktest } from './gap_backtest';
 import { registerSweepReclaim } from './sweep_reclaim';
 import { registerOrb } from './orb_backtest';
@@ -32,7 +33,9 @@ export const toISTString = (epochMs: number) => {
   return `${x.getUTCFullYear()}-${p(x.getUTCMonth() + 1)}-${p(x.getUTCDate())} ${p(x.getUTCHours())}:${p(x.getUTCMinutes())}:${p(x.getUTCSeconds())}`;
 };
 const isWeekendIST = (d?: Date) => { const day = (d || istNow()).getUTCDay(); return day === 0 || day === 6; };
-const isNseHoliday = (dateStr: string) => GAP_CONFIG.nseHolidays.includes(dateStr);
+// Official NSE list (auto-refreshed); falls back to the static config list
+// inside calendar_service if NSE is unreachable on a cold start.
+const isNseHoliday = (dateStr: string) => calIsNseHoliday(dateStr);
 const addDaysIST = (dateStr: string, days: number) => {
   const [y, m, dd] = dateStr.split('-').map(Number);
   const t = Date.UTC(y, m - 1, dd) + days * 86400000;
