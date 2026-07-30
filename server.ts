@@ -1266,10 +1266,15 @@ setInterval(() => {
       }
 
       // --- US index futures via Yahoo (free, may be blocked from some IPs) ---
+      // Futures trade nearly 24h and are what matters for tomorrow's Indian gap;
+      // the CASH indices are frozen at last night's US close. Both are listed so
+      // the two can never be mistaken for each other (they legitimately disagree
+      // overnight: the index shows yesterday's move, futures show right now).
       const US = [
         { key: 'SPX', label: 'S&P 500 Fut', sym: 'ES=F' },
         { key: 'NDX', label: 'Nasdaq Fut', sym: 'NQ=F' },
         { key: 'DJI', label: 'Dow Fut', sym: 'YM=F' },
+        { key: 'DJI_IDX', label: 'Dow Jones (index)', sym: '^DJI' },
       ];
       await Promise.all(US.map(async (u) => {
         try {
