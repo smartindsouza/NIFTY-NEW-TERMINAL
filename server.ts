@@ -1085,7 +1085,11 @@ setInterval(() => {
     let lastErr = '';
     for (const url of services) {
       try {
-        const r = await axios.get(url, { timeout: 5000 });
+        // 12s, not 5s: the Railway(US) -> Bangalore round trip is ~250ms and
+        // congests in bursts. A 5s ceiling reported a merely SLOW proxy as DEAD
+        // (the logged ECONNABORTED was our own client aborting, and the proxy's
+        // own log showed zero errors during those windows).
+        const r = await axios.get(url, { timeout: 12000 });
         const egressIp = String(r.data || '').trim();
         if (egressIp) {
           const alive = !!expectedIp && egressIp === expectedIp;
@@ -1266,16 +1270,21 @@ setInterval(() => {
       }
 
       // --- US index futures via Yahoo (free, may be blocked from some IPs) ---
+      // Futures trade nearly 24h and are what matters for tomorrow's Indian gap;
+      // the CASH indices are frozen at last night's US close. Both are listed so
+      // the two can never be mistaken for each other (they legitimately disagree
+      // overnight: the index shows yesterday's move, futures show right now).
       const US = [
         { key: 'SPX', label: 'S&P 500 Fut', sym: 'ES=F' },
         { key: 'NDX', label: 'Nasdaq Fut', sym: 'NQ=F' },
         { key: 'DJI', label: 'Dow Fut', sym: 'YM=F' },
+        { key: 'DJI_IDX', label: 'Dow Jones (index)', sym: '^DJI' },
       ];
       await Promise.all(US.map(async (u) => {
         try {
           const r = await axios.get(
             `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(u.sym)}?interval=5m&range=1d`,
-            { timeout: 4000, headers: { 'User-Agent': 'Mozilla/5.0' } }
+            { timeout: 8000, headers: { 'User-Agent': 'Mozilla/5.0' } }
           );
           const result = r.data?.chart?.result?.[0];
           const meta = result?.meta;
@@ -1313,7 +1322,7 @@ setInterval(() => {
         try {
           const r = await axios.get(
             `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(u.sym)}?interval=5m&range=1d`,
-            { timeout: 4000, headers: { 'User-Agent': 'Mozilla/5.0' } }
+            { timeout: 8000, headers: { 'User-Agent': 'Mozilla/5.0' } }
           );
           const result = r.data?.chart?.result?.[0];
           const meta = result?.meta;
@@ -1362,7 +1371,7 @@ setInterval(() => {
         try {
           const r = await axios.get(
             `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(g.sym)}?interval=5m&range=1d`,
-            { timeout: 4000, headers: { 'User-Agent': 'Mozilla/5.0' } }
+            { timeout: 8000, headers: { 'User-Agent': 'Mozilla/5.0' } }
           );
           const result = r.data?.chart?.result?.[0];
           const meta = result?.meta;

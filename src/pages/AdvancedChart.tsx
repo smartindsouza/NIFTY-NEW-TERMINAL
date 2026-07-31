@@ -2639,6 +2639,8 @@ export function AdvancedChart() {
   const rsiClosesRef = useRef<number[]>([]);
   const volumeSeriesRef = useRef<any>(null);
   const lastCandleTimeRef = useRef<number | null>(null);
+  // Cooldown so a persistent clock desync can't trigger a reseed storm.
+  const lastDesyncReseedRef = useRef<number>(0);
   const lastCandleDataRef = useRef<any>(null);
   // Candles that COMPLETED after the initial fetch. The fetched history is frozen
   // (tick-driven chart, no refetch), so without this archive every candle that
@@ -4887,7 +4889,14 @@ export function AdvancedChart() {
         if (mainSeriesRef.current && msg.candle) {
           const tfMin = parseInt(timeframe) || 5;
           // Synchronize time calculations using the high-precision server/exchange clock
-          const tickTime = msg.timestamp || (Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current);
+          // Clamp to "now" (server-corrected) plus a 2s skew allowance. A tick
+          // stamped in the future would roll the chart onto a phantom next bar;
+          // the 15s reconciliation below would then see the server as "behind"
+          // and silently stop correcting — the cause of a frozen candle with a
+          // phantom wick and no volume that only a manual refresh cleared.
+          const nowServerSec = Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current;
+          const rawTickTime = msg.timestamp || nowServerSec;
+          const tickTime = Math.min(rawTickTime, nowServerSec + 2);
           
           // Ignore incoming ticks when the market is closed (with 2-minute settlement buffer)
           const ist = getIstDateTime(tickTime);
@@ -5037,7 +5046,20 @@ export function AdvancedChart() {
            const updateTime = getMarketAlignedCandleStart(toUnixSeconds(latestCandle.time), tfMin);
 
            if (lastCandleTimeRef.current !== null && updateTime < lastCandleTimeRef.current) {
-             return; // Older than tick
+             // The chart's candle clock is AHEAD of the server's. That means we
+             // rolled onto a bar that doesn't exist yet (bad tick timestamp, or a
+             // clock/offset drift). Previously this returned every cycle, which
+             // permanently switched off the 15s correction: volume stopped
+             // updating and any wick invented by a stray tick stayed until the
+             // user manually refreshed. Treat it as a desync and reseed instead,
+             // rate-limited so it can never loop.
+             const sinceLastReseed = Date.now() - lastDesyncReseedRef.current;
+             if (sinceLastReseed > 30000) {
+               lastDesyncReseedRef.current = Date.now();
+               console.warn('[chart] clock desync — chart bar ahead of server; reseeding history');
+               try { refetchTa(); } catch (e) {}
+             }
+             return;
            }
 
            // Self-heal: if the server is 2+ bars ahead of the chart's last drawn bar
