@@ -8,7 +8,7 @@ import cron from 'node-cron';
 import Database from 'better-sqlite3';
 import { generateSimulatedChain } from './server/simulate_data';
 import { computeAnalytics } from './server/analytics_engine';
-import { getTechnicalAnalysis, kiteDiagnostics } from './server/technical_analysis';
+import { getTechnicalAnalysis, kiteDiagnostics, taFreshness } from './server/technical_analysis';
 import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData, getIndexFuturesTokens, getBseIndexToken, getOptionToken } from './server/kite_service';
 import { getHistoricalAnalytics } from './server/analytics_service';
 import { runRsiBacktest } from './server/rsi_backtest';
@@ -1039,6 +1039,17 @@ setInterval(() => {
   });
 
   // Example API routes
+  // Why are the newest candles missing? One tap, small answer — see taFreshness.
+  app.get('/api/ta/freshness', async (req, res) => {
+    try {
+      const tf = parseInt(String(req.query.timeframe || '5'), 10) || 5;
+      const token = String(req.query.token || '256265');
+      res.json(await taFreshness(tf, token));
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || String(e) });
+    }
+  });
+
   app.get('/api/healthz', (req, res) => {
     res.json({ status: "ok" });
   });

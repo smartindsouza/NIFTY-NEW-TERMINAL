@@ -258,6 +258,78 @@ async function throttleRequest<T>(fn: () => Promise<T>, endpointName: string = "
 }
 
 
+/**
+ * Candle-freshness diagnostic. Answers ONE question in a single tap: are the newest
+ * candles missing because Kite is not giving them to us, or because our own cache is
+ * serving an old copy? It reports both sides for the same timeframe:
+ *   servedTail  — the last candles the chart would receive right now (from cache if warm)
+ *   kiteTail    — the last candles a FRESH, cache-bypassing call to Kite returns
+ * If kiteTail is current and servedTail is behind, the fault is ours. If both are behind,
+ * Kite (or the proxy carrying the request) is not returning the recent candles.
+ */
+export async function taFreshness(timeframeMin: number, instrument_token: string) {
+  const istStr = (ms: number) => new Date(ms + 5.5 * 3600000).toISOString().replace('T', ' ').slice(0, 19) + ' IST';
+  const tail = (arr: any[], n = 3) => (arr || []).slice(-n).map((c: any) => {
+    const t = new Date(c.time ? (typeof c.time === 'number' ? c.time * 1000 : c.time) : c.date).getTime();
+    return { at: istStr(t), ageMin: +(((Date.now() - t) / 60000)).toFixed(1), close: c.close, volume: c.volume ?? null };
+  });
+
+  const cacheKey = `${instrument_token}_${timeframeMin}`;
+  const cached = cacheMap.get(cacheKey);
+  const out: any = {
+    serverNow: istStr(Date.now()),
+    timeframeMin, instrument_token,
+    cache: cached
+      ? {
+          present: true,
+          ageSec: Math.round((Date.now() - cached.lastUpdate) / 1000),
+          fullFetchAgeSec: Math.round((Date.now() - (cached.lastFullFetch ?? cached.lastUpdate)) / 1000),
+          candles: cached.data?.candles?.length ?? 0,
+          servedTail: tail(cached.data?.candles || []),
+        }
+      : { present: false },
+  };
+
+  try {
+    const kc = getKiteClient();
+    // @ts-ignore — same session check the rest of the module uses
+    if (!kc || !kc.access_token) throw new Error('no Kite session (log in to Zerodha)');
+    const interval = timeframeMin === 1 ? 'minute'
+      : timeframeMin === 3 ? '3minute'
+      : timeframeMin === 5 ? '5minute'
+      : timeframeMin === 10 ? '10minute'
+      : timeframeMin >= 1440 ? 'day' : '15minute';
+    const istString = (d: Date) => {
+      const x = new Date(d.getTime() + 5.5 * 3600000);
+      return x.toISOString().slice(0, 10) + ' ' + x.toISOString().slice(11, 19);
+    };
+    const t0 = Date.now();
+    // Deliberately a SMALL window (2 days): this must not be slowed by the 100-day
+    // pull the chart uses, or the timing below tells us nothing about freshness.
+    const raw = await kc.getHistoricalData(
+      parseInt(instrument_token, 10), interval as any,
+      istString(new Date(Date.now() - 2 * 86400000)), istString(new Date()),
+    );
+    out.kite = {
+      ok: true, interval, tookMs: Date.now() - t0,
+      candles: raw?.length ?? 0,
+      kiteTail: tail(raw || []),
+    };
+    const newest = (raw || []).length ? new Date(raw[raw.length - 1].date).getTime() : 0;
+    out.verdict = !newest ? 'Kite returned no candles at all'
+      : (Date.now() - newest) / 60000 > timeframeMin + 3
+        ? 'KITE IS BEHIND — the newest candle it will give us is older than one timeframe'
+        : cached && (cached.data?.candles?.length ?? 0) > 0 &&
+          new Date(cached.data.candles[cached.data.candles.length - 1].time * 1000).getTime() < newest - timeframeMin * 60000
+          ? 'OUR CACHE IS BEHIND — Kite has newer candles than we are serving'
+          : 'both current';
+  } catch (e: any) {
+    out.kite = { ok: false, error: e?.message || String(e) };
+    out.verdict = 'could not reach Kite for a fresh comparison — see kite.error';
+  }
+  return out;
+}
+
 export async function getTechnicalAnalysis(
   spot: number,
   timeframeMin: number = 5,
