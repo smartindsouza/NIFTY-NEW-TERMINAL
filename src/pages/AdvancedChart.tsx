@@ -1251,6 +1251,66 @@ function computeFvgZones(candles: any[]): any[] {
   return live.slice(-FVG_MAX_ZONES);
 }
 
+// Order Blocks — the last opposite-colour candle before a decisive move away.
+// Bullish: a DOWN-close candle whose very next candle CLOSES above its high, with
+// the push from the block's low to that close big enough to count as displacement
+// rather than noise. Bearish is mirrored. The block is the origin candle's full
+// range (high..low), which is the zone price tends to revisit.
+//
+// VALIDITY — the point of this indicator. A block stops extending to the right the
+// moment either happens, whichever comes FIRST:
+//   * a NEW order block forms  -> the old one is superseded and its box ends there;
+//   * a candle CLOSES right through it (below a bullish block, above a bearish one)
+//     -> the block failed and its box ends there.
+// Only the newest surviving block keeps running to the current candle. That is why
+// old boxes on the chart have a hard right edge instead of stretching forever.
+//
+// Lookahead-free: a block needs its confirming candle to have CLOSED, so nothing is
+// ever drawn using information the market had not yet produced.
+const OB_MIN_PTS = 10;
+const OB_MAX_ZONES = 6;
+function computeOrderBlocks(candles: any[]): any[] {
+  if (!candles || candles.length < 3) return [];
+  // Displacement bar scales with recent candle size, so a violent day needs a bigger
+  // push to qualify and a calm day still finds real blocks.
+  const tail = candles.slice(-20);
+  const avgRange = tail.length ? tail.reduce((a: number, c: any) => a + (c.high - c.low), 0) / tail.length : 0;
+  const minDisp = Math.max(OB_MIN_PTS, +(1.2 * avgRange).toFixed(1));
+
+  const found: any[] = [];
+  for (let i = 1; i < candles.length - 1; i++) {
+    const c = candles[i], n = candles[i + 1];
+    if (!c || !n) continue;
+    const bull = c.close < c.open && n.close > c.high && (n.close - c.low) >= minDisp;
+    const bear = c.close > c.open && n.close < c.low && (c.high - n.close) >= minDisp;
+    if (!bull && !bear) continue;
+    // Back-to-back candidates describe one move, not two blocks — keep the first.
+    if (found.length && i - found[found.length - 1].born <= 1) continue;
+    found.push({ type: bull ? 'bull' : 'bear', top: c.high, bottom: c.low, time: c.time, born: i });
+  }
+
+  // Close each block off: superseded by the next block, or broken by a close through it.
+  for (let k = 0; k < found.length; k++) {
+    const z = found[k];
+    const supersededAt = k + 1 < found.length ? found[k + 1].born : Infinity;
+    let endIdx: number | null = null;
+    let endReason = '';
+    for (let m = z.born + 2; m < candles.length; m++) {
+      if (m >= supersededAt) { endIdx = supersededAt; endReason = 'superseded'; break; }
+      const cc = candles[m];
+      if (z.type === 'bull' ? cc.close < z.bottom : cc.close > z.top) { endIdx = m; endReason = 'broken'; break; }
+    }
+    if (endIdx !== null && endIdx < candles.length) {
+      z.endTime = candles[endIdx].time;
+      z.endReason = endReason;
+    } else {
+      z.endTime = null;   // still live — this one keeps running to the current candle
+      z.endReason = 'live';
+    }
+  }
+  return found.slice(-OB_MAX_ZONES);
+}
+
 const toUnixSeconds = (value: any): number => {
   if (typeof value === "number") {
     return value > 1_000_000_000_000 ? Math.floor(value / 1000) : Math.floor(value);
@@ -2713,6 +2773,10 @@ export function AdvancedChart() {
     } catch(e) {}
     return true;
   });
+  // Order Blocks — index chart only, like the FVG zones.
+  const [showOrderBlocks, setShowOrderBlocks] = useState(() => {
+    try { const v = localStorage.getItem('showOrderBlocks'); return v === null ? true : v === 'true'; } catch (e) { return true; }
+  });
   // Fair Value Gaps — drawn like Demand/Supply zones, index chart only.
   const [showFvg, setShowFvg] = useState(() => {
     try { const v = localStorage.getItem('showFvg'); return v === null ? true : v === 'true'; } catch (e) { return true; }
@@ -2852,6 +2916,9 @@ export function AdvancedChart() {
   useEffect(() => {
     try { localStorage.setItem('showFvg', String(showFvg)); } catch (e) {}
   }, [showFvg]);
+  useEffect(() => {
+    try { localStorage.setItem('showOrderBlocks', String(showOrderBlocks)); } catch (e) {}
+  }, [showOrderBlocks]);
 
   useEffect(() => {
     try { localStorage.setItem('levelAlertsOn', String(levelAlertsOn)); } catch(e) {}
@@ -5457,6 +5524,8 @@ export function AdvancedChart() {
   const bbSigRef = useRef<string>(''); // change-signature so we only recompute when the candle moves
   const fvgZonesRef = useRef<any[]>([]);
   const fvgSigRef = useRef<string>('');
+  const obZonesRef = useRef<any[]>([]);
+  const obSigRef = useRef<string>('');
 
   const lastAlertedDivergenceRef = useRef<string | null>(null);
 
@@ -6501,6 +6570,64 @@ export function AdvancedChart() {
                 }
               }
 
+              // Order Blocks — recomputed only when a candle CLOSES, same as the FVG
+              // zones. A finished block is drawn with a hard right edge at the point it
+              // was superseded or broken; only the live one runs to the current candle.
+              if (showOrderBlocks && !isOptionView && mainSeriesRef.current) {
+                const baseC = chartDataRef.current?.candles || [];
+                const arc = liveClosedCandlesRef.current;
+                const lastT = baseC.length ? baseC[baseC.length - 1].time : 0;
+                const closedSince = arc.filter((k: any) => k.time > lastT);
+                const sig = `${timeframe}|${baseC.length}|${closedSince.length}|${closedSince.length ? closedSince[closedSince.length - 1].time : 0}`;
+                if (sig !== obSigRef.current) {
+                  obSigRef.current = sig;
+                  obZonesRef.current = computeOrderBlocks(closedSince.length ? [...baseC, ...closedSince] : baseC);
+                }
+                const liveC = lastCandleDataRef.current;
+                const pctB = Math.min(100, Math.max(1, parseFloat(dsZoneOpacity) || 8)) / 100;
+                for (const z of obZonesRef.current) {
+                  const yTop = mainSeriesRef.current.priceToCoordinate(z.top);
+                  const yBot = mainSeriesRef.current.priceToCoordinate(z.bottom);
+                  if (yTop === null || yBot === null) continue;
+                  const x0 = mainChartRef.current?.timeScale()?.timeToCoordinate(z.time as any);
+                  const zx = (x0 === null || x0 === undefined) ? 0 : Math.max(0, x0);
+                  // A live block can be broken by the candle forming right now — end it at
+                  // the current bar rather than letting it run on a level price has left.
+                  const brokenLive = !z.endTime && liveC &&
+                    (z.type === 'bull' ? liveC.close < z.bottom : liveC.close > z.top);
+                  let zRight = textAlignX;
+                  if (z.endTime || brokenLive) {
+                    const endT = z.endTime || (liveC && liveC.time);
+                    const x1 = endT ? mainChartRef.current?.timeScale()?.timeToCoordinate(endT as any) : null;
+                    if (x1 !== null && x1 !== undefined) zRight = Math.min(textAlignX, x1);
+                  }
+                  const zw = Math.max(0, zRight - zx);
+                  if (zw <= 0) continue;
+                  const rgb = z.type === 'bull' ? '245,158,11' : '139,92,246';
+                  const yA = Math.min(yTop, yBot), h = Math.abs(yBot - yTop);
+                  ctx.fillStyle = `rgba(${rgb},${Math.min(0.30, pctB + 0.03)})`;
+                  ctx.fillRect(zx, yA, zw, h);
+                  ctx.strokeStyle = `rgba(${rgb},0.55)`;
+                  ctx.lineWidth = 1;
+                  ctx.strokeRect(zx, yA, zw, h);
+                  // Hard cap on a finished block, so "this one stopped here" is visible at a
+                  // glance rather than inferred from where the shading happens to end.
+                  if (z.endTime || brokenLive) {
+                    ctx.beginPath();
+                    ctx.strokeStyle = `rgba(${rgb},0.9)`;
+                    ctx.lineWidth = 1.5;
+                    ctx.moveTo(zx + zw, yA);
+                    ctx.lineTo(zx + zw, yA + h);
+                    ctx.stroke();
+                  }
+                  ctx.font = 'bold 9px monospace';
+                  ctx.textAlign = 'left';
+                  ctx.textBaseline = 'middle';
+                  ctx.fillStyle = `rgba(${rgb},0.85)`;
+                  ctx.fillText(z.type === 'bull' ? 'OB▲' : 'OB▼', zx + 6, yA + h / 2);
+                }
+              }
+
               if (showDsZones && !isOptionView && dz && mainSeriesRef.current) {
                 const pct = Math.min(100, Math.max(1, parseFloat(dsZoneOpacity) || 8)) / 100;
                 const drawZone = (z: any, rgb: string, labelColor: string, label: string) => {
@@ -6766,7 +6893,7 @@ export function AdvancedChart() {
     draw();
     
     return () => cancelAnimationFrame(animationFrameId);
-  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth, taInfo, showOpeningRange, showDsZones, dsZoneOpacity, showFvg]);
+  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth, taInfo, showOpeningRange, showDsZones, dsZoneOpacity, showFvg, showOrderBlocks]);
 
   const { data: serverStats } = useQuery({
     queryKey: ["server-diagnostics"],
@@ -7111,6 +7238,19 @@ export function AdvancedChart() {
                         {showOpeningRange && <Check size={14} className="text-emerald-400" />}
                       </div>
                       <span>15m Opening Range (High/Low)</span>
+                    </button>
+                  </div>
+
+                  {/* Order Blocks */}
+                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                    <button
+                      onClick={() => setShowOrderBlocks(!showOrderBlocks)}
+                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
+                    >
+                      <div className="w-4 flex items-center justify-center">
+                        {showOrderBlocks && <Check size={14} className="text-emerald-400" />}
+                      </div>
+                      <span>Order Blocks</span>
                     </button>
                   </div>
 
