@@ -2701,6 +2701,8 @@ export function AdvancedChart() {
   const lastCandleTimeRef = useRef<number | null>(null);
   // Cooldown so a persistent clock desync can't trigger a reseed storm.
   const lastDesyncReseedRef = useRef<number>(0);
+  // Cooldown for the closed-bar audit below, so a reseed can never loop.
+  const lastTailReseedRef = useRef<number>(0);
   const lastCandleDataRef = useRef<any>(null);
   // Candles that COMPLETED after the initial fetch. The fetched history is frozen
   // (tick-driven chart, no refetch), so without this archive every candle that
@@ -5195,6 +5197,43 @@ export function AdvancedChart() {
                time: updateTime,
                value: latestCandle.rsi14,
              });
+           }
+
+           // CLOSED-BAR AUDIT. Everything above can only ever repair the NEWEST bar:
+           // lightweight-charts' update() refuses to touch a bar that is already behind
+           // the last one. So a bar that closed WRONG — ticks missing through a proxy
+           // blip, volume left at zero, a high or low never corrected — stays wrong for
+           // the rest of the session no matter how many times the poll runs. That is
+           // exactly the "the last two candles never update" symptom.
+           //
+           // Fix: compare the server's recent CLOSED bars against the ones we hold and,
+           // when they disagree, reseed the whole series (the only way to rewrite a bar
+           // in place). Rate-limited to once a minute, and self-limiting: after one
+           // reseed our bars ARE the server's, so it stops firing on its own.
+           if (!isCancelled && Array.isArray(data.candles) && data.candles.length >= 4) {
+             const ours = new Map<number, any>();
+             for (const c of (chartDataRef.current?.candles || [])) ours.set(toUnixSeconds(c.time), c);
+             for (const c of liveClosedCandlesRef.current) ours.set(toUnixSeconds(c.time), c);
+             const serverClosed = data.candles.slice(-4, -1); // newest bar is handled above
+             let drift = '';
+             for (const sc of serverClosed) {
+               const t = getMarketAlignedCandleStart(toUnixSeconds(sc.time), tfMin);
+               const oc = ours.get(t);
+               if (!oc) { drift = `bar ${t} missing from the chart`; break; }
+               // Tolerance is deliberately tight but not zero: a bar built from ticks can
+               // sit a point or two off the server's, which is not worth a reseed.
+               const tol = Math.max((sc.close || 0) * 0.0005, 2);
+               if (
+                 Math.abs((oc.close ?? 0) - sc.close) > tol ||
+                 (oc.high ?? 0) < sc.high - tol ||
+                 (oc.low ?? Infinity) > sc.low + tol
+               ) { drift = `bar ${t} differs from the server`; break; }
+             }
+             if (drift && Date.now() - lastTailReseedRef.current > 60000) {
+               lastTailReseedRef.current = Date.now();
+               console.warn(`[chart] closed-bar audit: ${drift} — reseeding history`);
+               try { refetchTa(); } catch (e) {}
+             }
            }
 
            // Keep the live closes buffer aligned with the close we actually drew
