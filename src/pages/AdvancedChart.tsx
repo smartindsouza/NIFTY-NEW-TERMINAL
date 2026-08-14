@@ -4699,6 +4699,10 @@ export function AdvancedChart() {
   // On the traded OPTION's chart only RSI stays on; index overlays (BB, S&R,
   // PDH/PDL, levels, OI bars, opening range, D/S zones, FVG) are hidden there.
   const isOptionView = !!selectedInstrument && (indexToken === null || instrumentToken !== indexToken);
+  // Read inside the chart effect's click handler, which is created once per chart
+  // rebuild — a ref keeps it correct even if the view changes without a rebuild.
+  const isOptionViewRef = useRef(isOptionView);
+  isOptionViewRef.current = isOptionView;
   const { data: taInfo, isLoading: isLoadingTa, isError: isTaError, error: taError, refetch: refetchTa } = useQuery({
     queryKey: ["ta-data-live-chart", timeframe, instrumentToken],
     queryFn: async () => {
@@ -4765,7 +4769,11 @@ export function AdvancedChart() {
     // new query whose data was undefined during fetch, making the OI bars
     // disappear and reappear.
     placeholderData: (prev: any) => prev,
-    refetchInterval: () => document.visibilityState === 'visible' ? 10 * 1000 : false,
+    // OI is an INDEX study and is never drawn on an option chart, so there is no
+    // reason to keep pulling the whole chain every 10s while one is open — that
+    // traffic shares the same proxy the orders use.
+    enabled: !isOptionView,
+    refetchInterval: () => (!isOptionViewRef.current && document.visibilityState === 'visible') ? 10 * 1000 : false,
     staleTime: 30000,
     gcTime: 10 * 60000,
   });
@@ -5896,9 +5904,12 @@ export function AdvancedChart() {
             }
           }
 
-          // Default: Open the option strike selection floating menu
+          // Default: Open the option strike selection floating menu.
+          // NEVER on an option chart: the y-coordinate there is a PREMIUM, so the
+          // menu would offer strikes derived from a premium price — meaningless, and
+          // one careless tap away from an unintended order.
           const price = mainSeries.coordinateToPrice(y);
-          if (price !== null && quickTradeEnabledRef.current) {
+          if (price !== null && quickTradeEnabledRef.current && !isOptionViewRef.current) {
             // Open the menu near the clicked cursor coordinate
             setClickMenu({
               x: param.point.x,
@@ -7424,7 +7435,10 @@ export function AdvancedChart() {
                     </button>
                   </div>
 
-                  {/* OI Bars */}
+                  {/* OI Bars — an INDEX study. The bars were already suppressed on an
+                      option chart, but leaving the switch visible invited turning on
+                      something that could never draw. */}
+                  {!isOptionView && (
                   <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
                     <button
                       onClick={() => setShowOiBars(!showOiBars)}
@@ -7447,6 +7461,7 @@ export function AdvancedChart() {
                       <Settings size={13} />
                     </button>
                   </div>
+                  )}
 
                   {/* RSI */}
                   <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
@@ -7536,6 +7551,7 @@ export function AdvancedChart() {
           </div>
           </div>
           <div className="flex items-center gap-2 flex-1 basis-0 min-w-[52%] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents md:min-w-0 md:basis-auto pr-1">
+          {!isOptionView && (
           <div className="flex items-center justify-center gap-2 h-9 w-9 md:w-auto bg-muted/40 border border-0 rounded-md md:px-3 shrink-0 md:order-2 cursor-pointer" onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled' : 'Quick Trade disabled'); } catch (e) {} }} title="Quick Trade">
              <Zap size={18} className={`md:hidden ${quickTradeEnabled ? 'text-primary' : 'text-muted-foreground'}`} />
              <span className="hidden md:inline text-xs font-medium text-foreground/80">Quick Trade</span>
@@ -7544,6 +7560,7 @@ export function AdvancedChart() {
                <div className="w-7 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after: after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
              </label>
           </div>
+          )}
             <button
               onClick={() => {
                 setTbReloading(true);
