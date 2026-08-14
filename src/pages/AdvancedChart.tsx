@@ -3743,6 +3743,9 @@ export function AdvancedChart() {
   // place SL(-10%)/TARGET(+30%) lines vs the actual entry price, with live % labels.
   const slEntryRef = useRef<number | null>(null);
   const slEntryLineRef = useRef<any>(null);
+  // Lets the chart-building effect re-attach the SL/TP lines the instant it
+  // rebuilds the series, instead of leaving them missing until the 1s poll.
+  const slEnsureRef = useRef<null | (() => void)>(null);
   const tradeInstrumentRef = useRef<any>(null);
   const [tradeTabInstr, setTradeTabInstr] = useState<any>(null);
   const autoOpenedForRef = useRef<string>('');
@@ -4073,6 +4076,25 @@ export function AdvancedChart() {
       const effBull = viewingTrade ? (posNow.side === 'BUY') : slIsBullish;
       slEntryRef.current = viewingTrade ? posNow.entryPrice : null;
 
+      // NOT the traded contract's chart (i.e. NIFTY spot): draw nothing. The armed
+      // rule is PREMIUM-based — its columns are entry/sl/tp and it holds no spot
+      // levels at all — so the branches below fell through to Math.round(spot*1.01)
+      // and spot*0.99 and painted an invented +/-1% band that had NOTHING to do with
+      // the real exit. Two lines that look authoritative and mean nothing are worse
+      // than no lines, so any existing ones are torn down here.
+      if (!viewingTrade) {
+        if (slLinesRef.current.length) {
+          slLinesRef.current.forEach(l => { try { s.removePriceLine(l.instance); } catch (e) {} });
+          slLinesRef.current = [];
+          slSeriesRef.current = null;
+        }
+        if (slEntryLineRef.current) {
+          try { s.removePriceLine(slEntryLineRef.current); } catch (e) {}
+          slEntryLineRef.current = null;
+        }
+        return;
+      }
+
       let upper: number, lower: number;
       // On the traded OPTION's chart, premium-based lines always take priority —
       // an armed rule's levels are NIFTY SPOT values and would land wildly
@@ -4150,9 +4172,11 @@ export function AdvancedChart() {
       if (!viewingTrade) setSlLevels({ upper, lower });
     };
     ensure();
+    slEnsureRef.current = ensure;
     const iv = setInterval(ensure, 1000);
     return () => {
       clearInterval(iv);
+      slEnsureRef.current = null;
       const s = mainSeriesRef.current;
       slLinesRef.current.forEach(l => { try { s && s.removePriceLine(l.instance); } catch {} });
       slLinesRef.current = [];
@@ -4948,6 +4972,18 @@ export function AdvancedChart() {
         }
       }
 
+      // LIVE OPTION PREMIUM. The server broadcasts the traded/armed contract's
+      // ticks as 'optionTick' keyed by instrument TOKEN — they carry no symbol, so
+      // the symbol match below never saw them and an option chart's premium sat
+      // still between the 15s polls. Normalise into the same shape as an index
+      // tick so exactly one code path builds the live candle for both.
+      let isOptionTick = false;
+      if (msg && msg.type === 'optionTick' && msg.token != null && typeof msg.ltp === 'number'
+          && String(msg.token) === String(instrumentTokenRef.current)) {
+        isOptionTick = true;
+        msg = { ...msg, type: 'tick', symbol: currentSymbol, candle: { close: msg.ltp } };
+      }
+
       const normalize = (s: string) => s.replace(/^(NSE:|BSE:|NFO:)/, '').trim();
       const msgSym = msg.symbol;
       const isMatch = msg.type === "tick" && normalize(msgSym) === normalize(currentSymbol);
@@ -4985,8 +5021,13 @@ export function AdvancedChart() {
           // candle's high/low (they're cumulative max/min). NIFTY never moves
           // 1.5% within one candle vs the last known close, so such a tick is bad data.
           if (seededLastCandle && Number.isFinite(seededLastCandle.close) && seededLastCandle.close > 0) {
+            // An option premium of 150 moving 5 points is a 3.3% move and entirely
+            // normal, especially near expiry; NIFTY moving 1.5% inside one candle is
+            // not. One threshold cannot serve both, so the gate widens for options
+            // while staying tight on the index.
+            const devLimit = isOptionTick ? 0.25 : 0.015;
             const dev = Math.abs(msg.candle.close - seededLastCandle.close) / seededLastCandle.close;
-            if (!Number.isFinite(msg.candle.close) || msg.candle.close <= 0 || dev > 0.015) {
+            if (!Number.isFinite(msg.candle.close) || msg.candle.close <= 0 || dev > devLimit) {
               return;
             }
           }
@@ -5792,6 +5833,10 @@ export function AdvancedChart() {
     });
 
     mainSeriesRef.current = mainSeries;
+    // Re-attach the SL/TP lines in the same frame the series is created. Without
+    // this they stay missing until ensure()'s next 1s tick — the blink seen every
+    // ~15s on an option chart, where the 15s data refetch rebuilds the series.
+    try { slEnsureRef.current?.(); } catch (e) {}
 
     const { pdhPrice, pdlPrice, pStartTime } = pdhPdlData;
 
