@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>NIFTY Quant Analytics Terminal</title>
     <!-- Adaptive Progressive Web App Attributes -->
     <link rel="manifest" href="/manifest.json" />
@@ -14,6 +14,20 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="QuantTerminal" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <style>
+      /* Kills double-tap-to-zoom without touching pan or pinch. The chart canvas
+         sets its own touch-action, so its pinch-to-zoom is unaffected. */
+      html, body { touch-action: manipulation; }
+    </style>
+    <script>
+      // iOS Safari ignores user-scalable=no in the browser (it is honoured in the
+      // installed PWA), so pinching the PAGE is blocked explicitly here. These are
+      // Safari-only page-zoom gestures; lightweight-charts works from touch events,
+      // so zooming the CHART itself still works.
+      ['gesturestart', 'gesturechange', 'gestureend'].forEach(function (evt) {
+        document.addEventListener(evt, function (e) { e.preventDefault(); }, { passive: false });
+      });
+    </script>
   </head>
   <body>
     <div id="root"></div>

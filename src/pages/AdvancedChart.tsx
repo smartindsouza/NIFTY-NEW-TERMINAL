@@ -4002,6 +4002,21 @@ export function AdvancedChart() {
   // External "reload chart" button (in the app shell) → refetch full history and
   // snap the view back to the latest candle. Fixes a chart that's scrolled away or
   // stuck on stale data on mobile without a full app refresh.
+  // Jumping back to the latest candle used to land on empty space: the main price
+  // scale is created with autoScale:false (so the vertical range stays put while
+  // you pan), which means it keeps whatever range the PAST view had and the recent
+  // candles can sit far outside it. Refit once, then hand the scale back to manual
+  // so panning behaves exactly as before.
+  const refitPriceScaleRef = useRef<() => void>(() => {});
+  refitPriceScaleRef.current = () => {
+    try {
+      const ps = mainSeriesRef.current?.priceScale?.();
+      if (!ps) return;
+      ps.applyOptions({ autoScale: true });
+      setTimeout(() => { try { ps.applyOptions({ autoScale: false }); } catch (e) {} }, 150);
+    } catch (e) {}
+  };
+
   useEffect(() => {
     const onReload = () => {
       try { refetchTa(); } catch (e) {}
@@ -4011,6 +4026,7 @@ export function AdvancedChart() {
           const ts = mainChartRef.current?.timeScale?.();
           if (ts) {
             ts.scrollToRealTime();
+            refitPriceScaleRef.current();
             // also reset the saved zoom so a persisted range doesn't pull us back
             try {
               const data = chartDataRef.current?.candles;
@@ -7627,6 +7643,9 @@ export function AdvancedChart() {
                         const barsToShow = Math.min(120, data.length);
                         ts.setVisibleLogicalRange({ from: data.length - barsToShow, to: data.length + 2 });
                       }
+                      // Bring the PRICE range back to the candles too — scrolling to
+                      // the right edge alone can leave them off-screen vertically.
+                      refitPriceScaleRef.current();
                     }
                   } catch (e) {}
                   setShowJumpToLatest(false);
