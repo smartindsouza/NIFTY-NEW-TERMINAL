@@ -14,6 +14,7 @@ import { isNseHoliday as calIsNseHoliday } from './calendar_service';
 import { registerGapBacktest } from './gap_backtest';
 import { registerSweepReclaim } from './sweep_reclaim';
 import { registerOrb } from './orb_backtest';
+import { registerPaSearch } from './pa_search';
 
 type AnyDb = any; // better-sqlite3 Database (typed loosely to avoid a hard dep here)
 
@@ -497,6 +498,7 @@ export function registerGapScorecard(app: any, db: AnyDb) {
   registerGapBacktest(app, db, guard);
   registerSweepReclaim(app, db, guard);
   registerOrb(app, db, guard);
+  registerPaSearch(app, db, guard);
 
   console.log('[gap] scorecard registered: snapshot 15:15 IST, outcome 09:16 IST, reco price 09:21 IST');
 }
