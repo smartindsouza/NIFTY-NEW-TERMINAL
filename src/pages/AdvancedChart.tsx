@@ -3398,6 +3398,31 @@ export function AdvancedChart() {
   });
   const rsiPaneHeightRef = useRef(rsiPaneHeight);
   useEffect(() => { rsiPaneHeightRef.current = rsiPaneHeight; }, [rsiPaneHeight]);
+
+  // Showing or hiding the RSI pane changes how tall the main chart's container is.
+  // The chart is sized by a ResizeObserver, and if it is left holding a height from
+  // the previous layout it draws taller than its container — and since that
+  // container is overflow-hidden, the part that gets clipped is the bottom strip:
+  // the time axis. That is why the x-axis vanished with RSI switched off. Re-apply
+  // the real measured size (and re-assert the axis) after the toggle has settled.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        const el = chartContainerRef.current;
+        const ch = mainChartRef.current;
+        if (!el || !ch) return;
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) {
+          ch.applyOptions({
+            width: Math.floor(r.width),
+            height: Math.floor(r.height),
+            timeScale: { visible: true },
+          });
+        }
+      } catch (e) {}
+    }, 80);
+    return () => clearTimeout(t);
+  }, [showRsi, rsiPaneHeight]);
   const rsiPaneRef = useRef<HTMLDivElement>(null);
   const rsiDragRef = useRef<{ startY: number; startH: number } | null>(null);
   const [showDiagnostic, setShowDiagnostic] = useState(() => {
@@ -5835,6 +5860,13 @@ export function AdvancedChart() {
     // Create Main Chart
     const mainChart = createChart(chartContainerRef.current, {
       ...commonOptions,
+      timeScale: {
+        ...commonOptions.timeScale,
+        // Stated rather than left to the default: the RSI pane deliberately hides
+        // its own axis, so the MAIN chart is the only thing that ever draws the
+        // time scale. If this is ever off, the chart has no x-axis at all.
+        visible: true,
+      },
       rightPriceScale: {
         borderColor: 'rgba(255, 255, 255, 0.1)',
         autoScale: false,
