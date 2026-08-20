@@ -1025,6 +1025,44 @@ setInterval(() => {
     }
   });
 
+  // Keep the chart combinations a user actually switches between WARM. Cold, a
+  // single switch costs three sequential Kite fetches (candles + two futures
+  // pulls for volume) over the slow link to Bangalore — that is the 5-6 second
+  // wait. Warm, the same request is served from the 60s cache in milliseconds.
+  // Runs only during market hours; failures are silent because this is a comfort
+  // feature and must never disturb anything that matters.
+  let sensexPrewarmToken: string | null = null;
+  setInterval(async () => {
+    try {
+      const x = new Date(Date.now() + 5.5 * 3600 * 1000);
+      const day = x.getUTCDay(), min = x.getUTCHours() * 60 + x.getUTCMinutes();
+      if (day === 0 || day === 6) return;
+      if (min < 550 || min > 935) return;           // ~09:10 to ~15:35 IST
+      const kc: any = getKiteClient();
+      if (!kc || !kc.access_token) return;
+
+      const combos: Array<{ tf: number; token: string; symbol: string }> = [
+        { tf: 1, token: '256265', symbol: 'NIFTY 50' },
+        { tf: 3, token: '256265', symbol: 'NIFTY 50' },
+        { tf: 5, token: '256265', symbol: 'NIFTY 50' },
+        { tf: 15, token: '256265', symbol: 'NIFTY 50' },
+      ];
+      if (!sensexPrewarmToken) {
+        try { const t = await getBseIndexToken('SENSEX'); if (t) sensexPrewarmToken = String(t); } catch (e) {}
+      }
+      if (sensexPrewarmToken) {
+        combos.push({ tf: 5, token: sensexPrewarmToken, symbol: 'BSE:SENSEX' });
+        combos.push({ tf: 15, token: sensexPrewarmToken, symbol: 'BSE:SENSEX' });
+      }
+      // Sequential on purpose: firing six Kite calls at once through one proxy is
+      // exactly the traffic spike that made the outages worse.
+      for (const c of combos) {
+        try { await getTechnicalAnalysis(latestSpot, c.tf, c.token, c.symbol); } catch (e) {}
+        await new Promise(r => setTimeout(r, 300));
+      }
+    } catch (e) { /* comfort feature — never let it surface */ }
+  }, 45000);
+
   app.get('/api/ta', async (req, res) => {
     const timeframe = req.query.timeframe ? parseInt(req.query.timeframe as string) : 5;
     const token = req.query.token as string || "256265";
