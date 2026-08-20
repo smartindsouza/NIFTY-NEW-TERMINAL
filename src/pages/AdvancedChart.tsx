@@ -6389,6 +6389,35 @@ export function AdvancedChart() {
       }
     };
 
+    // A ResizeObserver only fires when the CONTAINER changes size. That leaves one
+    // hole, and it is the bug: if the chart canvas is ever given a height TALLER
+    // than its container — which happens when the container is measured before the
+    // mobile layout has settled, since iOS resolves 100dvh and positions the fixed
+    // toolbars late — then the container itself never changes again, nothing
+    // re-fires, and the canvas stays too tall for the whole session. The container
+    // is overflow-hidden, so the strip that gets clipped is the bottom one: the
+    // time axis. Rotating the phone fixed it precisely because rotation is the one
+    // thing that forces a container resize.
+    //
+    // So: re-measure at several settle points after mount, and on every event that
+    // can change the usable viewport, applying only when it actually differs.
+    const syncChartSize = () => {
+      try {
+        const el = chartContainerRef.current;
+        if (!el) return;
+        const w = Math.floor(el.clientWidth), h = Math.floor(el.clientHeight);
+        if (w <= 0 || h <= 0) return;
+        const o: any = mainChart.options();
+        if (o.width !== w || o.height !== h) mainChart.applyOptions({ width: w, height: h });
+      } catch (e) {}
+    };
+    const sizeTimers = [0, 120, 400, 1200, 2500].map(ms => setTimeout(syncChartSize, ms));
+    window.addEventListener('resize', syncChartSize);
+    window.addEventListener('orientationchange', syncChartSize);
+    document.addEventListener('visibilitychange', syncChartSize);
+    const vv: any = (window as any).visualViewport;
+    if (vv) { vv.addEventListener('resize', syncChartSize); vv.addEventListener('scroll', syncChartSize); }
+
     const mainResizeObserver = new ResizeObserver(handleMainResize);
     const rsiResizeObserver = new ResizeObserver(handleRsiResize);
 
@@ -6396,6 +6425,11 @@ export function AdvancedChart() {
     if (rsiContainerRef.current) rsiResizeObserver.observe(rsiContainerRef.current);
 
     return () => {
+      sizeTimers.forEach(t => clearTimeout(t));
+      window.removeEventListener('resize', syncChartSize);
+      window.removeEventListener('orientationchange', syncChartSize);
+      document.removeEventListener('visibilitychange', syncChartSize);
+      if (vv) { vv.removeEventListener('resize', syncChartSize); vv.removeEventListener('scroll', syncChartSize); }
       mainResizeObserver.disconnect();
       rsiResizeObserver.disconnect();
       try {
