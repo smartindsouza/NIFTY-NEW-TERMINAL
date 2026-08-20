@@ -2703,6 +2703,10 @@ export function AdvancedChart() {
   const lastDesyncReseedRef = useRef<number>(0);
   // Cooldown for the closed-bar audit below, so a reseed can never loop.
   const lastTailReseedRef = useRef<number>(0);
+  // The fixed bottom toolbar. Measured live so the chart can be sized to stop
+  // exactly where it starts, instead of trusting a hard-coded height in the
+  // page's calc() — which is what has been wrong all along.
+  const bottomBarRef = useRef<HTMLDivElement | null>(null);
   const lastCandleDataRef = useRef<any>(null);
   // Candles that COMPLETED after the initial fetch. The fetched history is frozen
   // (tick-driven chart, no refetch), so without this archive every candle that
@@ -6364,10 +6368,9 @@ export function AdvancedChart() {
         const nh = Math.floor(entry.contentRect.height);
         window.requestAnimationFrame(() => {
           try {
-            mainChart.applyOptions({
-              width: nw,
-              height: nh,
-            });
+            // Route through syncChartSize so the observer can never re-apply a
+            // height that reaches past the visible area (see the note there).
+            syncChartSize();
           } catch(e) {}
         });
       }
@@ -6401,16 +6404,42 @@ export function AdvancedChart() {
     //
     // So: re-measure at several settle points after mount, and on every event that
     // can change the usable viewport, applying only when it actually differs.
-    const syncChartSize = () => {
+    // Declared with `function` on purpose: the ResizeObserver handler above calls
+    // it, and a const arrow would only work by luck of timing.
+    function syncChartSize() {
       try {
         const el = chartContainerRef.current;
         if (!el) return;
-        const w = Math.floor(el.clientWidth), h = Math.floor(el.clientHeight);
-        if (w <= 0 || h <= 0) return;
+        const rect = el.getBoundingClientRect();
+        const w = Math.floor(el.clientWidth);
+        if (w <= 0) return;
+
+        // Size to what is actually VISIBLE, not to the container. Two previous
+        // attempts trusted the container's own height and both failed, because the
+        // container itself can extend past the bottom of the screen: the page height
+        // is calc(100dvh - 124px - safe-area-bottom), a hard-coded guess that does
+        // not hold on every device. Whatever hangs below is hidden behind the fixed
+        // toolbar, and the strip that gets swallowed is the chart's time axis.
+        //
+        // So measure the real floor: the top of the fixed toolbar if it is fixed
+        // (mobile), otherwise the visible viewport. The chart then ends exactly
+        // where the visible area does and its axis can never be pushed off-screen.
+        const vvH = (window as any).visualViewport?.height ?? window.innerHeight;
+        let floorY = vvH;
+        const bar = bottomBarRef.current;
+        if (bar) {
+          const pos = window.getComputedStyle(bar).position;
+          if (pos === 'fixed') floorY = Math.min(floorY, bar.getBoundingClientRect().top);
+        }
+        const visibleH = Math.floor(floorY - rect.top);
+        // Never trust a nonsense measurement mid-layout; fall back to the container.
+        const h = visibleH > 120 ? Math.min(visibleH, Math.floor(el.clientHeight) || visibleH) : Math.floor(el.clientHeight);
+        if (!h || h <= 0) return;
+
         const o: any = mainChart.options();
         if (o.width !== w || o.height !== h) mainChart.applyOptions({ width: w, height: h });
       } catch (e) {}
-    };
+    }
     const sizeTimers = [0, 120, 400, 1200, 2500].map(ms => setTimeout(syncChartSize, ms));
     window.addEventListener('resize', syncChartSize);
     window.addEventListener('orientationchange', syncChartSize);
@@ -7339,7 +7368,7 @@ export function AdvancedChart() {
           <AiMarketRead taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} model="claude-sonnet-4-6" />
           <MarketContext />
         </div>
-        <div className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-2 py-1.5 md:p-0 flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap md:justify-end w-full md:w-auto">
+        <div ref={bottomBarRef} className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-2 py-1.5 md:p-0 flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap md:justify-end w-full md:w-auto">
           <div className="flex items-center gap-2 shrink-0 min-w-0 md:contents">
           <div className="w-28 max-w-[112px] sm:max-w-none shrink-0 sm:w-auto md:order-1">
           <SymbolSearch 
