@@ -469,9 +469,19 @@ export async function getTechnicalAnalysis(
         // NIFTY futures contract. We pull the two nearest expiries and pick whichever carried
         // more total volume over the window — this auto-handles the expiry roll (near expiry,
         // volume migrates to next month), which is what TradingView's continuous future shows.
-        if (String(instrument_token) === '256265' && rawHist && rawHist.length > 0) {
+        // WHICH index are we drawing? An index has no traded volume of its own, so
+        // the bars come from its futures. This used to be hardcoded to NIFTY's spot
+        // token, which is exactly why a SENSEX chart showed Vol 0 — it never even
+        // tried. NIFTY behaviour is unchanged; SENSEX and BANKEX now borrow from
+        // their own BSE futures.
+        const volumeUnderlying = /SENSEX/i.test(symbol) ? 'SENSEX'
+          : /BANKEX/i.test(symbol) ? 'BANKEX'
+          : String(instrument_token) === '256265' ? 'NIFTY'
+          : null;
+        if (volumeUnderlying && rawHist && rawHist.length > 0) {
           try {
-            const futs = await getIndexFuturesTokens('NIFTY');
+            const futs = await getIndexFuturesTokens(volumeUnderlying);
+            if (!futs.length) console.warn(`[Volume Merge] no listed futures found for ${volumeUnderlying} — chart will show no volume`);
             let bestVolByTime: Map<number, number> | null = null;
             let bestTotal = -1;
             let bestExpiry = '';
@@ -499,7 +509,7 @@ export async function getTechnicalAnalysis(
                 const t = new Date(r.date).getTime();
                 if (bestVolByTime.has(t)) { r.volume = bestVolByTime.get(t); matched++; }
               }
-              console.log(`[Volume Merge] NIFTY futures volume (most-active expiry ${bestExpiry}) mapped onto ${matched}/${rawHist.length} candles`);
+              console.log(`[Volume Merge] ${volumeUnderlying} futures volume (most-active expiry ${bestExpiry}) mapped onto ${matched}/${rawHist.length} candles`);
             }
           } catch (e) {
             console.error('[Volume Merge] failed, continuing without volume:', e);

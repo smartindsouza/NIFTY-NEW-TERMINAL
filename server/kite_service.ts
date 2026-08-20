@@ -149,13 +149,23 @@ export async function getIndexFuturesTokens(name: string = 'NIFTY'): Promise<{ t
   const kc = getKiteClient();
   if (!kc || !(kc as any).access_token) return [];
   const now = Date.now();
-  if (!nfoInstrumentsCache || (now - lastInstrumentsFetch > 24 * 60 * 60 * 1000)) {
+  // SENSEX/BANKEX futures are BSE contracts and live in the BFO file, not NFO.
+  // Searching NFO for them returns nothing, which is why a SENSEX chart had no
+  // volume to borrow at all.
+  const isBse = name === 'SENSEX' || name === 'BANKEX';
+  if (isBse) {
+    if (!bfoInstrumentsCache || (now - lastBfoInstrumentsFetch > 24 * 60 * 60 * 1000)) {
+      bfoInstrumentsCache = await kc.getInstruments('BFO');
+      lastBfoInstrumentsFetch = now;
+    }
+  } else if (!nfoInstrumentsCache || (now - lastInstrumentsFetch > 24 * 60 * 60 * 1000)) {
     nfoInstrumentsCache = await kc.getInstruments('NFO');
     lastInstrumentsFetch = now;
   }
+  const pool = (isBse ? bfoInstrumentsCache : nfoInstrumentsCache) || [];
   const toDateStr = (d: any): string => (d instanceof Date ? d.toISOString().split('T')[0] : String(d).split('T')[0]);
   const today = new Date().toISOString().split('T')[0];
-  const futs = (nfoInstrumentsCache || [])
+  const futs = pool
     .filter((i: any) => i.name === name && i.instrument_type === 'FUT' && toDateStr(i.expiry) >= today)
     .map((i: any) => ({ token: Number(i.instrument_token), expiry: toDateStr(i.expiry), tradingsymbol: String(i.tradingsymbol) }))
     .sort((a: { expiry: string }, b: { expiry: string }) => a.expiry.localeCompare(b.expiry));
