@@ -4532,6 +4532,7 @@ export function AdvancedChart() {
   const [triggerBox, setTriggerBox] = useState<null | {
     contract: any; level: number; current: number;
     side: 'BUY' | 'SELL'; product: 'MIS' | 'NRML'; lots: number;
+    lotMode: 'AUTO' | 'MANUAL';
   }>(null);
   const [triggerMargin, setTriggerMargin] = useState<null | { total: number; source: string } | 'unavailable' | 'loading'>(null);
   const [armingTrigger, setArmingTrigger] = useState(false);
@@ -4552,7 +4553,10 @@ export function AdvancedChart() {
         contract: c,
         level: Math.max(0.05, Math.round(tappedPrice / 0.05) * 0.05), // NSE option tick size
         current,
-        side: 'BUY', product: 'NRML', lots: 1,
+        // MANUAL / 1 lot by default. AUTO MAX is available, but a trigger fires
+        // later and unattended, so the size it was armed at should be one the user
+        // chose rather than the largest the balance happened to allow at arm time.
+        side: 'BUY', product: 'NRML', lots: 1, lotMode: 'MANUAL',
       });
     } catch (e: any) {
       toast.error(e?.message || 'Could not open the trigger box');
@@ -4580,6 +4584,20 @@ export function AdvancedChart() {
       .catch(() => { if (!cancelled) setTriggerMargin('unavailable'); });
     return () => { cancelled = true; };
   }, [triggerBox?.contract?.tradingsymbol, triggerBox?.side, triggerBox?.product, triggerBox?.lots, triggerBox?.level]);
+
+  // Margin per lot is inferred from the quote we already have, so AUTO MAX costs
+  // no extra request. Sell-side margin is not perfectly linear across lots, so
+  // this is a close estimate and the quoted total below is always the real number.
+  const marginPerLot = (triggerBox && triggerMargin && typeof triggerMargin === 'object' && triggerBox.lots > 0)
+    ? triggerMargin.total / triggerBox.lots : 0;
+  const maxLots = marginPerLot > 0 ? Math.max(0, Math.floor((availBalance || 0) / marginPerLot)) : 0;
+
+  useEffect(() => {
+    if (!triggerBox || triggerBox.lotMode !== 'AUTO') return;
+    if (maxLots >= 1 && triggerBox.lots !== maxLots) {
+      setTriggerBox({ ...triggerBox, lots: maxLots });
+    }
+  }, [maxLots, triggerBox?.lotMode]);
 
   const armTrigger = async () => {
     if (!triggerBox) return;
@@ -8768,15 +8786,44 @@ export function AdvancedChart() {
               ))}
             </div>
 
-            <div className="flex items-center justify-between bg-muted/40 rounded-lg px-2 py-1.5 mb-2">
-              <button onClick={() => setTriggerBox({ ...triggerBox, lots: Math.max(1, triggerBox.lots - 1) })}
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[11px] font-bold text-muted-foreground">Lot Sizing</span>
+              <div className="flex gap-1">
+                {(['AUTO', 'MANUAL'] as const).map(md => (
+                  <button key={md} onClick={() => setTriggerBox({ ...triggerBox, lotMode: md })}
+                    className={`text-[10px] font-bold px-2 py-1 rounded transition-colors ${triggerBox.lotMode === md ? 'bg-primary/25 text-primary' : 'bg-muted/40 text-muted-foreground'}`}>
+                    {md === 'AUTO' ? 'AUTO MAX' : 'MANUAL'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between bg-muted/40 rounded-lg px-2 py-1.5 mb-1.5">
+              <button
+                onClick={() => setTriggerBox({ ...triggerBox, lotMode: 'MANUAL', lots: Math.max(1, triggerBox.lots - 1) })}
                 className="w-7 h-7 rounded bg-black/30 text-sm font-bold">−</button>
               <span className="text-xs font-mono">
                 {triggerBox.lots} lot{triggerBox.lots > 1 ? 's' : ''}
                 <span className="text-muted-foreground"> · {triggerBox.lots * (triggerBox.contract.lot_size || 0)} qty</span>
               </span>
-              <button onClick={() => setTriggerBox({ ...triggerBox, lots: triggerBox.lots + 1 })}
+              <button
+                onClick={() => setTriggerBox({ ...triggerBox, lotMode: 'MANUAL', lots: triggerBox.lots + 1 })}
                 className="w-7 h-7 rounded bg-black/30 text-sm font-bold">+</button>
+            </div>
+
+            <div className="flex gap-1.5 mb-2">
+              {([
+                { label: '1 LOT', lots: 1 },
+                { label: 'HALF', lots: Math.max(1, Math.floor(maxLots / 2)) },
+                { label: 'MAX', lots: Math.max(1, maxLots) },
+              ] as const).map(b => (
+                <button key={b.label}
+                  disabled={b.label !== '1 LOT' && maxLots < 1}
+                  onClick={() => setTriggerBox({ ...triggerBox, lotMode: 'MANUAL', lots: b.lots })}
+                  className={`flex-1 text-[10px] font-bold py-1.5 rounded transition-colors disabled:opacity-40 ${triggerBox.lots === b.lots ? 'bg-primary/25 text-primary' : 'bg-muted/40 text-muted-foreground hover:text-foreground'}`}>
+                  {b.label}
+                </button>
+              ))}
             </div>
 
             <div className="text-[11px] mb-3 px-1">
@@ -8791,10 +8838,6 @@ export function AdvancedChart() {
               className={`w-full text-sm font-bold py-2.5 rounded-lg transition-colors disabled:opacity-50 ${triggerBox.side === 'BUY' ? 'bg-emerald-500/25 text-emerald-300 hover:bg-emerald-500/35' : 'bg-rose-500/25 text-rose-300 hover:bg-rose-500/35'}`}>
               {armingTrigger ? 'Arming…' : `Arm ${triggerBox.side} at ${triggerBox.level.toFixed(2)}`}
             </button>
-            <div className="text-[10px] text-muted-foreground mt-2 leading-relaxed">
-              Nothing is bought now. The order goes in when the premium reaches this
-              level, during market hours only, and expires at the close if untouched.
-            </div>
             <button onClick={() => setTriggerBox(null)}
               className="w-full mt-2 text-xs py-2 rounded-lg bg-muted/40 text-muted-foreground hover:text-foreground">
               Cancel
