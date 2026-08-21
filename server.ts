@@ -1166,6 +1166,19 @@ setInterval(() => {
         sensexChain: lastSensexChainTokens.length,
         bankChain: lastBankChainTokens.length,
         watchedOnDemand: activeWatchedTokens().length,
+        // The whole point: for each contract a chart asked for, is it on the feed
+        // and WHEN did a tick last arrive? A fresh age means the server has the
+        // data and any lag is on the client; a null or stale age means the
+        // contract simply is not trading. No token hunting required.
+        watched: activeWatchedTokens().map((t) => {
+          const lt = getLatestTick(t);
+          return {
+            token: t,
+            isSubscribed: all.has(t),
+            ltp: lt?.ltp ?? null,
+            lastTickAgoSec: lt?.ts ? +((Date.now() - lt.ts) / 1000).toFixed(1) : null,
+          };
+        }),
         ...(tok ? { token: tok, isSubscribed: all.has(tok), lastTick: getLatestTick(tok) || null } : {}),
       });
     } catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
