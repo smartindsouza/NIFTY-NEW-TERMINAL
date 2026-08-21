@@ -9,7 +9,7 @@ import Database from 'better-sqlite3';
 import { generateSimulatedChain } from './server/simulate_data';
 import { computeAnalytics } from './server/analytics_engine';
 import { getTechnicalAnalysis, kiteDiagnostics, taFreshness } from './server/technical_analysis';
-import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData, getIndexFuturesTokens, getBseIndexToken, getOptionToken, getContractInfo } from './server/kite_service';
+import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData, getIndexFuturesTokens, getBseIndexToken, getOptionToken, getContractInfo, getOrderMargin } from './server/kite_service';
 import { getHistoricalAnalytics } from './server/analytics_service';
 import { runRsiBacktest } from './server/rsi_backtest';
 import { getLiveSignal, runOptionConfirmBacktest, getAlertSignal } from './server/option_rsi';
@@ -19,6 +19,7 @@ import { getPremiumPulse, getPremiumPulseBias } from './server/premium_pulse';
 import { getFiiData, getCashFiiDii } from './server/fii_service';
 import { registerGapScorecard, toISTString } from './server/gap_scorecard';
 import { registerCalendar, isNseHoliday as calIsNseHoliday, holidayName } from './server/calendar_service';
+import { registerTriggers, armedTriggerTokens, onTickForTriggers } from './server/triggers';
 import { GAP_CONFIG } from './server/config/gapScorecard';
 import { evaluateQuantSignals } from './server/quant_engine';
 import { generateGamePlan } from './server/game_plan_service';
@@ -446,6 +447,8 @@ function pushTickerSubscriptions() {
   if (sensexIndexToken) all.add(sensexIndexToken);
   all.add(BANKNIFTY_TOKEN);
   for (const t of activeWatchedTokens()) all.add(t);
+  // Without this an armed trigger would sit waiting for ticks that never arrive.
+  for (const t of armedTriggerTokens()) all.add(t);
   for (const t of lastSensexChainTokens) all.add(t);
   for (const t of lastBankChainTokens) all.add(t);
   for (const t of premiumRuleTokens()) all.add(t);
@@ -583,6 +586,8 @@ function connectTicker() {
         }
       }
       broadcast({ type: 'optionTick', token: tick.token, ltp: tick.ltp, oi: tick.oi, volume: tick.volume });
+      // Price triggers are evaluated on the same tick that feeds the charts.
+      try { onTickForTriggers(tick.token, tick.ltp); } catch (e) {}
     }
   });
 }
@@ -1140,6 +1145,23 @@ setInterval(() => {
   // Contract details for a symbol the user is looking at. Read-only; it places
   // nothing. Exists so an order can be built with the REAL lot size and exchange
   // rather than values inferred from the symbol.
+  // Margin for an order the user is CONSIDERING. Read-only; places nothing.
+  app.post('/api/order-margin', express.json(), async (req, res) => {
+    try {
+      const b = req.body || {};
+      const m = await getOrderMargin({
+        tradingsymbol: String(b.tradingsymbol || '').toUpperCase(),
+        exchange: String(b.exchange || 'NFO'),
+        transaction_type: String(b.side || 'BUY').toUpperCase() === 'SELL' ? 'SELL' : 'BUY',
+        quantity: parseInt(String(b.quantity), 10) || 0,
+        product: String(b.product || 'NRML').toUpperCase(),
+        price: parseFloat(String(b.price)) || 0,
+      });
+      if (!m) return res.status(503).json({ error: 'margin unavailable from Kite right now' });
+      res.json(m);
+    } catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
+  });
+
   app.get('/api/contract-info', async (req, res) => {
     try {
       const ts = String(req.query.tradingsymbol || '').trim().toUpperCase();
@@ -1661,6 +1683,7 @@ setInterval(() => {
   // Official NSE trading-holiday calendar (auto-refreshed daily) — feeds the
   // H-levels prompt, the journal guard and the gap-scorecard crons.
   registerCalendar(app, db);
+  registerTriggers(app, db);
 
   registerGapScorecard(app, db);
 

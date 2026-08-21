@@ -4500,6 +4500,91 @@ export function AdvancedChart() {
   // Prefill the SAME order ticket used everywhere else with the contract the chart
   // is showing. Lot size and exchange come from Kite's instrument master, never
   // inferred from the symbol — a wrong lot size is a wrong-sized real order.
+  // The trigger box: arm a level now, the order goes in when the premium gets
+  // there. Opened by tapping an option chart; the tapped price IS the level.
+  const [triggerBox, setTriggerBox] = useState<null | {
+    contract: any; level: number; current: number;
+    side: 'BUY' | 'SELL'; product: 'MIS' | 'NRML'; lots: number;
+  }>(null);
+  const [triggerMargin, setTriggerMargin] = useState<null | { total: number; source: string } | 'unavailable' | 'loading'>(null);
+  const [armingTrigger, setArmingTrigger] = useState(false);
+
+  const openTriggerBox = async (tappedPrice: number) => {
+    const instr = selectedInstrument;
+    if (!instr?.tradingsymbol) return;
+    setIsProcessingStrikeAction(true);
+    try {
+      const res = await fetch(`/api/contract-info?tradingsymbol=${encodeURIComponent(instr.tradingsymbol)}`);
+      if (!res.ok) { toast.error('Could not identify this contract — nothing armed'); return; }
+      const c = await res.json();
+      if (!c.lot_size) { toast.error('No lot size for this contract — refusing to arm'); return; }
+      const current = lastCandleDataRef.current?.close
+        ?? chartDataRef.current?.candles?.[chartDataRef.current.candles.length - 1]?.close ?? 0;
+      if (!(current > 0)) { toast.error('No live premium yet — wait for a tick before arming'); return; }
+      setTriggerBox({
+        contract: c,
+        level: Math.max(0.05, Math.round(tappedPrice / 0.05) * 0.05), // NSE option tick size
+        current,
+        side: 'BUY', product: 'NRML', lots: 1,
+      });
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not open the trigger box');
+    } finally { setIsProcessingStrikeAction(false); }
+  };
+  const openTriggerBoxRef = useRef(openTriggerBox);
+  openTriggerBoxRef.current = openTriggerBox;
+
+  // Margin comes from Kite, never estimated — a sell's SPAN requirement cannot be
+  // guessed, and a wrong number beside a sell button is one the user would act on.
+  useEffect(() => {
+    if (!triggerBox) { setTriggerMargin(null); return; }
+    let cancelled = false;
+    setTriggerMargin('loading');
+    const qty = triggerBox.lots * (triggerBox.contract.lot_size || 0);
+    fetch('/api/order-margin', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tradingsymbol: triggerBox.contract.tradingsymbol, exchange: triggerBox.contract.exchange,
+        side: triggerBox.side, quantity: qty, product: triggerBox.product, price: triggerBox.level,
+      }),
+    })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error('unavailable')))
+      .then(m => { if (!cancelled) setTriggerMargin({ total: m.total, source: m.source }); })
+      .catch(() => { if (!cancelled) setTriggerMargin('unavailable'); });
+    return () => { cancelled = true; };
+  }, [triggerBox?.contract?.tradingsymbol, triggerBox?.side, triggerBox?.product, triggerBox?.lots, triggerBox?.level]);
+
+  const armTrigger = async () => {
+    if (!triggerBox) return;
+    setArmingTrigger(true);
+    try {
+      const qty = triggerBox.lots * (triggerBox.contract.lot_size || 0);
+      const r = await fetch('/api/triggers', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tradingsymbol: triggerBox.contract.tradingsymbol,
+          instrument_token: triggerBox.contract.instrument_token,
+          exchange: triggerBox.contract.exchange,
+          side: triggerBox.side, product: triggerBox.product, quantity: qty,
+          trigger_price: triggerBox.level, current_price: triggerBox.current,
+        }),
+      });
+      const d = await r.json();
+      if (!d.ok) { toast.error(d.error || 'Could not arm'); return; }
+      toast.success(`Armed: ${triggerBox.side} at ${triggerBox.level.toFixed(2)}`);
+      setTriggerBox(null);
+      refetchTriggers();
+    } catch (e: any) { toast.error(e?.message || 'Could not arm'); }
+    finally { setArmingTrigger(false); }
+  };
+
+  const { data: triggersData, refetch: refetchTriggers } = useQuery({
+    queryKey: ['triggers'],
+    queryFn: async () => (await fetch('/api/triggers')).json(),
+    refetchInterval: 5000, refetchOnWindowFocus: true,
+  });
+  const armedTriggers = (triggersData?.rows || []).filter((r: any) => r.status === 'ARMED');
+
   const openOptionBuyTicket = async () => {
     // openOptionBuyTicketRef is refreshed on every render, so this closure always
     // sees the CURRENT contract — no separate ref needed.
@@ -6207,7 +6292,7 @@ export function AdvancedChart() {
           // live premium, so pretending the tap chose a price would be a lie the
           // fill would immediately contradict; the tap is only the trigger.
           if (isOptionViewRef.current) {
-            if (quickTradeEnabledRef.current) openOptionBuyTicketRef.current();
+            if (quickTradeEnabledRef.current && price !== null) openTriggerBoxRef.current(price);
             return;
           }
 
@@ -8578,6 +8663,96 @@ export function AdvancedChart() {
             setIsEditingHLevels(false);
           }}
         />
+      )}
+
+      {/* Armed triggers — always visible while any exist. A pending instruction to
+          buy or sell that the user cannot SEE is the thing most likely to surprise
+          them later, so this is not tucked behind a menu. */}
+      {armedTriggers.length > 0 && (
+        <div className="fixed left-2 bottom-[calc(7.5rem+env(safe-area-inset-bottom))] md:bottom-4 z-40 flex flex-col gap-1.5">
+          {armedTriggers.map((t: any) => (
+            <div key={t.id} className="flex items-center gap-2 bg-amber-500/15 border border-amber-500/40 rounded-lg px-2.5 py-1.5">
+              <span className="text-[10px] font-mono font-bold text-amber-300">
+                {t.side} {prettyOptionName(t.tradingsymbol)} @ {Number(t.trigger_price).toFixed(2)}
+                <span className="opacity-70"> · {t.direction === 'UP' ? 'on rise' : 'on fall'}</span>
+              </span>
+              <button
+                onClick={async () => {
+                  const r = await fetch(`/api/triggers/${t.id}`, { method: 'DELETE' }).then(x => x.json()).catch(() => null);
+                  if (r?.ok) { toast.success('Trigger cancelled'); } else { toast.error(r?.error || 'Could not cancel'); }
+                  refetchTriggers();
+                }}
+                className="text-[10px] font-bold text-amber-200 hover:text-white px-1.5 py-0.5 rounded bg-black/30"
+              >
+                CANCEL
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Trigger box — minimal by request: side, product, lots, margin, confirm. */}
+      {triggerBox && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setTriggerBox(null)}>
+          <div className="bg-card border border-border rounded-xl p-4 w-full max-w-[300px]" onClick={(e) => e.stopPropagation()}>
+            <div className="text-sm font-bold">{prettyOptionName(triggerBox.contract.tradingsymbol)}</div>
+            <div className="text-[11px] text-muted-foreground mb-3">
+              now {triggerBox.current.toFixed(2)} · fires on a{' '}
+              {triggerBox.level > triggerBox.current ? 'rise' : 'fall'} to{' '}
+              <span className="text-foreground font-bold">{triggerBox.level.toFixed(2)}</span>
+            </div>
+
+            <div className="flex gap-1.5 mb-2">
+              {(['BUY', 'SELL'] as const).map(sd => (
+                <button key={sd} onClick={() => setTriggerBox({ ...triggerBox, side: sd })}
+                  className={`flex-1 text-xs font-bold py-1.5 rounded-lg transition-colors ${triggerBox.side === sd ? (sd === 'BUY' ? 'bg-emerald-500/25 text-emerald-300' : 'bg-rose-500/25 text-rose-300') : 'bg-muted/40 text-muted-foreground'}`}>
+                  {sd}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex gap-1.5 mb-2">
+              {(['MIS', 'NRML'] as const).map(pr => (
+                <button key={pr} onClick={() => setTriggerBox({ ...triggerBox, product: pr })}
+                  className={`flex-1 text-xs font-bold py-1.5 rounded-lg transition-colors ${triggerBox.product === pr ? 'bg-primary/25 text-primary' : 'bg-muted/40 text-muted-foreground'}`}>
+                  {pr}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between bg-muted/40 rounded-lg px-2 py-1.5 mb-2">
+              <button onClick={() => setTriggerBox({ ...triggerBox, lots: Math.max(1, triggerBox.lots - 1) })}
+                className="w-7 h-7 rounded bg-black/30 text-sm font-bold">−</button>
+              <span className="text-xs font-mono">
+                {triggerBox.lots} lot{triggerBox.lots > 1 ? 's' : ''}
+                <span className="text-muted-foreground"> · {triggerBox.lots * (triggerBox.contract.lot_size || 0)} qty</span>
+              </span>
+              <button onClick={() => setTriggerBox({ ...triggerBox, lots: triggerBox.lots + 1 })}
+                className="w-7 h-7 rounded bg-black/30 text-sm font-bold">+</button>
+            </div>
+
+            <div className="text-[11px] mb-3 px-1">
+              Margin:{' '}
+              {triggerMargin === 'loading' ? <span className="text-muted-foreground">checking…</span>
+                : triggerMargin === 'unavailable' || !triggerMargin
+                  ? <span className="text-amber-400">unavailable from Zerodha — arm only if you know the requirement</span>
+                  : <span className="text-foreground font-bold font-mono">₹{Math.round(triggerMargin.total).toLocaleString('en-IN')}</span>}
+            </div>
+
+            <button onClick={armTrigger} disabled={armingTrigger}
+              className={`w-full text-sm font-bold py-2.5 rounded-lg transition-colors disabled:opacity-50 ${triggerBox.side === 'BUY' ? 'bg-emerald-500/25 text-emerald-300 hover:bg-emerald-500/35' : 'bg-rose-500/25 text-rose-300 hover:bg-rose-500/35'}`}>
+              {armingTrigger ? 'Arming…' : `Arm ${triggerBox.side} at ${triggerBox.level.toFixed(2)}`}
+            </button>
+            <div className="text-[10px] text-muted-foreground mt-2 leading-relaxed">
+              Nothing is bought now. The order goes in when the premium reaches this
+              level, during market hours only, and expires at the close if untouched.
+            </div>
+            <button onClick={() => setTriggerBox(null)}
+              className="w-full mt-2 text-xs py-2 rounded-lg bg-muted/40 text-muted-foreground hover:text-foreground">
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Expiry picker — shown between tapping CE/PE Chart and the chart opening. */}

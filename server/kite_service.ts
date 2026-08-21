@@ -233,6 +233,46 @@ export async function getOptionToken(exchange: string, tradingsymbol: string): P
   } catch (e) { return null; }
 }
 
+/** Margin required for an order, from Kite's OWN calculator.
+ *  For a BUY of options the answer is roughly premium x quantity, but for a SELL
+ *  it is a SPAN + exposure figure that only the exchange's model can produce —
+ *  so it is asked for rather than estimated. Showing a self-invented margin next
+ *  to a sell button would be a number the user could act on and the broker would
+ *  then contradict. Returns null when unavailable, and callers must say so. */
+export async function getOrderMargin(o: {
+  tradingsymbol: string; exchange: string; transaction_type: 'BUY' | 'SELL';
+  quantity: number; product: string; order_type?: string; price?: number;
+}): Promise<any | null> {
+  try {
+    const kc: any = getKiteClient();
+    if (!kc || !kc.access_token) return null;
+    if (typeof kc.orderMargins !== 'function') return null;
+    const resp = await kc.orderMargins([{
+      exchange: o.exchange,
+      tradingsymbol: o.tradingsymbol,
+      transaction_type: o.transaction_type,
+      variety: 'regular',
+      product: o.product,
+      order_type: o.order_type || 'MARKET',
+      quantity: Number(o.quantity),
+      price: Number(o.price) || 0,
+      trigger_price: 0,
+    }]);
+    const row = Array.isArray(resp) ? resp[0] : (resp?.data ? resp.data[0] : null);
+    if (!row) return null;
+    return {
+      total: Number(row.total) || 0,
+      span: Number(row.span) || 0,
+      exposure: Number(row.exposure) || 0,
+      optionPremium: Number(row.option_premium) || 0,
+      source: 'Kite order margins API',
+    };
+  } catch (e: any) {
+    console.error('[margin] Kite order-margin call failed:', e?.message || e);
+    return null;
+  }
+}
+
 /** Full contract details for a tradingsymbol, straight from Kite's instrument
  *  master. Needed before any order can be built for a contract the user is merely
  *  LOOKING at: quantity is meaningless without the real lot size, and guessing one
