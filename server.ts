@@ -4,6 +4,7 @@ import axios from 'axios';
 import { createServer as createViteServer } from "vite";
 import { WebSocketServer } from 'ws';
 import * as http from 'http';
+import * as zlib from 'zlib';
 import cron from 'node-cron';
 import Database from 'better-sqlite3';
 import { generateSimulatedChain } from './server/simulate_data';
@@ -345,6 +346,45 @@ async function firePremiumExit(tradingsymbol: string, reason: string): Promise<v
 
 async function startServer() {
   const app = express();
+
+  // GZIP JSON RESPONSES. The chart's /api/ta payload is thousands of candles plus
+  // indicator arrays — hundreds of KB of highly repetitive JSON — and it crosses
+  // the link on every reload and every index or timeframe switch. Text like this
+  // compresses to roughly a tenth of its size, so this is the single biggest
+  // change available to how fast the chart feels.
+  //
+  // Written against Node's built-in zlib rather than the `compression` package on
+  // purpose: package-lock.json is committed, and adding a dependency without
+  // regenerating the lock is how a deploy fails at install time. No new dependency
+  // can do that.
+  //
+  // Compression is ASYNC so a large payload never blocks the event loop — the same
+  // loop is carrying the tick feed and the exit engine, and stalling it to save a
+  // few milliseconds of transfer would be a bad trade.
+  app.use((req, res, next) => {
+    if (!/\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) return next();
+    const originalJson = res.json.bind(res);
+    (res as any).json = (body: any) => {
+      let raw: Buffer;
+      try { raw = Buffer.from(JSON.stringify(body)); }
+      catch (e) { return originalJson(body); }
+      // Below a couple of KB the headers cost more than the saving.
+      if (raw.length < 2048 || res.headersSent || res.getHeader('Content-Encoding')) {
+        return originalJson(body);
+      }
+      zlib.gzip(raw, { level: 6 }, (err, gz) => {
+        if (err || res.headersSent) { try { originalJson(body); } catch (e) {} return; }
+        res.setHeader('Content-Encoding', 'gzip');
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Vary', 'Accept-Encoding');
+        res.setHeader('Content-Length', String(gz.length));
+        res.end(gz);
+      });
+      return res;
+    };
+    next();
+  });
+
   const server = http.createServer(app);
   
   // Setup WS Server
