@@ -3034,10 +3034,6 @@ export function AdvancedChart() {
     try { return new URLSearchParams(window.location.search).has('optToken'); }
     catch (e) { return false; }
   })();
-  // A tab opened from Strike Click carries the contract in its URL. Applied once
-  // on mount only — after that the user's own selection wins, so a reload keeps
-  // the contract but a later switch is never fought by the URL.
-  const urlInstrumentAppliedRef = useRef(false);
   const [selectedStrikeOnChart, setSelectedStrikeOnChart] = useState<{ strike: number; tradingsymbol: string; optionType: 'CE' | 'PE' } | null>(() => {
     try {
       const saved = localStorage.getItem('selectedStrikeOnChart');
@@ -3484,6 +3480,25 @@ export function AdvancedChart() {
   }, [showDiagnostic]);
   const [rsiHoverValue, setRsiHoverValue] = useState<string | null>(null);
   const [selectedInstrument, setSelectedInstrument] = useState<Instrument | null>(() => {
+    // A Strike Click tab carries its contract in the URL, and it MUST be applied
+    // here, in the initial state — not later in an effect. The whole live-tick
+    // path (the WS listener and the token it matches against) is wired up on the
+    // first render, so a contract that arrives one render later leaves that
+    // listener bound to the wrong instrument and the chart never shows a tick:
+    // exactly the "option chart has no live feed" symptom, while the same
+    // contract restored from localStorage ticked perfectly.
+    try {
+      const q = new URLSearchParams(window.location.search);
+      const tok = q.get('optToken'), tsym = q.get('optSymbol');
+      if (tok && tsym) {
+        return {
+          instrument_token: tok,
+          tradingsymbol: tsym,
+          ...(q.get('optLot') ? { lot_size: Number(q.get('optLot')) } : {}),
+          ...(q.get('optExch') ? { exchange: q.get('optExch') } : {}),
+        } as any;
+      }
+    } catch (e) {}
     try {
       const saved = localStorage.getItem('selectedInstrument');
       return saved ? JSON.parse(saved) : null;
@@ -4871,23 +4886,6 @@ export function AdvancedChart() {
     staleTime: 8000,
     enabled: Boolean(timeframe && instrumentToken)
   });
-
-  useEffect(() => {
-    if (urlInstrumentAppliedRef.current) return;
-    urlInstrumentAppliedRef.current = true;
-    try {
-      const q = new URLSearchParams(window.location.search);
-      const tok = q.get('optToken'), tsym = q.get('optSymbol');
-      if (tok && tsym) {
-        setSelectedInstrument({
-          instrument_token: tok,
-          tradingsymbol: tsym,
-          lot_size: q.get('optLot') ? Number(q.get('optLot')) : undefined,
-          exchange: q.get('optExch') || undefined,
-        } as any);
-      }
-    } catch (e) {}
-  }, []);
 
   // Tell the server which contract this chart is showing so its ticks are actually
   // streamed. The chain subscriptions only ever covered the default expiry's
