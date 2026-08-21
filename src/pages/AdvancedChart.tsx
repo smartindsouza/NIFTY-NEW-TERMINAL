@@ -4520,16 +4520,31 @@ export function AdvancedChart() {
   // Deliberately shares the strike-rounding and contract lookup used for orders,
   // so the chart you inspect is exactly the contract the ticket would have sold
   // you — a separate lookup here could quietly drift to a different strike.
-  const openStrikeChart = async (optionType: 'CE' | 'PE', clickedPrice: number) => {
+  // Which expiry to open, asked BEFORE the chart opens. Previously this silently
+  // used the nearest expiry, which is the wrong assumption often enough to matter:
+  // the strike you want on a monthly is not the one the weekly hands you.
+  const [expiryPick, setExpiryPick] = useState<{
+    optionType: 'CE' | 'PE'; price: number; expiries: string[];
+  } | null>(null);
+
+  const openStrikeChart = async (optionType: 'CE' | 'PE', clickedPrice: number, expiry?: string) => {
     setClickMenu(null);
     try {
       const sym = currentSymbol.toUpperCase();
       const strikeInterval = (sym.includes('SENSEX') || sym.includes('BANKNIFTY') || sym.includes('BANK')) ? 100 : 50;
       const targetStrike = Math.round(clickedPrice / strikeInterval) * strikeInterval;
       const spotParam = lastSpotValue ? `&spot=${lastSpotValue}` : '';
-      const res = await fetch(`/api/option-chain?symbol=${encodeURIComponent(currentSymbol)}${spotParam}`);
+      const expParam = expiry ? `&expiry=${encodeURIComponent(expiry)}` : '';
+      const res = await fetch(`/api/option-chain?symbol=${encodeURIComponent(currentSymbol)}${spotParam}${expParam}`);
       if (!res.ok) throw new Error('Could not fetch option chain');
       const chainData = await res.json();
+
+      // No expiry chosen yet and more than one is listed → ask, do not guess.
+      if (!expiry && Array.isArray(chainData?.expiries) && chainData.expiries.length > 1) {
+        setExpiryPick({ optionType, price: clickedPrice, expiries: chainData.expiries.slice(0, 8) });
+        return;
+      }
+
       let bestStrike = targetStrike;
       if (chainData?.strikes?.length && !chainData.strikes.includes(targetStrike)) {
         bestStrike = chainData.strikes.reduce((prev: number, curr: number) =>
@@ -8509,6 +8524,35 @@ export function AdvancedChart() {
             setIsEditingHLevels(false);
           }}
         />
+      )}
+
+      {/* Expiry picker — shown between tapping CE/PE Chart and the chart opening. */}
+      {expiryPick && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setExpiryPick(null)}>
+          <div className="bg-card border border-border rounded-xl p-4 w-full max-w-[280px]" onClick={(e) => e.stopPropagation()}>
+            <div className="text-sm font-bold mb-1">
+              {expiryPick.optionType} chart · expiry
+            </div>
+            <div className="text-[11px] text-muted-foreground mb-3">
+              Nearest first. The strike is picked inside the expiry you choose.
+            </div>
+            <div className="flex flex-col gap-1.5 max-h-[260px] overflow-y-auto">
+              {expiryPick.expiries.map((e) => (
+                <button
+                  key={e}
+                  onClick={() => { const p = expiryPick; setExpiryPick(null); openStrikeChart(p.optionType, p.price, e); }}
+                  className="text-left text-sm font-mono px-3 py-2 rounded-lg bg-muted/40 hover:bg-primary/20 hover:text-primary transition-colors"
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setExpiryPick(null)}
+              className="w-full mt-3 text-xs py-2 rounded-lg bg-muted/40 text-muted-foreground hover:text-foreground">
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
 
       {showOrderTicket && ticketData && (
