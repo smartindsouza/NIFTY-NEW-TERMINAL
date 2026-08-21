@@ -3027,6 +3027,10 @@ export function AdvancedChart() {
 
   // States for chart-click option strike selection
   const [clickMenu, setClickMenu] = useState<{ x: number, y: number, price: number } | null>(null);
+  // A tab opened from Strike Click carries the contract in its URL. Applied once
+  // on mount only — after that the user's own selection wins, so a reload keeps
+  // the contract but a later switch is never fought by the URL.
+  const urlInstrumentAppliedRef = useRef(false);
   const [selectedStrikeOnChart, setSelectedStrikeOnChart] = useState<{ strike: number; tradingsymbol: string; optionType: 'CE' | 'PE' } | null>(() => {
     try {
       const saved = localStorage.getItem('selectedStrikeOnChart');
@@ -4427,6 +4431,40 @@ export function AdvancedChart() {
     await resolveStrikeDetails(action, optionType, clickedPrice);
   };
 
+  // Open that strike's option chart in a NEW TAB, leaving this one on the index.
+  // Deliberately shares the strike-rounding and contract lookup used for orders,
+  // so the chart you inspect is exactly the contract the ticket would have sold
+  // you — a separate lookup here could quietly drift to a different strike.
+  const openStrikeChart = async (optionType: 'CE' | 'PE', clickedPrice: number) => {
+    setClickMenu(null);
+    try {
+      const sym = currentSymbol.toUpperCase();
+      const strikeInterval = (sym.includes('SENSEX') || sym.includes('BANKNIFTY') || sym.includes('BANK')) ? 100 : 50;
+      const targetStrike = Math.round(clickedPrice / strikeInterval) * strikeInterval;
+      const spotParam = lastSpotValue ? `&spot=${lastSpotValue}` : '';
+      const res = await fetch(`/api/option-chain?symbol=${encodeURIComponent(currentSymbol)}${spotParam}`);
+      if (!res.ok) throw new Error('Could not fetch option chain');
+      const chainData = await res.json();
+      let bestStrike = targetStrike;
+      if (chainData?.strikes?.length && !chainData.strikes.includes(targetStrike)) {
+        bestStrike = chainData.strikes.reduce((prev: number, curr: number) =>
+          Math.abs(curr - targetStrike) < Math.abs(prev - targetStrike) ? curr : prev);
+      }
+      const contract = (optionType === 'CE' ? chainData?.ceData : chainData?.peData)?.[bestStrike];
+      if (!contract || !contract.instrument_token) {
+        toast.error(`No contract found for ${bestStrike} ${optionType}`);
+        return;
+      }
+      const url = `/advanced-chart?optToken=${encodeURIComponent(String(contract.instrument_token))}`
+        + `&optSymbol=${encodeURIComponent(contract.tradingsymbol || '')}`
+        + (contract.lot_size ? `&optLot=${contract.lot_size}` : '')
+        + (contract.exchange ? `&optExch=${encodeURIComponent(contract.exchange)}` : '');
+      window.open(url, '_blank', 'noopener');
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not open that option chart');
+    }
+  };
+
   const handleExitAllTrades = async () => {
     if (activePositions.length === 0 || isExitingAllTrades) return;
     
@@ -4826,6 +4864,23 @@ export function AdvancedChart() {
     staleTime: 8000,
     enabled: Boolean(timeframe && instrumentToken)
   });
+
+  useEffect(() => {
+    if (urlInstrumentAppliedRef.current) return;
+    urlInstrumentAppliedRef.current = true;
+    try {
+      const q = new URLSearchParams(window.location.search);
+      const tok = q.get('optToken'), tsym = q.get('optSymbol');
+      if (tok && tsym) {
+        setSelectedInstrument({
+          instrument_token: tok,
+          tradingsymbol: tsym,
+          lot_size: q.get('optLot') ? Number(q.get('optLot')) : undefined,
+          exchange: q.get('optExch') || undefined,
+        } as any);
+      }
+    } catch (e) {}
+  }, []);
 
   const currentSymbol = selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel;
   const lastSpotValue = taInfo && taInfo.candles && taInfo.candles.length > 0 
@@ -8044,6 +8099,24 @@ export function AdvancedChart() {
                   <span>Sell Put</span>
                   <span className="text-[9px] bg-rose-500/20 px-1 rounded text-rose-400">PE</span>
                 </button>
+                <div className="border-t border-white/10 mt-0.5 pt-1.5 flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); openStrikeChart('CE', clickMenu.price); }}
+                    className="flex-1 text-xs bg-transparent hover:bg-primary/20 border border-primary/30 rounded px-2 py-1 text-primary font-semibold transition-colors cursor-pointer"
+                    title="Open this strike's CALL chart in a new tab"
+                  >
+                    CE Chart
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); openStrikeChart('PE', clickMenu.price); }}
+                    className="flex-1 text-xs bg-transparent hover:bg-primary/20 border border-primary/30 rounded px-2 py-1 text-primary font-semibold transition-colors cursor-pointer"
+                    title="Open this strike's PUT chart in a new tab"
+                  >
+                    PE Chart
+                  </button>
+                </div>
               </div>
             )}
 
