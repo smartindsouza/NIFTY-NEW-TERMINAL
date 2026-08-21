@@ -5082,6 +5082,18 @@ export function AdvancedChart() {
     return () => clearTimeout(t);
   }, [timeframe, instrumentToken, selectedInstrument, sensexTokenData?.token]);
 
+  // The numbers that explain a call falling on an up day. Only on an option chart.
+  const { data: optionReality } = useQuery({
+    queryKey: ['option-analytics', selectedInstrument?.tradingsymbol],
+    queryFn: async () => {
+      const r = await fetch(`/api/option-analytics?tradingsymbol=${encodeURIComponent(selectedInstrument!.tradingsymbol)}`);
+      if (!r.ok) return null;
+      return r.json();
+    },
+    enabled: !!selectedInstrument?.tradingsymbol && isOptionView,
+    refetchInterval: 20000, refetchOnWindowFocus: false,
+  });
+
   const currentSymbol = selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel;
   const lastSpotValue = taInfo && taInfo.candles && taInfo.candles.length > 0 
     ? taInfo.candles[taInfo.candles.length - 1].close 
@@ -8627,6 +8639,37 @@ export function AdvancedChart() {
             setIsEditingHLevels(false);
           }}
         />
+      )}
+
+      {/* OPTION REALITY CHECK. A call can fall on a day the index rises, and the
+          reasons are not visible anywhere on a price chart: the index never crossed
+          the strike, a day of time value evaporated, and calm markets make hope
+          cheaper. These are those numbers, stated plainly. */}
+      {isOptionView && optionReality && (
+        <div className="flex flex-wrap items-center gap-1.5 px-1 pb-1 shrink-0">
+          <span className={`text-[10px] font-mono font-bold px-2 py-1 rounded ${optionReality.inTheMoney ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'}`}>
+            {optionReality.inTheMoney
+              ? `IN THE MONEY by ${Math.round(optionReality.intrinsic)}`
+              : `NEEDS ${Math.round(Math.abs(optionReality.type === 'CE' ? optionReality.strike - optionReality.spot : optionReality.spot - optionReality.strike))} PTS TO REACH STRIKE`}
+          </span>
+          <span className="text-[10px] font-mono px-2 py-1 rounded bg-muted/50 text-muted-foreground">
+            BREAK EVEN {Math.round(optionReality.breakeven)}
+            <span className="text-foreground/80 font-bold"> · {optionReality.moveNeeded > 0 ? `${Math.round(optionReality.moveNeeded)} pts away` : 'passed'}</span>
+          </span>
+          {optionReality.thetaPerDayRupees != null && (
+            <span className="text-[10px] font-mono px-2 py-1 rounded bg-rose-500/15 text-rose-300" title="What one lot loses per day from time alone, index unchanged">
+              TIME COST ₹{Math.abs(optionReality.thetaPerDayRupees).toLocaleString('en-IN')}/day
+              {optionReality.thetaPctPerDay ? ` (${optionReality.thetaPctPerDay}%)` : ''}
+            </span>
+          )}
+          <span className="text-[10px] font-mono px-2 py-1 rounded bg-muted/50 text-muted-foreground">
+            HOPE VALUE {optionReality.timeValuePct}%
+            <span className="opacity-70"> · {optionReality.daysLeft < 1 ? 'expires today' : `${Math.floor(optionReality.daysLeft)}d left`}</span>
+          </span>
+          {optionReality.iv != null && (
+            <span className="text-[10px] font-mono px-2 py-1 rounded bg-muted/50 text-muted-foreground">IV {optionReality.iv}%</span>
+          )}
+        </div>
       )}
 
       {/* Armed triggers — always visible while any exist. A pending instruction to

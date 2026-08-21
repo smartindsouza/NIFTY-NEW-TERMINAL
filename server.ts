@@ -14,7 +14,7 @@ import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, se
 import { getHistoricalAnalytics } from './server/analytics_service';
 import { runRsiBacktest } from './server/rsi_backtest';
 import { getLiveSignal, runOptionConfirmBacktest, getAlertSignal } from './server/option_rsi';
-import { ivAndDelta } from './server/options_math';
+import { ivAndDelta, bsThetaPerDay } from './server/options_math';
 import { getGammaBlast } from './server/gamma_blast';
 import { getPremiumPulse, getPremiumPulseBias } from './server/premium_pulse';
 import { getFiiData, getCashFiiDii } from './server/fii_service';
@@ -1215,6 +1215,67 @@ setInterval(() => {
       const c = await resolveOptionContract(underlying, expiry, strike, type as 'CE' | 'PE');
       if (!c) return res.status(404).json({ error: 'no listed contract for that expiry and strike' });
       res.json(c);
+    } catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
+  });
+
+  // WHY IS MY CALL FALLING ON AN UP DAY? This answers it with numbers rather than
+  // sympathy: how far the index still has to travel, what the position loses per
+  // day purely to time, and where it actually breaks even. Read-only.
+  app.get('/api/option-analytics', async (req, res) => {
+    try {
+      const ts = String(req.query.tradingsymbol || '').trim().toUpperCase();
+      if (!ts) return res.status(400).json({ error: 'tradingsymbol required' });
+      const c = await getContractInfo(ts);
+      if (!c || !c.strike || !c.expiry) return res.status(404).json({ error: 'contract not found' });
+
+      // Underlying spot: taken from the live feed we already carry.
+      const under = ts.replace(/\d.*$/, '');
+      const spotToken = under === 'BANKNIFTY' ? 260105
+        : under === 'NIFTY' ? 256265
+        : (under === 'SENSEX' && sensexIndexToken) ? sensexIndexToken : null;
+      const spotTick = spotToken ? getLatestTick(spotToken) : null;
+      const spot = spotTick?.ltp || (under === 'NIFTY' ? latestSpot : 0);
+      const optTick = getLatestTick(Number(c.instrument_token));
+      const premium = optTick?.ltp || 0;
+      if (!(spot > 0) || !(premium > 0)) {
+        return res.status(503).json({ error: 'no live prices for this contract yet' });
+      }
+
+      const type = c.instrument_type === 'PE' ? 'PE' : 'CE';
+      const strike = Number(c.strike);
+      // Days to expiry, counted to the close of the expiry day, floored at a few
+      // hours so an expiry-day option does not divide by zero.
+      const expMs = new Date(c.expiry + 'T15:30:00+05:30').getTime();
+      const daysLeft = Math.max(0.15, (expMs - Date.now()) / 86400000);
+      const T = daysLeft / 365;
+      const r = 0.065;
+
+      const { iv, delta } = ivAndDelta(type as 'CE' | 'PE', spot, strike, T, r, premium);
+      const theta = iv ? bsThetaPerDay(type as 'CE' | 'PE', spot, strike, T, r, iv) : null;
+
+      const intrinsic = type === 'CE' ? Math.max(0, spot - strike) : Math.max(0, strike - spot);
+      const timeValue = Math.max(0, premium - intrinsic);
+      const breakeven = type === 'CE' ? strike + premium : strike - premium;
+      const moveNeeded = type === 'CE' ? breakeven - spot : spot - breakeven;
+      const lot = Number(c.lot_size) || 0;
+
+      res.json({
+        tradingsymbol: c.tradingsymbol, type, strike, expiry: c.expiry, lotSize: lot,
+        spot: +spot.toFixed(2), premium: +premium.toFixed(2),
+        daysLeft: +daysLeft.toFixed(2),
+        inTheMoney: intrinsic > 0,
+        intrinsic: +intrinsic.toFixed(2),
+        // The part of the price that is pure hope — it goes to ZERO at expiry.
+        timeValue: +timeValue.toFixed(2),
+        timeValuePct: premium > 0 ? +(100 * timeValue / premium).toFixed(1) : null,
+        breakeven: +breakeven.toFixed(2),
+        moveNeeded: +moveNeeded.toFixed(2),
+        iv: iv ? +(iv * 100).toFixed(1) : null,
+        delta: delta ? +delta.toFixed(3) : null,
+        thetaPerDay: theta ? +theta.toFixed(2) : null,
+        thetaPerDayRupees: theta && lot ? Math.round(theta * lot) : null,
+        thetaPctPerDay: theta && premium > 0 ? +(100 * Math.abs(theta) / premium).toFixed(1) : null,
+      });
     } catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
   });
 

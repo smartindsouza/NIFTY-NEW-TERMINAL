@@ -53,6 +53,22 @@ export function bsDelta(type: 'CE' | 'PE', S: number, K: number, T: number, r: n
 }
 
 // Convenience: from a live premium, return { iv (decimal), delta } or nulls if not solvable.
+/** THETA — what the option loses per DAY purely because time passed, holding the
+ *  index and volatility still. This is the number that explains a call falling on
+ *  an up day, and it is not otherwise visible anywhere in the app. Returned as a
+ *  per-day figure (negative for a buyer) rather than the per-year convention,
+ *  because "I lose this much by tomorrow" is the question actually being asked. */
+export function bsThetaPerDay(type: 'CE' | 'PE', S: number, K: number, T: number, r: number, sig: number): number {
+  if (!(T > 0) || !(sig > 0) || !(S > 0) || !(K > 0)) return 0;
+  const d1 = (Math.log(S / K) + (r + (sig * sig) / 2) * T) / (sig * Math.sqrt(T));
+  const d2 = d1 - sig * Math.sqrt(T);
+  const term1 = -(S * normPDF(d1) * sig) / (2 * Math.sqrt(T));
+  const perYear = type === 'CE'
+    ? term1 - r * K * Math.exp(-r * T) * normCDF(d2)
+    : term1 + r * K * Math.exp(-r * T) * normCDF(-d2);
+  return perYear / 365;
+}
+
 export function ivAndDelta(type: 'CE' | 'PE', S: number, K: number, T: number, r: number, price: number): { iv: number | null; delta: number | null } {
   const intrinsic = type === 'CE' ? Math.max(0, S - K) : Math.max(0, K - S);
   // Essentially no time value → deep ITM/OTM: delta saturates
