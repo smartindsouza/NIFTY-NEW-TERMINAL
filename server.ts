@@ -9,7 +9,7 @@ import Database from 'better-sqlite3';
 import { generateSimulatedChain } from './server/simulate_data';
 import { computeAnalytics } from './server/analytics_engine';
 import { getTechnicalAnalysis, kiteDiagnostics, taFreshness } from './server/technical_analysis';
-import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData, getIndexFuturesTokens, getBseIndexToken, getOptionToken, getContractInfo, getOrderMargin } from './server/kite_service';
+import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData, getIndexFuturesTokens, getBseIndexToken, getOptionToken, getContractInfo, getOrderMargin, resolveOptionContract } from './server/kite_service';
 import { getHistoricalAnalytics } from './server/analytics_service';
 import { runRsiBacktest } from './server/rsi_backtest';
 import { getLiveSignal, runOptionConfirmBacktest, getAlertSignal } from './server/option_rsi';
@@ -1159,6 +1159,22 @@ setInterval(() => {
       });
       if (!m) return res.status(503).json({ error: 'margin unavailable from Kite right now' });
       res.json(m);
+    } catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
+  });
+
+  // One contract, resolved from the cached instrument file — no chain, no quotes.
+  app.get('/api/resolve-option', async (req, res) => {
+    try {
+      const underlying = String(req.query.underlying || '').toUpperCase();
+      const expiry = String(req.query.expiry || '');
+      const strike = parseFloat(String(req.query.strike || ''));
+      const type = String(req.query.type || 'CE').toUpperCase() === 'PE' ? 'PE' : 'CE';
+      if (!underlying || !expiry || !(strike > 0)) {
+        return res.status(400).json({ error: 'underlying, expiry and strike required' });
+      }
+      const c = await resolveOptionContract(underlying, expiry, strike, type as 'CE' | 'PE');
+      if (!c) return res.status(404).json({ error: 'no listed contract for that expiry and strike' });
+      res.json(c);
     } catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
   });
 

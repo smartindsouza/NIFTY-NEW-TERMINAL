@@ -4678,15 +4678,14 @@ export function AdvancedChart() {
     optionType: 'CE' | 'PE'; price: number; expiries: string[]; strike: number; under: string;
   } | null>(null);
 
-  // The strike the chart will land on: the tapped one if it is listed, otherwise
-  // the nearest listed. Shown in the picker so the label cannot promise a strike
-  // the lookup would not choose.
-  const bestStrikeForLabel = (chainData: any, targetStrike: number): number => {
-    if (chainData?.strikes?.length && !chainData.strikes.includes(targetStrike)) {
-      return chainData.strikes.reduce((prev: number, curr: number) =>
-        Math.abs(curr - targetStrike) < Math.abs(prev - targetStrike) ? curr : prev);
-    }
-    return targetStrike;
+  // Instrument-master name for whichever index the chart is on.
+  const masterName = (): string => {
+    const s2 = currentSymbol.toUpperCase();
+    if (s2.includes('SENSEX')) return 'SENSEX';
+    if (s2.includes('BANKEX')) return 'BANKEX';
+    if (s2.includes('BANK')) return 'BANKNIFTY';
+    if (s2.includes('FIN')) return 'FINNIFTY';
+    return 'NIFTY';
   };
 
   const openStrikeChart = async (optionType: 'CE' | 'PE', clickedPrice: number, expiry?: string) => {
@@ -4695,32 +4694,36 @@ export function AdvancedChart() {
       const sym = currentSymbol.toUpperCase();
       const strikeInterval = (sym.includes('SENSEX') || sym.includes('BANKNIFTY') || sym.includes('BANK')) ? 100 : 50;
       const targetStrike = Math.round(clickedPrice / strikeInterval) * strikeInterval;
-      const spotParam = lastSpotValue ? `&spot=${lastSpotValue}` : '';
-      const expParam = expiry ? `&expiry=${encodeURIComponent(expiry)}` : '';
-      const res = await fetch(`/api/option-chain?symbol=${encodeURIComponent(currentSymbol)}${spotParam}${expParam}`);
-      if (!res.ok) throw new Error('Could not fetch option chain');
-      const chainData = await res.json();
 
-      // No expiry chosen yet and more than one is listed → ask, do not guess.
-      if (!expiry && Array.isArray(chainData?.expiries) && chainData.expiries.length > 1) {
-        setExpiryPick({
-          optionType, price: clickedPrice, expiries: chainData.expiries.slice(0, 8),
-          strike: bestStrikeForLabel(chainData, targetStrike),
-          under: UNDERLYING_LABEL[sym.replace(/[^A-Z]/g, '')] || currentSymbol,
-        });
+      // EXPIRY LIST WITHOUT A FETCH. The chart already holds the chain for this
+      // index (the OI query), and its expiries are the same list. Fetching a whole
+      // chain — every strike, with live quotes — just to read that list is what
+      // made tapping CE/PE Chart feel slow.
+      if (!expiry) {
+        const known: string[] = (oiData as any)?.expiries || [];
+        if (known.length > 1) {
+          setExpiryPick({
+            optionType, price: clickedPrice, expiries: known.slice(0, 8),
+            strike: targetStrike,
+            under: UNDERLYING_LABEL[sym.replace(/[^A-Z]/g, '')] || currentSymbol,
+          });
+          return;
+        }
+      }
+
+      // ONE contract, from the cached instrument file — no chain, no quotes. The
+      // nearest listed strike inside the chosen expiry is resolved server-side.
+      const chosenExpiry = expiry || (oiData as any)?.expiryDate;
+      if (!chosenExpiry) { toast.error('No expiry available yet — try again in a moment'); return; }
+      const res = await fetch(`/api/resolve-option?underlying=${masterName()}`
+        + `&expiry=${encodeURIComponent(chosenExpiry)}&strike=${targetStrike}&type=${optionType}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err?.error || 'Could not find that contract');
         return;
       }
-
-      let bestStrike = targetStrike;
-      if (chainData?.strikes?.length && !chainData.strikes.includes(targetStrike)) {
-        bestStrike = chainData.strikes.reduce((prev: number, curr: number) =>
-          Math.abs(curr - targetStrike) < Math.abs(prev - targetStrike) ? curr : prev);
-      }
-      const contract = (optionType === 'CE' ? chainData?.ceData : chainData?.peData)?.[bestStrike];
-      if (!contract || !contract.instrument_token) {
-        toast.error(`No contract found for ${bestStrike} ${optionType}`);
-        return;
-      }
+      const contract = await res.json();
+      if (!contract?.instrument_token) { toast.error('Could not find that contract'); return; }
       const url = `/advanced-chart?optToken=${encodeURIComponent(String(contract.instrument_token))}`
         + `&optSymbol=${encodeURIComponent(contract.tradingsymbol || '')}`
         + (contract.lot_size ? `&optLot=${contract.lot_size}` : '')

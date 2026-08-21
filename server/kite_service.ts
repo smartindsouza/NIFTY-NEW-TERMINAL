@@ -233,6 +233,50 @@ export async function getOptionToken(exchange: string, tradingsymbol: string): P
   } catch (e) { return null; }
 }
 
+/** Resolve ONE option contract straight from the instrument master.
+ *  The chart used to fetch a whole option chain - every strike, with live quotes -
+ *  just to learn one contract's token, which is why opening a strike chart lagged.
+ *  This reads the cached contract file instead: no quotes, no network after the
+ *  first load. Picks the nearest LISTED strike within the chosen expiry, so the
+ *  answer is a contract that actually exists rather than the strike we hoped for. */
+export async function resolveOptionContract(
+  underlying: string, expiry: string, targetStrike: number, optionType: 'CE' | 'PE',
+): Promise<any | null> {
+  try {
+    const kc = getKiteClient();
+    // @ts-ignore
+    if (!kc || !kc.access_token) return null;
+    const name = String(underlying || '').toUpperCase();
+    const isBse = name === 'SENSEX' || name === 'BANKEX';
+    const now = Date.now();
+    if (isBse) {
+      if (!bfoInstrumentsCache || (now - lastBfoInstrumentsFetch > 24 * 60 * 60 * 1000)) {
+        bfoInstrumentsCache = await kc.getInstruments('BFO');
+        lastBfoInstrumentsFetch = now;
+      }
+    } else if (!nfoInstrumentsCache || (now - lastInstrumentsFetch > 24 * 60 * 60 * 1000)) {
+      nfoInstrumentsCache = await kc.getInstruments('NFO');
+      lastInstrumentsFetch = now;
+    }
+    const pool = (isBse ? bfoInstrumentsCache : nfoInstrumentsCache) || [];
+    const toDateStr = (d: any): string => d instanceof Date ? d.toISOString().split('T')[0] : String(d).split('T')[0];
+    const candidates = pool.filter((i: any) =>
+      i.name === name && i.instrument_type === optionType && toDateStr(i.expiry) === expiry);
+    if (!candidates.length) return null;
+    const best = candidates.reduce((prev: any, cur: any) =>
+      Math.abs(Number(cur.strike) - targetStrike) < Math.abs(Number(prev.strike) - targetStrike) ? cur : prev);
+    return {
+      tradingsymbol: best.tradingsymbol,
+      instrument_token: String(best.instrument_token),
+      exchange: best.exchange,
+      lot_size: Number(best.lot_size) || null,
+      strike: Number(best.strike) || null,
+      expiry: toDateStr(best.expiry),
+      instrument_type: best.instrument_type,
+    };
+  } catch (e) { return null; }
+}
+
 /** Margin required for an order, from Kite's OWN calculator.
  *  For a BUY of options the answer is roughly premium x quantity, but for a SELL
  *  it is a SPAN + exposure figure that only the exchange's model can produce —
