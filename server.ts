@@ -9,7 +9,7 @@ import Database from 'better-sqlite3';
 import { generateSimulatedChain } from './server/simulate_data';
 import { computeAnalytics } from './server/analytics_engine';
 import { getTechnicalAnalysis, kiteDiagnostics, taFreshness } from './server/technical_analysis';
-import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData, getIndexFuturesTokens, getBseIndexToken, getOptionToken } from './server/kite_service';
+import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData, getIndexFuturesTokens, getBseIndexToken, getOptionToken, getContractInfo } from './server/kite_service';
 import { getHistoricalAnalytics } from './server/analytics_service';
 import { runRsiBacktest } from './server/rsi_backtest';
 import { getLiveSignal, runOptionConfirmBacktest, getAlertSignal } from './server/option_rsi';
@@ -1137,6 +1137,19 @@ setInterval(() => {
   // A chart declares the contract it is showing; we stream it for the next 2
   // minutes and it re-declares while it stays open. Read-only with respect to
   // trading — it only widens the tick subscription.
+  // Contract details for a symbol the user is looking at. Read-only; it places
+  // nothing. Exists so an order can be built with the REAL lot size and exchange
+  // rather than values inferred from the symbol.
+  app.get('/api/contract-info', async (req, res) => {
+    try {
+      const ts = String(req.query.tradingsymbol || '').trim().toUpperCase();
+      if (!ts) return res.status(400).json({ error: 'tradingsymbol required' });
+      const info = await getContractInfo(ts);
+      if (!info) return res.status(404).json({ error: `contract ${ts} not found in the instrument master` });
+      res.json(info);
+    } catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
+  });
+
   app.get('/api/ticker/watch', (req, res) => {
     try {
       const tok = parseInt(String(req.query.token || ''), 10);

@@ -4458,6 +4458,59 @@ export function AdvancedChart() {
     }
   };
 
+  // Prefill the SAME order ticket used everywhere else with the contract the chart
+  // is showing. Lot size and exchange come from Kite's instrument master, never
+  // inferred from the symbol — a wrong lot size is a wrong-sized real order.
+  const openOptionBuyTicket = async () => {
+    // openOptionBuyTicketRef is refreshed on every render, so this closure always
+    // sees the CURRENT contract — no separate ref needed.
+    const instr = selectedInstrument;
+    if (!instr?.tradingsymbol) return;
+    setIsProcessingStrikeAction(true);
+    try {
+      const res = await fetch(`/api/contract-info?tradingsymbol=${encodeURIComponent(instr.tradingsymbol)}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err?.error || 'Could not identify this contract — no order prepared');
+        return;
+      }
+      const c = await res.json();
+      if (!c.lot_size) { toast.error('No lot size for this contract — refusing to prepare an order'); return; }
+      // Live premium if we have one, else the last close the chart drew.
+      const live = lastCandleDataRef.current?.close
+        ?? chartDataRef.current?.candles?.[chartDataRef.current.candles.length - 1]?.close
+        ?? 0;
+      setTicketData({
+        action: 'BUY',
+        optionType: (c.instrument_type === 'PE' ? 'PE' : 'CE'),
+        underlying: String(instr.tradingsymbol).replace(/\d.*$/, '') || 'NIFTY',
+        expiry: c.expiry || '',
+        strike: c.strike || 0,
+        tradingsymbol: c.tradingsymbol,
+        instrument_token: String(c.instrument_token),
+        ltp: live,
+        lotSize: c.lot_size,
+        quantity: c.lot_size,          // one lot
+        product: 'NRML',
+        orderType: 'MARKET',
+        limitPrice: 0,
+        exchange: c.exchange,
+        segment: c.segment,
+        source_of_lot_size: c.source_of_lot_size,
+      });
+      setAvailableExpiries(c.expiry ? [c.expiry] : []);
+      setShowOrderTicket(true);
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not prepare the order');
+    } finally {
+      setIsProcessingStrikeAction(false);
+    }
+  };
+  // The chart's click handler is created once per chart build, so it reads this
+  // through a ref rather than closing over a stale copy.
+  const openOptionBuyTicketRef = useRef(openOptionBuyTicket);
+  openOptionBuyTicketRef.current = openOptionBuyTicket;
+
   const handleStrikeAction = async (action: 'BUY' | 'SELL', optionType: 'CE' | 'PE', clickedPrice: number) => {
     setClickMenu(null);
     await resolveStrikeDetails(action, optionType, clickedPrice);
@@ -6074,11 +6127,21 @@ export function AdvancedChart() {
             }
           }
 
-          // Default: Open the option strike selection floating menu.
-          // NEVER on an option chart: the y-coordinate there is a PREMIUM, so the
-          // menu would offer strikes derived from a premium price — meaningless, and
-          // one careless tap away from an unintended order.
           const price = mainSeries.coordinateToPrice(y);
+
+          // OPTION CHART: tapping buys THE CONTRACT ON SCREEN, at market, via the
+          // normal order ticket — which is the confirmation step. The strike menu
+          // is still never shown here: the y-coordinate on this chart is a PREMIUM,
+          // so strikes derived from it would be meaningless.
+          //
+          // The tapped price does NOT set the entry. A market order fills at the
+          // live premium, so pretending the tap chose a price would be a lie the
+          // fill would immediately contradict; the tap is only the trigger.
+          if (isOptionViewRef.current) {
+            if (quickTradeEnabledRef.current) openOptionBuyTicketRef.current();
+            return;
+          }
+
           if (price !== null && quickTradeEnabledRef.current && !isOptionViewRef.current) {
             // Open the menu near the clicked cursor coordinate
             setClickMenu({
@@ -7780,7 +7843,7 @@ export function AdvancedChart() {
           </div>
           </div>
           <div className="flex items-center gap-2 flex-1 basis-0 min-w-[52%] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents md:min-w-0 md:basis-auto pr-1">
-          {!isOptionView && (
+          {(
           <div className="flex items-center justify-center gap-2 h-9 w-9 md:w-auto bg-muted/40 border border-0 rounded-md md:px-3 shrink-0 md:order-2 cursor-pointer" onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled' : 'Quick Trade disabled'); } catch (e) {} }} title="Quick Trade">
              <Zap size={18} className={`md:hidden ${quickTradeEnabled ? 'text-primary' : 'text-muted-foreground'}`} />
              <span className="hidden md:inline text-xs font-medium text-foreground/80">Quick Trade</span>

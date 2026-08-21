@@ -233,6 +233,46 @@ export async function getOptionToken(exchange: string, tradingsymbol: string): P
   } catch (e) { return null; }
 }
 
+/** Full contract details for a tradingsymbol, straight from Kite's instrument
+ *  master. Needed before any order can be built for a contract the user is merely
+ *  LOOKING at: quantity is meaningless without the real lot size, and guessing one
+ *  from the underlying's usual value is exactly the kind of assumption that sends
+ *  a wrong-sized order. Searches both F&O files, so it works for a NIFTY, Bank
+ *  Nifty or SENSEX contract of ANY expiry — not just the default chain's. */
+export async function getContractInfo(tradingsymbol: string): Promise<any | null> {
+  try {
+    const kc = getKiteClient();
+    // @ts-ignore
+    if (!kc || !kc.access_token) return null;
+    const now = Date.now();
+    if (!nfoInstrumentsCache || (now - lastInstrumentsFetch > 24 * 60 * 60 * 1000)) {
+      nfoInstrumentsCache = await kc.getInstruments('NFO');
+      lastInstrumentsFetch = now;
+    }
+    let hit = (nfoInstrumentsCache || []).find((i: any) => i.tradingsymbol === tradingsymbol);
+    if (!hit) {
+      if (!bfoInstrumentsCache || (now - lastBfoInstrumentsFetch > 24 * 60 * 60 * 1000)) {
+        bfoInstrumentsCache = await kc.getInstruments('BFO');
+        lastBfoInstrumentsFetch = now;
+      }
+      hit = (bfoInstrumentsCache || []).find((i: any) => i.tradingsymbol === tradingsymbol);
+    }
+    if (!hit) return null;
+    const toDateStr = (d: any): string => d instanceof Date ? d.toISOString().split('T')[0] : String(d).split('T')[0];
+    return {
+      tradingsymbol: hit.tradingsymbol,
+      instrument_token: String(hit.instrument_token),
+      exchange: hit.exchange,
+      segment: hit.segment,
+      lot_size: Number(hit.lot_size) || null,
+      strike: Number(hit.strike) || null,
+      expiry: hit.expiry ? toDateStr(hit.expiry) : null,
+      instrument_type: hit.instrument_type,
+      source_of_lot_size: 'Kite Live Instrument Master',
+    };
+  } catch (e) { return null; }
+}
+
 // Best-effort index instrument token from the full dump (e.g. BSE:SENSEX).
 // Returns null when the dump isn't loaded yet — callers must treat it as optional.
 function resolveIndexToken(spotSymbol: string): number | null {
