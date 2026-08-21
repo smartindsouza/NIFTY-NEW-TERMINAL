@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight } from "lucide-react";
+import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, LayoutGrid } from "lucide-react";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { getDivergences } from "../lib/divergence";
@@ -5141,6 +5141,63 @@ export function AdvancedChart() {
     });
   }, [selectedInstrument?.tradingsymbol]);
 
+  // CHART SWITCHER. A grid of every chart in play — the three indices plus whatever
+  // option charts are open — each with a small preview drawn from the candles the
+  // app has ALREADY cached, so opening it costs no requests. Tapping a card expands
+  // it into the chart, which is the interaction from the reference clip: the card
+  // you touched becomes the screen you land on, rather than one view cutting to
+  // another with nothing connecting them.
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [expanding, setExpanding] = useState<null | { rect: DOMRect; label: string }>(null);
+
+  const switcherCards = React.useMemo(() => {
+    const cards: any[] = [
+      { key: 'NIFTY', label: 'NIFTY 50', token: '256265', kind: 'index' },
+      { key: 'BANKNIFTY', label: 'BANK NIFTY', token: '260105', kind: 'index' },
+      ...(sensexTokenData?.token ? [{ key: 'SENSEX', label: 'SENSEX', token: String(sensexTokenData.token), kind: 'index' }] : []),
+      ...openCharts.map((c: any) => ({
+        key: c.tradingsymbol, kind: 'option', token: String(c.instrument_token), contract: c,
+        label: prettyOptionName(c.tradingsymbol,
+          contractExpiry?.symbol === c.tradingsymbol ? contractExpiry.expiry : null),
+      })),
+    ];
+    return cards.map((c) => {
+      // Read-only from the query cache — never triggers a fetch.
+      const cached: any = queryClient.getQueryData(["ta-data-live-chart", timeframe, c.token]);
+      const candles: any[] = cached?.candles || [];
+      const closes = candles.slice(-40).map((k: any) => Number(k.close)).filter((n: number) => isFinite(n));
+      const last = closes.length ? closes[closes.length - 1] : null;
+      const first = closes.length ? closes[0] : null;
+      const changePct = (last && first) ? ((last - first) / first) * 100 : null;
+      let path = '';
+      if (closes.length > 1) {
+        const lo = Math.min(...closes), hi = Math.max(...closes), span = (hi - lo) || 1;
+        path = closes.map((v, i) =>
+          `${i === 0 ? 'M' : 'L'}${((i / (closes.length - 1)) * 100).toFixed(1)},${(28 - ((v - lo) / span) * 26).toFixed(1)}`
+        ).join(' ');
+      }
+      return { ...c, last, changePct, path };
+    });
+  }, [openCharts, sensexTokenData?.token, timeframe, queryClient, contractExpiry, taInfo]);
+
+  // The expand: clone the tapped card at its exact position, then grow it to fill
+  // the chart. Purely visual — the chart switch happens immediately underneath, so
+  // if the animation is skipped nothing is lost.
+  const pickFromSwitcher = (card: any, el: HTMLElement | null) => {
+    const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (card.kind === 'index') {
+      setUnderlying(card.key as any);
+      setSelectedInstrument(null);
+    } else {
+      setSelectedInstrument(card.contract);
+    }
+    setSwitcherOpen(false);
+    if (el && !reduced) {
+      setExpanding({ rect: el.getBoundingClientRect(), label: card.label });
+      setTimeout(() => setExpanding(null), 420);
+    }
+  };
+
   const currentSymbol = selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel;
   const lastSpotValue = taInfo && taInfo.candles && taInfo.candles.length > 0 
     ? taInfo.candles[taInfo.candles.length - 1].close 
@@ -8069,6 +8126,13 @@ export function AdvancedChart() {
             SENSEX
           </button>
 
+          <button
+            onClick={() => setSwitcherOpen(true)}
+            title="All charts"
+            className="flex items-center justify-center w-7 h-7 rounded-md bg-muted/40 text-muted-foreground hover:text-primary shrink-0">
+            <LayoutGrid size={14} />
+          </button>
+
           {/* Charts opened this session, kept after the index tabs. Tapping an index
               does not close them; the highlight simply moves. */}
           {openCharts.map((c) => {
@@ -8714,6 +8778,76 @@ export function AdvancedChart() {
             setIsEditingHLevels(false);
           }}
         />
+      )}
+
+      {/* Chart switcher — cards with previews drawn from cached candles. */}
+      {switcherOpen && (
+        <div
+          className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm p-4 flex items-center justify-center animate-in fade-in duration-150"
+          onClick={() => setSwitcherOpen(false)}>
+          <div className="w-full max-w-[520px]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2 px-1">
+              <span className="text-xs font-bold text-muted-foreground tracking-wider">ALL CHARTS</span>
+              <button onClick={() => setSwitcherOpen(false)} className="text-muted-foreground hover:text-foreground">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {switcherCards.map((c) => {
+                const active = c.kind === 'index'
+                  ? (!selectedInstrument && underlying === c.key)
+                  : selectedInstrument?.tradingsymbol === c.key;
+                const up = (c.changePct ?? 0) >= 0;
+                return (
+                  <button
+                    key={c.key}
+                    onClick={(e) => pickFromSwitcher(c, e.currentTarget as HTMLElement)}
+                    className={`text-left rounded-xl p-2.5 border transition-transform active:scale-[0.97] ${active ? 'bg-primary/15 border-primary/40' : 'bg-card border-border hover:border-primary/30'}`}>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-[11px] font-mono font-bold truncate">{c.label}</span>
+                      {c.changePct != null && (
+                        <span className={`text-[10px] font-mono ${up ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {up ? '+' : ''}{c.changePct.toFixed(2)}%
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-sm font-mono font-bold mt-0.5">
+                      {c.last != null ? c.last.toFixed(2) : <span className="text-muted-foreground text-xs">—</span>}
+                    </div>
+                    {/* Preview comes from cached candles; a chart never visited has
+                        none yet, and an empty box is honest about that. */}
+                    <svg viewBox="0 0 100 30" preserveAspectRatio="none" className="w-full h-8 mt-1">
+                      {c.path
+                        ? <path d={c.path} fill="none" strokeWidth="1.5" vectorEffect="non-scaling-stroke"
+                            stroke={up ? 'rgb(52,211,153)' : 'rgb(251,113,133)'} />
+                        : <line x1="0" y1="15" x2="100" y2="15" stroke="currentColor" strokeWidth="1"
+                            className="text-muted-foreground/30" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />}
+                    </svg>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* The tapped card, grown to fill the chart. Visual only. */}
+      {expanding && (
+        <div
+          className="fixed z-[69] rounded-xl bg-card border border-primary/40 pointer-events-none"
+          style={{
+            left: expanding.rect.left, top: expanding.rect.top,
+            width: expanding.rect.width, height: expanding.rect.height,
+            animation: 'chartCardExpand 380ms cubic-bezier(0.22, 1, 0.36, 1) forwards',
+            ['--exp-dx' as any]: `${(window.innerWidth / 2) - (expanding.rect.left + expanding.rect.width / 2)}px`,
+            ['--exp-dy' as any]: `${(window.innerHeight / 2) - (expanding.rect.top + expanding.rect.height / 2)}px`,
+            ['--exp-sx' as any]: `${Math.max(1, window.innerWidth / Math.max(1, expanding.rect.width))}`,
+            ['--exp-sy' as any]: `${Math.max(1, window.innerHeight / Math.max(1, expanding.rect.height))}`,
+          }}>
+          <span className="absolute inset-0 flex items-center justify-center text-[11px] font-mono font-bold text-primary">
+            {expanding.label}
+          </span>
+        </div>
       )}
 
       {/* OPTION REALITY CHECK. A call can fall on a day the index rises, and the
