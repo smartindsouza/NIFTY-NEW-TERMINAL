@@ -1326,7 +1326,28 @@ const MONTH_ABBR = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT',
 const WEEKLY_MONTH: Record<string, number> = {
   '1':1,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'O':10,'N':11,'D':12,
 };
-export function prettyOptionName(tradingsymbol: string): string {
+/** "2027-03-30" -> "30th Mar 2027". The YEAR is kept whenever it is not the
+ *  current one: a March 2027 contract and a March 2026 contract would otherwise
+ *  read identically, and on a trading screen that is a mistake waiting to be made. */
+export function prettyExpiry(iso: string): string | null {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const [, y, mo, d] = m;
+  const monIdx = parseInt(mo, 10) - 1;
+  if (monIdx < 0 || monIdx > 11) return null;
+  const day = parseInt(d, 10);
+  const suffix = (day % 10 === 1 && day !== 11) ? 'st'
+    : (day % 10 === 2 && day !== 12) ? 'nd'
+    : (day % 10 === 3 && day !== 13) ? 'rd' : 'th';
+  const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][monIdx];
+  const thisYear = new Date().getFullYear();
+  return `${day}${suffix} ${mon}${parseInt(y, 10) === thisYear ? '' : ' ' + y}`;
+}
+
+/** The expiry DAY is not in a monthly tradingsymbol — BANKNIFTY27MAR58500CE only
+ *  says March 2027 — so when the real date is known (from Kite's contract master)
+ *  it is passed in and used. Without it we fall back to what the symbol can prove. */
+export function prettyOptionName(tradingsymbol: string, expiryIso?: string | null): string {
   const ts = String(tradingsymbol || '').trim().toUpperCase();
   if (!ts) return tradingsymbol;
   const m = ts.match(/^([A-Z]+?)(\d.*)(CE|PE)$/);
@@ -1337,15 +1358,21 @@ export function prettyOptionName(tradingsymbol: string): string {
   // MONTHLY: the two digits are the YEAR, not a day — BANKNIFTY27MAR58500CE is
   // March 2027. Printing "27 MAR" would read as the 27th and mislead on a
   // trading screen, so monthlies show the month and year instead.
+  const pretty = expiryIso ? prettyExpiry(expiryIso) : null;
+
   const monthly = middle.match(/^(\d{2})([A-Z]{3})(\d+)$/);
   if (monthly && MONTH_ABBR.includes(monthly[2])) {
-    return `${under} ${monthly[3]} ${type} ${monthly[2]} 20${monthly[1]}`;
+    return pretty
+      ? `${under} ${monthly[3]} ${type} (${pretty})`
+      : `${under} ${monthly[3]} ${type} ${monthly[2]} 20${monthly[1]}`;
   }
   const weekly = middle.match(/^(\d{2})([1-9OND])(\d{2})(\d+)$/);
   if (weekly) {
     const mon = WEEKLY_MONTH[weekly[2]];
     const day = weekly[3];
-    if (mon) return `${under} ${weekly[4]} ${type} ${day} ${MONTH_ABBR[mon - 1]}`;
+    if (mon) return pretty
+      ? `${under} ${weekly[4]} ${type} (${pretty})`
+      : `${under} ${weekly[4]} ${type} ${day} ${MONTH_ABBR[mon - 1]}`;
   }
   return tradingsymbol;
 }
@@ -5121,6 +5148,21 @@ export function AdvancedChart() {
     return () => { stopped = true; clearInterval(iv); };
   }, [isOptionView, instrumentToken]);
 
+  // The real expiry date for the contract on screen, so the title can show the
+  // DAY. Only a monthly's month/year is derivable from the symbol itself.
+  const [contractExpiry, setContractExpiry] = useState<{ symbol: string; expiry: string | null } | null>(null);
+  useEffect(() => {
+    const sym = selectedInstrument?.tradingsymbol;
+    if (!sym || !isOptionView) { setContractExpiry(null); return; }
+    if (contractExpiry?.symbol === sym) return;
+    let cancelled = false;
+    fetch(`/api/contract-info?tradingsymbol=${encodeURIComponent(sym)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(c => { if (!cancelled) setContractExpiry({ symbol: sym, expiry: c?.expiry || null }); })
+      .catch(() => { if (!cancelled) setContractExpiry({ symbol: sym, expiry: null }); });
+    return () => { cancelled = true; };
+  }, [selectedInstrument?.tradingsymbol, isOptionView]);
+
   const currentSymbol = selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel;
   const lastSpotValue = taInfo && taInfo.candles && taInfo.candles.length > 0 
     ? taInfo.candles[taInfo.candles.length - 1].close 
@@ -7600,7 +7642,10 @@ export function AdvancedChart() {
       <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2 md:gap-3 pb-2 mb-2 md:mb-4">
         <div className="relative flex items-center gap-2 md:gap-4 flex-wrap max-md:pr-28">
           <h1 className="text-base md:text-2xl font-bold text-foreground tracking-tight whitespace-nowrap">
-            {isFocusedChart && selectedInstrument ? prettyOptionName(selectedInstrument.tradingsymbol) : 'Advanced Trading Chart'}
+            {isFocusedChart && selectedInstrument
+              ? prettyOptionName(selectedInstrument.tradingsymbol,
+                  contractExpiry?.symbol === selectedInstrument.tradingsymbol ? contractExpiry.expiry : null)
+              : 'Advanced Trading Chart'}
           </h1>
           {/* Mobile: chevron toggles the biases dropdown */}
           <button
@@ -8695,7 +8740,7 @@ export function AdvancedChart() {
       {triggerBox && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setTriggerBox(null)}>
           <div className="bg-card border border-border rounded-xl p-4 w-full max-w-[300px]" onClick={(e) => e.stopPropagation()}>
-            <div className="text-sm font-bold">{prettyOptionName(triggerBox.contract.tradingsymbol)}</div>
+            <div className="text-sm font-bold">{prettyOptionName(triggerBox.contract.tradingsymbol, triggerBox.contract.expiry)}</div>
             <div className="text-[11px] text-muted-foreground mb-3">
               now {triggerBox.current.toFixed(2)} · fires on a{' '}
               {triggerBox.level > triggerBox.current ? 'rise' : 'fall'} to{' '}
