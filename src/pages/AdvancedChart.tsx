@@ -1311,6 +1311,45 @@ function computeOrderBlocks(candles: any[]): any[] {
   return found.slice(-OB_MAX_ZONES);
 }
 
+// Turn a Zerodha option tradingsymbol into something readable at a glance.
+// BANKNIFTY27MAR58500CE  ->  BANK NIFTY 58500 CE 27 MAR   (monthly)
+// NIFTY2582124350CE      ->  NIFTY 24350 CE 21 AUG        (weekly)
+// Both layouts exist and differ, so each is matched explicitly; anything that
+// fits neither is returned UNCHANGED rather than half-parsed into a wrong
+// strike, which on a trading screen is worse than an ugly symbol.
+const UNDERLYING_LABEL: Record<string, string> = {
+  BANKNIFTY: 'BANK NIFTY', FINNIFTY: 'FIN NIFTY', MIDCPNIFTY: 'MIDCAP NIFTY',
+  NIFTY: 'NIFTY', SENSEX: 'SENSEX', BANKEX: 'BANKEX',
+};
+const MONTH_ABBR = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+// Weekly symbols compress the month to one character: 1-9, then O, N, D.
+const WEEKLY_MONTH: Record<string, number> = {
+  '1':1,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'O':10,'N':11,'D':12,
+};
+export function prettyOptionName(tradingsymbol: string): string {
+  const ts = String(tradingsymbol || '').trim().toUpperCase();
+  if (!ts) return tradingsymbol;
+  const m = ts.match(/^([A-Z]+?)(\d.*)(CE|PE)$/);
+  if (!m) return tradingsymbol;
+  const [, rawUnder, middle, type] = m;
+  const under = UNDERLYING_LABEL[rawUnder] || rawUnder;
+
+  // MONTHLY: the two digits are the YEAR, not a day — BANKNIFTY27MAR58500CE is
+  // March 2027. Printing "27 MAR" would read as the 27th and mislead on a
+  // trading screen, so monthlies show the month and year instead.
+  const monthly = middle.match(/^(\d{2})([A-Z]{3})(\d+)$/);
+  if (monthly && MONTH_ABBR.includes(monthly[2])) {
+    return `${under} ${monthly[3]} ${type} ${monthly[2]} 20${monthly[1]}`;
+  }
+  const weekly = middle.match(/^(\d{2})([1-9OND])(\d{2})(\d+)$/);
+  if (weekly) {
+    const mon = WEEKLY_MONTH[weekly[2]];
+    const day = weekly[3];
+    if (mon) return `${under} ${weekly[4]} ${type} ${day} ${MONTH_ABBR[mon - 1]}`;
+  }
+  return tradingsymbol;
+}
+
 const toUnixSeconds = (value: any): number => {
   if (typeof value === "number") {
     return value > 1_000_000_000_000 ? Math.floor(value / 1000) : Math.floor(value);
@@ -4524,8 +4563,19 @@ export function AdvancedChart() {
   // used the nearest expiry, which is the wrong assumption often enough to matter:
   // the strike you want on a monthly is not the one the weekly hands you.
   const [expiryPick, setExpiryPick] = useState<{
-    optionType: 'CE' | 'PE'; price: number; expiries: string[];
+    optionType: 'CE' | 'PE'; price: number; expiries: string[]; strike: number; under: string;
   } | null>(null);
+
+  // The strike the chart will land on: the tapped one if it is listed, otherwise
+  // the nearest listed. Shown in the picker so the label cannot promise a strike
+  // the lookup would not choose.
+  const bestStrikeForLabel = (chainData: any, targetStrike: number): number => {
+    if (chainData?.strikes?.length && !chainData.strikes.includes(targetStrike)) {
+      return chainData.strikes.reduce((prev: number, curr: number) =>
+        Math.abs(curr - targetStrike) < Math.abs(prev - targetStrike) ? curr : prev);
+    }
+    return targetStrike;
+  };
 
   const openStrikeChart = async (optionType: 'CE' | 'PE', clickedPrice: number, expiry?: string) => {
     setClickMenu(null);
@@ -4541,7 +4591,11 @@ export function AdvancedChart() {
 
       // No expiry chosen yet and more than one is listed → ask, do not guess.
       if (!expiry && Array.isArray(chainData?.expiries) && chainData.expiries.length > 1) {
-        setExpiryPick({ optionType, price: clickedPrice, expiries: chainData.expiries.slice(0, 8) });
+        setExpiryPick({
+          optionType, price: clickedPrice, expiries: chainData.expiries.slice(0, 8),
+          strike: bestStrikeForLabel(chainData, targetStrike),
+          under: UNDERLYING_LABEL[sym.replace(/[^A-Z]/g, '')] || currentSymbol,
+        });
         return;
       }
 
@@ -7461,7 +7515,7 @@ export function AdvancedChart() {
       <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2 md:gap-3 pb-2 mb-2 md:mb-4">
         <div className="relative flex items-center gap-2 md:gap-4 flex-wrap max-md:pr-28">
           <h1 className="text-base md:text-2xl font-bold text-foreground tracking-tight whitespace-nowrap">
-            {isFocusedChart && selectedInstrument ? selectedInstrument.tradingsymbol : 'Advanced Trading Chart'}
+            {isFocusedChart && selectedInstrument ? prettyOptionName(selectedInstrument.tradingsymbol) : 'Advanced Trading Chart'}
           </h1>
           {/* Mobile: chevron toggles the biases dropdown */}
           <button
@@ -8530,11 +8584,8 @@ export function AdvancedChart() {
       {expiryPick && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setExpiryPick(null)}>
           <div className="bg-card border border-border rounded-xl p-4 w-full max-w-[280px]" onClick={(e) => e.stopPropagation()}>
-            <div className="text-sm font-bold mb-1">
-              {expiryPick.optionType} chart · expiry
-            </div>
-            <div className="text-[11px] text-muted-foreground mb-3">
-              Nearest first. The strike is picked inside the expiry you choose.
+            <div className="text-base font-bold mb-3">
+              {expiryPick.under} {expiryPick.strike} {expiryPick.optionType}
             </div>
             <div className="flex flex-col gap-1.5 max-h-[260px] overflow-y-auto">
               {expiryPick.expiries.map((e) => (
