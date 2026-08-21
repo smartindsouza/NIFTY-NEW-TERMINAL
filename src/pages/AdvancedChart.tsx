@@ -296,9 +296,18 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
               {ticket.action}
             </span>
             <span className="font-semibold text-sm tracking-wider">
-              {ticket.tradingsymbol}
+              {prettyOptionName(ticket.tradingsymbol, ticket.expiry)}
             </span>
           </div>
+          {/* LTP lives here now that the metadata block is gone — it is the one
+              number from that block worth keeping in view while confirming. */}
+          <span className={`font-bold font-mono text-sm ml-auto mr-3 px-1.5 py-0.5 rounded transition-all duration-300 ${
+            priceDirection === 'UP' ? 'text-emerald-400 bg-emerald-500/10'
+            : priceDirection === 'DOWN' ? 'text-rose-400 bg-rose-500/10'
+            : 'text-primary'
+          }`}>
+            ₹{liveLtp.toFixed(2)}
+          </span>
           <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
             <X size={18} />
           </button>
@@ -313,7 +322,6 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
               <span className="text-foreground/80 font-medium">{ticket.underlying}</span>
             </div>
             <div className="bg-primary/10 border border-primary/25 p-2 rounded-2xl flex flex-col justify-between">
-              <span className="text-primary font-bold text-[10px] uppercase tracking-wider block mb-1">⚠️ Expiry Date</span>
               <select
                 value={ticket.expiry}
                 onChange={(e) => onExpiryChange(e.target.value)}
@@ -326,112 +334,6 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
                 ))}
               </select>
             </div>
-            <div>
-              <span className="text-muted-foreground block">Strike / Option</span>
-              <span className="text-foreground/80 font-medium">{ticket.strike} {ticket.optionType}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground block">LTP</span>
-              <span className={`font-bold font-mono transition-all duration-300 inline-block px-1.5 py-0.5 rounded ${
-                priceDirection === 'UP'
-                  ? 'text-emerald-800 bg-emerald-100 border border-emerald-200'
-                  : priceDirection === 'DOWN'
-                  ? 'text-rose-800 bg-rose-100 border border-rose-200'
-                  : 'text-primary'
-              }`}>
-                ₹{liveLtp.toFixed(2)}
-              </span>
-            </div>
-          </div>
-
-          {/* Option Contract Diagnostics Box */}
-          <div className="bg-background/45 border border-0/60 rounded-lg p-2.5 text-[11px] font-sans">
-            <button 
-              type="button"
-              onClick={() => setShowDiagnostics(!showDiagnostics)}
-              className="w-full flex justify-between items-center text-primary/90 font-semibold pb-1 border-b border-0/40 hover:text-primary transition-colors"
-            >
-              <span>📋 Instrument Master Diagnostics</span>
-              <div className="flex items-center gap-2">
-                <span className="text-[9px] bg-primary/10 text-primary px-1.5 py-0.5 rounded font-mono">
-                  {ticket.exchange || 'NFO'}
-                </span>
-                <span className="text-[9px] text-primary/75 hover:text-primary font-sans ml-1">
-                  ({showDiagnostics ? 'hide' : 'show'})
-                </span>
-              </div>
-            </button>
-            
-            {showDiagnostics && (
-              <div className="space-y-1 text-muted-foreground font-sans leading-normal mt-1.5 animate-in fade-in slide-in-from-top-1">
-                <div className="flex justify-between">
-                  <span>Trading Symbol:</span>
-                  <span className="text-foreground/90 font-mono font-medium">{ticket.tradingsymbol || 'N/A'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Instrument Token:</span>
-                  <span className="text-foreground/90 font-mono">{ticket.instrument_token || 'N/A'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Segment:</span>
-                  <span className="text-foreground/90">{ticket.segment || 'NFO-OPT'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Expiry Date:</span>
-                  <span className="text-foreground/90 font-mono">{ticket.expiry}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Strike Price:</span>
-                  <span className="text-foreground/90 font-mono">{ticket.strike}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Option Type:</span>
-                  <span className={`font-mono font-bold ${ticket.optionType === 'CE' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    {ticket.optionType}
-                  </span>
-                </div>
-                <div className="flex justify-between border-t border-0/40 pt-1.5 mt-1 pb-0.5">
-                  <span className="font-semibold text-foreground/80">Lot Size from Kite Master:</span>
-                  <span className="font-mono text-primary font-bold">
-                    {lotSize != null ? lotSize : (
-                      <span className="text-rose-400 animate-pulse font-sans font-medium text-[10px]">
-                        Unavailable
-                      </span>
-                    )}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Source:</span>
-                  <span className="text-[10px] text-primary/70 italic font-medium">
-                    {ticket.source_of_lot_size || 'Kite Live Instrument Master'}
-                  </span>
-                </div>
-
-                <div className="text-[10px] font-semibold text-primary/80 mb-1 border-b border-0/40 pb-0.5 mt-2 pt-1 uppercase tracking-widest">
-                   Auto Lot Diagnostics
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Lot Sizing Mode:</span>
-                  <span className={`font-mono font-medium ${lotSizingMode === 'AUTO MAX' ? 'text-primary' : 'text-foreground/80'}`}>{lotSizingMode}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Cost Per Lot:</span>
-                  <span className="font-mono text-primary font-semibold">{costPerLot > 0 ? `₹${costPerLot.toFixed(2)}` : 'N/A'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Max Affordable Lots:</span>
-                  <span className="font-mono text-primary font-semibold">{maxAffordableLots > 0 ? maxAffordableLots : '0'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Selected Lots:</span>
-                  <span className="font-mono text-primary/90">{lots}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Auto Lot Calculation Source:</span>
-                  <span className="font-mono text-[9px] text-primary/70">{calculationSource}</span>
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Missing Lot Size Alert Box */}
@@ -507,46 +409,8 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
                    </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 mt-2.5 pt-2 border-t border-0/60 text-[10px]">
-                   <div className="flex justify-between">
-                     <span className="text-muted-foreground">Total Qty:</span>
-                     <span className="font-mono text-foreground/80">{quantity} <span className="text-slate-600 text-[9px]">(x{lotSize})</span></span>
-                   </div>
-                   <div className="flex justify-between items-center">
-                     <span className="text-muted-foreground">Cost/Lot:</span>
-                     <span className="font-mono text-emerald-400/90 flex items-center gap-1">
-                        {costPerLot > 0 ? `₹${costPerLot.toFixed(1)}` : '...' }
-                        {!isKite && costPerLot > 0 && <span className="text-primary/80 text-[8px]" title="Estimated">*Est</span>}
-                     </span>
-                   </div>
-                   <div className="flex justify-between items-center">
-                     <span className="text-muted-foreground">Max Afford:</span>
-                     <span className="font-mono text-primary flex items-center gap-1">
-                        {maxAffordableLots > 0 ? maxAffordableLots : 0} lots
-                        {!isKite && maxAffordableLots > 0 && <span className="text-primary/80 text-[8px]" title="Estimated">*Est</span>}
-                     </span>
-                   </div>
-                   <div className="flex justify-between">
-                     <span className="text-muted-foreground">Avail margin:</span>
-                     <span className="font-mono text-emerald-400/90">₹{availBalance.toFixed(0)}</span>
-                   </div>
-                </div>
              </div>
              
-             {/* Auto LIMIT price — live premium ±0.5%, updates live, no manual typing */}
-            <div>
-              <label className="text-xs font-medium text-muted-foreground block mb-1">
-                Price <span className="text-[9px] text-primary/80 font-semibold">(auto · live {ticket.action === 'BUY' ? '+' : '−'}0.5%)</span>
-              </label>
-              <input
-                type="number"
-                step="0.05"
-                readOnly
-                value={limitPrice}
-                className="w-full bg-card/60 border border-0 rounded-md text-center text-xs h-9 focus:outline-none font-mono text-foreground"
-              />
-              <span className="text-[10px] text-muted-foreground block mt-1">Tick size ₹0.05 · tracks live premium</span>
-            </div>
           </div>
 
           {/* Required vs Available details */}
