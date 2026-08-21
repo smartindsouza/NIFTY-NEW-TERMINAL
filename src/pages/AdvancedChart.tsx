@@ -3027,6 +3027,13 @@ export function AdvancedChart() {
 
   // States for chart-click option strike selection
   const [clickMenu, setClickMenu] = useState<{ x: number, y: number, price: number } | null>(null);
+  // Same URL signal App uses. In this mode the tab is about ONE contract, so the
+  // index switcher is hidden too — it would only offer a way to navigate away from
+  // the thing the tab exists to show.
+  const isFocusedChart = (() => {
+    try { return new URLSearchParams(window.location.search).has('optToken'); }
+    catch (e) { return false; }
+  })();
   // A tab opened from Strike Click carries the contract in its URL. Applied once
   // on mount only — after that the user's own selection wins, so a reload keeps
   // the contract but a later switch is never fought by the URL.
@@ -7351,7 +7358,7 @@ export function AdvancedChart() {
       <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2 md:gap-3 pb-2 mb-2 md:mb-4">
         <div className="relative flex items-center gap-2 md:gap-4 flex-wrap max-md:pr-28">
           <h1 className="text-base md:text-2xl font-bold text-foreground tracking-tight whitespace-nowrap">
-            Advanced Trading Chart
+            {isFocusedChart && selectedInstrument ? selectedInstrument.tradingsymbol : 'Advanced Trading Chart'}
           </h1>
           {/* Mobile: chevron toggles the biases dropdown */}
           <button
@@ -7783,7 +7790,7 @@ export function AdvancedChart() {
         </div>
       ) : (
       <div className="flex flex-col flex-grow gap-0 md:gap-2 min-h-0">
-        <div className="flex items-center gap-1.5 px-1 pb-1 shrink-0">
+        <div className={`items-center gap-1.5 px-1 pb-1 shrink-0 ${isFocusedChart ? 'hidden' : 'flex'}`}>
           <button onClick={() => { setUnderlying('NIFTY'); setSelectedInstrument(null); }}
             className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${!selectedInstrument && underlying === 'NIFTY' ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
             NIFTY 50

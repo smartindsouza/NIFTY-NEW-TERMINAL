@@ -73,6 +73,14 @@ function TerminalLoader() {
 }
 
 export default function App() {
+  // True when this tab was opened as a dedicated option chart (Strike Click).
+  // Must live in App itself — it is App that renders the left rail. Two earlier
+  // attempts put it in TerminalLoader, which compiles cleanly and then crashes at
+  // runtime, so the check below asserts the declaration and every use share a scope.
+  const isFocusedChart = (() => {
+    try { return new URLSearchParams(window.location.search).has('optToken'); }
+    catch (e) { return false; }
+  })();
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [location] = useLocation();
   const [reloading, setReloading] = useState(false);
@@ -148,8 +156,13 @@ export default function App() {
           }
           ` : ''}
         `}</style>
-        <Header />
-        <main className={`flex-1 overflow-y-auto w-full relative bg-transparent pl-0 md:pl-[80px] pt-[max(env(safe-area-inset-top),12px)] md:pt-8 md:pb-12 pr-0 md:pr-6 lg:pr-8 ${onChart ? 'max-md:overflow-hidden max-md:overscroll-none pb-24 max-md:pb-0' : 'pb-24'}`}>
+        {/* A tab opened from Strike Click is a single-contract window: no left rail
+            and no page padding for it. Deliberately keyed on the URL rather than on
+            "is an option showing", because the MAIN tab must keep its navigation —
+            it shows the traded option after every trade, and hiding the rail there
+            would strand the user with no way back. */}
+        {!isFocusedChart && <Header />}
+        <main className={`flex-1 overflow-y-auto w-full relative bg-transparent pl-0 ${isFocusedChart ? '' : 'md:pl-[80px]'} pt-[max(env(safe-area-inset-top),12px)] md:pt-8 md:pb-12 pr-0 md:pr-6 lg:pr-8 ${onChart ? 'max-md:overflow-hidden max-md:overscroll-none pb-24 max-md:pb-0' : 'pb-24'}`}>
           <ActivePositions />
           <Suspense fallback={<TerminalLoader />}>
             <Switch>
