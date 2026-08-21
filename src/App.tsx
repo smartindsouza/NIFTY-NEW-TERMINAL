@@ -7,6 +7,8 @@ import { lazy, Suspense, useState, useEffect } from 'react';
 import { Route, Switch, useLocation } from 'wouter';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Header } from './components/Header';
+// The live tick connection must belong to the APP, not to a piece of chrome.
+import { useGlobalWebSocket } from './hooks/useWebSocket';
 import { ActivePositions } from './components/ActivePositions';
 import { Toaster } from '@/components/ui/sonner';
 import { DiagnosticsPanel } from './components/DiagnosticsPanel';
@@ -73,6 +75,13 @@ function TerminalLoader() {
 }
 
 export default function App() {
+  // Open the live tick connection here, unconditionally. It used to be opened as
+  // a side effect of rendering <Header/>, so hiding the left rail in a Strike Click
+  // tab silently took the WEBSOCKET with it: that tab received no ticks at all and
+  // its option chart sat on the 15s poll. A data connection must never depend on
+  // whether a piece of UI happens to be on screen.
+  useGlobalWebSocket();
+
   // True when this tab was opened as a dedicated option chart (Strike Click).
   // Must live in App itself — it is App that renders the left rail. Two earlier
   // attempts put it in TerminalLoader, which compiles cleanly and then crashes at
