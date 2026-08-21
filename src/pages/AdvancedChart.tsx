@@ -3170,9 +3170,35 @@ export function AdvancedChart() {
     return false;
   });
 
+  // Declared HERE, above the H-levels keys that read it: those keys are computed
+  // during render, so leaving this further down was a temporal-dead-zone crash
+  // waiting to happen rather than a style point.
+  const [underlying, setUnderlying] = useState<'NIFTY' | 'BANKNIFTY' | 'SENSEX'>(() => {
+    // Validated against the known set rather than trusted: an old or hand-edited
+    // value must fall back to NIFTY, not leave the chart pointing at nothing.
+    try {
+      const v = localStorage.getItem('chartUnderlying');
+      if (v === 'SENSEX' || v === 'BANKNIFTY' || v === 'NIFTY') return v;
+    } catch(e) {}
+    return 'NIFTY';
+  });
+  useEffect(() => {
+    try { localStorage.setItem('chartUnderlying', underlying); } catch(e) {}
+  }, [underlying]);
+
+  // Each index has its OWN levels. Keys are suffixed per index so NIFTY, Bank
+  // Nifty and SENSEX cannot overwrite one another on the device, on the server, or
+  // in the dated journal. The bare 'hLevels' key is still read as NIFTY's so an
+  // existing device keeps the levels it already has.
+  const hlKey = underlying === 'NIFTY' ? 'hLevels' : `hLevels_${underlying}`;
+  const hlSettingKey = underlying === 'NIFTY' ? 'h_levels' : `h_levels_${underlying}`;
+  const hlKeyRef = useRef(hlKey); hlKeyRef.current = hlKey;
+  const hlSettingKeyRef = useRef(hlSettingKey); hlSettingKeyRef.current = hlSettingKey;
+  const underlyingRef = useRef(underlying); underlyingRef.current = underlying;
+
   const [hLevels, setHLevels] = useState<number[]>(() => {
     try {
-      const saved = localStorage.getItem('hLevels');
+      const saved = localStorage.getItem(hlKey);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length === 6) {
@@ -3222,21 +3248,24 @@ export function AdvancedChart() {
   const hLevelsHydratedRef = useRef(false);
   useEffect(() => {
     let cancelled = false;
+    // Re-runs when the index changes: the levels belong to the index, so switching
+    // must load that index's set rather than carry the previous one across.
+    hLevelsHydratedRef.current = false;
     (async () => {
       try {
-        const r = await fetch('/api/settings/h_levels');
+        const r = await fetch(`/api/settings/${hlSettingKey}`);
         const d = await r.json();
         const serverVal = d?.value;
         if (!cancelled && Array.isArray(serverVal) && serverVal.length === 6) {
           const norm = serverVal.map((v: any) => Math.round(Number(v) || 0));
           setHLevels(norm);
-          try { localStorage.setItem('hLevels', JSON.stringify(norm)); } catch {}
+          try { localStorage.setItem(hlKey, JSON.stringify(norm)); } catch {}
         } else if (!cancelled) {
           // server empty — seed from whatever this device already has
           let local: number[] = [];
-          try { local = JSON.parse(localStorage.getItem('hLevels') || '[]'); } catch {}
+          try { local = JSON.parse(localStorage.getItem(hlKey) || '[]'); } catch {}
           if (Array.isArray(local) && local.length === 6 && local.some(v => v > 0)) {
-            fetch('/api/settings/h_levels', {
+            fetch(`/api/settings/${hlSettingKey}`, {
               method: 'PUT', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ value: local }),
             }).catch(() => {});
@@ -3246,7 +3275,7 @@ export function AdvancedChart() {
       if (!cancelled) hLevelsHydratedRef.current = true;
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [hlKey, hlSettingKey]);
 
   useEffect(() => {
     try {
@@ -3256,14 +3285,14 @@ export function AdvancedChart() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('hLevels', JSON.stringify(hLevels));
+      localStorage.setItem(hlKeyRef.current, JSON.stringify(hLevels));
     } catch(e) {}
     // Mirror to the server so the levels sync to the user's other devices.
     // Gated on hydration so the initial local value can't overwrite a freshly
     // pulled server copy. Debounced to coalesce rapid edits.
     if (!hLevelsHydratedRef.current) return;
     const t = setTimeout(() => {
-      fetch('/api/settings/h_levels', {
+      fetch(`/api/settings/${hlSettingKeyRef.current}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ value: hLevels }),
       }).catch(() => {});
@@ -3275,7 +3304,7 @@ export function AdvancedChart() {
         const d = `${x.getUTCFullYear()}-${String(x.getUTCMonth() + 1).padStart(2, '0')}-${String(x.getUTCDate()).padStart(2, '0')}`;
         fetch('/api/h-levels', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ date: d, levels: hLevels, note: 'auto from chart indicator' }),
+          body: JSON.stringify({ date: d, symbol: underlyingRef.current, levels: hLevels, note: 'auto from chart indicator' }),
         }).catch(() => {});
       }
     }, 600);
@@ -3453,18 +3482,6 @@ export function AdvancedChart() {
 
   // Which INDEX the chart's index view shows (the tab-strip switcher). Options
   // open on top of either; switching back to index mode lands on this one.
-  const [underlying, setUnderlying] = useState<'NIFTY' | 'BANKNIFTY' | 'SENSEX'>(() => {
-    // Validated against the known set rather than trusted: an old or hand-edited
-    // value must fall back to NIFTY, not leave the chart pointing at nothing.
-    try {
-      const v = localStorage.getItem('chartUnderlying');
-      if (v === 'SENSEX' || v === 'BANKNIFTY' || v === 'NIFTY') return v;
-    } catch(e) {}
-    return 'NIFTY';
-  });
-  useEffect(() => {
-    try { localStorage.setItem('chartUnderlying', underlying); } catch(e) {}
-  }, [underlying]);
 
   useEffect(() => {
     try {

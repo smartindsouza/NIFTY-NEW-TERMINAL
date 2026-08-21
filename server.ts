@@ -36,6 +36,29 @@ const db = new Database(`${KITE_DATA_DIR}/kite_session.db`);
 // fires a real exit through closePositionBySymbol when a level is crossed.
 // Daily journal of externally-supplied "H levels" (formula undisclosed).
 // Stored dated for later reverse-engineering against price data.
+// PER-INDEX H-LEVELS. The original table keyed rows by DATE alone, which was fine
+// while NIFTY was the only chart — but Bank Nifty and SENSEX have their own levels,
+// and on a shared date they would silently overwrite each other AND corrupt the
+// NIFTY series that has been collecting since 23 Jul for the formula hunt.
+//
+// The rebuild is done as a NEW table rather than an ALTER, because the primary key
+// itself has to change (sqlite cannot alter one in place). Existing rows are copied
+// across and tagged NIFTY, which is what they are. The original table is left
+// untouched as a backup — nothing is dropped.
+db.exec(`CREATE TABLE IF NOT EXISTS h_levels_v2 (
+  symbol TEXT NOT NULL, date TEXT NOT NULL, levels TEXT NOT NULL, note TEXT DEFAULT '',
+  created_at INTEGER, updated_at INTEGER,
+  PRIMARY KEY (symbol, date)
+);`);
+try {
+  const already: any = db.prepare('SELECT COUNT(*) AS n FROM h_levels_v2').get();
+  if (!already || already.n === 0) {
+    const moved = db.prepare(`INSERT OR IGNORE INTO h_levels_v2 (symbol, date, levels, note, created_at, updated_at)
+      SELECT 'NIFTY', date, levels, note, created_at, updated_at FROM h_levels`).run();
+    if (moved && moved.changes) console.log(`[h-levels] migrated ${moved.changes} existing rows to NIFTY`);
+  }
+} catch (e) { console.error('[h-levels] migration skipped:', e); }
+
 db.exec(`CREATE TABLE IF NOT EXISTS h_levels (
   date TEXT PRIMARY KEY, levels TEXT NOT NULL, note TEXT DEFAULT '',
   created_at INTEGER, updated_at INTEGER
@@ -1878,22 +1901,31 @@ setInterval(() => {
       if (calIsNseHoliday(d)) return res.json({ ok: false, skipped: true, error: `${holidayName(d) || 'NSE holiday'} — market closed, not journaled` });
       const arr = Array.isArray(levels) ? levels.map(Number).filter((v: number) => isFinite(v)) : [];
       if (!arr.length) return res.status(400).json({ ok: false, error: 'levels must be a non-empty number array' });
-      db.prepare(`INSERT INTO h_levels (date, levels, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(date) DO UPDATE SET levels = excluded.levels, note = excluded.note, updated_at = excluded.updated_at`)
-        .run(d, JSON.stringify(arr), String(note || ''), Date.now(), Date.now());
-      res.json({ ok: true, date: d, count: arr.length });
+      // Symbol defaults to NIFTY so anything older that omits it keeps working.
+      const sym = String((req.body && req.body.symbol) || 'NIFTY').toUpperCase().trim() || 'NIFTY';
+      db.prepare(`INSERT INTO h_levels_v2 (symbol, date, levels, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(symbol, date) DO UPDATE SET levels = excluded.levels, note = excluded.note, updated_at = excluded.updated_at`)
+        .run(sym, d, JSON.stringify(arr), String(note || ''), Date.now(), Date.now());
+      res.json({ ok: true, symbol: sym, date: d, count: arr.length });
     } catch (e: any) { res.status(500).json({ ok: false, error: e?.message || String(e) }); }
   });
   app.get('/api/h-levels', (req, res) => {
     try {
       const limit = Math.min(500, parseInt(String(req.query.limit || '200'), 10) || 200);
-      const rows = (db.prepare('SELECT * FROM h_levels ORDER BY date DESC LIMIT ?').all(limit) as any[])
+      const symQ = req.query.symbol ? String(req.query.symbol).toUpperCase().trim() : null;
+      const rows = ((symQ
+        ? db.prepare('SELECT * FROM h_levels_v2 WHERE symbol = ? ORDER BY date DESC LIMIT ?').all(symQ, limit)
+        : db.prepare('SELECT * FROM h_levels_v2 ORDER BY date DESC LIMIT ?').all(limit)) as any[])
         .map(r => ({ date: r.date, levels: JSON.parse(r.levels), note: r.note || '' }));
       res.json({ rows });
     } catch (e: any) { res.status(500).json({ ok: false, error: e?.message || String(e) }); }
   });
   app.delete('/api/h-levels/:date', (req, res) => {
-    try { db.prepare('DELETE FROM h_levels WHERE date = ?').run(String(req.params.date)); res.json({ ok: true }); }
+    try {
+      const sym = String((req.query.symbol as string) || 'NIFTY').toUpperCase().trim();
+      db.prepare('DELETE FROM h_levels_v2 WHERE symbol = ? AND date = ?').run(sym, String(req.params.date));
+      res.json({ ok: true, symbol: sym });
+    }
     catch (e: any) { res.status(500).json({ ok: false, error: e?.message || String(e) }); }
   });
 

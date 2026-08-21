@@ -13,6 +13,10 @@ const istToday = () => {
 };
 
 export default function HLevels() {
+  // Each index keeps its own levels, so the journal is browsed one index at a
+  // time — mixing them in a single list would make the series useless for working
+  // out the formula later.
+  const [symbol, setSymbol] = useState<'NIFTY' | 'BANKNIFTY' | 'SENSEX'>('NIFTY');
   const [date, setDate] = useState(istToday());
   const [raw, setRaw] = useState('');
   const [note, setNote] = useState('');
@@ -20,8 +24,8 @@ export default function HLevels() {
   const [saving, setSaving] = useState(false);
 
   const { data, refetch } = useQuery({
-    queryKey: ['h-levels'],
-    queryFn: async () => (await fetch('/api/h-levels?limit=200')).json(),
+    queryKey: ['h-levels', symbol],
+    queryFn: async () => (await fetch(`/api/h-levels?limit=200&symbol=${symbol}`)).json(),
     refetchOnWindowFocus: false,
   });
   const rows: any[] = data?.rows || [];
@@ -34,7 +38,7 @@ export default function HLevels() {
     try {
       const r = await fetch('/api/h-levels', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date, levels: parsed, note: note.trim() || undefined }),
+        body: JSON.stringify({ date, symbol, levels: parsed, note: note.trim() || undefined }),
       });
       const d = await r.json();
       if (d?.ok) { setMsg(`Saved ${parsed.length} level${parsed.length > 1 ? 's' : ''} for ${date}.`); setRaw(''); setNote(''); refetch(); }
@@ -44,7 +48,7 @@ export default function HLevels() {
   };
 
   const del = async (d: string) => {
-    await fetch(`/api/h-levels/${d}`, { method: 'DELETE' });
+    await fetch(`/api/h-levels/${d}?symbol=${symbol}`, { method: 'DELETE' });
     refetch();
   };
 
@@ -58,6 +62,16 @@ export default function HLevels() {
             <p className="text-xs text-muted-foreground">Auto-filled: every day's values from your chart's H Levels indicator are captured here — no extra entry needed. Manual box below is only for corrections or past dates. After ~30+ days we run the formula hunt.</p>
           </div>
         </div>
+      </div>
+
+      {/* Which index */}
+      <div className="flex items-center gap-1.5 mb-3">
+        {(['NIFTY', 'BANKNIFTY', 'SENSEX'] as const).map(s => (
+          <button key={s} onClick={() => setSymbol(s)}
+            className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${symbol === s ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
+            {s === 'BANKNIFTY' ? 'BANK NIFTY' : s}
+          </button>
+        ))}
       </div>
 
       {/* Entry */}
