@@ -4417,10 +4417,12 @@ export function AdvancedChart() {
         contract: c,
         level: Math.max(0.05, Math.round(tappedPrice / 0.05) * 0.05), // NSE option tick size
         current,
-        // MANUAL / 1 lot by default. AUTO MAX is available, but a trigger fires
-        // later and unattended, so the size it was armed at should be one the user
-        // chose rather than the largest the balance happened to allow at arm time.
-        side: 'BUY', product: 'NRML', lots: 1, lotMode: 'MANUAL',
+        // AUTO MAX by default, matching the main order ticket — the user asked for
+        // the two screens to behave the same. Worth knowing: the size is computed
+        // from the balance at ARM time, while the order goes in later, so if margin
+        // has moved against you by then the broker can reject it. Switch to MANUAL
+        // to pin a size that does not chase the balance.
+        side: 'BUY', product: 'NRML', lots: 1, lotMode: 'AUTO',
       });
     } catch (e: any) {
       toast.error(e?.message || 'Could not open the trigger box');
