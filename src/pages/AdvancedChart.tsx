@@ -5110,6 +5110,37 @@ export function AdvancedChart() {
     refetchInterval: 20000, refetchOnWindowFocus: false,
   });
 
+  // OPEN CHARTS. Previously the contract chip was derived from whatever chart was
+  // showing, so tapping an index erased it and the option could only be reached by
+  // finding the strike again. These are kept as their own list — switching to an
+  // index changes which chart is ACTIVE, it does not close anything. Session-scoped
+  // like the selected contract itself, so a fresh open of the app starts clean.
+  const [openCharts, setOpenCharts] = useState<any[]>(() => {
+    try {
+      const saved = sessionStorage.getItem('openOptionCharts');
+      const arr = saved ? JSON.parse(saved) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) { return []; }
+  });
+  useEffect(() => {
+    try { sessionStorage.setItem('openOptionCharts', JSON.stringify(openCharts)); } catch (e) {}
+  }, [openCharts]);
+
+  // Whatever option chart gets shown joins the list. Capped so the row cannot grow
+  // past what a phone can display.
+  useEffect(() => {
+    if (!selectedInstrument?.tradingsymbol) return;
+    setOpenCharts(prev => {
+      if (prev.some(c => c.tradingsymbol === selectedInstrument.tradingsymbol)) return prev;
+      return [...prev, {
+        tradingsymbol: selectedInstrument.tradingsymbol,
+        instrument_token: String(selectedInstrument.instrument_token),
+        ...(selectedInstrument.lot_size ? { lot_size: selectedInstrument.lot_size } : {}),
+        ...(selectedInstrument.exchange ? { exchange: selectedInstrument.exchange } : {}),
+      }].slice(-5);
+    });
+  }, [selectedInstrument?.tradingsymbol]);
+
   const currentSymbol = selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel;
   const lastSpotValue = taInfo && taInfo.candles && taInfo.candles.length > 0 
     ? taInfo.candles[taInfo.candles.length - 1].close 
@@ -8025,24 +8056,6 @@ export function AdvancedChart() {
       ) : (
       <div className="flex flex-col flex-grow gap-0 md:gap-2 min-h-0">
         <div className={`items-center gap-1.5 px-1 pb-1 shrink-0 overflow-x-auto ${isFocusedChart ? 'hidden' : 'flex'}`}>
-          {/* The contract sits in the SAME row as the indices, so switching between
-              them is one tap either way and it is always obvious which chart is on
-              screen. The × returns to the index without hunting for a tab. */}
-          {selectedInstrument && (
-            <div className="flex items-center gap-1 px-2 h-7 rounded-md bg-primary/20 border border-primary/30 shrink-0">
-              <span className="text-xs font-mono font-bold text-primary whitespace-nowrap">
-                {prettyOptionName(selectedInstrument.tradingsymbol,
-                  contractExpiry?.symbol === selectedInstrument.tradingsymbol ? contractExpiry.expiry : null)}
-              </span>
-              <button
-                onClick={() => setSelectedInstrument(null)}
-                title="Back to the index chart"
-                className="text-primary/70 hover:text-primary text-sm leading-none px-0.5"
-              >
-                ×
-              </button>
-            </div>
-          )}
           <button onClick={() => { setUnderlying('NIFTY'); setSelectedInstrument(null); }}
             className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${!selectedInstrument && underlying === 'NIFTY' ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
             NIFTY 50
@@ -8055,6 +8068,34 @@ export function AdvancedChart() {
             className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${!selectedInstrument && underlying === 'SENSEX' ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
             SENSEX
           </button>
+
+          {/* Charts opened this session, kept after the index tabs. Tapping an index
+              does not close them; the highlight simply moves. */}
+          {openCharts.map((c) => {
+            const active = selectedInstrument?.tradingsymbol === c.tradingsymbol;
+            return (
+              <div key={c.tradingsymbol}
+                className={`flex items-center gap-1 pl-2 pr-1 h-7 rounded-md shrink-0 transition-colors ${active ? 'bg-primary/20 border border-primary/30' : 'bg-muted/40'}`}>
+                <button
+                  onClick={() => setSelectedInstrument(c)}
+                  className={`text-xs font-mono font-bold whitespace-nowrap ${active ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
+                  {prettyOptionName(c.tradingsymbol,
+                    contractExpiry?.symbol === c.tradingsymbol ? contractExpiry.expiry : null)}
+                </button>
+                <button
+                  onClick={() => {
+                    setOpenCharts(prev => prev.filter(x => x.tradingsymbol !== c.tradingsymbol));
+                    // Only leave the chart if the one being closed is the one on screen.
+                    if (active) setSelectedInstrument(null);
+                  }}
+                  title="Close this chart"
+                  className={`text-sm leading-none px-1 ${active ? 'text-primary/70 hover:text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
+                  ×
+                </button>
+              </div>
+            );
+          })}
+
           {tradeTabInstr && (
           <button onClick={() => setSelectedInstrument(tradeTabInstr)}
             className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${selectedInstrument && String(selectedInstrument.instrument_token) === String(tradeTabInstr.instrument_token) ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
