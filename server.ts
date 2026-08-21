@@ -24,7 +24,7 @@ import { evaluateQuantSignals } from './server/quant_engine';
 import { generateGamePlan } from './server/game_plan_service';
 
 import { getLiveNews, rateLimitMiddleware, currentAIStatus } from './server/news_service';
-import { startTicker, setSubscriptions, isTickerConnected } from './server/ticker_service';
+import { startTicker, setSubscriptions, isTickerConnected, getLatestTick } from './server/ticker_service';
 import { setDeltaFuturesToken, getDeltaFuturesToken, onFuturesTick, getDeltaSnapshot } from './server/delta_tracker';
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
@@ -422,6 +422,17 @@ let sensexActiveUntil = 0;
 // activity-window pattern as SENSEX: the index is always streamed (one token is
 // free), the option tokens only while a Bank Nifty chart is actually in use.
 const BANKNIFTY_TOKEN = 260105;
+// Whatever contract a chart is CURRENTLY showing, streamed on demand. The chain
+// sets only cover the default expiry's strikes, so a chart opened on anything
+// outside that window (another expiry, a far strike) had no live feed at all and
+// crawled along on the 15s poll. A chart says what it is watching and the token
+// is streamed while it keeps saying so.
+const watchedTokens = new Map<number, number>(); // token -> expires at
+function activeWatchedTokens(): number[] {
+  const now = Date.now();
+  for (const [tok, exp] of watchedTokens) if (exp < now) watchedTokens.delete(tok);
+  return Array.from(watchedTokens.keys());
+}
 let bankActiveUntil = 0;
 let lastBankChainTokens: number[] = [];
 let lastNiftyChainTokens: number[] = [256265];
@@ -434,6 +445,7 @@ function pushTickerSubscriptions() {
   const all = new Set<number>(lastNiftyChainTokens);
   if (sensexIndexToken) all.add(sensexIndexToken);
   all.add(BANKNIFTY_TOKEN);
+  for (const t of activeWatchedTokens()) all.add(t);
   for (const t of lastSensexChainTokens) all.add(t);
   for (const t of lastBankChainTokens) all.add(t);
   for (const t of premiumRuleTokens()) all.add(t);
@@ -1121,6 +1133,43 @@ setInterval(() => {
       }
     } catch (e) { /* comfort feature — never let it surface */ }
   }, 45000);
+
+  // A chart declares the contract it is showing; we stream it for the next 2
+  // minutes and it re-declares while it stays open. Read-only with respect to
+  // trading — it only widens the tick subscription.
+  app.get('/api/ticker/watch', (req, res) => {
+    try {
+      const tok = parseInt(String(req.query.token || ''), 10);
+      if (!tok || !isFinite(tok)) return res.status(400).json({ ok: false, error: 'token required' });
+      const wasNew = !watchedTokens.has(tok);
+      watchedTokens.set(tok, Date.now() + 2 * 60 * 1000);
+      if (wasNew) pushTickerSubscriptions();
+      res.json({ ok: true, token: tok, watching: activeWatchedTokens().length });
+    } catch (e: any) { res.status(500).json({ ok: false, error: e?.message || String(e) }); }
+  });
+
+  // Is a given contract actually on the live feed? Answers the question directly
+  // instead of leaving "it feels slow" to guesswork.
+  app.get('/api/ticker/status', (req, res) => {
+    try {
+      const tok = req.query.token ? parseInt(String(req.query.token), 10) : null;
+      const all = new Set<number>(lastNiftyChainTokens);
+      if (sensexIndexToken) all.add(sensexIndexToken);
+      all.add(BANKNIFTY_TOKEN);
+      for (const t of lastSensexChainTokens) all.add(t);
+      for (const t of lastBankChainTokens) all.add(t);
+      for (const t of activeWatchedTokens()) all.add(t);
+      res.json({
+        tickerConnected: isTickerConnected(),
+        subscribedCount: all.size,
+        niftyChain: lastNiftyChainTokens.length,
+        sensexChain: lastSensexChainTokens.length,
+        bankChain: lastBankChainTokens.length,
+        watchedOnDemand: activeWatchedTokens().length,
+        ...(tok ? { token: tok, isSubscribed: all.has(tok), lastTick: getLatestTick(tok) || null } : {}),
+      });
+    } catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
+  });
 
   app.get('/api/ta', async (req, res) => {
     const timeframe = req.query.timeframe ? parseInt(req.query.timeframe as string) : 5;

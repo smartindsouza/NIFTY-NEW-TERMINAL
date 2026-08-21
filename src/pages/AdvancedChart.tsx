@@ -4889,6 +4889,23 @@ export function AdvancedChart() {
     } catch (e) {}
   }, []);
 
+  // Tell the server which contract this chart is showing so its ticks are actually
+  // streamed. The chain subscriptions only ever covered the default expiry's
+  // strikes, so a chart opened on anything else got no live feed at all. Re-declared
+  // every 60s (the server's window is 2 minutes) and only for an option view —
+  // the three indices are streamed permanently and need no help.
+  useEffect(() => {
+    if (!isOptionView || !instrumentToken) return;
+    let stopped = false;
+    const ping = () => {
+      if (stopped) return;
+      fetch(`/api/ticker/watch?token=${encodeURIComponent(String(instrumentToken))}`).catch(() => {});
+    };
+    ping();
+    const iv = setInterval(ping, 60000);
+    return () => { stopped = true; clearInterval(iv); };
+  }, [isOptionView, instrumentToken]);
+
   const currentSymbol = selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel;
   const lastSpotValue = taInfo && taInfo.candles && taInfo.candles.length > 0 
     ? taInfo.candles[taInfo.candles.length - 1].close 
