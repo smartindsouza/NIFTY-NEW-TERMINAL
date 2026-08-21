@@ -417,6 +417,13 @@ let latestSensexChainData: any = null;
 let latestSensexAnalytics: any = null;
 let latestSensexChainAt = 0;
 let sensexActiveUntil = 0;
+// Bank Nifty was never on the live feed at all — not the index, not its options —
+// so its chart only moved on the 15s poll while NIFTY ticked every second. Same
+// activity-window pattern as SENSEX: the index is always streamed (one token is
+// free), the option tokens only while a Bank Nifty chart is actually in use.
+const BANKNIFTY_TOKEN = 260105;
+let bankActiveUntil = 0;
+let lastBankChainTokens: number[] = [];
 let lastNiftyChainTokens: number[] = [256265];
 let lastSensexChainTokens: number[] = [];
 
@@ -426,7 +433,9 @@ let lastSensexChainTokens: number[] = [];
 function pushTickerSubscriptions() {
   const all = new Set<number>(lastNiftyChainTokens);
   if (sensexIndexToken) all.add(sensexIndexToken);
+  all.add(BANKNIFTY_TOKEN);
   for (const t of lastSensexChainTokens) all.add(t);
+  for (const t of lastBankChainTokens) all.add(t);
   for (const t of premiumRuleTokens()) all.add(t);
   setSubscriptions(Array.from(all));
 }
@@ -474,6 +483,24 @@ async function refreshData() {
         }
       } catch (e) { /* SENSEX is optional; NIFTY feed continues */ }
 
+      // Bank Nifty chain: streamed only while a Bank Nifty chart is in use, so an
+      // idle user is not paying for ~100 extra tokens on the feed.
+      try {
+        if (Date.now() < bankActiveUntil) {
+          const bn = await getLiveOptionChain('NSE:NIFTY BANK');
+          if (bn && !bn.isMock) {
+            const btok: number[] = [];
+            for (const k of (bn.strikes || [])) {
+              if (bn.ceData?.[k]?.instrument_token) btok.push(bn.ceData[k].instrument_token);
+              if (bn.peData?.[k]?.instrument_token) btok.push(bn.peData[k].instrument_token);
+            }
+            lastBankChainTokens = btok;
+          }
+        } else if (lastBankChainTokens.length) {
+          lastBankChainTokens = [];
+        }
+      } catch (e) { /* Bank Nifty is optional; the NIFTY feed continues */ }
+
       pushTickerSubscriptions();
 
       if (latestChainData.isMock) {
@@ -509,6 +536,13 @@ function connectTicker() {
       lastRealSpotTickAt = Date.now();
       const ts = Math.floor(Date.now() / 1000);
       broadcast({ type: 'tick', symbol: 'NSE:NIFTY 50', price: tick.ltp, timestamp: ts,
+        candle: { time: ts, open: tick.ltp, high: tick.ltp, low: tick.ltp, close: tick.ltp } });
+    } else if (tick.token === BANKNIFTY_TOKEN) {
+      // Bank Nifty index tick → same live-candle shape the chart consumes. Like
+      // SENSEX, deliberately does NOT touch latestSpot: every scorecard, watcher
+      // and exit rule in this app runs on the NIFTY number.
+      const ts = Math.floor(Date.now() / 1000);
+      broadcast({ type: 'tick', symbol: 'NSE:NIFTY BANK', price: tick.ltp, timestamp: ts,
         candle: { time: ts, open: tick.ltp, high: tick.ltp, low: tick.ltp, close: tick.ltp } });
     } else if (sensexIndexToken && tick.token === sensexIndexToken) {
       // SENSEX index tick → same live-candle shape the chart consumes for NIFTY.
@@ -1494,6 +1528,7 @@ setInterval(() => {
     // refreshData refreshes the SENSEX chain cache every 10s and streams its
     // option tokens while this window is open, then drops them when idle.
     if (isSensex) sensexActiveUntil = Date.now() + 2 * 60 * 1000;
+    if (symbol === 'NIFTY BANK' || symbol === 'BANKNIFTY') bankActiveUntil = Date.now() + 2 * 60 * 1000;
 
     // SENSEX fast-path: the ticket polls this endpoint every 1.5s for the live
     // premium — serving the 10s server cache instead of a fresh Kite quote batch
