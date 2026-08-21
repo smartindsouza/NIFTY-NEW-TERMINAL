@@ -1046,6 +1046,8 @@ setInterval(() => {
         { tf: 3, token: '256265', symbol: 'NIFTY 50' },
         { tf: 5, token: '256265', symbol: 'NIFTY 50' },
         { tf: 15, token: '256265', symbol: 'NIFTY 50' },
+        { tf: 5, token: '260105', symbol: 'NIFTY BANK' },
+        { tf: 15, token: '260105', symbol: 'NIFTY BANK' },
       ];
       if (!sensexPrewarmToken) {
         try { const t = await getBseIndexToken('SENSEX'); if (t) sensexPrewarmToken = String(t); } catch (e) {}

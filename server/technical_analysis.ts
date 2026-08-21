@@ -474,8 +474,19 @@ export async function getTechnicalAnalysis(
         // token, which is exactly why a SENSEX chart showed Vol 0 — it never even
         // tried. NIFTY behaviour is unchanged; SENSEX and BANKEX now borrow from
         // their own BSE futures.
-        const volumeUnderlying = /SENSEX/i.test(symbol) ? 'SENSEX'
+        // OPTION CONTRACTS MUST NEVER BORROW. They have real traded volume of their
+        // own, and their tradingsymbols contain the underlying's name
+        // (BANKNIFTY25AUG52000CE, SENSEX2672376000CE), so a name-based test alone
+        // would overwrite genuine option volume with futures volume. Matching the
+        // CE/PE suffix is what separates a contract from an index.
+        const isOptionContract = /(CE|PE)$/i.test(String(symbol || '').trim());
+        // NIFTY BANK is checked BEFORE the plain NIFTY test — "NIFTY BANK" contains
+        // "NIFTY", so the looser rule would otherwise claim it and borrow the wrong
+        // contract's volume.
+        const volumeUnderlying = isOptionContract ? null
+          : /SENSEX/i.test(symbol) ? 'SENSEX'
           : /BANKEX/i.test(symbol) ? 'BANKEX'
+          : (/NIFTY\s*BANK/i.test(symbol) || /BANKNIFTY/i.test(symbol) || String(instrument_token) === '260105') ? 'BANKNIFTY'
           : String(instrument_token) === '256265' ? 'NIFTY'
           : null;
         if (volumeUnderlying && rawHist && rawHist.length > 0) {

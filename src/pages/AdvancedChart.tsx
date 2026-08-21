@@ -3453,8 +3453,13 @@ export function AdvancedChart() {
 
   // Which INDEX the chart's index view shows (the tab-strip switcher). Options
   // open on top of either; switching back to index mode lands on this one.
-  const [underlying, setUnderlying] = useState<'NIFTY' | 'SENSEX'>(() => {
-    try { return localStorage.getItem('chartUnderlying') === 'SENSEX' ? 'SENSEX' : 'NIFTY'; } catch(e) {}
+  const [underlying, setUnderlying] = useState<'NIFTY' | 'BANKNIFTY' | 'SENSEX'>(() => {
+    // Validated against the known set rather than trusted: an old or hand-edited
+    // value must fall back to NIFTY, not leave the chart pointing at nothing.
+    try {
+      const v = localStorage.getItem('chartUnderlying');
+      if (v === 'SENSEX' || v === 'BANKNIFTY' || v === 'NIFTY') return v;
+    } catch(e) {}
     return 'NIFTY';
   });
   useEffect(() => {
@@ -4736,8 +4741,17 @@ export function AdvancedChart() {
     gcTime: Infinity,
     retry: 2,
   });
-  const indexToken: string | null = underlying === 'NIFTY' ? '256265' : (sensexTokenData?.token ? String(sensexTokenData.token) : null);
-  const indexLabel = underlying === 'NIFTY' ? 'NIFTY 50' : 'SENSEX';
+  // NIFTY 50 (256265) and NIFTY BANK (260105) are NSE's published index tokens and
+  // are as stable as the exchange itself; SENSEX is resolved from Zerodha's dump
+  // because BSE's token is not a constant we should be inventing.
+  const indexToken: string | null =
+    underlying === 'NIFTY' ? '256265'
+    : underlying === 'BANKNIFTY' ? '260105'
+    : (sensexTokenData?.token ? String(sensexTokenData.token) : null);
+  const indexLabel =
+    underlying === 'NIFTY' ? 'NIFTY 50'
+    : underlying === 'BANKNIFTY' ? 'NIFTY BANK'
+    : 'SENSEX';
   const instrumentToken = selectedInstrument ? String(selectedInstrument.instrument_token) : indexToken;
   const instrumentTokenRef = useRef(instrumentToken);
   instrumentTokenRef.current = instrumentToken;
@@ -7701,6 +7715,10 @@ export function AdvancedChart() {
           <button onClick={() => { setUnderlying('NIFTY'); setSelectedInstrument(null); }}
             className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${!selectedInstrument && underlying === 'NIFTY' ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
             NIFTY 50
+          </button>
+          <button onClick={() => { setUnderlying('BANKNIFTY'); setSelectedInstrument(null); }}
+            className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${!selectedInstrument && underlying === 'BANKNIFTY' ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
+            BANK NIFTY
           </button>
           <button onClick={() => { setUnderlying('SENSEX'); setSelectedInstrument(null); }}
             className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${!selectedInstrument && underlying === 'SENSEX' ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
