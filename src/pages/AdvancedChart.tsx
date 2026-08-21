@@ -4608,6 +4608,22 @@ export function AdvancedChart() {
       }
       const contract = await res.json();
       if (!contract?.instrument_token) { toast.error('Could not find that contract'); return; }
+      // A PHONE HAS NO VISIBLE TABS. Opening a second one there is a one-way door:
+      // the chromeless option tab hides the index switcher, and with no tab strip
+      // to go back through, the user is stranded. On a narrow screen the chart
+      // switches IN PLACE, where the index buttons remain one tap away. Desktop
+      // keeps the separate tab, which is useful precisely because tabs are visible.
+      const narrow = typeof window !== 'undefined'
+        && window.matchMedia && window.matchMedia('(max-width: 767px)').matches;
+      if (narrow) {
+        setSelectedInstrument({
+          instrument_token: String(contract.instrument_token),
+          tradingsymbol: contract.tradingsymbol,
+          ...(contract.lot_size ? { lot_size: contract.lot_size } : {}),
+          ...(contract.exchange ? { exchange: contract.exchange } : {}),
+        } as any);
+        return;
+      }
       const url = `/advanced-chart?optToken=${encodeURIComponent(String(contract.instrument_token))}`
         + `&optSymbol=${encodeURIComponent(contract.tradingsymbol || '')}`
         + (contract.lot_size ? `&optLot=${contract.lot_size}` : '')
@@ -8008,7 +8024,25 @@ export function AdvancedChart() {
         </div>
       ) : (
       <div className="flex flex-col flex-grow gap-0 md:gap-2 min-h-0">
-        <div className={`items-center gap-1.5 px-1 pb-1 shrink-0 ${isFocusedChart ? 'hidden' : 'flex'}`}>
+        <div className={`items-center gap-1.5 px-1 pb-1 shrink-0 overflow-x-auto ${isFocusedChart ? 'hidden' : 'flex'}`}>
+          {/* The contract sits in the SAME row as the indices, so switching between
+              them is one tap either way and it is always obvious which chart is on
+              screen. The × returns to the index without hunting for a tab. */}
+          {selectedInstrument && (
+            <div className="flex items-center gap-1 px-2 h-7 rounded-md bg-primary/20 border border-primary/30 shrink-0">
+              <span className="text-xs font-mono font-bold text-primary whitespace-nowrap">
+                {prettyOptionName(selectedInstrument.tradingsymbol,
+                  contractExpiry?.symbol === selectedInstrument.tradingsymbol ? contractExpiry.expiry : null)}
+              </span>
+              <button
+                onClick={() => setSelectedInstrument(null)}
+                title="Back to the index chart"
+                className="text-primary/70 hover:text-primary text-sm leading-none px-0.5"
+              >
+                ×
+              </button>
+            </div>
+          )}
           <button onClick={() => { setUnderlying('NIFTY'); setSelectedInstrument(null); }}
             className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${!selectedInstrument && underlying === 'NIFTY' ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
             NIFTY 50
