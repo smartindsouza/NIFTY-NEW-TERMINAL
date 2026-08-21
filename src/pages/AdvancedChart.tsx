@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
-import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
 import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight } from "lucide-react";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
@@ -4970,6 +4970,8 @@ export function AdvancedChart() {
   // rebuild — a ref keeps it correct even if the view changes without a rebuild.
   const isOptionViewRef = useRef(isOptionView);
   isOptionViewRef.current = isOptionView;
+  const queryClient = useQueryClient();
+
   const { data: taInfo, isLoading: isLoadingTa, isError: isTaError, error: taError, refetch: refetchTa } = useQuery({
     queryKey: ["ta-data-live-chart", timeframe, instrumentToken],
     queryFn: async () => {
@@ -5049,6 +5051,36 @@ export function AdvancedChart() {
       .catch(() => { if (!cancelled) setContractExpiry({ symbol: sym, expiry: null }); });
     return () => { cancelled = true; };
   }, [selectedInstrument?.tradingsymbol, isOptionView]);
+
+  // SWITCHING INDEX USED TO STALL. The chart caches every combination it has
+  // fetched (staleTime and gcTime are Infinity), so going BACK to an index was
+  // always instant — it was the FIRST visit to each that waited on a request.
+  // While sitting on one index, quietly fetch the other two at the same
+  // timeframe, so the switch is served from cache. Idle-time work only: it never
+  // blocks what is on screen, and failures are ignored.
+  useEffect(() => {
+    if (selectedInstrument) return;           // on an option chart, leave it alone
+    const others = [
+      { token: '256265', label: 'NIFTY 50' },
+      { token: '260105', label: 'NIFTY BANK' },
+      ...(sensexTokenData?.token ? [{ token: String(sensexTokenData.token), label: 'SENSEX' }] : []),
+    ].filter(o => o.token !== instrumentToken);
+
+    const t = setTimeout(() => {
+      for (const o of others) {
+        queryClient.prefetchQuery({
+          queryKey: ["ta-data-live-chart", timeframe, o.token],
+          queryFn: async () => {
+            const res = await fetch(`/api/ta?timeframe=${timeframe}&token=${o.token}&symbol=${encodeURIComponent(o.label)}`);
+            if (!res.ok) throw new Error('prefetch failed');
+            return res.json();
+          },
+          staleTime: Infinity,
+        }).catch(() => {});
+      }
+    }, 1200);   // let the visible chart finish loading first
+    return () => clearTimeout(t);
+  }, [timeframe, instrumentToken, selectedInstrument, sensexTokenData?.token]);
 
   const currentSymbol = selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel;
   const lastSpotValue = taInfo && taInfo.candles && taInfo.candles.length > 0 
