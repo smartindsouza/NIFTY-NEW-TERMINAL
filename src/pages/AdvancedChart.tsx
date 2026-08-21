@@ -3499,10 +3499,17 @@ export function AdvancedChart() {
         } as any;
       }
     } catch (e) {}
+    // SESSION storage, not local. A refresh mid-session should keep the contract
+    // you were watching, but OPENING the app fresh should land on the index — an
+    // option chart from yesterday is stale context to be handed on startup, and it
+    // hid the index behind a contract that may not even be relevant any more.
+    // sessionStorage gives exactly that: survives reloads, dies with the tab.
     try {
-      const saved = localStorage.getItem('selectedInstrument');
-      return saved ? JSON.parse(saved) : null;
+      const saved = sessionStorage.getItem('selectedInstrument');
+      if (saved) return JSON.parse(saved);
     } catch(e) {}
+    // One-time cleanup of the old permanent key so a stale value cannot resurface.
+    try { localStorage.removeItem('selectedInstrument'); } catch(e) {}
     return null;
   });
 
@@ -3512,10 +3519,13 @@ export function AdvancedChart() {
   useEffect(() => {
     try {
       if (selectedInstrument) {
-        localStorage.setItem('selectedInstrument', JSON.stringify(selectedInstrument));
+        sessionStorage.setItem('selectedInstrument', JSON.stringify(selectedInstrument));
       } else {
-        localStorage.removeItem('selectedInstrument');
+        sessionStorage.removeItem('selectedInstrument');
       }
+      // Keep the retired permanent key clear on every change, so an older build
+      // that wrote it cannot leave a value behind to be restored later.
+      localStorage.removeItem('selectedInstrument');
     } catch(e) {}
   }, [selectedInstrument]);
   
