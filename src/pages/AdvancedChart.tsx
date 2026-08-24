@@ -8341,7 +8341,7 @@ export function AdvancedChart() {
                 index right now. Display only: pointer-events-none, so it can never
                 block a drag, a crosshair, or a level being placed. */}
             {isOptionView && lev && !lev.error && (
-              <div className="absolute top-2 left-2 z-[5] pointer-events-none rounded-md bg-background/80 border border-border/60 px-2.5 py-1.5 text-[11px] leading-snug font-mono max-w-[85%]">
+              <div className="absolute top-11 left-2 z-[5] pointer-events-none rounded-md bg-background/80 border border-border/60 px-2.5 py-1.5 text-[11px] leading-snug font-mono max-w-[85%]">
                 <div className="text-foreground font-semibold">
                   {lev.lambda != null ? `1% index ≈ ${lev.lambda}% premium` : 'gearing — solving…'}
                 </div>
