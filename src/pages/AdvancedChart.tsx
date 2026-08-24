@@ -1133,6 +1133,74 @@ function computeFvgZones(candles: any[]): any[] {
 // ever drawn using information the market had not yet produced.
 const OB_MIN_PTS = 10;
 const OB_MAX_ZONES = 6;
+// MARKET STRUCTURE — Break of Structure and Change of Character.
+//
+// The two are opposites and must never be confused, so the rule is written out:
+// swing points are marked first (a swing high is a candle whose high beats the two
+// candles either side; a swing low is the mirror). Then, when a candle CLOSES
+// through the most recent swing level:
+//   * in the SAME direction as the current trend  -> BOS   (trend continues)
+//   * AGAINST the current trend                   -> CHoCH (trend may be turning)
+// A break upward while already in an uptrend is continuation; the same break while
+// in a downtrend is the first sign of a turn. Labelling one as the other would
+// invert the message entirely.
+//
+// Uses CLOSES, not wicks: a wick through a level is a probe, a close through it is
+// a decision. Lookahead-free — a swing is only confirmed once the two candles after
+// it exist, and nothing is drawn before its breaking candle has closed.
+const STRUCT_LOOKBACK = 2;   // candles either side that define a swing
+const STRUCT_MAX = 6;        // most recent events kept on the chart
+function computeMarketStructure(candles: any[]): any[] {
+  if (!candles || candles.length < STRUCT_LOOKBACK * 2 + 3) return [];
+  const n = STRUCT_LOOKBACK;
+
+  // Swings, confirmed only when the candles either side exist.
+  const swings: { i: number; price: number; kind: 'H' | 'L' }[] = [];
+  for (let i = n; i < candles.length - n; i++) {
+    let isHigh = true, isLow = true;
+    for (let k = i - n; k <= i + n; k++) {
+      if (k === i) continue;
+      if (candles[k].high >= candles[i].high) isHigh = false;
+      if (candles[k].low <= candles[i].low) isLow = false;
+    }
+    if (isHigh) swings.push({ i, price: candles[i].high, kind: 'H' });
+    else if (isLow) swings.push({ i, price: candles[i].low, kind: 'L' });
+  }
+  if (!swings.length) return [];
+
+  const events: any[] = [];
+  let trend: 'UP' | 'DOWN' | null = null;
+  let lastHigh: { i: number; price: number } | null = null;
+  let lastLow: { i: number; price: number } | null = null;
+  let si = 0;
+
+  for (let i = 0; i < candles.length; i++) {
+    // A swing only becomes usable n candles after it forms — that is when it is
+    // confirmed, and using it earlier would be reading the future.
+    while (si < swings.length && swings[si].i + n <= i) {
+      const sw = swings[si++];
+      if (sw.kind === 'H') lastHigh = { i: sw.i, price: sw.price };
+      else lastLow = { i: sw.i, price: sw.price };
+    }
+    const c = candles[i];
+
+    if (lastHigh && c.close > lastHigh.price) {
+      const type = trend === 'DOWN' ? 'CHOCH' : 'BOS';
+      events.push({ type, dir: 'bull', level: lastHigh.price,
+        fromTime: candles[lastHigh.i].time, toTime: c.time, born: i });
+      trend = 'UP';
+      lastHigh = null;              // consumed; wait for the next swing high
+    } else if (lastLow && c.close < lastLow.price) {
+      const type = trend === 'UP' ? 'CHOCH' : 'BOS';
+      events.push({ type, dir: 'bear', level: lastLow.price,
+        fromTime: candles[lastLow.i].time, toTime: c.time, born: i });
+      trend = 'DOWN';
+      lastLow = null;
+    }
+  }
+  return events.slice(-STRUCT_MAX);
+}
+
 function computeOrderBlocks(candles: any[]): any[] {
   if (!candles || candles.length < 3) return [];
   // Displacement bar scales with recent candle size, so a violent day needs a bigger
@@ -2710,6 +2778,10 @@ export function AdvancedChart() {
     return true;
   });
   // Order Blocks — index chart only, like the FVG zones.
+  // Market structure — index charts only, like the other index studies.
+  const [showStructure, setShowStructure] = useState(() => {
+    try { const v = localStorage.getItem('showStructure'); return v === null ? true : v === 'true'; } catch (e) { return true; }
+  });
   const [showOrderBlocks, setShowOrderBlocks] = useState(() => {
     try { const v = localStorage.getItem('showOrderBlocks'); return v === null ? true : v === 'true'; } catch (e) { return true; }
   });
@@ -2855,6 +2927,9 @@ export function AdvancedChart() {
   useEffect(() => {
     try { localStorage.setItem('showOrderBlocks', String(showOrderBlocks)); } catch (e) {}
   }, [showOrderBlocks]);
+  useEffect(() => {
+    try { localStorage.setItem('showStructure', String(showStructure)); } catch (e) {}
+  }, [showStructure]);
 
   useEffect(() => {
     try { localStorage.setItem('levelAlertsOn', String(levelAlertsOn)); } catch(e) {}
@@ -6003,6 +6078,8 @@ export function AdvancedChart() {
   const fvgZonesRef = useRef<any[]>([]);
   const fvgSigRef = useRef<string>('');
   const obZonesRef = useRef<any[]>([]);
+  const structRef = useRef<any[]>([]);
+  const structSigRef = useRef<string>('');
   const obSigRef = useRef<string>('');
 
   const lastAlertedDivergenceRef = useRef<string | null>(null);
@@ -7134,6 +7211,46 @@ export function AdvancedChart() {
               // Order Blocks — recomputed only when a candle CLOSES, same as the FVG
               // zones. A finished block is drawn with a hard right edge at the point it
               // was superseded or broken; only the live one runs to the current candle.
+              // Market structure: a dashed line at the broken level running from the
+              // swing that set it to the candle that closed through it, tagged BOS or
+              // CHoCH. Index charts only, and recomputed only on a candle close.
+              if (showStructure && !isOptionView && mainSeriesRef.current) {
+                const baseC = chartDataRef.current?.candles || [];
+                const arc = liveClosedCandlesRef.current;
+                const lastT = baseC.length ? baseC[baseC.length - 1].time : 0;
+                const closedSince = arc.filter((k: any) => k.time > lastT);
+                const sig = `${timeframe}|${baseC.length}|${closedSince.length}|${closedSince.length ? closedSince[closedSince.length - 1].time : 0}`;
+                if (sig !== structSigRef.current) {
+                  structSigRef.current = sig;
+                  structRef.current = computeMarketStructure(closedSince.length ? [...baseC, ...closedSince] : baseC);
+                }
+                for (const ev of structRef.current) {
+                  const y = mainSeriesRef.current.priceToCoordinate(ev.level);
+                  if (y === null) continue;
+                  const x0 = mainChartRef.current?.timeScale()?.timeToCoordinate(ev.fromTime as any);
+                  const x1 = mainChartRef.current?.timeScale()?.timeToCoordinate(ev.toTime as any);
+                  if (x0 === null || x0 === undefined || x1 === null || x1 === undefined) continue;
+                  // CHoCH is the one that says the trend may be turning, so it is the
+                  // one that stands out: solid and brighter. BOS is continuation and
+                  // stays quiet — the chart should not shout the ordinary event.
+                  const isChoch = ev.type === 'CHOCH';
+                  const rgb = ev.dir === 'bull' ? '56,189,248' : '244,114,182';
+                  ctx.beginPath();
+                  ctx.setLineDash(isChoch ? [] : [4, 3]);
+                  ctx.strokeStyle = `rgba(${rgb},${isChoch ? 0.95 : 0.55})`;
+                  ctx.lineWidth = isChoch ? 1.6 : 1;
+                  ctx.moveTo(Math.max(0, x0), y);
+                  ctx.lineTo(Math.max(0, x1), y);
+                  ctx.stroke();
+                  ctx.setLineDash([]);
+                  ctx.font = `bold ${isChoch ? 10 : 9}px monospace`;
+                  ctx.textAlign = 'left';
+                  ctx.textBaseline = 'bottom';
+                  ctx.fillStyle = `rgba(${rgb},${isChoch ? 1 : 0.8})`;
+                  ctx.fillText(isChoch ? 'CHoCH' : 'BOS', Math.max(0, x1) + 4, y - 2);
+                }
+              }
+
               if (showOrderBlocks && !isOptionView && mainSeriesRef.current) {
                 const baseC = chartDataRef.current?.candles || [];
                 const arc = liveClosedCandlesRef.current;
@@ -7454,7 +7571,7 @@ export function AdvancedChart() {
     draw();
     
     return () => cancelAnimationFrame(animationFrameId);
-  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth, taInfo, showOpeningRange, showDsZones, dsZoneOpacity, showFvg, showOrderBlocks]);
+  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth, taInfo, showOpeningRange, showDsZones, dsZoneOpacity, showFvg, showOrderBlocks, showStructure]);
 
   const { data: serverStats } = useQuery({
     queryKey: ["server-diagnostics"],
@@ -7804,6 +7921,21 @@ export function AdvancedChart() {
                       <span>15m Opening Range (High/Low)</span>
                     </button>
                   </div>
+
+                  {/* Market Structure (BOS / CHoCH) — an index study */}
+                  {!isOptionView && (
+                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                    <button
+                      onClick={() => setShowStructure(!showStructure)}
+                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
+                    >
+                      <div className="w-4 flex items-center justify-center">
+                        {showStructure && <Check size={14} className="text-emerald-400" />}
+                      </div>
+                      <span>Market Structure (BOS / CHoCH)</span>
+                    </button>
+                  </div>
+                  )}
 
                   {/* Order Blocks */}
                   <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
