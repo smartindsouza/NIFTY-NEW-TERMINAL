@@ -59,17 +59,30 @@ const sgn = (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(1)}`;
 /** Compare what delta predicted with what actually happened, in plain words. */
 export function classifyWindow(minutes: number, dIndex: number, dOpt: number, delta: number, spot: number, premium: number) {
   const expected = +(delta * dIndex).toFixed(2);
+  const excess = dOpt - expected;
+  // ORDER MATTERS. Ask "does delta explain what happened?" FIRST, and only blame
+  // IV or decay when it genuinely does not. The original code asked "did the index
+  // move much?" first, so a small index move on a highly geared contract was
+  // reported as IV/decay even when delta predicted the premium almost exactly
+  // (Martin's screenshot: index +7.4, delta said +3.4, premium did +3.3 — labelled
+  // "moving on IV/decay, not the index", which contradicted its own numbers).
+  const band = Math.max(1.2, 0.25 * Math.abs(expected));
   const quietIdx = Math.abs(dIndex) < spot * 0.0004;             // ~10 pts on a 25k index
   const quietOpt = Math.abs(dOpt) < Math.max(0.6, premium * 0.01);
   let tone: 'up' | 'down' | 'flat', label: string;
-  if (quietIdx && quietOpt) { tone = 'flat'; label = 'quiet — nothing moving'; }
-  else if (quietIdx) { tone = dOpt > 0 ? 'up' : 'down'; label = 'premium moving on IV/decay, not the index'; }
-  else {
-    const excess = dOpt - expected;
-    const band = Math.max(1.2, 0.25 * Math.abs(expected));
-    if (excess > band) { tone = 'up'; label = 'premium OUTRUNNING delta — IV rising'; }
-    else if (excess < -band) { tone = 'down'; label = 'premium LAGGING delta — IV falling / theta bleed'; }
-    else { tone = 'flat'; label = 'delta explains the move'; }
+  if (Math.abs(excess) <= band) {
+    // Delta accounts for it. True whether the index moved 7 points or 70.
+    tone = 'flat';
+    label = (quietIdx && quietOpt) ? 'quiet — nothing moving' : 'delta explains the move';
+  } else if (quietIdx) {
+    // Delta does NOT explain it and the index barely moved — so something other
+    // than direction is driving the premium.
+    tone = dOpt > 0 ? 'up' : 'down';
+    label = 'premium moving on IV/decay, not the index';
+  } else if (excess > 0) {
+    tone = 'up'; label = 'premium OUTRUNNING delta — IV rising';
+  } else {
+    tone = 'down'; label = 'premium LAGGING delta — IV falling / theta bleed';
   }
   return { expected, tone, label, text: `${minutes}m: index ${sgn(dIndex)} → option ${sgn(dOpt)} (Δ said ${sgn(expected)}) — ${label}` };
 }
