@@ -21,6 +21,7 @@ import { getFiiData, getCashFiiDii } from './server/fii_service';
 import { registerGapScorecard, toISTString } from './server/gap_scorecard';
 import { registerCalendar, isNseHoliday as calIsNseHoliday, holidayName } from './server/calendar_service';
 import { registerTriggers, armedTriggerTokens, onTickForTriggers } from './server/triggers';
+import { registerLeverage } from './server/leverage';
 import { GAP_CONFIG } from './server/config/gapScorecard';
 import { evaluateQuantSignals } from './server/quant_engine';
 import { generateGamePlan } from './server/game_plan_service';
@@ -1801,6 +1802,7 @@ setInterval(() => {
   // H-levels prompt, the journal guard and the gap-scorecard crons.
   registerCalendar(app, db);
   registerTriggers(app, db);
+  registerLeverage(app);
 
   registerGapScorecard(app, db);
 

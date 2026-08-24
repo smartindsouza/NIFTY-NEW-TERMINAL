@@ -5235,6 +5235,17 @@ export function AdvancedChart() {
   });
   confSignalsRef.current = Array.isArray((confData as any)?.signals) ? (confData as any).signals : [];
 
+  // Leverage meter — greeks plus the realized 30-minute premium-vs-index ratio,
+  // so the option chart says out loud whether IV or theta is driving the premium.
+  const { data: levDataRaw } = useQuery({
+    queryKey: ['leverage', selectedInstrument?.tradingsymbol],
+    queryFn: async () => { const r = await fetch(`/api/leverage?sym=${encodeURIComponent(selectedInstrument?.tradingsymbol || '')}`); return r.json(); },
+    enabled: isOptionView && !!selectedInstrument?.tradingsymbol,
+    refetchInterval: 60000,
+    staleTime: 55000,
+  });
+  const lev: any = levDataRaw as any;
+
   const currentSymbol = selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel;
   const lastSpotValue = taInfo && taInfo.candles && taInfo.candles.length > 0 
     ? taInfo.candles[taInfo.candles.length - 1].close 
@@ -8326,6 +8337,28 @@ export function AdvancedChart() {
 
           {/* Main Chart (Price & Volume) */}
           <div className="relative flex-grow flex w-full bg-card rounded-none md:rounded-xl min-h-0 md:min-h-[450px]" onMouseLeave={() => setCrosshairInfo(null)}>
+            {/* Leverage meter — why the premium is moving more (or less) than the
+                index right now. Display only: pointer-events-none, so it can never
+                block a drag, a crosshair, or a level being placed. */}
+            {isOptionView && lev && !lev.error && (
+              <div className="absolute top-2 left-2 z-[5] pointer-events-none rounded-md bg-background/80 border border-border/60 px-2.5 py-1.5 text-[11px] leading-snug font-mono max-w-[85%]">
+                <div className="text-foreground font-semibold">
+                  {lev.lambda != null ? `1% index ≈ ${lev.lambda}% premium` : 'gearing — solving…'}
+                </div>
+                <div className="text-foreground/80">
+                  Δ {lev.delta ?? '—'} · +{lev.gammaPer50 ?? '—'}Δ/50pt · θ {lev.thetaPerDay ?? '—'}/day{lev.iv != null ? ` · IV ${lev.iv}%` : ''}
+                </div>
+                {lev.window?.text && (
+                  <div className={
+                    lev.window.tone === 'up' ? 'text-emerald-400'
+                    : lev.window.tone === 'down' ? 'text-amber-400'
+                    : 'text-foreground/60'
+                  }>
+                    {lev.window.text}{lev.stale ? ' · market closed' : ''}
+                  </div>
+                )}
+              </div>
+            )}
             <div
               ref={chartContainerRef}
               onPointerDownCapture={handlePointerDown}
