@@ -2712,6 +2712,7 @@ export function AdvancedChart() {
   // Bollinger Bands drifted stale until a manual refresh (the reported bug).
   const liveClosedCandlesRef = useRef<any[]>([]);
   const chartDataRef = useRef<any>(null);
+  const confSignalsRef = useRef<any[]>([]);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const serverTimeOffsetRef = useRef<number>(0);
   
@@ -2778,6 +2779,11 @@ export function AdvancedChart() {
     return true;
   });
   // Order Blocks — index chart only, like the FVG zones.
+  // Confluence buy/sell signals — forward-test arrows, drawn from the server's
+  // log so they can never repaint. 5-minute index charts only.
+  const [showConfSignals, setShowConfSignals] = useState(() => {
+    try { const v = localStorage.getItem('showConfSignals'); return v === null ? true : v === 'true'; } catch (e) { return true; }
+  });
   // Market structure — index charts only, like the other index studies.
   const [showStructure, setShowStructure] = useState(() => {
     try { const v = localStorage.getItem('showStructure'); return v === null ? true : v === 'true'; } catch (e) { return true; }
@@ -2930,6 +2936,9 @@ export function AdvancedChart() {
   useEffect(() => {
     try { localStorage.setItem('showStructure', String(showStructure)); } catch (e) {}
   }, [showStructure]);
+  useEffect(() => {
+    try { localStorage.setItem('showConfSignals', String(showConfSignals)); } catch (e) {}
+  }, [showConfSignals]);
 
   useEffect(() => {
     try { localStorage.setItem('levelAlertsOn', String(levelAlertsOn)); } catch(e) {}
@@ -5216,6 +5225,16 @@ export function AdvancedChart() {
     });
   }, [selectedInstrument?.tradingsymbol]);
 
+  // The signal list comes from the SERVER's log — the same rows the scorecard
+  // grades — so an arrow always has a paper trail and can never repaint.
+  const { data: confData } = useQuery({
+    queryKey: ['confluence-signals'],
+    queryFn: async () => { const r = await fetch('/api/confluence'); if (!r.ok) throw new Error('confluence fetch failed'); return r.json(); },
+    refetchInterval: 60000,
+    staleTime: 55000,
+  });
+  confSignalsRef.current = Array.isArray((confData as any)?.signals) ? (confData as any).signals : [];
+
   const currentSymbol = selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel;
   const lastSpotValue = taInfo && taInfo.candles && taInfo.candles.length > 0 
     ? taInfo.candles[taInfo.candles.length - 1].close 
@@ -7215,6 +7234,46 @@ export function AdvancedChart() {
               // Order Blocks — recomputed only when a candle CLOSES, same as the FVG
               // zones. A finished block is drawn with a hard right edge at the point it
               // was superseded or broken; only the live one runs to the current candle.
+              // Confluence buy/sell arrows — forward-test signals from the server
+              // log. Closed candles only, so an arrow can never repaint. Drawn on
+              // the 5-minute index chart, where the rule actually runs.
+              if (showConfSignals && !isOptionView && String(timeframe) === '5' && mainSeriesRef.current) {
+                const rows = (confSignalsRef.current || []).filter((s: any) => s.symbol === underlying);
+                if (rows.length) {
+                  const baseC2 = chartDataRef.current?.candles || [];
+                  const extra2 = (liveClosedCandlesRef.current || []).filter((k: any) => !baseC2.length || k.time > baseC2[baseC2.length - 1].time);
+                  const allC = [...baseC2, ...extra2];
+                  const tms = (t: any) => { const n = Number(t); return n < 1e12 ? n * 1000 : n; };
+                  for (const s of rows) {
+                    let cd: any = null, bd = Infinity;
+                    for (const c of allC) { const d = Math.abs(tms(c.time) - s.fired_t); if (d < bd) { bd = d; cd = c; } }
+                    if (!cd || bd > 150000) continue;
+                    const x = mainChartRef.current?.timeScale()?.timeToCoordinate(cd.time);
+                    if (x === null || x === undefined) continue;
+                    const long = s.dir === 'LONG';
+                    const y = mainSeriesRef.current.priceToCoordinate(long ? cd.low : cd.high);
+                    if (y === null) continue;
+                    const yy = long ? y + 16 : y - 16;
+                    ctx.beginPath();
+                    if (long) { ctx.moveTo(x, yy - 8); ctx.lineTo(x - 5, yy); ctx.lineTo(x + 5, yy); }
+                    else { ctx.moveTo(x, yy + 8); ctx.lineTo(x - 5, yy); ctx.lineTo(x + 5, yy); }
+                    ctx.closePath();
+                    ctx.fillStyle = long ? 'rgba(52,211,153,1)' : 'rgba(251,113,133,1)';
+                    ctx.fill();
+                    ctx.font = 'bold 9px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = long ? 'top' : 'bottom';
+                    ctx.fillText(long ? 'BUY' : 'SELL', x, long ? yy + 2 : yy - 2);
+                    // Once graded, the arrow carries its result in option points —
+                    // the signal and its consequence stay attached to each other.
+                    if (s.status === 'GRADED' && s.option_pts != null) {
+                      ctx.fillStyle = (s.option_pts || 0) > 0 ? 'rgba(52,211,153,0.9)' : 'rgba(251,113,133,0.9)';
+                      ctx.fillText(`${(s.option_pts || 0) > 0 ? '+' : ''}${s.option_pts}`, x, long ? yy + 13 : yy - 13);
+                    }
+                  }
+                }
+              }
+
               // Market structure: a dashed line at the broken level running from the
               // swing that set it to the candle that closed through it, tagged BOS or
               // CHoCH. Index charts only, and recomputed only on a candle close.
@@ -7583,7 +7642,7 @@ export function AdvancedChart() {
     draw();
     
     return () => cancelAnimationFrame(animationFrameId);
-  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth, taInfo, showOpeningRange, showDsZones, dsZoneOpacity, showFvg, showOrderBlocks, showStructure]);
+  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth, taInfo, showOpeningRange, showDsZones, dsZoneOpacity, showFvg, showOrderBlocks, showStructure, showConfSignals, confData]);
 
   const { data: serverStats } = useQuery({
     queryKey: ["server-diagnostics"],
@@ -7933,6 +7992,21 @@ export function AdvancedChart() {
                       <span>15m Opening Range (High/Low)</span>
                     </button>
                   </div>
+
+                  {/* Buy/Sell confluence signals — forward test, 5-min index charts */}
+                  {!isOptionView && (
+                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                    <button
+                      onClick={() => setShowConfSignals(!showConfSignals)}
+                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
+                    >
+                      <div className="w-4 flex items-center justify-center">
+                        {showConfSignals && <Check size={14} className="text-emerald-400" />}
+                      </div>
+                      <span>Buy/Sell Signals (5-min · forward test)</span>
+                    </button>
+                  </div>
+                  )}
 
                   {/* Market Structure (BOS / CHoCH) — an index study */}
                   {!isOptionView && (
