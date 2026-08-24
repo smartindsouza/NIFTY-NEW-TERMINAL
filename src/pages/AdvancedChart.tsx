@@ -8344,6 +8344,12 @@ export function AdvancedChart() {
               <div className="absolute top-11 left-2 z-[5] pointer-events-none rounded-md bg-background/80 border border-border/60 px-2.5 py-1.5 text-[11px] leading-snug font-mono max-w-[85%]">
                 <div className="text-foreground font-semibold">
                   {lev.lambda != null ? `1% index ≈ ${lev.lambda}% premium` : 'gearing — solving…'}
+                  {/* The inputs behind the number, so it can be checked at a glance
+                      instead of inferred from the OHLC row — which shows the HOVERED
+                      candle, not the live premium, and misled us both once already. */}
+                  {lev.spot != null && lev.premium != null && (
+                    <span className="text-foreground/50 font-normal"> ({lev.spot} / {lev.premium})</span>
+                  )}
                 </div>
                 <div className="text-foreground/80">
                   Δ {lev.delta ?? '—'} · +{lev.gammaPer50 ?? '—'}Δ/50pt · θ {lev.thetaPerDay ?? '—'}/day{lev.iv != null ? ` · IV ${lev.iv}%` : ''}
