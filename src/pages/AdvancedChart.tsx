@@ -2781,8 +2781,11 @@ export function AdvancedChart() {
   // Order Blocks — index chart only, like the FVG zones.
   // Confluence buy/sell signals — forward-test arrows, drawn from the server's
   // log so they can never repaint. 5-minute index charts only.
+  // Default OFF. The 2-year backtest failed (avg -1.73 option pts over 2,339
+  // signals), so these arrows mark a rule that loses money. The logger keeps
+  // running and grading itself, but nothing losing is shown by default.
   const [showConfSignals, setShowConfSignals] = useState(() => {
-    try { const v = localStorage.getItem('showConfSignals'); return v === null ? true : v === 'true'; } catch (e) { return true; }
+    try { return localStorage.getItem('showConfSignals') === 'true'; } catch (e) { return false; }
   });
   // Market structure — index charts only, like the other index studies.
   const [showStructure, setShowStructure] = useState(() => {
@@ -8014,7 +8017,7 @@ export function AdvancedChart() {
                       <div className="w-4 flex items-center justify-center">
                         {showConfSignals && <Check size={14} className="text-emerald-400" />}
                       </div>
-                      <span>Buy/Sell Signals (5-min · forward test)</span>
+                      <span>Buy/Sell Signals (5-min · backtest FAILED)</span>
                     </button>
                   </div>
                   )}
