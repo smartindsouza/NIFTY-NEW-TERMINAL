@@ -7168,7 +7168,11 @@ export function AdvancedChart() {
                 const arc = liveClosedCandlesRef.current;
                 const lastT = baseC.length ? baseC[baseC.length - 1].time : 0;
                 const closedSince = arc.filter((k: any) => k.time > lastT);
-                const sig = `${timeframe}|${baseC.length}|${closedSince.length}|${closedSince.length ? closedSince[closedSince.length - 1].time : 0}`;
+                // The INSTRUMENT belongs in this key. Without it, switching index kept the
+                // previous one's zones: both indices return the same number of candles at
+                // the same timeframe, so the key matched, nothing recomputed, and levels
+                // from the old index were drawn far off the new chart's scale — invisible.
+                const sig = `${instrumentToken}|${timeframe}|${baseC.length}|${closedSince.length}|${closedSince.length ? closedSince[closedSince.length - 1].time : 0}`;
                 if (sig !== fvgSigRef.current) {
                   fvgSigRef.current = sig;
                   fvgZonesRef.current = computeFvgZones(closedSince.length ? [...baseC, ...closedSince] : baseC);
@@ -7219,7 +7223,11 @@ export function AdvancedChart() {
                 const arc = liveClosedCandlesRef.current;
                 const lastT = baseC.length ? baseC[baseC.length - 1].time : 0;
                 const closedSince = arc.filter((k: any) => k.time > lastT);
-                const sig = `${timeframe}|${baseC.length}|${closedSince.length}|${closedSince.length ? closedSince[closedSince.length - 1].time : 0}`;
+                // The INSTRUMENT belongs in this key. Without it, switching index kept the
+                // previous one's zones: both indices return the same number of candles at
+                // the same timeframe, so the key matched, nothing recomputed, and levels
+                // from the old index were drawn far off the new chart's scale — invisible.
+                const sig = `${instrumentToken}|${timeframe}|${baseC.length}|${closedSince.length}|${closedSince.length ? closedSince[closedSince.length - 1].time : 0}`;
                 if (sig !== structSigRef.current) {
                   structSigRef.current = sig;
                   structRef.current = computeMarketStructure(closedSince.length ? [...baseC, ...closedSince] : baseC);
@@ -7256,7 +7264,11 @@ export function AdvancedChart() {
                 const arc = liveClosedCandlesRef.current;
                 const lastT = baseC.length ? baseC[baseC.length - 1].time : 0;
                 const closedSince = arc.filter((k: any) => k.time > lastT);
-                const sig = `${timeframe}|${baseC.length}|${closedSince.length}|${closedSince.length ? closedSince[closedSince.length - 1].time : 0}`;
+                // The INSTRUMENT belongs in this key. Without it, switching index kept the
+                // previous one's zones: both indices return the same number of candles at
+                // the same timeframe, so the key matched, nothing recomputed, and levels
+                // from the old index were drawn far off the new chart's scale — invisible.
+                const sig = `${instrumentToken}|${timeframe}|${baseC.length}|${closedSince.length}|${closedSince.length ? closedSince[closedSince.length - 1].time : 0}`;
                 if (sig !== obSigRef.current) {
                   obSigRef.current = sig;
                   obZonesRef.current = computeOrderBlocks(closedSince.length ? [...baseC, ...closedSince] : baseC);
