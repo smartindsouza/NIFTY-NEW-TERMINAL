@@ -99,6 +99,7 @@ export function Header() {
     { href: '/option-value', label: 'Option Value', icon: Layers },
     { href: '/gamma-blast', label: 'Gamma Blast', icon: Zap },
     { href: '/premium-pulse', label: 'Premium Pulse', icon: Wind },
+    { href: '/research', label: 'Research', icon: Activity },
   ];
 
   // Apply the user's saved tab order; any tab not in the saved list (e.g. newly added features) is appended.

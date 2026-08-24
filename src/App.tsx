@@ -40,6 +40,7 @@ const SignalAlerts = lazy(() => import('./pages/SignalAlerts'));
 const OptionValue = lazy(() => import('./pages/OptionValue'));
 const GammaBlast = lazy(() => import('./pages/GammaBlast'));
 const PremiumPulse = lazy(() => import('./pages/PremiumPulse'));
+const Research = lazy(() => import('./pages/Research'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -197,6 +198,7 @@ export default function App() {
               <Route path="/option-value" component={OptionValue} />
               <Route path="/gamma-blast" component={GammaBlast} />
               <Route path="/premium-pulse" component={PremiumPulse} />
+              <Route path="/research" component={Research} />
               <Route>
                  <div className="p-8 text-center text-muted-foreground animate-pulse">404 - Not Found</div>
               </Route>
