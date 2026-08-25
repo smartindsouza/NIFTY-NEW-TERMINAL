@@ -1159,7 +1159,18 @@ setInterval(() => {
       }
       if (!Array.isArray(trades) || trades.length === 0) return res.json({ success: true, imported: 0, note: 'Zerodha reported no fills today.' });
 
-      const ts = (t: any) => { const v = t.fill_timestamp || t.exchange_timestamp || t.timestamp; const ms = v ? new Date(v).getTime() : NaN; return isFinite(ms) ? ms : Date.now(); };
+      // Kite returns 'YYYY-MM-DD HH:MM:SS' with NO timezone, and it is IST. The
+      // server runs in UTC, so new Date(v) read it as UTC and the browser then
+      // rendered it in IST — applying the +5:30 offset a second time. A 09:52 am
+      // fill displayed as 3:22 pm. Pin the zone explicitly.
+      const ts = (t: any) => {
+        const v = t.fill_timestamp || t.exchange_timestamp || t.timestamp;
+        if (!v) return Date.now();
+        let str = String(v).trim();
+        if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(str)) str = str.replace(' ', 'T') + '+05:30';
+        const ms = new Date(str).getTime();
+        return isFinite(ms) ? ms : Date.now();
+      };
       const sorted = [...trades].sort((a, b) => ts(a) - ts(b));
 
       // FIFO pair per symbol.
@@ -1179,8 +1190,7 @@ setInterval(() => {
           const take = Math.min(qty, lot.qty);
           const pnl = lot.side === 'BUY' ? (price - lot.price) * take : (lot.price - price) * take;
           rows.push({ sym, side: lot.side, qty: take, entry: lot.price, entryTime: lot.when, exit: price, exitTime: when,
-                      product: lot.product, orderId: lot.orderId, status: 'CLOSED', pnl,
-                      key: `${lot.tradeId}|${t.trade_id}|${take}` });
+                      product: lot.product, status: 'CLOSED', pnl });
           lot.qty -= take; qty -= take;
           if (lot.qty <= 0) book.shift();
         }
@@ -1190,29 +1200,63 @@ setInterval(() => {
       for (const key of Object.keys(openLots)) {
         for (const lot of openLots[key]) {
           rows.push({ sym: key, side: lot.side, qty: lot.qty, entry: lot.price, entryTime: lot.when,
-                      exit: null, exitTime: null, product: lot.product, orderId: lot.orderId, status: 'OPEN', pnl: null,
-                      key: `${lot.tradeId}|OPEN|${lot.qty}` });
+                      exit: null, exitTime: null, product: lot.product, status: 'OPEN', pnl: null });
         }
       }
 
+      // AGGREGATE to one row per symbol per state. The first version wrote a row per
+      // FIFO leg, so a single order filled in chunks became seven near-identical
+      // lines differing by five paise — unreadable, and it looked like duplicates.
+      // A journal should show the trade the way it was actually taken.
+      type Agg = { sym: string; side: string; qty: number; entryQP: number; exitQP: number;
+                   entryTime: number; exitTime: number | null; product: string; status: string; pnl: number };
+      const aggs = new Map<string, Agg>();
+      for (const r of rows) {
+        const k = `${r.sym}|${r.status}|${r.side}`;
+        const a = aggs.get(k) || { sym: r.sym, side: r.side, qty: 0, entryQP: 0, exitQP: 0,
+                                   entryTime: r.entryTime, exitTime: null, product: r.product, status: r.status, pnl: 0 };
+        a.qty += r.qty;
+        a.entryQP += r.entry * r.qty;                       // quantity-weighted, so the
+        if (r.exit != null) a.exitQP += r.exit * r.qty;     // average price is the real one
+        a.entryTime = Math.min(a.entryTime, r.entryTime);   // first fill in
+        if (r.exitTime != null) a.exitTime = Math.max(a.exitTime ?? 0, r.exitTime);  // last fill out
+        a.pnl += r.pnl || 0;
+        aggs.set(k, a);
+      }
+
       const parse = (sym: string) => { const m = /(\d+)(CE|PE)$/.exec(sym || ''); return m ? { strike: Number(m[1]), optionType: m[2] } : { strike: null, optionType: null }; };
-      let imported = 0, skipped = 0;
-      const ins = db.prepare(`INSERT OR IGNORE INTO trade_journal
+      const now = Date.now();
+      const istNow = new Date(now + 5.5 * 3600000);
+      const dayStart = Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate()) - 5.5 * 3600000;
+
+      // REBUILD, don't accumulate. Kite's trade list is the full truth for the day,
+      // so previously imported rows for today are cleared and rewritten. The first
+      // version only ever INSERTED, so a lot imported while still open left a stale
+      // OPEN row behind forever — which is why closed positions kept showing OPEN,
+      // and why the same symbol appeared open at two different quantities.
+      // Only auto-imported rows are touched; anything hand-entered is left alone.
+      const wipe = db.prepare(`DELETE FROM trade_journal WHERE kite_key IS NOT NULL AND entry_time >= ?`).run(dayStart);
+
+      let imported = 0;
+      const ins = db.prepare(`INSERT OR REPLACE INTO trade_journal
         (tradingsymbol, exchange, option_type, strike, side, qty, product, entry_price, entry_time, context,
          test_mode, simulated, status, exit_price, exit_time, exit_reason, pnl, created_at, updated_at, kite_key)
         VALUES (?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?)`);
-      const now = Date.now();
-      for (const r of rows) {
-        const { strike, optionType } = parse(r.sym);
-        const info = ins.run(
-          r.sym, 'NFO', optionType, strike, r.side, r.qty, r.product, r.entry, r.entryTime,
-          JSON.stringify({ source: 'KITE_IMPORT', orderId: r.orderId || null }), r.status, r.exit, r.exitTime,
-          r.status === 'CLOSED' ? 'KITE' : null, r.pnl == null ? null : Math.round(r.pnl * 100) / 100,
-          now, now, r.key
+      for (const a of aggs.values()) {
+        if (a.qty <= 0) continue;
+        const { strike, optionType } = parse(a.sym);
+        const entryAvg = Math.round((a.entryQP / a.qty) * 100) / 100;
+        const exitAvg = a.status === 'CLOSED' ? Math.round((a.exitQP / a.qty) * 100) / 100 : null;
+        ins.run(
+          a.sym, 'NFO', optionType, strike, a.side, a.qty, a.product, entryAvg, a.entryTime,
+          JSON.stringify({ source: 'KITE_IMPORT' }), a.status, exitAvg, a.exitTime,
+          a.status === 'CLOSED' ? 'KITE' : null, a.status === 'CLOSED' ? Math.round(a.pnl * 100) / 100 : null,
+          now, now, `${dayStart}|${a.sym}|${a.status}|${a.side}`
         );
-        if (info.changes) imported++; else skipped++;
+        imported++;
       }
-      return res.json({ success: true, imported, skipped, fills: trades.length });
+      return res.json({ success: true, imported, replaced: wipe.changes, fills: trades.length });
+
     } catch (e: any) {
       console.error('[journal import-kite]', e);
       return res.status(500).json({ success: false, error: e?.message || String(e) });
