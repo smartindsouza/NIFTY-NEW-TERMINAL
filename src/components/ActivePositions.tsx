@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { X, RefreshCw, Sparkles, TrendingUp, TrendingDown, Shield } from "lucide-react";
 import { toast } from "sonner";
+import { addWsMessageListener } from "../hooks/useWebSocket";
 
 export interface ActiveTrade {
   id: string;
@@ -15,6 +16,9 @@ export interface ActiveTrade {
   testMode?: boolean;
   kitePnl?: number;   // Zerodha's own P&L for this position (matches the Kite app exactly)
   product?: string;
+  token?: number;     // instrument token — how live ticks are matched to this row
+  pnlBase?: number;   // sell_value − buy_value, so pnl = pnlBase + qtySigned × ltp
+  qtySigned?: number; // Kite's signed quantity: + long, − short
 }
 
 export function ActivePositions() {
@@ -190,6 +194,9 @@ export function ActivePositions() {
               next.kitePnl = kp.pnl;
               changed = true;
             }
+            if (kp.instrument_token && next.token !== kp.instrument_token) { next.token = kp.instrument_token; changed = true; }
+            if (kp.pnl_base !== undefined && next.pnlBase !== kp.pnl_base) { next.pnlBase = kp.pnl_base ?? undefined; changed = true; }
+            if (Number(kp.quantity) !== next.qtySigned) { next.qtySigned = Number(kp.quantity); changed = true; }
             const prevLtp = lastPricesRef.current[pos.id]?.price || pos.entryPrice;
             const dir: "up" | "down" | "flat" = kp.last_price > prevLtp ? "up" : kp.last_price < prevLtp ? "down" : "flat";
             setLastPrices((prev) => ({ ...prev, [pos.id]: { price: kp.last_price || prevLtp, dir } }));
@@ -225,11 +232,21 @@ export function ActivePositions() {
               testMode: false,
               kitePnl: typeof kp.pnl === 'number' ? kp.pnl : undefined,
               product: kp.product,
+              token: kp.instrument_token,
+              pnlBase: kp.pnl_base ?? undefined,
+              qtySigned: Number(kp.quantity),
             });
           });
           if (adopted.length) {
             updated.push(...adopted);
             changed = true;
+            // Seed the price map, or the LTP column shows the ENTRY price until the
+            // next poll lands — a card that looks frozen the moment it appears.
+            setLastPrices((prev) => {
+              const next = { ...prev };
+              adopted.forEach((a) => { next[a.id] = { price: a.currentPrice || a.entryPrice, dir: 'flat' }; });
+              return next;
+            });
             adopted.forEach((a) => toast.info(`${a.symbol} — open position found on Zerodha.`, { id: `adopted-${a.symbol}` }));
           }
 
@@ -276,6 +293,34 @@ export function ActivePositions() {
 
     return () => { clearInterval(realTimer); clearInterval(simTimer); document.removeEventListener('visibilitychange', onVisible); };
   }, [exitingIds]);
+
+  // Live ticks between polls. PASSIVE ONLY — this never calls subscribeToTicks,
+  // because the socket carries ONE subscribed symbol at a time and subscribing from
+  // here would silently steal the chart's feed. So we use option ticks that are
+  // already flowing (which is exactly the case that matters: watching the option
+  // chart of a position you hold) and let the 3s poll cover everything else.
+  useEffect(() => {
+    const off = addWsMessageListener((msg: any) => {
+      if (!msg || msg.type !== 'optionTick' || msg.token == null || typeof msg.ltp !== 'number') return;
+      if (!(msg.ltp > 0)) return;
+      setPositions((prev) => {
+        let hit = false;
+        const next = prev.map((pos) => {
+          if (pos.testMode || String(pos.token ?? '') !== String(msg.token)) return pos;
+          if (pos.currentPrice === msg.ltp) return pos;
+          hit = true;
+          setLastPrices((lp) => {
+            const prevPrice = lp[pos.id]?.price ?? pos.entryPrice;
+            const dir: 'up' | 'down' | 'flat' = msg.ltp > prevPrice ? 'up' : msg.ltp < prevPrice ? 'down' : 'flat';
+            return { ...lp, [pos.id]: { price: msg.ltp, dir } };
+          });
+          return { ...pos, currentPrice: msg.ltp };
+        });
+        return hit ? next : prev;   // never re-render on a tick for a symbol we don't hold
+      });
+    });
+    return off;
+  }, []);
 
   // One-click exit function
   const handleExitPosition = async (pos: ActiveTrade) => {
@@ -421,7 +466,15 @@ export function ActivePositions() {
           const computedPnl = pos.side === "BUY"
             ? (ltp - pos.entryPrice) * pos.qty
             : (pos.entryPrice - ltp) * pos.qty;
-          const pnl = (!pos.testMode && typeof pos.kitePnl === 'number') ? pos.kitePnl : computedPnl;
+          // Preference order: Zerodha's own formula evaluated against the freshest
+          // tick (updates continuously and matches the Kite app), then Zerodha's
+          // last polled figure, then the local estimate for test cards.
+          const livePnl = (!pos.testMode && typeof pos.pnlBase === 'number' && typeof pos.qtySigned === 'number' && ltp > 0)
+            ? pos.pnlBase + pos.qtySigned * ltp
+            : null;
+          const pnl = livePnl !== null
+            ? livePnl
+            : (!pos.testMode && typeof pos.kitePnl === 'number') ? pos.kitePnl : computedPnl;
           const isProfit = pnl >= 0;
 
           // Fancy class for pricing flashes

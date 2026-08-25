@@ -876,26 +876,46 @@ setInterval(() => {
       if (instruments.length > 0) {
         try { quotes = await kc.getQuote(instruments); } catch (e) { quotes = {}; }
       }
-      let openUnrealised = 0;
+      // Zerodha's OWN P&L formula, so this matches the Kite app by construction:
+      //     pnl = (sell_value − buy_value) + quantity × last_price
+      // The previous version used (ltp − average_price) × quantity, which silently
+      // DROPS the realised component. Identical for an untouched position, but wrong
+      // the moment a leg is partially closed or the same strike is traded twice in a
+      // day — turning a few rupees of tick jitter into a solidly wrong number.
+      const legPnl = (p: any, ltp: number) => {
+        const bv = Number(p.buy_value), sv = Number(p.sell_value);
+        if (isFinite(bv) && isFinite(sv)) return (sv - bv) + (Number(p.quantity) || 0) * ltp * (Number(p.multiplier) || 1);
+        return (ltp - p.average_price) * p.quantity;   // fallback if Kite omits the values
+      };
+      const ltpFor = (p: any) => {
+        const q = quotes[`${p.exchange}:${p.tradingsymbol}`];
+        return (q && q.last_price > 0) ? q.last_price : (p.last_price || p.average_price);
+      };
       const out = open.map((p: any) => {
-        const key = `${p.exchange}:${p.tradingsymbol}`;
-        const q = quotes[key];
-        const ltp = (q && q.last_price > 0) ? q.last_price : (p.last_price || p.average_price);
-        // quantity is signed by Kite (+ for long, − for short), so this works for both
-        const pnl = (ltp - p.average_price) * p.quantity;
-        openUnrealised += pnl;
+        const ltp = ltpFor(p);
+        const bv = Number(p.buy_value), sv = Number(p.sell_value);
         return {
           tradingsymbol: p.tradingsymbol,
-          quantity: p.quantity,
+          instrument_token: p.instrument_token,
+          quantity: p.quantity,               // signed by Kite: + long, − short
           product: p.product,
           average_price: p.average_price,
           last_price: ltp,
-          pnl: Math.round(pnl * 100) / 100,
+          // pnl_base lets the CLIENT recompute P&L against a live tick using the
+          // exact same formula: pnl = pnl_base + quantity × ltp. That is what makes
+          // the banner update continuously instead of stepping every 3 seconds.
+          pnl_base: (isFinite(bv) && isFinite(sv)) ? Math.round((sv - bv) * 100) / 100 : null,
+          multiplier: Number(p.multiplier) || 1,
+          pnl: Math.round(legPnl(p, ltp) * 100) / 100,
         };
       });
-      // Net day P&L: everything booked so far today (incl. already-closed trades) + live unrealised on open legs
+      // Day net P&L = the same formula summed over EVERY net position, including
+      // ones already closed today (for those, quantity is 0 and the formula reduces
+      // to pure realised). Summing legPnl avoids the double-count that adding a
+      // separate realised total to these figures would now produce.
+      const netPnl = Math.round(net.reduce((sum: number, p: any) => sum + legPnl(p, ltpFor(p)), 0) * 100) / 100;
       const realisedTotal = net.reduce((s: number, p: any) => s + (p.realised || 0), 0);
-      const netPnl = Math.round((realisedTotal + openUnrealised) * 100) / 100;
+      const openUnrealised = out.reduce((s: number, o: any) => s + (o.pnl || 0), 0);
       return res.json({
         success: true,
         positions: out,
