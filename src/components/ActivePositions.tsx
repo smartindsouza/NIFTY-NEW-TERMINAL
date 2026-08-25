@@ -89,6 +89,7 @@ export function ActivePositions() {
   const [lastPrices, setLastPrices] = useState<Record<string, { price: number; dir: "up" | "down" | "flat" }>>({});
   const lastPricesRef = useRef<Record<string, { price: number; dir: "up" | "down" | "flat" }>>({});
   useEffect(() => { lastPricesRef.current = lastPrices; }, [lastPrices]);
+  useEffect(() => { positionsRef.current = positions; }, [positions]);
   const confirmedOpenRef = useRef<Set<string>>(new Set()); // symbols Kite has confirmed as open this session
   // Symbols whose exit order was just placed. Zerodha keeps reporting the position
   // as open until the closing order actually fills, so without this the poll would
@@ -97,6 +98,10 @@ export function ActivePositions() {
   // re-adoption briefly makes that impossible. Time-based (not a permanent flag) so
   // deliberately re-entering the same strike later in the day still shows up.
   const recentlyExitedRef = useRef<Map<string, number>>(new Map());
+  // The poll effect must not re-mount whenever the position count changes (that
+  // would tear down and rebuild the interval, and was part of how duplicate polls
+  // appeared). It reads the live count through this ref instead.
+  const positionsRef = useRef<ActiveTrade[]>([]);
   const [netPnl, setNetPnl] = useState<number | null>(null); // day net P&L: realized today + live unrealized
 
   // Fetch active positions from localStorage
@@ -261,12 +266,32 @@ export function ActivePositions() {
       } catch { /* keep last real values; never fall back to simulation */ }
     };
 
-    pollReal();
-    const realTimer = setInterval(pollReal, 3000);
+    // Cadence must match what is actually at stake. Removing the old
+    // positions.length === 0 guard (so a Kite-app trade can be DISCOVERED) turned a
+    // no-position app into a permanent 3s poll on every open tab — which is what
+    // tripped the broker-throttle warning. So:
+    //   • holding something → 3s, because the P&L on screen is real money
+    //   • flat             → 20s, enough to notice a trade taken in the Kite app
+    //   • tab hidden       → nothing at all; poll once the moment it comes back
+    // Two broker calls per request means a background tab was spending quota for
+    // a screen nobody was looking at.
+    let realTimer: any = null;
+    let currentMs = 0;
+    const desiredMs = () => (document.visibilityState !== 'visible' ? 0 : (positionsRef.current.length > 0 ? 3000 : 20000));
+    const retime = () => {
+      const ms = desiredMs();
+      if (ms === currentMs) return;
+      currentMs = ms;
+      if (realTimer) { clearInterval(realTimer); realTimer = null; }
+      if (ms > 0) realTimer = setInterval(pollReal, ms);
+    };
+    if (document.visibilityState === 'visible') pollReal();
+    retime();
+    const retimeTicker = setInterval(retime, 2000);
     // When the app returns to the foreground (e.g., after exiting a trade in the
     // Zerodha app), reconcile immediately instead of waiting for the next tick —
     // iOS suspends timers in the background, which left closed trades looking open.
-    const onVisible = () => { if (document.visibilityState === 'visible') pollReal(); };
+    const onVisible = () => { retime(); if (document.visibilityState === 'visible') pollReal(); };
     document.addEventListener('visibilitychange', onVisible);
 
     // Simulation strictly for test-mode cards
@@ -291,7 +316,7 @@ export function ActivePositions() {
       });
     }, 2000);
 
-    return () => { clearInterval(realTimer); clearInterval(simTimer); document.removeEventListener('visibilitychange', onVisible); };
+    return () => { if (realTimer) clearInterval(realTimer); clearInterval(retimeTicker); clearInterval(simTimer); document.removeEventListener('visibilitychange', onVisible); };
   }, [exitingIds]);
 
   // Live ticks between polls. PASSIVE ONLY — this never calls subscribeToTicks,

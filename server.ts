@@ -862,11 +862,23 @@ setInterval(() => {
 
   // ===== Auto-Exit Rules API =====
   // Live position data straight from Kite — real avg fill price, real LTP, Zerodha's own P&L
+  // Every open tab polls this, and each call costs TWO broker requests
+  // (getPositions + getQuote). A short shared cache collapses all of them into at
+  // most one broker round trip per window, so N tabs cost the same as one and a
+  // burst of callers cannot walk us into a 429 — which, on a broker, would mean
+  // being unable to EXIT a position. In-flight requests are shared rather than
+  // queued, so simultaneous callers all ride the same promise.
+  let posCache: { at: number; p: Promise<any> } | null = null;
+  const POSITIONS_CACHE_MS = 1500;
   app.get('/api/positions-live', async (_req, res) => {
     try {
+      if (posCache && Date.now() - posCache.at < POSITIONS_CACHE_MS) {
+        try { return res.json(await posCache.p); } catch (e) { posCache = null; }
+      }
+      const fresh = (async () => {
       const kc = getKiteClient();
       // @ts-ignore
-      if (!kc || !kc.access_token) return res.json({ success: false, error: 'No active Kite session' });
+      if (!kc || !kc.access_token) return { success: false, error: 'No active Kite session' };
       const positions = await kc.getPositions();
       const net = (positions && positions.net) || [];
       const open = net.filter((p: any) => p.quantity !== 0);
@@ -916,14 +928,19 @@ setInterval(() => {
       const netPnl = Math.round(net.reduce((sum: number, p: any) => sum + legPnl(p, ltpFor(p)), 0) * 100) / 100;
       const realisedTotal = net.reduce((s: number, p: any) => s + (p.realised || 0), 0);
       const openUnrealised = out.reduce((s: number, o: any) => s + (o.pnl || 0), 0);
-      return res.json({
+      return {
         success: true,
         positions: out,
         netPnl,
         realisedPnl: Math.round(realisedTotal * 100) / 100,
         openPnl: Math.round(openUnrealised * 100) / 100,
-      });
+      };
+      })();
+      posCache = { at: Date.now(), p: fresh };
+      const payload = await fresh.catch((e: any) => { posCache = null; return { success: false, error: e?.message || String(e) }; });
+      return res.json(payload);
     } catch (e: any) {
+      posCache = null;
       return res.json({ success: false, error: e?.message || String(e) });
     }
   });
