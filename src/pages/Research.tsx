@@ -190,28 +190,42 @@ export default function Research() {
   {
     const q = swp; const r = q.data?.result; const job = q.data?.job;
     let verdict: Verdict = 'PENDING';
-    let headline = 'Never run.';
+    let headline = 'Never run. The rule is written and waiting — nothing has been tested.';
     const stats: Card['stats'] = [];
+    // The engine stores its aggregate under `all` (with `biasAligned` and
+    // `walkForwardAligned` alongside) and records NO barMet flag — unlike ORB.
+    // The first version of this card looked for primary/combined and would have
+    // shown UNAVAILABLE even on a perfectly good result.
+    const all = r?.all, wf = r?.walkForwardAligned;
     if (q.isError) { verdict = 'ERROR'; headline = 'Could not reach the endpoint.'; }
     else if (job?.status === 'running') { verdict = 'RUNNING'; headline = job.progress || 'Running…'; }
-    else if (r) {
-      // Shape varies; surface whatever headline numbers exist without inventing any.
-      const agg = r.primary || r.combined || r;
-      const avg = agg?.avgPts ?? agg?.avgOptionPts;
-      const nn = agg?.n;
-      if (typeof nn === 'number') {
-        verdict = r.barMet === true ? 'PASSED' : r.barMet === false ? 'FAILED' : (avg ?? 0) > 0 ? 'PASSED' : 'FAILED';
-        headline = `${nn} trades, ${sgn(avg)} points per trade.`;
-        stats.push({ k: 'Trades', v: String(nn) });
-        if (agg.winRate != null) stats.push({ k: 'Win rate', v: `${n1(agg.winRate)}%` });
-        if (avg != null) stats.push({ k: 'Avg / trade', v: `${sgn(avg)} pts`, bad: avg < 0, good: avg > 0 });
-      } else { verdict = 'ERROR'; headline = 'Result stored in an unexpected shape — open the endpoint directly.'; }
+    else if (job?.status === 'error') { verdict = 'ERROR'; headline = job.error || 'The run failed.'; }
+    else if (all && typeof all.n === 'number') {
+      // No barMet is stored, so the bar below is applied HERE, and it was written
+      // down before the first run — same standard ORB had to clear.
+      const testAvg = wf?.test?.avgPts;
+      const passed = all.n >= 60 && (all.totalPts ?? 0) > 0 && (testAvg ?? -1) > 0;
+      verdict = passed ? 'PASSED' : 'FAILED';
+      headline = passed
+        ? `Cleared the bar: ${sgn(all.avgPts)} pts per trade over ${all.n} trades, and the untouched half held up.`
+        : `${all.n} trades at ${sgn(all.avgPts)} points each — did not clear the bar.`;
+      stats.push({ k: 'Trades', v: String(all.n) });
+      if (all.winRate != null) stats.push({ k: 'Win rate', v: `${n1(all.winRate)}%` });
+      if (all.avgPts != null) stats.push({ k: 'Avg / trade', v: `${sgn(all.avgPts)} pts`, bad: all.avgPts < 0, good: all.avgPts > 0 });
+      if (all.totalPts != null) stats.push({ k: 'Total', v: `${sgn(all.totalPts)} pts`, bad: all.totalPts < 0, good: all.totalPts > 0 });
+      if (wf?.train?.avgPts != null) stats.push({ k: 'First half', v: `${sgn(wf.train.avgPts)} /trade`, bad: wf.train.avgPts < 0 });
+      if (testAvg != null) stats.push({ k: 'Second half', v: `${sgn(testAvg)} /trade`, bad: testAvg < 0 });
+      if (r?.byExit) stats.push({ k: 'Stopped out', v: `${r.byExit.stop} of ${all.n}` });
+      if (r?.daysAnalyzed) stats.push({ k: 'Days', v: String(r.daysAnalyzed) });
     }
     cards.push({
       name: 'Sweep & Reclaim',
-      plain: 'Price pushes through a prior high or low, takes the stops sitting there, then closes back inside — trade the reclaim.',
-      bar: 'Set inside the engine when it was written; profitable after costs.',
+      plain: 'Price pushes through yesterday\u2019s high or low (or the opening range, or a round number), runs the stops sitting there, then closes back inside within three candles \u2014 trade the reclaim. One trade a day, out by 3pm.',
+      bar: 'At least 60 trades, profitable after costs, AND the second half of history profitable on its own. Written down before the first run, not after.',
       verdict, headline, stats,
+      note: r
+        ? 'Two things the engine deliberately could not test: max-OI strike levels (no historical option-chain archive exists) and RSI confirmation (not computed in this version). Stops are assumed to fill first whenever a stop and a target are touched in the same candle \u2014 the pessimistic assumption.'
+        : 'This rule has never been run. Whatever it shows on its first run is its one honest attempt \u2014 a rule that fails is retired, not adjusted.',
       endpoint: '/api/sweep/backtest/status',
     });
   }
