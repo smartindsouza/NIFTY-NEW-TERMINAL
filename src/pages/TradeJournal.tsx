@@ -1,7 +1,8 @@
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
-import { BookOpen, RefreshCw, TrendingUp, TrendingDown, Trash2, Sparkles } from 'lucide-react';
+import { BookOpen, RefreshCw, TrendingUp, TrendingDown, Trash2, Sparkles, Download } from 'lucide-react';
 
 interface JournalTrade {
   id: number;
@@ -60,6 +61,23 @@ function Chip({ label, value }: { label: string; value: any }) {
 export default function TradeJournal() {
   const [filter, setFilter] = useState<'ALL' | 'OPEN' | 'CLOSED'>('ALL');
 
+  const [importing, setImporting] = useState(false);
+  const importKite = async () => {
+    if (importing) return;
+    setImporting(true);
+    try {
+      const res = await fetch('/api/journal/import-kite', { method: 'POST' });
+      const d = await res.json().catch(() => ({ success: false, error: 'Bad response' }));
+      if (!d.success) { toast.error(d.error || 'Import failed.'); return; }
+      if (d.imported === 0 && (d.skipped || 0) > 0) toast.success('Already up to date — nothing new to import.');
+      else if (d.imported === 0) toast.info(d.note || 'Zerodha reported no fills today.');
+      else toast.success(`Imported ${d.imported} trade${d.imported === 1 ? '' : 's'} from Zerodha.`);
+      refetch();
+    } catch (e: any) {
+      toast.error('Network error importing from Zerodha.');
+    } finally { setImporting(false); }
+  };
+
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['trade-journal'],
     queryFn: async () => {
@@ -96,12 +114,25 @@ export default function TradeJournal() {
             <p className="text-xs text-muted-foreground">Every trade with its market context — the data Claude will review.</p>
           </div>
         </div>
-        <button
-          onClick={() => refetch()}
-          className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-card hover:bg-popover transition-colors text-muted-foreground"
-        >
-          <RefreshCw className={cn('w-3.5 h-3.5', isFetching && 'animate-spin')} /> Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Pull today's real fills from Zerodha — including trades placed in the
+              Kite app, which this journal would otherwise never see. Safe to press
+              repeatedly: each leg carries a unique fingerprint, so nothing doubles. */}
+          <button
+            onClick={importKite}
+            disabled={importing}
+            className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-card hover:bg-popover transition-colors text-muted-foreground disabled:opacity-50"
+          >
+            <Download className={cn('w-3.5 h-3.5', importing && 'animate-pulse')} />
+            {importing ? 'Importing…' : 'Import from Kite'}
+          </button>
+          <button
+            onClick={() => refetch()}
+            className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-card hover:bg-popover transition-colors text-muted-foreground"
+          >
+            <RefreshCw className={cn('w-3.5 h-3.5', isFetching && 'animate-spin')} /> Refresh
+          </button>
+        </div>
       </div>
 
       {/* Summary */}

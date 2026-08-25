@@ -160,6 +160,17 @@ db.prepare(`
   )
 `).run();
 
+// trade_journal predates the Kite import, so the column must be ADDED to the
+// existing table — CREATE TABLE IF NOT EXISTS would silently do nothing here.
+// kite_key is a deterministic fingerprint of one imported leg; the UNIQUE index
+// is what actually makes re-importing idempotent (INSERT OR IGNORE alone would
+// happily duplicate every row on the second run).
+try { db.exec(`ALTER TABLE trade_journal ADD COLUMN kite_key TEXT`); }
+catch (e) { /* already present */ }
+try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_trade_journal_kite_key ON trade_journal(kite_key) WHERE kite_key IS NOT NULL`); }
+catch (e) { console.error('[journal] kite_key index failed', e); }
+
+
 // Migration: add trailing-stop columns if they don't exist yet
 for (const [col, def] of ([
   ['trail_enabled', 'INTEGER DEFAULT 0'],
@@ -1078,6 +1089,85 @@ setInterval(() => {
 
   // ===== Trade Journal endpoints (Phase 1) =====
   // List journaled trades (most recent first). Optional ?status=OPEN|CLOSED and ?limit=N.
+  // Pull the day's REAL fills from Zerodha into the journal, so trades taken in
+  // the Kite app appear alongside trades taken here. Kite is the source of truth:
+  // each fill carries its own order_id, and (order_id, trade_id) is UNIQUE, so
+  // re-running this is idempotent — it can never double-count a trade.
+  //
+  // Buys and sells for the same symbol are paired FIFO into one journal row, so a
+  // round trip shows as a single CLOSED trade with a real P&L rather than two
+  // disconnected legs. An unmatched buy stays OPEN.
+  app.post('/api/journal/import-kite', express.json(), async (_req, res) => {
+    try {
+      const kc = getKiteClient();
+      // @ts-ignore
+      if (!kc || !kc.access_token) return res.json({ success: false, error: 'No active Kite session — log in to Zerodha first.' });
+      let trades: any[] = [];
+      try { trades = await kc.getTrades(); } catch (e: any) {
+        return res.json({ success: false, error: 'Could not read trades from Zerodha: ' + (e?.message || e) });
+      }
+      if (!Array.isArray(trades) || trades.length === 0) return res.json({ success: true, imported: 0, note: 'Zerodha reported no fills today.' });
+
+      const ts = (t: any) => { const v = t.fill_timestamp || t.exchange_timestamp || t.timestamp; const ms = v ? new Date(v).getTime() : NaN; return isFinite(ms) ? ms : Date.now(); };
+      const sorted = [...trades].sort((a, b) => ts(a) - ts(b));
+
+      // FIFO pair per symbol.
+      const openLots: Record<string, any[]> = {};
+      const rows: any[] = [];
+      for (const t of sorted) {
+        const sym = t.tradingsymbol; if (!sym) continue;
+        const side = String(t.transaction_type || '').toUpperCase();
+        let qty = Number(t.quantity) || 0; if (qty <= 0) continue;
+        const price = Number(t.average_price ?? t.price) || 0;
+        const when = ts(t);
+        const key = `${sym}`;
+        const book = openLots[key] || (openLots[key] = []);
+        // Does this fill close existing opposite lots?
+        while (qty > 0 && book.length && book[0].side !== side) {
+          const lot = book[0];
+          const take = Math.min(qty, lot.qty);
+          const pnl = lot.side === 'BUY' ? (price - lot.price) * take : (lot.price - price) * take;
+          rows.push({ sym, side: lot.side, qty: take, entry: lot.price, entryTime: lot.when, exit: price, exitTime: when,
+                      product: lot.product, orderId: lot.orderId, status: 'CLOSED', pnl,
+                      key: `${lot.tradeId}|${t.trade_id}|${take}` });
+          lot.qty -= take; qty -= take;
+          if (lot.qty <= 0) book.shift();
+        }
+        if (qty > 0) book.push({ side, qty, price, when, product: t.product || 'MIS', orderId: t.order_id, tradeId: t.trade_id });
+      }
+      // Anything left unmatched is still open.
+      for (const key of Object.keys(openLots)) {
+        for (const lot of openLots[key]) {
+          rows.push({ sym: key, side: lot.side, qty: lot.qty, entry: lot.price, entryTime: lot.when,
+                      exit: null, exitTime: null, product: lot.product, orderId: lot.orderId, status: 'OPEN', pnl: null,
+                      key: `${lot.tradeId}|OPEN|${lot.qty}` });
+        }
+      }
+
+      const parse = (sym: string) => { const m = /(\d+)(CE|PE)$/.exec(sym || ''); return m ? { strike: Number(m[1]), optionType: m[2] } : { strike: null, optionType: null }; };
+      let imported = 0, skipped = 0;
+      const ins = db.prepare(`INSERT OR IGNORE INTO trade_journal
+        (tradingsymbol, exchange, option_type, strike, side, qty, product, entry_price, entry_time, context,
+         test_mode, simulated, status, exit_price, exit_time, exit_reason, pnl, created_at, updated_at, kite_key)
+        VALUES (?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?)`);
+      const now = Date.now();
+      for (const r of rows) {
+        const { strike, optionType } = parse(r.sym);
+        const info = ins.run(
+          r.sym, 'NFO', optionType, strike, r.side, r.qty, r.product, r.entry, r.entryTime,
+          JSON.stringify({ source: 'KITE_IMPORT', orderId: r.orderId || null }), r.status, r.exit, r.exitTime,
+          r.status === 'CLOSED' ? 'KITE' : null, r.pnl == null ? null : Math.round(r.pnl * 100) / 100,
+          now, now, r.key
+        );
+        if (info.changes) imported++; else skipped++;
+      }
+      return res.json({ success: true, imported, skipped, fills: trades.length });
+    } catch (e: any) {
+      console.error('[journal import-kite]', e);
+      return res.status(500).json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
   app.get('/api/journal', (req, res) => {
     try {
       const status = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : null;

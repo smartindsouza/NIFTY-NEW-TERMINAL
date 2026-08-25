@@ -57,7 +57,7 @@ export function ActivePositions() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          tradingsymbol: pos.symbol, exchange: 'NFO', qty: pos.qty, product: 'MIS',
+          tradingsymbol: pos.symbol, exchange: 'NFO', qty: pos.qty, product: pos.product || 'MIS',
           positionSide: pos.side, spotLower, spotUpper, spotMode: form.spotMode,
           rsiLower, rsiUpper, timeframe: form.timeframe
         })
@@ -86,6 +86,13 @@ export function ActivePositions() {
   const lastPricesRef = useRef<Record<string, { price: number; dir: "up" | "down" | "flat" }>>({});
   useEffect(() => { lastPricesRef.current = lastPrices; }, [lastPrices]);
   const confirmedOpenRef = useRef<Set<string>>(new Set()); // symbols Kite has confirmed as open this session
+  // Symbols whose exit order was just placed. Zerodha keeps reporting the position
+  // as open until the closing order actually fills, so without this the poll would
+  // re-adopt the card seconds after the user exited — and a second click would send
+  // a SECOND closing order, flipping a closed long into a fresh short. Suppressing
+  // re-adoption briefly makes that impossible. Time-based (not a permanent flag) so
+  // deliberately re-entering the same strike later in the day still shows up.
+  const recentlyExitedRef = useRef<Map<string, number>>(new Map());
   const [netPnl, setNetPnl] = useState<number | null>(null); // day net P&L: realized today + live unrealized
 
   // Fetch active positions from localStorage
@@ -130,11 +137,11 @@ export function ActivePositions() {
   // Live prices: poll REAL Kite position data (avg fill, LTP, Zerodha P&L).
   // Test-mode positions keep a small simulation; real positions never use fake ticks.
   useEffect(() => {
-    if (positions.length === 0) return;
-
+    // NOTE: this effect must run even when there are no local cards. It used to
+    // bail on positions.length === 0 (and again unless a non-test card existed),
+    // which meant a trade taken in the ZERODHA APP was never discovered: the poll
+    // that would have found it only ran once the app itself had opened something.
     const pollReal = async () => {
-      const hasReal = positions.some(p => !p.testMode);
-      if (!hasReal) return;
       try {
         const res = await fetch('/api/positions-live');
         const data = await res.json();
@@ -189,6 +196,43 @@ export function ActivePositions() {
             return next;
           });
 
+          // Adopt positions Kite reports that this app never opened — i.e. trades
+          // taken in the Zerodha app. They become ordinary cards, so they show live
+          // P&L and can be exited from here (the server closes by symbol, reading
+          // the real quantity/product/side from Zerodha, so origin doesn't matter).
+          const known = new Set(updated.map((pos) => pos.symbol));
+          const adopted: ActiveTrade[] = [];
+          Object.keys(bySymbol).forEach((sym) => {
+            if (known.has(sym)) return;
+            const exitedAt = recentlyExitedRef.current.get(sym);
+            if (exitedAt && Date.now() - exitedAt < 30000) return;   // exit in flight
+            const kp = bySymbol[sym];
+            const qty = Number(kp.quantity) || 0;
+            if (qty === 0) return;
+            const m = /(\d+)(CE|PE)$/.exec(sym);
+            adopted.push({
+              id: `kite-${sym}`,
+              symbol: sym,
+              side: qty > 0 ? 'BUY' : 'SELL',
+              qty: Math.abs(qty),
+              entryPrice: Number(kp.average_price) || 0,
+              currentPrice: Number(kp.last_price) || Number(kp.average_price) || 0,
+              optionType: m ? (m[2] as 'CE' | 'PE') : undefined,
+              strike: m ? Number(m[1]) : undefined,
+              // Entry time isn't in the positions feed; the journal import carries
+              // the real fill time. Stamp now so the >25s stale rule behaves.
+              timestamp: new Date().toISOString(),
+              testMode: false,
+              kitePnl: typeof kp.pnl === 'number' ? kp.pnl : undefined,
+              product: kp.product,
+            });
+          });
+          if (adopted.length) {
+            updated.push(...adopted);
+            changed = true;
+            adopted.forEach((a) => toast.info(`${a.symbol} — open position found on Zerodha.`, { id: `adopted-${a.symbol}` }));
+          }
+
           if (changed) localStorage.setItem("active_positions", JSON.stringify(updated));
           if (removed.length > 0) {
             // Cascade to the chart's Arm Auto-Exit panel and let the user know
@@ -231,7 +275,7 @@ export function ActivePositions() {
     }, 2000);
 
     return () => { clearInterval(realTimer); clearInterval(simTimer); document.removeEventListener('visibilitychange', onVisible); };
-  }, [positions.length, exitingIds]);
+  }, [exitingIds]);
 
   // One-click exit function
   const handleExitPosition = async (pos: ActiveTrade) => {
@@ -290,6 +334,10 @@ export function ActivePositions() {
           description: `Closing at ~₹${finalPrice.toFixed(2)}. Realized P&L: ${pnl >= 0 ? "+" : ""}${formattedPnl}`
         });
       }
+
+      // Mark the symbol as just-exited BEFORE clearing the card, so the 3s poll
+      // cannot re-adopt it while the closing order is still working.
+      recentlyExitedRef.current.set(pos.symbol, Date.now());
 
       // Remove from active positions and save remaining
       const currentActive = JSON.parse(localStorage.getItem("active_positions") || "[]");
