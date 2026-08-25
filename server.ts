@@ -926,7 +926,21 @@ setInterval(() => {
       // to pure realised). Summing legPnl avoids the double-count that adding a
       // separate realised total to these figures would now produce.
       const netPnl = Math.round(net.reduce((sum: number, p: any) => sum + legPnl(p, ltpFor(p)), 0) * 100) / 100;
-      const realisedTotal = net.reduce((s: number, p: any) => s + (p.realised || 0), 0);
+      // Zerodha's per-position `realised` field came back 0 on a day with closed
+      // trades (confirmed against netPnl, which Martin verified matches the Kite
+      // app), so it cannot be trusted here. Derive realised the same way netPnl is
+      // derived — from buy/sell values — instead of from that field:
+      //   • a fully closed leg (quantity 0) is pure realised;
+      //   • a partially closed leg has realised on the quantity no longer held,
+      //     which is exactly legPnl evaluated at the position's own average price.
+      // Falls back to the reported field only when the values are missing.
+      const realisedTotal = net.reduce((sum: number, p: any) => {
+        const bv = Number(p.buy_value), sv = Number(p.sell_value);
+        if (!isFinite(bv) || !isFinite(sv)) return sum + (p.realised || 0);
+        const qty = Number(p.quantity) || 0;
+        if (qty === 0) return sum + (sv - bv);
+        return sum + legPnl(p, Number(p.average_price) || 0);
+      }, 0);
       const openUnrealised = out.reduce((s: number, o: any) => s + (o.pnl || 0), 0);
       return {
         success: true,
