@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { X, RefreshCw, Sparkles, TrendingUp, TrendingDown, Shield } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { addWsMessageListener } from "../hooks/useWebSocket";
 
 export interface ActiveTrade {
@@ -102,7 +103,10 @@ export function ActivePositions() {
   // would tear down and rebuild the interval, and was part of how duplicate polls
   // appeared). It reads the live count through this ref instead.
   const positionsRef = useRef<ActiveTrade[]>([]);
+  const lastPollErrorRef = useRef<string | null>(null);
   const [netPnl, setNetPnl] = useState<number | null>(null); // day net P&L: realized today + live unrealized
+  const [pollError, setPollError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   // Fetch active positions from localStorage
   const loadPositions = () => {
@@ -263,7 +267,17 @@ export function ActivePositions() {
           }
           return changed ? updated : prevPositions;
         });
-      } catch { /* keep last real values; never fall back to simulation */ }
+      } catch (err: any) {
+        // This catch used to be bare. Anything that threw inside the poll — a bad
+        // response, an exception in the adoption block — vanished silently, and the
+        // symptom was simply "my position isn't showing" with nothing to debug from.
+        // A watcher of real money must never fail invisibly.
+        lastPollErrorRef.current = err?.message || String(err);
+        console.error('[positions] poll failed:', err);
+        setPollError(lastPollErrorRef.current);
+        return;
+      }
+      setPollError(null);
     };
 
     // Cadence must match what is actually at stake. Removing the old
@@ -277,7 +291,7 @@ export function ActivePositions() {
     // a screen nobody was looking at.
     let realTimer: any = null;
     let currentMs = 0;
-    const desiredMs = () => (document.visibilityState !== 'visible' ? 0 : (positionsRef.current.length > 0 ? 3000 : 20000));
+    const desiredMs = () => (document.visibilityState !== 'visible' ? 0 : (positionsRef.current.length > 0 ? 3000 : 8000));
     const retime = () => {
       const ms = desiredMs();
       if (ms === currentMs) return;
@@ -318,6 +332,61 @@ export function ActivePositions() {
 
     return () => { if (realTimer) clearInterval(realTimer); clearInterval(retimeTicker); clearInterval(simTimer); document.removeEventListener('visibilitychange', onVisible); };
   }, [exitingIds]);
+
+  // Manual sync. Whatever the automatic cadence is doing, one click forces a read
+  // of Zerodha's live positions — so a position can always be brought on screen
+  // (and therefore exited from here) without waiting on a timer.
+  const syncNow = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      const res = await fetch('/api/positions-live');
+      const data = await res.json().catch(() => null);
+      if (!data) { toast.error('No response from the server.'); return; }
+      if (!data.success) { toast.error(data.error || 'Zerodha did not return positions.'); return; }
+      const list: any[] = Array.isArray(data.positions) ? data.positions : [];
+      if (list.length === 0) { toast.info('Zerodha reports no open positions.'); return; }
+      // Rebuild straight from Zerodha, bypassing the incremental merge entirely.
+      const rebuilt: ActiveTrade[] = list.filter((kp) => Number(kp.quantity) !== 0).map((kp) => {
+        const qty = Number(kp.quantity) || 0;
+        const m = /(\d+)(CE|PE)$/.exec(kp.tradingsymbol || '');
+        const existing = positionsRef.current.find((x) => x.symbol === kp.tradingsymbol && !x.testMode);
+        return {
+          id: existing?.id || `kite-${kp.tradingsymbol}`,
+          symbol: kp.tradingsymbol,
+          side: qty > 0 ? 'BUY' : 'SELL',
+          qty: Math.abs(qty),
+          entryPrice: Number(kp.average_price) || 0,
+          currentPrice: Number(kp.last_price) || Number(kp.average_price) || 0,
+          optionType: m ? (m[2] as 'CE' | 'PE') : undefined,
+          strike: m ? Number(m[1]) : undefined,
+          timestamp: existing?.timestamp || new Date().toISOString(),
+          testMode: false,
+          kitePnl: typeof kp.pnl === 'number' ? kp.pnl : undefined,
+          product: kp.product,
+          token: kp.instrument_token,
+          pnlBase: kp.pnl_base ?? undefined,
+          qtySigned: qty,
+        } as ActiveTrade;
+      });
+      const tests = positionsRef.current.filter((x) => x.testMode);
+      const next = [...tests, ...rebuilt];
+      rebuilt.forEach((r) => confirmedOpenRef.current.add(r.symbol));
+      recentlyExitedRef.current.clear();   // an explicit sync overrides exit suppression
+      setPositions(next);
+      setLastPrices((prev) => {
+        const lp = { ...prev };
+        rebuilt.forEach((r) => { if (!lp[r.id]) lp[r.id] = { price: r.currentPrice || r.entryPrice, dir: 'flat' }; });
+        return lp;
+      });
+      localStorage.setItem('active_positions', JSON.stringify(next));
+      if (typeof data.netPnl === 'number') setNetPnl(data.netPnl);
+      setPollError(null);
+      toast.success(`Synced ${rebuilt.length} position${rebuilt.length === 1 ? '' : 's'} from Zerodha.`);
+    } catch (e: any) {
+      toast.error('Could not reach the server.');
+    } finally { setSyncing(false); }
+  };
 
   // Live ticks between polls. PASSIVE ONLY — this never calls subscribeToTicks,
   // because the socket carries ONE subscribed symbol at a time and subscribing from
@@ -448,7 +517,37 @@ export function ActivePositions() {
     }
   };
 
-  if (positions.length === 0) return null;
+  if (positions.length === 0) {
+    // Never render nothing: if the poll is failing, or Zerodha has a position this
+    // app has not picked up, there must still be somewhere to see it and act.
+    if (!pollError) return (
+      <div className="w-full mb-3 flex items-center justify-end">
+        <button
+          onClick={syncNow}
+          disabled={syncing}
+          className="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-lg bg-card hover:bg-popover text-muted-foreground transition-colors disabled:opacity-50"
+          title="Read open positions directly from Zerodha"
+        >
+          <RefreshCw className={cn('w-3 h-3', syncing && 'animate-spin')} />
+          {syncing ? 'Syncing…' : 'Sync positions from Zerodha'}
+        </button>
+      </div>
+    );
+    return (
+      <div className="w-full mb-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 flex items-center justify-between gap-3">
+        <span className="text-xs text-amber-400">
+          Position check failed — a trade taken in the Kite app may not be shown here. {pollError}
+        </span>
+        <button
+          onClick={syncNow}
+          disabled={syncing}
+          className="shrink-0 flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-lg bg-card hover:bg-popover text-foreground/80 transition-colors disabled:opacity-50"
+        >
+          <RefreshCw className={cn('w-3 h-3', syncing && 'animate-spin')} /> Retry
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full mb-6 border border-emerald-500/20 bg-emerald-950/10 rounded-xl overflow-hidden backdrop-blur-sm transition-all duration-300 animate-in slide-in-from-top-4">
