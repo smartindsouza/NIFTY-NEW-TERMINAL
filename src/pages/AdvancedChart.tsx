@@ -6220,7 +6220,11 @@ export function AdvancedChart() {
   useEffect(() => {
     if (!chartContainerRef.current || !chartData || chartData.candles.length === 0) return;
 
-    const VISIBLE_BARS = 55;
+    // Default window: how many candles the chart opens on, everywhere — first
+    // load, refresh, and every timeframe switch. Raised from 55 to 85 so the
+    // opening view is zoomed out a little and shows more context. The "sane
+    // range" check below scales off this, so both move together.
+    const VISIBLE_BARS = 85;
     const RIGHT_OFFSET = 8;
 
     function focusRecentCandles(chart: any, candles: any[]) {
