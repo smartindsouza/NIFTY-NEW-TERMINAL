@@ -7900,9 +7900,9 @@ export function AdvancedChart() {
         </div>
       )}
 
-      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2 md:gap-3 pb-2 mb-2 md:mb-4">
-        <div className="relative flex items-center gap-2 md:gap-4 flex-wrap max-md:pr-28">
-          <h1 className="text-base md:text-2xl font-bold text-foreground tracking-tight whitespace-nowrap">
+      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2 md:gap-3 pb-2 mb-2 md:mb-2 md:flex-nowrap md:h-11 md:border-b md:border-border/60">
+        <div className="relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-nowrap md:min-w-0 max-md:pr-28">
+          <h1 className="text-base md:text-sm font-semibold text-foreground tracking-tight whitespace-nowrap md:truncate">
             {isFocusedChart && selectedInstrument
               ? prettyOptionName(selectedInstrument.tradingsymbol,
                   contractExpiry?.symbol === selectedInstrument.tradingsymbol ? contractExpiry.expiry : null)
@@ -8370,17 +8370,17 @@ export function AdvancedChart() {
         </div>
       ) : (
       <div className="flex flex-col flex-grow gap-0 md:gap-2 min-h-0">
-        <div className={`items-center gap-1.5 px-1 pb-1 shrink-0 overflow-x-auto ${isFocusedChart ? 'hidden' : 'flex'}`}>
+        <div className={`items-center gap-0 px-0 pb-0 shrink-0 overflow-x-auto border-b border-border/60 bg-background/40 ${isFocusedChart ? 'hidden' : 'flex'}`}>
           <button onClick={() => { setUnderlying('NIFTY'); setSelectedInstrument(null); }}
-            className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${!selectedInstrument && underlying === 'NIFTY' ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
+            className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${!selectedInstrument && underlying === 'NIFTY' ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
             NIFTY 50
           </button>
           <button onClick={() => { setUnderlying('BANKNIFTY'); setSelectedInstrument(null); }}
-            className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${!selectedInstrument && underlying === 'BANKNIFTY' ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
+            className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${!selectedInstrument && underlying === 'BANKNIFTY' ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
             BANK NIFTY
           </button>
           <button onClick={() => { setUnderlying('SENSEX'); setSelectedInstrument(null); }}
-            className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${!selectedInstrument && underlying === 'SENSEX' ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
+            className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${!selectedInstrument && underlying === 'SENSEX' ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
             SENSEX
           </button>
 
@@ -8390,7 +8390,7 @@ export function AdvancedChart() {
             const active = selectedInstrument?.tradingsymbol === c.tradingsymbol;
             return (
               <div key={c.tradingsymbol}
-                className={`flex items-center gap-1 pl-2 pr-1 h-7 rounded-md shrink-0 transition-colors ${active ? 'bg-primary/20 border border-primary/30' : 'bg-muted/40'}`}>
+                className={`flex items-center gap-1 pl-2 pr-1 h-8 rounded-none shrink-0 transition-colors border-b-2 border-r border-r-border/40 ${active ? 'border-b-primary bg-primary/10' : 'border-b-transparent bg-transparent hover:bg-muted/30'}`}>
                 <button
                   onClick={() => setSelectedInstrument(c)}
                   className={`text-xs font-mono font-bold whitespace-nowrap ${active ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
@@ -8413,7 +8413,7 @@ export function AdvancedChart() {
 
           {tradeTabInstr && (
           <button onClick={() => setSelectedInstrument(tradeTabInstr)}
-            className={`px-3 h-7 rounded-md text-xs font-mono font-bold transition-colors ${selectedInstrument && String(selectedInstrument.instrument_token) === String(tradeTabInstr.instrument_token) ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-muted/40 text-muted-foreground'}`}>
+            className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${selectedInstrument && String(selectedInstrument.instrument_token) === String(tradeTabInstr.instrument_token) ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
             {tradeTabInstr.tradingsymbol}
           </button>
           )}
@@ -8422,7 +8422,7 @@ export function AdvancedChart() {
 
 
           {/* Main Chart (Price & Volume) */}
-          <div className="relative flex-grow flex w-full bg-card rounded-none md:rounded-xl min-h-0 md:min-h-[450px]" onMouseLeave={() => setCrosshairInfo(null)}>
+          <div className="relative flex-grow flex w-full bg-card rounded-none min-h-0 md:min-h-[450px]" onMouseLeave={() => setCrosshairInfo(null)}>
             {/* Leverage meter — why the premium is moving more (or less) than the
                 index right now. Display only: pointer-events-none, so it can never
                 block a drag, a crosshair, or a level being placed. */}
@@ -8457,7 +8457,7 @@ export function AdvancedChart() {
               onPointerMoveCapture={handlePointerMove}
               onPointerUpCapture={handlePointerUp}
               onPointerLeave={handlePointerUp}
-              className="border border-0 rounded-none md:rounded-xl stretch-self flex-grow relative w-full overflow-hidden z-20"
+              className="border border-0 rounded-none stretch-self flex-grow relative w-full overflow-hidden z-20"
             />
             {showJumpToLatest && (
               <button
@@ -8589,7 +8589,7 @@ export function AdvancedChart() {
             )}
             <canvas
               ref={overlayCanvasRef}
-              className="absolute inset-0 w-full h-full pointer-events-none rounded-xl z-30"
+              className="absolute inset-0 w-full h-full pointer-events-none rounded-none z-30"
             />
             {(() => {
               if (showOiBars && !isOptionView && oiData && crosshairInfo) {
@@ -8838,7 +8838,7 @@ export function AdvancedChart() {
           <div ref={rsiPaneRef} style={rsiPaneHeight ? { height: `${rsiPaneHeight}px` } : undefined} className={`relative w-full shrink-0 h-[140px] md:h-[200px] ${!showRsi ? 'hidden' : ''}`}>
             <div
               ref={rsiContainerRef}
-              className="bg-card border border-0 rounded-none md:rounded-xl overflow-hidden w-full h-full absolute inset-0"
+              className="bg-card border border-0 rounded-none overflow-hidden w-full h-full absolute inset-0"
             />
             {rsiHoverValue && (
                <div className="absolute top-2 left-2 z-10 text-xs font-mono font-medium text-cyan-400">
