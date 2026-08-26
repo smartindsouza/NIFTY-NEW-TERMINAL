@@ -3567,6 +3567,10 @@ export function AdvancedChart() {
   const [isEditingRsi, setIsEditingRsi] = useState(false);
 
   const logicalRangeRef = useRef<any>(null);
+  // Bar count at the moment the visible range was last captured. Needed to tell
+  // "the user is pinned to the live edge" from "the user scrolled back to look at
+  // something", so new candles push the view along in the first case only.
+  const rangeBarCountRef = useRef<number>(0);
 
   const cacheKey = `${selectedInstrument?.instrument_token}_${timeframe}`;
 
@@ -6463,7 +6467,16 @@ export function AdvancedChart() {
     const isFirstChartLoad = !chartFirstLoadDone;
     if (logicalRangeRef.current && !isFirstChartLoad) {
       try {
-        mainChart.timeScale().setVisibleLogicalRange(logicalRangeRef.current);
+        // If the user was pinned to the live edge when the range was captured,
+        // slide the window along by however many candles arrived, so the newest
+        // candle stays in view. If they had scrolled back to study something,
+        // leave the window exactly where they put it.
+        const saved = logicalRangeRef.current;
+        const prevCount = rangeBarCountRef.current || 0;
+        const nextCount = candleData.length;
+        const wasAtLiveEdge = prevCount > 0 && saved.to >= prevCount - 2;
+        const shift = (wasAtLiveEdge && nextCount > prevCount) ? (nextCount - prevCount) : 0;
+        mainChart.timeScale().setVisibleLogicalRange({ from: saved.from + shift, to: saved.to + shift });
       } catch (e) {}
     } else {
       // First mount of the session (or no saved range): show the latest candles.
@@ -6927,6 +6940,25 @@ export function AdvancedChart() {
       mainResizeObserver.disconnect();
       rsiResizeObserver.disconnect();
       try {
+      } catch (e) {}
+      // Capture the range the user is ACTUALLY looking at, from the live chart,
+      // before it is destroyed. This effect tears the chart down and rebuilds it
+      // on every data refresh — every 15s on an option chart — so without this the
+      // rebuild fell through to focusRecentCandles and snapped the zoom back to the
+      // default ~55 bars, roughly ten seconds after each manual zoom.
+      //
+      // Why not rely on the existing subscribeVisibleLogicalRangeChange handlers:
+      // they key the cache on `${selectedInstrument?.instrument_token}_${timeframe}`
+      // captured in a closure, so a range saved before the instrument resolved was
+      // filed under "undefined_<tf>" and never read back. Reading the chart itself
+      // at teardown cannot be mis-keyed or go stale.
+      try {
+        const lr = mainChart.timeScale().getVisibleLogicalRange();
+        if (lr && isFinite(lr.from) && isFinite(lr.to) && lr.to > lr.from) {
+          logicalRangeRef.current = { from: lr.from, to: lr.to };
+          rangeBarCountRef.current = (chartDataRef.current?.candles?.length) || chartData.candles.length;
+          try { globalLogicalRangeCache[cacheKey] = logicalRangeRef.current; } catch (e) {}
+        }
       } catch (e) {}
       try { mainChart.timeScale().unsubscribeVisibleLogicalRangeChange(jumpRangeHandler); } catch (e) {}
       mainChart.remove();
