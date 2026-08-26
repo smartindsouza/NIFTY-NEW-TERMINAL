@@ -3594,6 +3594,9 @@ export function AdvancedChart() {
 
   useEffect(() => {
     logicalRangeRef.current = globalLogicalRangeCache[cacheKey] || null;
+    // The bar count belongs to the range; carrying one from the previous timeframe
+    // made the live-edge shift meaningless (60 bars of 1h vs 400 bars of 5m).
+    rangeBarCountRef.current = 0;
   }, [cacheKey]);
 
   const [bbColor, setBbColor] = useState(() => {
@@ -6487,7 +6490,18 @@ export function AdvancedChart() {
         const nextCount = candleData.length;
         const wasAtLiveEdge = prevCount > 0 && saved.to >= prevCount - 2;
         const shift = (wasAtLiveEdge && nextCount > prevCount) ? (nextCount - prevCount) : 0;
-        mainChart.timeScale().setVisibleLogicalRange({ from: saved.from + shift, to: saved.to + shift });
+        const from = saved.from + shift, to = saved.to + shift;
+        const span = to - from;
+        // A logical range is a pair of BAR INDICES, and a bar means something
+        // different on every timeframe. Restoring a 5-minute range onto an hourly
+        // chart (or vice versa) produced the broken views Martin screenshotted:
+        // a handful of bars stretched across the whole pane. Only reuse a saved
+        // range when it still describes a sane window over THIS data; otherwise
+        // fall back to the same default view every timeframe starts from.
+        const sane = span >= 5 && span <= Math.max(VISIBLE_BARS * 6, nextCount * 2)
+                     && to > 0 && from < nextCount;
+        if (sane) mainChart.timeScale().setVisibleLogicalRange({ from, to });
+        else focusRecentCandles(mainChart, chartData.candles);
       } catch (e) {}
     } else {
       // First mount of the session (or no saved range): show the latest candles.
@@ -6968,7 +6982,11 @@ export function AdvancedChart() {
         if (lr && isFinite(lr.from) && isFinite(lr.to) && lr.to > lr.from) {
           logicalRangeRef.current = { from: lr.from, to: lr.to };
           rangeBarCountRef.current = (chartDataRef.current?.candles?.length) || chartData.candles.length;
-          try { globalLogicalRangeCache[cacheKey] = logicalRangeRef.current; } catch (e) {}
+          // Deliberately NOT written to globalLogicalRangeCache here: cacheKey is not
+          // a dependency of this effect, so the closure's key can belong to a
+          // different instrument or timeframe than the one being torn down, and the
+          // range would be filed against the wrong chart. The subscribe handlers
+          // already maintain that cache with a correctly scoped key.
         }
       } catch (e) {}
       try { mainChart.timeScale().unsubscribeVisibleLogicalRangeChange(jumpRangeHandler); } catch (e) {}
