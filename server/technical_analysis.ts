@@ -211,6 +211,26 @@ function computeOpeningRange(raw: any[]): { high: number; low: number; date: str
 }
 
 const cacheMap = new Map<string, { data: any, lastUpdate: number, lastFullFetch?: number }>();
+
+// ---------------------------------------------------------------- volume caches
+// An index has no volume of its own, so the chart borrows it from the futures. The
+// original code downloaded the FULL history of EVERY listed expiry on every cold
+// request just to discover which contract was most active — three ~7,500-candle
+// pulls for a 5-minute chart, sequential, each behind a 350ms throttle, and the
+// whole thing repeated once the 60s TA cache expired. That was the bulk of the
+// 5-8 second first load Martin reported.
+//
+// Two things are cached instead:
+//   activeExpiryCache — WHICH contract is most active. It changes once a month at
+//     rollover, so it is resolved once a day. Confirmed by re-scanning if the
+//     remembered contract ever returns nothing.
+//   futVolCache — the volume series itself. Volume on a candle that has already
+//     closed never changes; only the newest candle moves. Refreshed on the same
+//     cadence as a candle, so a 5-minute chart re-pulls at most once per 5 minutes
+//     instead of once per minute.
+const activeExpiryCache = new Map<string, { token: number; expiry: string; day: string }>();
+const futVolCache = new Map<string, { at: number; map: Map<number, number>; expiry: string }>();
+const istDay = () => new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
 const inFlightRequests = new Map<string, Promise<any>>();
 
 let nextAvailableTime = Date.now();
@@ -491,28 +511,57 @@ export async function getTechnicalAnalysis(
           : null;
         if (volumeUnderlying && rawHist && rawHist.length > 0) {
           try {
-            const futs = await getIndexFuturesTokens(volumeUnderlying);
-            if (!futs.length) console.warn(`[Volume Merge] no listed futures found for ${volumeUnderlying} — chart will show no volume`);
+            const volKey = `${volumeUnderlying}_${intervalName}`;
             let bestVolByTime: Map<number, number> | null = null;
-            let bestTotal = -1;
             let bestExpiry = '';
-            for (const fut of futs) {
-              const futHist = await throttleRequest(() => kc.getHistoricalData(
-                fut.token,
-                intervalName as any,
-                fromDate,
-                toDate,
-              ), `historical_fut_${intervalName}`);
-              if (!futHist || futHist.length === 0) continue;
-              const m = new Map<number, number>();
-              let total = 0;
-              for (const f of futHist) {
-                const t = new Date(f.date).getTime();
-                const v = f.volume || 0;
-                m.set(t, v);
-                total += v;
+
+            // 1) Serve the cached volume series while it is still current. One
+            //    candle's worth of staleness at most, and only on the newest bar.
+            const vCached = futVolCache.get(volKey);
+            const volTtl = Math.max(60000, baseIntervalMin * 60000);
+            if (vCached && Date.now() - vCached.at < volTtl) {
+              bestVolByTime = vCached.map;
+              bestExpiry = vCached.expiry + ' (cached)';
+            } else {
+              const futs = await getIndexFuturesTokens(volumeUnderlying);
+              if (!futs.length) console.warn(`[Volume Merge] no listed futures found for ${volumeUnderlying} — chart will show no volume`);
+
+              // 2) Fetch ONLY the contract already known to be most active. The
+              //    full scan runs just once a day, or if that contract comes back
+              //    empty (rollover, or a bad remembered token).
+              const remembered = activeExpiryCache.get(volumeUnderlying);
+              const useRemembered = remembered && remembered.day === istDay()
+                && futs.some(f => f.token === remembered.token);
+              const pullOne = async (fut: { token: number; expiry: string }) => {
+                const h = await throttleRequest(() => kc.getHistoricalData(
+                  fut.token, intervalName as any, fromDate, toDate,
+                ), `historical_fut_${intervalName}`);
+                if (!h || h.length === 0) return null;
+                const m = new Map<number, number>();
+                let total = 0;
+                for (const f of h) { const t = new Date(f.date).getTime(); const v = f.volume || 0; m.set(t, v); total += v; }
+                return { m, total, expiry: fut.expiry, token: fut.token };
+              };
+
+              let picked: any = null;
+              if (useRemembered) {
+                picked = await pullOne(futs.find(f => f.token === remembered!.token)!);
+                if (!picked || picked.total <= 0) picked = null;   // stale — fall through to a full scan
               }
-              if (total > bestTotal) { bestTotal = total; bestVolByTime = m; bestExpiry = fut.expiry; }
+              if (!picked) {
+                let best: any = null;
+                for (const fut of futs) {
+                  const r = await pullOne(fut);
+                  if (r && (!best || r.total > best.total)) best = r;
+                }
+                picked = best;
+                if (picked) activeExpiryCache.set(volumeUnderlying, { token: picked.token, expiry: picked.expiry, day: istDay() });
+              }
+              if (picked) {
+                bestVolByTime = picked.m;
+                bestExpiry = picked.expiry;
+                futVolCache.set(volKey, { at: Date.now(), map: picked.m, expiry: picked.expiry });
+              }
             }
             if (bestVolByTime) {
               let matched = 0;
