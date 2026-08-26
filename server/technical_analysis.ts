@@ -1,4 +1,5 @@
 import { getKiteClient, getIndexFuturesTokens } from "./kite_service.js";
+import { getLatestTick } from "./ticker_service.js";
 import { aggregateCandles } from "./aggregator.js";
 import { scoreBounceAt } from "./bounce_conviction.js";
 
@@ -369,9 +370,22 @@ export async function getTechnicalAnalysis(
         if (symbol.startsWith("NFO:")) {
           formatSymbol = symbol;
         }
-        const ltpRes = await throttleRequest(() => kc.getLTP([formatSymbol]), `ltp_${formatSymbol}`);
-        if (ltpRes && ltpRes[formatSymbol]) {
-          resolvedSpot = ltpRes[formatSymbol].last_price;
+        // The live WebSocket tick is the same number getLTP would return, already
+        // in memory. Preferring it removes a throttled broker round trip (350ms of
+        // enforced spacing plus network) from EVERY request — including cache hits,
+        // which previously paid for a network call before even looking at the cache.
+        // getLTP remains the fallback for anything not on the tick stream, or when
+        // the last tick is stale enough that it should not be trusted.
+        const tokenNum = parseInt(instrument_token, 10);
+        const tick = isFinite(tokenNum) ? getLatestTick(tokenNum) : undefined;
+        const tickAgeMs = tick?.ts ? Date.now() - tick.ts : Infinity;
+        if (tick && tick.ltp > 0 && tickAgeMs < 15000) {
+          resolvedSpot = tick.ltp;
+        } else {
+          const ltpRes = await throttleRequest(() => kc.getLTP([formatSymbol]), `ltp_${formatSymbol}`);
+          if (ltpRes && ltpRes[formatSymbol]) {
+            resolvedSpot = ltpRes[formatSymbol].last_price;
+          }
         }
       } catch (ltpErr: any) {
         // ignore, fallback to passed spot
