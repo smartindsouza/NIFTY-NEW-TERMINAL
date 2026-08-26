@@ -5884,6 +5884,10 @@ export function AdvancedChart() {
     const result = {
       candles: uniqueCandles,
       spot: taInfo.spot,
+      // Which timeframe these candles ARE. The chart effect needs this to tell a
+      // real render from the transient one that happens while the new timeframe's
+      // data is still in flight.
+      timeframe: tfNum,
     };
     lastGoodChartDataRef.current = result;
     return result;
@@ -6479,7 +6483,17 @@ export function AdvancedChart() {
     }
     
     const isFirstChartLoad = !chartFirstLoadDone;
-    if (logicalRangeRef.current && !isFirstChartLoad) {
+    // While a timeframe switch is in flight, the query keeps the PREVIOUS
+    // timeframe's candles on screen so the chart does not go blank. That
+    // intermediate frame used to get a restored zoom applied to it, and then the
+    // real data arrived a moment later with a different one — the brief "wrong
+    // chart, slightly zoomed" flash. Any frame whose candles do not belong to the
+    // timeframe now selected is drawn at the SAME default window the final frame
+    // will use, so the two are visually identical and nothing jumps.
+    const tfNow = parseInt(timeframe, 10) || 5;
+    const dataMatchesTf = typeof (chartData as any).timeframe !== 'number'
+      || (chartData as any).timeframe === tfNow;
+    if (logicalRangeRef.current && !isFirstChartLoad && dataMatchesTf) {
       try {
         // If the user was pinned to the live edge when the range was captured,
         // slide the window along by however many candles arrived, so the newest
