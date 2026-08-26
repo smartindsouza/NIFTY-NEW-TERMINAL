@@ -5091,9 +5091,20 @@ export function AdvancedChart() {
       }
       return res.json();
     },
-    // Fetch periodically while visible to sync indicator bias with dashboard
-    // using false here and manual update interval below to prevent chart full redraws
-    refetchInterval: isOptionView ? 15000 : false,
+    // NEVER refetch history on a timer. This query feeds chartData, chartData is a
+    // dependency of the main chart effect, and that effect DESTROYS and rebuilds the
+    // whole chart (mainChart.remove()) every time it runs. Option charts were left on
+    // a 15s interval, so an option chart physically tore itself down four times a
+    // minute — visibly flashing, dropping the crosshair, and (before the previous
+    // fix) snapping the zoom back to default.
+    //
+    // The mechanism to avoid this already exists and is what index charts have always
+    // used: the background poll below fetches the same /api/ta and INJECTS the result
+    // through mainSeriesRef.current.update(), so candles, volume and RSI move without
+    // the chart being rebuilt. It self-heals too — it reseeds through the normal path
+    // if the server runs 2+ bars ahead, or if the chart's bar clock desyncs. Option
+    // charts now take that same path.
+    refetchInterval: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     // Refetch full history whenever the chart (re)mounts — returning from another
