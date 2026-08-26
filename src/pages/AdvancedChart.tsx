@@ -3047,6 +3047,12 @@ export function AdvancedChart() {
   // Same URL signal App uses. In this mode the tab is about ONE contract, so the
   // index switcher is hidden too — it would only offer a way to navigate away from
   // the thing the tab exists to show.
+  // Top-bar badges Martin asked to hide (OI BIAS, SIGNAL, PULSE, and the Bounce
+  // score) to match a cleaner TradingView-style header. The computations behind
+  // them are untouched and still feed everything else — only the chips are
+  // hidden, so restoring them is this one flag.
+  const SHOW_BIAS_BADGES = false;
+
   const isFocusedChart = (() => {
     try { return new URLSearchParams(window.location.search).has('optToken'); }
     catch (e) { return false; }
@@ -4707,22 +4713,18 @@ export function AdvancedChart() {
       // to go back through, the user is stranded. On a narrow screen the chart
       // switches IN PLACE, where the index buttons remain one tap away. Desktop
       // keeps the separate tab, which is useful precisely because tabs are visible.
-      const narrow = typeof window !== 'undefined'
-        && window.matchMedia && window.matchMedia('(max-width: 767px)').matches;
-      if (narrow) {
-        setSelectedInstrument({
-          instrument_token: String(contract.instrument_token),
-          tradingsymbol: contract.tradingsymbol,
-          ...(contract.lot_size ? { lot_size: contract.lot_size } : {}),
-          ...(contract.exchange ? { exchange: contract.exchange } : {}),
-        } as any);
-        return;
-      }
-      const url = `/advanced-chart?optToken=${encodeURIComponent(String(contract.instrument_token))}`
-        + `&optSymbol=${encodeURIComponent(contract.tradingsymbol || '')}`
-        + (contract.lot_size ? `&optLot=${contract.lot_size}` : '')
-        + (contract.exchange ? `&optExch=${encodeURIComponent(contract.exchange)}` : '');
-      window.open(url, '_blank', 'noopener');
+      // Open the contract IN PLACE, as a tab alongside the index tabs. It used to
+      // spawn a separate browser window on anything wider than a phone, which
+      // scattered charts across windows; the phone path already did the right
+      // thing. Selecting an instrument is what registers it in openCharts, so the
+      // tab strip picks it up automatically.
+      setSelectedInstrument({
+        instrument_token: String(contract.instrument_token),
+        tradingsymbol: contract.tradingsymbol,
+        ...(contract.lot_size ? { lot_size: contract.lot_size } : {}),
+        ...(contract.exchange ? { exchange: contract.exchange } : {}),
+      } as any);
+      return;
     } catch (e: any) {
       toast.error(e?.message || 'Could not open that option chart');
     }
@@ -7921,7 +7923,7 @@ export function AdvancedChart() {
               LIVE TICK: {lastTickMessage}
              </span>
           )}
-          {oiData && oiData.strikes && (() => {
+          {SHOW_BIAS_BADGES && oiData && oiData.strikes && (() => {
             let ceChg = 0, peChg = 0;
             oiData.strikes.forEach((s: number) => {
               ceChg += oiData.ceData?.[s]?.chgOi || 0;
@@ -7940,7 +7942,7 @@ export function AdvancedChart() {
               </span>
             );
           })()}
-          {decision && (() => {
+          {SHOW_BIAS_BADGES && decision && (() => {
             const biasText = decision.bullScore > decision.bearScore ? 'BULLISH' : decision.bearScore > decision.bullScore ? 'BEARISH' : 'NEUTRAL';
             const color = biasText === 'BULLISH' ? 'bg-emerald-500/20 text-emerald-400'
               : biasText === 'BEARISH' ? 'bg-rose-500/20 text-rose-400'
@@ -7952,7 +7954,7 @@ export function AdvancedChart() {
               </span>
             );
           })()}
-          {pulseBias?.success && pulseBias.dir && (() => {
+          {SHOW_BIAS_BADGES && pulseBias?.success && pulseBias.dir && (() => {
             const color = pulseBias.dir === 'UP' ? 'bg-emerald-500/20 text-emerald-400'
               : pulseBias.dir === 'DOWN' ? 'bg-rose-500/20 text-rose-400'
               : 'bg-slate-500/20 text-slate-300';
@@ -8352,7 +8354,9 @@ export function AdvancedChart() {
             >
               <RefreshCw size={18} className={tbReloading ? 'animate-spin' : ''} />
             </button>
+          {SHOW_BIAS_BADGES && (
           <div className="shrink-0 md:order-5 [&>button]:h-9"><BounceConviction taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} /></div>
+          )}
 
           </div>
         </div>
