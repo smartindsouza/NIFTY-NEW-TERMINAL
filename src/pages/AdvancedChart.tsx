@@ -4596,6 +4596,71 @@ export function AdvancedChart() {
   });
   const armedTriggers = (triggersData?.rows || []).filter((r: any) => r.status === 'ARMED');
 
+  // Draw each armed level as a price line on the chart for THAT contract. A
+  // pending instruction to buy that is invisible on the chart is exactly the
+  // thing that surprises someone later — until now it existed only as a small
+  // chip in the corner.
+  const triggerLinesRef = useRef<any[]>([]);
+  useEffect(() => {
+    const s = mainSeriesRef.current;
+    if (!s) return;
+    triggerLinesRef.current.forEach(l => { try { s.removePriceLine(l); } catch (e) {} });
+    triggerLinesRef.current = [];
+    const sym = selectedInstrument?.tradingsymbol;
+    if (!sym) return;                                   // index chart: nothing to draw
+    for (const t of armedTriggers) {
+      if (String(t.tradingsymbol).toUpperCase() !== String(sym).toUpperCase()) continue;
+      const px = Number(t.trigger_price);
+      if (!(px > 0)) continue;
+      try {
+        triggerLinesRef.current.push(s.createPriceLine({
+          price: px,
+          color: t.side === 'BUY' ? '#34d399' : '#fb7185',
+          lineWidth: 2,
+          lineStyle: 2,                                  // dashed: not yet a position
+          axisLabelVisible: true,
+          title: `${t.side} ${t.quantity} @ ${px.toFixed(2)} (${t.direction === 'UP' ? 'on rise' : 'on fall'})`,
+        }));
+      } catch (e) {}
+    }
+    return () => {
+      const ss = mainSeriesRef.current;
+      triggerLinesRef.current.forEach(l => { try { ss && ss.removePriceLine(l); } catch (e) {} });
+      triggerLinesRef.current = [];
+    };
+  }, [triggersData, selectedInstrument?.tradingsymbol, chartData]);
+
+  // ---- 2) A trigger that FAILS must say so. It used to vanish: the chip renders
+  // only ARMED rows, so a rejected order (margin, price band, session) dropped off
+  // screen silently and looked exactly like "it never fired". Martin lost two
+  // entries to this — both rejected by Zerodha for insufficient funds, neither
+  // surfaced anywhere. Outcomes are now announced once, and failures stay on
+  // screen until dismissed.
+  const seenTriggerStatusRef = useRef<Map<string, string>>(new Map());
+  const [failedTriggers, setFailedTriggers] = useState<any[]>([]);
+  useEffect(() => {
+    const rows = triggersData?.rows || [];
+    const seen = seenTriggerStatusRef.current;
+    const firstPass = seen.size === 0;
+    for (const r of rows) {
+      const prev = seen.get(r.id);
+      seen.set(r.id, r.status);
+      if (firstPass || prev === r.status) continue;      // no announcements on load
+      if (r.status === 'FAILED') {
+        toast.error(`Order NOT placed — ${prettyOptionName(r.tradingsymbol)}`, {
+          description: r.error || 'Zerodha rejected the order.',
+          duration: 30000,
+        });
+        setFailedTriggers(prev2 => [{ ...r }, ...prev2.filter(x => x.id !== r.id)].slice(0, 4));
+      } else if (r.status === 'FIRED') {
+        toast.success(`Order placed — ${r.side} ${r.quantity} ${prettyOptionName(r.tradingsymbol)}`, {
+          description: `Level ${Number(r.trigger_price).toFixed(2)} reached at ${Number(r.fired_price).toFixed(2)}.`,
+          duration: 12000,
+        });
+      }
+    }
+  }, [triggersData]);
+
   const openOptionBuyTicket = async () => {
     // openOptionBuyTicketRef is refreshed on every render, so this closure always
     // sees the CURRENT contract — no separate ref needed.
@@ -9093,6 +9158,30 @@ export function AdvancedChart() {
       {/* Armed triggers — always visible while any exist. A pending instruction to
           buy or sell that the user cannot SEE is the thing most likely to surprise
           them later, so this is not tucked behind a menu. */}
+      {/* Rejected triggers stay on screen until dismissed. A toast can be missed;
+          money that did not get invested because an order was silently rejected
+          must not depend on the user having been watching at that second. */}
+      {failedTriggers.length > 0 && (
+        <div className="fixed left-2 right-2 md:right-auto md:max-w-md bottom-[calc(11rem+env(safe-area-inset-bottom))] md:bottom-24 z-50 flex flex-col gap-1.5">
+          {failedTriggers.map((t: any) => (
+            <div key={t.id} className="flex items-start gap-2 bg-rose-500/20 border border-rose-500/50 rounded-lg px-2.5 py-2">
+              <div className="min-w-0">
+                <div className="text-[11px] font-mono font-bold text-rose-200">
+                  ORDER NOT PLACED — {t.side} {t.quantity} {prettyOptionName(t.tradingsymbol)} @ {Number(t.trigger_price).toFixed(2)}
+                </div>
+                <div className="text-[10px] text-rose-100/80 leading-snug mt-0.5">{t.error || 'Rejected by Zerodha.'}</div>
+              </div>
+              <button
+                onClick={() => setFailedTriggers(prev => prev.filter(x => x.id !== t.id))}
+                className="ml-auto shrink-0 text-[10px] font-bold text-rose-100 hover:text-white px-1.5 py-0.5 rounded bg-black/30"
+              >
+                DISMISS
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {armedTriggers.length > 0 && (
         <div className="fixed left-2 bottom-[calc(7.5rem+env(safe-area-inset-bottom))] md:bottom-4 z-40 flex flex-col gap-1.5">
           {armedTriggers.map((t: any) => (
