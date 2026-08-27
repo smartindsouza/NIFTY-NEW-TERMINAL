@@ -3869,6 +3869,14 @@ export function AdvancedChart() {
   // Chart-side manual exit: first tap arms (CONFIRM EXIT?), second tap fires.
   const [exitBusy, setExitBusy] = useState(false);
   const slActivePosRef = useRef<any>(null);
+  // The SL/TP levels currently ARMED on the server, per symbol. The chart used to
+  // recompute -10%/+20% from entry every time it drew these lines, and the effect
+  // that snaps them back to the saved rule is guarded to run ONCE per position —
+  // so switching tabs and returning redrew the defaults and the restore never
+  // re-ran. The lines then disagreed with the live protective rule: the chart said
+  // -10% while the server was holding whatever had been dragged. This ref is the
+  // last known armed pair and is what the lines are seeded from.
+  const premRuleRef = useRef<{ symbol: string; sl: number; tp: number } | null>(null);
   useEffect(() => { slActivePosRef.current = slActivePos; }, [slActivePos]);
 
   // Push the premium SL/TP rule to the server — the dragged lines become the
@@ -3876,6 +3884,9 @@ export function AdvancedChart() {
   const pushPremiumRule = async (slPx: number, tpPx: number) => {
     const pos = slActivePosRef.current;
     if (!pos) return;
+    // Record what is being armed BEFORE the round trip, so a redraw that happens
+    // while the request is in flight still draws the dragged levels.
+    premRuleRef.current = { symbol: pos.symbol, sl: slPx, tp: tpPx };
     setPremSync('SYNCING');
     try {
       const r = await fetch('/api/premium-exit/set', {
@@ -4030,6 +4041,7 @@ export function AdvancedChart() {
     const sym = slActivePos?.symbol;
     if (!sym) {
       setTradeTabInstr(null); tradeInstrumentRef.current = null; slEntryRef.current = null;
+      premRuleRef.current = null;   // a new position must start from defaults, not the last one's levels
       autoOpenedForRef.current = '';
       return;
     }
@@ -4068,6 +4080,7 @@ export function AdvancedChart() {
         const long = pos.side === 'BUY';
         if (rule && rule.status === 'ACTIVE') {
           setPremSync('ACTIVE');
+          premRuleRef.current = { symbol: pos.symbol, sl: Number(rule.sl), tp: Number(rule.tp) };
           // Snap the lines to the saved rule once they exist (they're created async).
           const apply = (attempt: number) => {
             const u = slLinesRef.current.find((l: any) => l.kind === 'upper');
@@ -4083,7 +4096,7 @@ export function AdvancedChart() {
         } else {
           const slP = +((long ? pos.entryPrice * 0.9 : pos.entryPrice * 1.1)).toFixed(2);
           const tpP = +((long ? pos.entryPrice * 1.2 : pos.entryPrice * 0.8)).toFixed(2);
-          pushPremiumRule(slP, tpP);
+          pushPremiumRule(slP, tpP);   // also sets premRuleRef
         }
       } catch { if (!cancelled) setPremSync('ERROR'); }
     })();
@@ -4237,8 +4250,17 @@ export function AdvancedChart() {
         // (both draggable; dragging applies the LIVE rule instantly).
         const entry = posNow.entryPrice;
         const long = posNow.side === 'BUY';
-        const slP = +((long ? entry * 0.9 : entry * 1.1)).toFixed(2);
-        const tpP = +((long ? entry * 1.2 : entry * 0.8)).toFixed(2);
+        // Seed from the ARMED rule when there is one for this contract, so a
+        // redraw (tab switch, timeframe change, data refresh) cannot silently
+        // replace the user's dragged levels with the -10%/+20% defaults.
+        const armed = premRuleRef.current && premRuleRef.current.symbol === posNow.symbol
+          ? premRuleRef.current : null;
+        const slP = armed && armed.sl > 0
+          ? armed.sl
+          : +((long ? entry * 0.9 : entry * 1.1)).toFixed(2);
+        const tpP = armed && armed.tp > 0
+          ? armed.tp
+          : +((long ? entry * 1.2 : entry * 0.8)).toFixed(2);
         upper = long ? tpP : slP;
         lower = long ? slP : tpP;
       } else if (slArmedRule) {
