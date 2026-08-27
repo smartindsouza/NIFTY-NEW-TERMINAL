@@ -4565,7 +4565,10 @@ export function AdvancedChart() {
     }
   }, [maxLots, triggerBox?.lotMode]);
 
-  const armTrigger = async () => {
+  // Shortfall reported by the broker at arm time; null when there is nothing to warn about.
+  const [marginWarn, setMarginWarn] = useState<any>(null);
+
+  const armTrigger = async (force = false) => {
     if (!triggerBox) return;
     setArmingTrigger(true);
     try {
@@ -4578,11 +4581,26 @@ export function AdvancedChart() {
           exchange: triggerBox.contract.exchange,
           side: triggerBox.side, product: triggerBox.product, quantity: qty,
           trigger_price: triggerBox.level, current_price: triggerBox.current,
+          ...(force ? { force: true } : {}),
         }),
       });
       const d = await r.json();
+
+      // The server asked the broker what this order would cost BEFORE arming, and
+      // there isn't enough. Say so with the numbers rather than letting the level
+      // arrive and the order get rejected silently — which is what happened twice.
+      if (!d.ok && d.needsConfirm && d.reason === 'INSUFFICIENT_MARGIN') {
+        setMarginWarn({
+          required: d.required, available: d.available, shortfall: d.shortfall,
+          side: triggerBox.side, qty, level: triggerBox.level,
+          symbol: triggerBox.contract.tradingsymbol,
+        });
+        return;
+      }
+
       if (!d.ok) { toast.error(d.error || 'Could not arm'); return; }
       toast.success(`Armed: ${triggerBox.side} at ${triggerBox.level.toFixed(2)}`);
+      setMarginWarn(null);
       setTriggerBox(null);
       refetchTriggers();
     } catch (e: any) { toast.error(e?.message || 'Could not arm'); }
@@ -9162,6 +9180,44 @@ export function AdvancedChart() {
       {/* Armed triggers — always visible while any exist. A pending instruction to
           buy or sell that the user cannot SEE is the thing most likely to surprise
           them later, so this is not tucked behind a menu. */}
+      {/* Broker says there isn't enough margin for this order. Shown BEFORE arming,
+          with the real numbers, so the choice is made now rather than discovered
+          when the level arrives and the order is rejected. */}
+      {marginWarn && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-xl border border-amber-500/50 bg-card p-4">
+            <div className="text-sm font-bold text-amber-300">Not enough margin for this order</div>
+            <div className="mt-2 text-xs text-foreground/80 leading-relaxed">
+              {marginWarn.side} {marginWarn.qty} {prettyOptionName(marginWarn.symbol)} at {Number(marginWarn.level).toFixed(2)}
+            </div>
+            <div className="mt-3 space-y-1 font-mono text-xs">
+              <div className="flex justify-between"><span className="text-muted-foreground">Required</span><span className="text-foreground">₹{Number(marginWarn.required).toLocaleString('en-IN')}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Available</span><span className="text-foreground">₹{Number(marginWarn.available).toLocaleString('en-IN')}</span></div>
+              <div className="flex justify-between border-t border-border/60 pt-1"><span className="text-rose-300">Short by</span><span className="text-rose-300 font-bold">₹{Number(marginWarn.shortfall).toLocaleString('en-IN')}</span></div>
+            </div>
+            <p className="mt-3 text-[11px] text-muted-foreground leading-relaxed">
+              If nothing changes, Zerodha will reject this order when the level is reached.
+              Margin can free up during the day, so you can arm it anyway.
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => setMarginWarn(null)}
+                className="flex-1 h-9 rounded-lg bg-muted text-xs font-bold text-foreground"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { setMarginWarn(null); armTrigger(true); }}
+                disabled={armingTrigger}
+                className="flex-1 h-9 rounded-lg bg-amber-500/20 border border-amber-500/50 text-xs font-bold text-amber-200 disabled:opacity-50"
+              >
+                Arm anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Rejected triggers stay on screen until dismissed. A toast can be missed;
           money that did not get invested because an order was silently rejected
           must not depend on the user having been watching at that second. */}
@@ -9286,7 +9342,7 @@ export function AdvancedChart() {
                   : <span className="text-foreground font-bold font-mono">₹{Math.round(triggerMargin.total).toLocaleString('en-IN')}</span>}
             </div>
 
-            <button onClick={armTrigger} disabled={armingTrigger}
+            <button onClick={() => armTrigger(false)} disabled={armingTrigger}
               className={`w-full text-sm font-bold py-2.5 rounded-lg transition-colors disabled:opacity-50 ${triggerBox.side === 'BUY' ? 'bg-emerald-500/25 text-emerald-300 hover:bg-emerald-500/35' : 'bg-rose-500/25 text-rose-300 hover:bg-rose-500/35'}`}>
               {armingTrigger ? 'Arming…' : `Arm ${triggerBox.side} at ${triggerBox.level.toFixed(2)}`}
             </button>

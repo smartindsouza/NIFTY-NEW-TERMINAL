@@ -22,6 +22,7 @@
 //     against a broker is how one intended trade becomes five.
 
 import express from 'express';
+import { getKiteClient } from './kite_service';
 import axios from 'axios';
 import { isNseHoliday } from './calendar_service';
 
@@ -168,7 +169,7 @@ export function onTickForTriggers(token: number, ltp: number) {
 export function registerTriggers(app: any, database: any) {
   initTriggers(database);
 
-  app.post('/api/triggers', express.json(), (req: any, res: any) => {
+  app.post('/api/triggers', express.json(), async (req: any, res: any) => {
     try {
       const b = req.body || {};
       const quantity = parseInt(String(b.quantity), 10);
@@ -184,6 +185,56 @@ export function registerTriggers(app: any, database: any) {
       if (!(currentPrice > 0)) return res.status(400).json({ ok: false, error: 'current price required to decide direction' });
       if (side !== 'BUY' && side !== 'SELL') return res.status(400).json({ ok: false, error: 'side must be BUY or SELL' });
       if (product !== 'MIS' && product !== 'NRML') return res.status(400).json({ ok: false, error: 'product must be MIS or NRML' });
+
+      // MARGIN PRE-CHECK. Two of Martin's armed entries were rejected by Zerodha
+      // at the moment the level was reached — for insufficient funds — after he
+      // had already waited on them. The level came, the entry did not, and he
+      // found out days later. Asking the broker NOW turns that into a question he
+      // can answer while it still matters.
+      //
+      // Advisory, not a veto: margin moves during the day, and refusing outright
+      // would sometimes be wrong. So a shortfall comes back as needsConfirm and
+      // the caller may re-send with force:true. Anything that fails or is
+      // unavailable ARMS NORMALLY — a broken pre-check must never block a trade.
+      if (!b.force) {
+        try {
+          const kc = getKiteClient();
+          // @ts-ignore
+          if (kc && kc.access_token) {
+            const [mg, funds] = await Promise.all([
+              kc.orderMargins([{
+                exchange: String(b.exchange || 'NFO'),
+                tradingsymbol: String(b.tradingsymbol).toUpperCase(),
+                transaction_type: side,
+                variety: 'regular',
+                product,
+                order_type: 'MARKET',
+                quantity,
+                price: 0,
+                trigger_price: 0,
+              }]),
+              kc.getMargins(),
+            ]);
+            const required = Number(mg?.[0]?.total);
+            const available = Number(funds?.equity?.available?.live_balance ?? funds?.equity?.net);
+            if (isFinite(required) && isFinite(available) && required > available) {
+              return res.status(409).json({
+                ok: false,
+                needsConfirm: true,
+                reason: 'INSUFFICIENT_MARGIN',
+                required: Math.round(required * 100) / 100,
+                available: Math.round(available * 100) / 100,
+                shortfall: Math.round((required - available) * 100) / 100,
+                error: `Margin required ${Math.round(required)} but only ${Math.round(available)} available — short by ${Math.round(required - available)}. Zerodha would reject this when the level is hit.`,
+              });
+            }
+          }
+        } catch (e) {
+          // Pre-check unavailable (session, rate limit, market closed). Arm anyway
+          // rather than block on a check that is only advisory.
+          console.warn('[triggers] margin pre-check skipped:', (e as any)?.message || e);
+        }
+      }
 
       const id = `trg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       db.prepare(`INSERT INTO pending_triggers
