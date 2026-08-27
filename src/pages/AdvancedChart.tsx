@@ -4275,11 +4275,26 @@ export function AdvancedChart() {
         }
       }
 
+      // Label each exit line with the percentage AND what it is actually worth in
+      // rupees at the position's real quantity — a percentage alone does not tell
+      // you whether you are risking 800 or 8,000.
+      //
+      // Both numbers are signed by PROFIT, not by price direction, so a TARGET
+      // always reads positive and an SL always negative. Previously the percentage
+      // was raw price change, which on a SHORT showed a profitable target as a
+      // negative — and would have contradicted the rupee figure sitting next to it.
       const pctTitle = (label: string, price: number) => {
         const entry = slEntryRef.current;
         if (!entry) return '';
-        const pct = ((price - entry) / entry) * 100;
-        return `${label} ${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
+        const isBuy = (posNow?.side || 'BUY') !== 'SELL';
+        const move = isBuy ? (price - entry) : (entry - price);   // + when it makes money
+        const pct = (move / entry) * 100;
+        const qty = Number(posNow?.qty) || 0;
+        const sign = (v: number) => (v >= 0 ? '+' : '-');
+        const money = qty > 0
+          ? ` · ${sign(move)}₹${Math.abs(Math.round(move * qty)).toLocaleString('en-IN')}`
+          : '';
+        return `${label} ${sign(pct)}${Math.abs(pct).toFixed(1)}%${money}`;
       };
       const upLabel = effBull ? 'TARGET' : 'SL';
       const loLabel = effBull ? 'SL' : 'TARGET';
