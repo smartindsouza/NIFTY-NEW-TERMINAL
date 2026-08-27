@@ -4628,7 +4628,11 @@ export function AdvancedChart() {
       triggerLinesRef.current.forEach(l => { try { ss && ss.removePriceLine(l); } catch (e) {} });
       triggerLinesRef.current = [];
     };
-  }, [triggersData, selectedInstrument?.tradingsymbol, chartData]);
+    // NOTE: chartData must NOT be a dependency here — it is declared far below
+    // this effect, and referencing it in the array crashes the whole page with
+    // "Cannot access 'chartData' before initialization". triggersData already
+    // changes every 5s, which is what actually needs to redraw these lines.
+  }, [triggersData, selectedInstrument?.tradingsymbol]);
 
   // ---- 2) A trigger that FAILS must say so. It used to vanish: the chip renders
   // only ARMED rows, so a rejected order (margin, price band, session) dropped off
