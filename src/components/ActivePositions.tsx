@@ -104,6 +104,12 @@ export function ActivePositions() {
   // appeared). It reads the live count through this ref instead.
   const positionsRef = useRef<ActiveTrade[]>([]);
   const lastPollErrorRef = useRef<string | null>(null);
+  // Hard floor between position polls, whatever triggers one — the interval, a
+  // tab regaining focus, a re-time, or a remount. Several of those can coincide
+  // (switching back to the tab fires visibilitychange AND re-times the interval),
+  // which is how short bursts appeared even with a sane cadence.
+  const lastPollAtRef = useRef<number>(0);
+  const MIN_POLL_GAP_MS = 2000;
   const [netPnl, setNetPnl] = useState<number | null>(null); // day net P&L: realized today + live unrealized
   const [pollError, setPollError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -154,7 +160,9 @@ export function ActivePositions() {
     // bail on positions.length === 0 (and again unless a non-test card existed),
     // which meant a trade taken in the ZERODHA APP was never discovered: the poll
     // that would have found it only ran once the app itself had opened something.
-    const pollReal = async () => {
+    const pollReal = async (force = false) => {
+      if (!force && Date.now() - lastPollAtRef.current < MIN_POLL_GAP_MS) return;
+      lastPollAtRef.current = Date.now();
       try {
         const res = await fetch('/api/positions-live');
         const data = await res.json();

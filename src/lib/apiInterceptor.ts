@@ -15,6 +15,17 @@ const LOCAL_ONLY_ENDPOINTS = new Set([
   '/api/healthz',
 ]);
 
+// Endpoints that DO sit in front of the broker but are served from a short shared
+// server-side cache, so N requests inside the cache window cost ONE broker call
+// (or none). Request frequency here is not broker frequency, and this warning
+// counts HTTP requests — so without this list it fires on traffic that cannot
+// cause a 429. Every entry must name the cache that makes it safe; if that cache
+// is ever removed, the endpoint must come off this list.
+const SERVER_CACHED_ENDPOINTS = new Map<string, string>([
+  ['/api/positions-live', '1.5s shared cache + shared in-flight promise in server.ts'],
+  ['/api/leverage', '55s per-symbol cache + shared in-flight promise in server/leverage.ts'],
+]);
+
 function showTooFrequentWarning(endpoint: string, rate: number) {
   if (isAlertActive) return;
   isAlertActive = true;
@@ -53,7 +64,7 @@ export function initializeInterceptor() {
         // Check for high-frequency warnings
         const warnings = performanceTracker.getEndpointFrequencyWarnings();
         const warning = warnings.find(w => w.endpoint === url.split('?')[0]);
-        if (warning && !LOCAL_ONLY_ENDPOINTS.has(warning.endpoint)) {
+        if (warning && !LOCAL_ONLY_ENDPOINTS.has(warning.endpoint) && !SERVER_CACHED_ENDPOINTS.has(warning.endpoint)) {
           showTooFrequentWarning(warning.endpoint, warning.ratePer15s);
         }
 
@@ -101,7 +112,7 @@ export function initializeInterceptor() {
         // Check frequency
         const warnings = performanceTracker.getEndpointFrequencyWarnings();
         const warning = warnings.find(w => w.endpoint === url.split('?')[0]);
-        if (warning && !LOCAL_ONLY_ENDPOINTS.has(warning.endpoint)) {
+        if (warning && !LOCAL_ONLY_ENDPOINTS.has(warning.endpoint) && !SERVER_CACHED_ENDPOINTS.has(warning.endpoint)) {
           showTooFrequentWarning(warning.endpoint, warning.ratePer15s);
         }
       }
