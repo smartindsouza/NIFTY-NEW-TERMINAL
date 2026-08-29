@@ -11,6 +11,7 @@ import { SymbolSearch } from "../components/SymbolSearch";
 import AiMarketRead from "../components/AiMarketRead";
 import MarketContext from "../components/MarketContext";
 import BounceConviction from "../components/BounceConviction";
+import { DownloadCloud } from 'lucide-react';
 import { Instrument } from "../hooks/useSymbolSearch";
 import { 
   createChart, 
@@ -8477,6 +8478,22 @@ export function AdvancedChart() {
               title="Reload chart and hard-refresh the app"
             >
               <RefreshCw size={18} className={tbReloading ? 'animate-spin' : ''} />
+            </button>
+
+            {/* Sync open positions from Zerodha. Deliberately NOT a RefreshCw —
+                the button immediately to its left already uses that glyph for
+                "reload the chart", and two identical icons doing different things
+                is how a user ends up reloading the app when they meant to pull
+                their positions. Down-arrow-into-tray reads as "fetch", it is
+                tinted, and it carries a POS label. */}
+            <button
+              onClick={() => { try { window.dispatchEvent(new CustomEvent('sync_positions_request')); } catch (e) {} }}
+              className="md:hidden shrink-0 md:order-4 flex items-center justify-center gap-0.5 h-9 px-2 rounded-md bg-emerald-500/15 text-emerald-300"
+              title="Sync open positions from Zerodha"
+              aria-label="Sync open positions from Zerodha"
+            >
+              <DownloadCloud size={18} />
+              <span className="text-[9px] font-bold tracking-wide">POS</span>
             </button>
           {SHOW_BIAS_BADGES && (
           <div className="shrink-0 md:order-5 [&>button]:h-9"><BounceConviction taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} /></div>

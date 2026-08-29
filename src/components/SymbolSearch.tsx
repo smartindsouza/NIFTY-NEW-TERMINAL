@@ -138,8 +138,11 @@ export function SymbolSearch({ onSelect, currentSymbol }: Props) {
             {loading && <Loader2 size={14} className="text-indigo-400 animate-spin shrink-0 ml-2" />}
           </div>
         ) : (
-          <span className="text-sm font-medium text-foreground/90 truncate flex-1">
-            {currentSymbol}
+          <span className="text-sm font-medium text-muted-foreground truncate flex-1">
+            {/* The chart already names the instrument in its title and tab, so
+                repeating it here made the control look like a label rather than
+                the search it is. */}
+            Search
           </span>
         )}
       </div>

@@ -396,6 +396,15 @@ export function ActivePositions() {
     } finally { setSyncing(false); }
   };
 
+  // The mobile toolbar's POS button lives in AdvancedChart, which cannot reach
+  // syncNow directly; a window event keeps the two decoupled and means any other
+  // surface can request a sync the same way.
+  useEffect(() => {
+    const onReq = () => { syncNow(); };
+    window.addEventListener('sync_positions_request', onReq);
+    return () => window.removeEventListener('sync_positions_request', onReq);
+  });
+
   // Live ticks between polls. PASSIVE ONLY — this never calls subscribeToTicks,
   // because the socket carries ONE subscribed symbol at a time and subscribing from
   // here would silently steal the chart's feed. So we use option ticks that are
