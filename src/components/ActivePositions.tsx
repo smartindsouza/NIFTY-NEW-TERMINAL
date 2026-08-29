@@ -529,17 +529,17 @@ export function ActivePositions() {
     // Never render nothing: if the poll is failing, or Zerodha has a position this
     // app has not picked up, there must still be somewhere to see it and act.
     if (!pollError) return (
-      <div className="w-full mb-3 flex items-center justify-end">
-        <button
-          onClick={syncNow}
-          disabled={syncing}
-          className="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-lg bg-card hover:bg-popover text-muted-foreground transition-colors disabled:opacity-50"
-          title="Read open positions directly from Zerodha"
-        >
-          <RefreshCw className={cn('w-3 h-3', syncing && 'animate-spin')} />
-          {syncing ? 'Syncing…' : 'Sync positions from Zerodha'}
-        </button>
-      </div>
+      // Icon only, fixed beside the AI button. It used to be a full-width row of
+      // text that ran underneath that button and collided with it on a phone.
+      <button
+        onClick={syncNow}
+        disabled={syncing}
+        className="fixed top-[max(env(safe-area-inset-top),12px)] md:top-3 right-[3.25rem] z-[90] w-9 h-9 flex items-center justify-center rounded-full bg-card/90 border border-border text-muted-foreground hover:text-foreground shadow-lg transition-colors disabled:opacity-50"
+        title="Sync open positions from Zerodha"
+        aria-label="Sync positions from Zerodha"
+      >
+        <RefreshCw className={cn('w-4 h-4', syncing && 'animate-spin')} />
+      </button>
     );
     return (
       <div className="w-full mb-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 flex items-center justify-between gap-3">

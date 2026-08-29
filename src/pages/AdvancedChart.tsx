@@ -8025,7 +8025,7 @@ export function AdvancedChart() {
       )}
 
       <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2 md:gap-3 pb-2 mb-2 md:mb-2 md:flex-nowrap md:h-11 md:border-b md:border-border/60">
-        <div className="relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-nowrap md:min-w-0 max-md:pr-28">
+        <div className="relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-nowrap md:min-w-0 max-md:pr-24">
           <h1 className="text-base md:text-sm font-semibold text-foreground tracking-tight whitespace-nowrap md:truncate">
             {isFocusedChart && selectedInstrument
               ? prettyOptionName(selectedInstrument.tradingsymbol,

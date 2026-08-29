@@ -156,10 +156,12 @@ export default function AiMarketRead({
           setOpen(true);
           if (!read) runRead();
         }}
-        className="fixed top-[max(env(safe-area-inset-top),12px)] md:top-3 right-3 z-[90] px-3 py-2 rounded-full text-xs font-mono font-bold bg-indigo-500/90 text-white shadow-lg hover:bg-indigo-500"
+        className="fixed top-[max(env(safe-area-inset-top),12px)] md:top-3 right-3 z-[90] w-9 h-9 flex items-center justify-center rounded-full text-base bg-indigo-500/90 text-white shadow-lg hover:bg-indigo-500"
+        title="AI market read"
+        aria-label="AI market read"
         title="Claude's plain-English read of the current setup"
       >
-        🧠 AI READ
+        🧠
       </button>
     );
   }
