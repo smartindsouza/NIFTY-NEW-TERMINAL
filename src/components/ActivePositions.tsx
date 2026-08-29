@@ -537,19 +537,11 @@ export function ActivePositions() {
   if (positions.length === 0) {
     // Never render nothing: if the poll is failing, or Zerodha has a position this
     // app has not picked up, there must still be somewhere to see it and act.
-    if (!pollError) return (
-      // Icon only, fixed beside the AI button. It used to be a full-width row of
-      // text that ran underneath that button and collided with it on a phone.
-      <button
-        onClick={syncNow}
-        disabled={syncing}
-        className="fixed top-[max(env(safe-area-inset-top),12px)] md:top-3 right-[3.25rem] z-[90] w-9 h-9 flex items-center justify-center rounded-full bg-card/90 border border-border text-muted-foreground hover:text-foreground shadow-lg transition-colors disabled:opacity-50"
-        title="Sync open positions from Zerodha"
-        aria-label="Sync positions from Zerodha"
-      >
-        <RefreshCw className={cn('w-4 h-4', syncing && 'animate-spin')} />
-      </button>
-    );
+    // Nothing to show when flat and healthy. The sync control now lives ONLY in
+    // the chart's bottom toolbar (the POS button) — it was briefly in both places,
+    // which is just two buttons doing one job. The error state below still renders,
+    // because a failed position check must always be visible somewhere.
+    if (!pollError) return null;
     return (
       <div className="w-full mb-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 flex items-center justify-between gap-3">
         <span className="text-xs text-amber-400">
