@@ -8134,9 +8134,9 @@ export function AdvancedChart() {
           <AiMarketRead taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} model="claude-sonnet-4-6" />
           <MarketContext />
         </div>
-        <div ref={bottomBarRef} className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-3 py-1.5 md:p-0 flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap md:justify-end w-full md:w-auto">
-          <div className="flex items-center gap-2 w-full justify-between min-w-0 md:contents">
-          <div className="flex-1 min-w-0 max-w-[150px] sm:max-w-none sm:w-auto md:order-1">
+        <div ref={bottomBarRef} className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-3 py-1.5 md:p-0 flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap justify-between md:justify-end w-full md:w-auto">
+          <div className="flex flex-1 items-center gap-2 justify-between min-w-0 md:contents">
+          <div className="flex-1 min-w-0 max-w-[200px] sm:max-w-none sm:w-auto md:order-1">
           <SymbolSearch 
             onSelect={setSelectedInstrument} 
             currentSymbol={selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel} 
