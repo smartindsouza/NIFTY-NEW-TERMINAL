@@ -997,7 +997,17 @@ const getIstDateTime = (unixSeconds: number) => {
 };
 
 const isMarketOpen = (unixSeconds: number): boolean => {
-  return true;
+  // IST is UTC+5:30 with no DST, so a fixed offset is exact — the same math as
+  // IstSessionClock below. NSE cash session: 09:15 to 15:30, Monday-Friday.
+  // Deliberately clock-only: NSE holidays are a server concern, and a poll that
+  // runs at market cadence on a holiday only hits the 60s TA cache — the safe
+  // direction to be wrong in. NOTE: this was a `return true` stub until
+  // 2026-08-30, which silently disabled the inject poll's closed-market skip —
+  // both /api/ta polls ran nights and weekends because of it.
+  const ist = new Date(unixSeconds * 1000 + 5.5 * 60 * 60 * 1000);
+  const day = ist.getUTCDay();
+  const minutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  return day !== 0 && day !== 6 && minutes >= 9 * 60 + 15 && minutes < 15 * 60 + 30;
 };
 
 // Live Indian-market clock shown beside the chart title: HH:MM:SS in 12-hour
@@ -5263,7 +5273,12 @@ export function AdvancedChart() {
       if (!res.ok) return null;
       return res.json();
     },
-    refetchInterval: 15000,
+    // 15s only while the market can actually move — this poll used to run all
+    // evening and weekend for data that cannot change, and was one of the callers
+    // behind the /api/ta frequency toast. The mount fetch still runs when closed,
+    // so the master signal keeps its data; the inject poll below already carries
+    // this same gate, and a morning focus/remount restarts the interval.
+    refetchInterval: () => isMarketOpen(Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current) ? 15000 : false,
     staleTime: 8000,
     enabled: Boolean(timeframe && instrumentToken)
   });

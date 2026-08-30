@@ -4,6 +4,9 @@ import { performanceTracker } from "../lib/performanceTracker";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
+// Injected by the `define` block in vite.config.ts at build time.
+declare const __BUILD_TIME__: string;
+
 export function DiagnosticsPanel() {
   const [metrics, setMetrics] = useState(performanceTracker.getMetrics());
 
@@ -21,9 +24,14 @@ export function DiagnosticsPanel() {
           <span className="flex items-center gap-1.5">
             <Activity className="w-4 h-4 text-emerald-400 animate-pulse" /> Live Terminal Diagnostics
           </span>
-          <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-400 border-emerald-500/20 font-mono">
-            SYS: OK
-          </Badge>
+          <span className="flex items-center gap-2">
+            <span className="text-[9px] font-mono normal-case tracking-normal text-muted-foreground" title="When this UI bundle was built (IST). If this is older than the latest deploy, the phone is still on a cached bundle — hard-refresh.">
+              UI {new Date(__BUILD_TIME__).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })} IST
+            </span>
+            <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-400 border-emerald-500/20 font-mono">
+              SYS: OK
+            </Badge>
+          </span>
         </CardTitle>
       </CardHeader>
       

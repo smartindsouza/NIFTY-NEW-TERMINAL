@@ -6,6 +6,12 @@ import {defineConfig} from 'vite';
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
+    // Baked in at build time so the running bundle can identify itself — ends the
+    // "did my phone actually load the new build?" question that has cost several
+    // rounds of judging fixes against a stale service-worker bundle.
+    define: {
+      __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+    },
     resolve: {
       alias: [
         // Redirect every bare `sonner` import to our shim (shared-id toasts), and

@@ -24,6 +24,14 @@ const LOCAL_ONLY_ENDPOINTS = new Set([
 const SERVER_CACHED_ENDPOINTS = new Map<string, string>([
   ['/api/positions-live', '1.5s shared cache + shared in-flight promise in server.ts'],
   ['/api/leverage', '55s per-symbol cache + shared in-flight promise in server/leverage.ts'],
+  // /api/ta is hit by SEVERAL legitimate one-shot and slow queries (main chart,
+  // decision poll, 60-min + daily HTF, other-index prefetch) whose distinct URLs
+  // all pool under this one path in the counter — a fresh page open alone makes
+  // ~6 calls within seconds, none of them a loop. Server side it sits behind a
+  // 60s shared cache with in-flight dedupe, a per-day futures-contract cache,
+  // market-hours pre-warm and 350ms request spacing, so request frequency here
+  // is not broker frequency.
+  ['/api/ta', '60s shared TA cache + in-flight dedupe + pre-warm in server/technical_analysis.ts'],
 ]);
 
 function showTooFrequentWarning(endpoint: string, rate: number) {
