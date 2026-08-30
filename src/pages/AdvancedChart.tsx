@@ -8140,7 +8140,7 @@ export function AdvancedChart() {
           <AiMarketRead taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} model="claude-sonnet-4-6" />
           <MarketContext />
         </div>
-        <div ref={bottomBarRef} className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-3 py-1.5 md:p-0 flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap justify-between md:justify-end w-full md:w-auto">
+        <div ref={bottomBarRef} className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-3 py-1.5 md:p-0 flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap justify-between md:justify-end w-screen md:w-auto max-w-[100vw] overflow-x-hidden md:overflow-visible">
           <div className="flex flex-1 items-center gap-2 justify-between min-w-0 md:contents">
           <div className="flex-1 min-w-0 max-w-[200px] sm:max-w-none sm:w-auto md:order-1">
           <SymbolSearch 
@@ -8499,7 +8499,7 @@ export function AdvancedChart() {
               aria-label="Sync open positions from Zerodha"
             >
               <DownloadCloud size={18} />
-              <span className="text-[9px] font-bold tracking-wide">POS</span>
+              <span className="text-[10px] font-bold tracking-wide">Sync</span>
             </button>
           {SHOW_BIAS_BADGES && (
           <div className="shrink-0 md:order-5 [&>button]:h-9"><BounceConviction taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} /></div>
