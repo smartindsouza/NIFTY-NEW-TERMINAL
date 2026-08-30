@@ -6123,7 +6123,9 @@ export function AdvancedChart() {
     alertLevelsRef.current = L;
   }, [hLevels, showHLevels, showFiftyPercentLevels, pdhPdlData, showPdhPdl, localAnalytics, showSnR, taInfo, showOpeningRange, showDsZones]);
 
-  // Fire one alert: OS notification (works from background tabs) + in-app toast + beep.
+  // Fire one alert: OS notification (works from background tabs) + beep. No in-app
+  // toast — see fireBreakoutAlert: on a phone these cards cover the chart they are
+  // describing, and the same information is already arriving as a notification.
   const fireLevelAlert = (label: string, price: number, spot: number, dirUp: boolean) => {
     const title = `${label} touched`;
     const body = `Price ${spot.toFixed(2)} crossed ${dirUp ? 'up through' : 'down through'} ${label} (${price})`;
@@ -6132,7 +6134,6 @@ export function AdvancedChart() {
         new Notification(title, { body, tag: `lvl-${label}-${price}` });
       }
     } catch(e) {}
-    try { toast(title, { description: body }); } catch(e) {}
     try {
       const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
       if (AC) {
@@ -6183,7 +6184,12 @@ export function AdvancedChart() {
         new Notification(title, { body, tag: `brk-${r.level}-${r.brokeAt}` });
       }
     } catch(e) {}
-    try { toast(title, { description: body }); } catch(e) {}
+    // NO in-app toast. This alert already reaches Martin three other ways — the
+    // phone notification above, the bell/Notifications list below, and the tone —
+    // so the toast was a fourth copy of the same thing, and it landed as a large
+    // card over the top of the chart, covering the title and the price action it
+    // was describing. The phone notification is deliberately kept: that one is
+    // useful when the app is not in front of him, which is the point of an alert.
     try {
       notificationService.add('divergence', title, body);
     } catch(e) {}
