@@ -433,22 +433,13 @@ async function startServer() {
     return minutes >= 9 * 60 + 15 && minutes <= 15 * 60 + 40;
   }
 
-  setInterval(() => {
-    if (isTickerConnected()) return;
-    if (!isNSEMarketOpen()) return;
-    wss.clients.forEach((client) => {
-      if (client.readyState === 1) {
-        const symbol = (client as any).subscribedSymbol || 'NSE:NIFTY 50';
-        const isNifty = symbol === 'NSE:NIFTY 50' || symbol === 'NIFTY 50';
-        const tickPrice = isNifty ? latestSpot : 22100;
-        const timestampSeconds = Math.floor(Date.now() / 1000);
-        client.send(JSON.stringify({
-          type: 'tick', symbol, price: tickPrice, timestamp: timestampSeconds,
-          candle: { time: timestampSeconds, open: tickPrice, high: tickPrice, low: tickPrice, close: tickPrice }
-        }));
-      }
-    });
-  }, 1000);
+  // The synthetic-tick fallback that lived here (1s fake ticks to every chart
+  // client whenever the Kite ticker was down — last known spot for NIFTY and a
+  // hardcoded 22100 for anything else) is deliberately GONE. Fabricated prices
+  // on a real-money screen are worse than a stalled chart: a stalled chart is
+  // visibly stale, a fake feed looks alive. When the ticker drops, clients now
+  // get heartbeats only, the live candle stops advancing, and the freshness
+  // machinery tells the truth about tick age.
 
   // Keep-alive heartbeat so reverse proxy doesn't kill idle connections
   setInterval(() => {
