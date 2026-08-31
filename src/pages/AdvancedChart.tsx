@@ -3069,6 +3069,23 @@ export function AdvancedChart() {
   const alertStateRef = useRef<Map<string, { lastFired: number; armed: boolean }>>(new Map());
   const levelAlertsOnRef = useRef(levelAlertsOn);
   useEffect(() => { levelAlertsOnRef.current = levelAlertsOn; }, [levelAlertsOn]);
+  // Directional-Zones tap alerts. Off by default: this is the Pine script's own
+  // "zone tapped" alert, and it should not start firing for anyone who has not
+  // asked for it. Detection reads the ALREADY-COMPUTED zone output and never
+  // touches computeDirectionalZones — that function passed its TradingView
+  // parity test and stays frozen.
+  const [zoneTapAlertsOn, setZoneTapAlertsOn] = useState(() => {
+    try { return localStorage.getItem('zoneTapAlertsOn') === 'true'; } catch(e) {}
+    return false;
+  });
+  const zoneTapAlertsOnRef = useRef(zoneTapAlertsOn);
+  useEffect(() => { zoneTapAlertsOnRef.current = zoneTapAlertsOn; }, [zoneTapAlertsOn]);
+  // Tapped zones already seen, so each tap announces once. Keyed per
+  // instrument+timeframe: switching either is a different zone set, and the new
+  // set is SEEDED silently rather than alerted, so changing charts never dumps a
+  // batch of historical taps.
+  const dzTapSeenRef = useRef<Set<string>>(new Set());
+  const dzTapContextRef = useRef<string>('');
 
   // Live futures "pressure" proxy (from the server delta broadcast) + latest
   // breakout-authenticity verdict. deltaRef holds the freshest value for use
@@ -3180,6 +3197,13 @@ export function AdvancedChart() {
   useEffect(() => {
     try { localStorage.setItem('showConfSignals', String(showConfSignals)); } catch (e) {}
   }, [showConfSignals]);
+
+  useEffect(() => {
+    try { localStorage.setItem('zoneTapAlertsOn', String(zoneTapAlertsOn)); } catch(e) {}
+    if (zoneTapAlertsOn && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      try { Notification.requestPermission(); } catch(e) {}
+    }
+  }, [zoneTapAlertsOn]);
 
   useEffect(() => {
     try { localStorage.setItem('levelAlertsOn', String(levelAlertsOn)); } catch(e) {}
@@ -6389,6 +6413,52 @@ export function AdvancedChart() {
     } catch(e) {}
   };
 
+  // Zone-tap alert. Follows the house convention set by fireLevelAlert and
+  // fireBreakoutAlert: OS notification (useful when the app is not in front of
+  // him) + bell-list entry + a tone, and deliberately NO in-app toast, which on
+  // a phone covers the chart it is describing.
+  const fireZoneTapAlert = (z: { top: number; bottom: number }) => {
+    const title = 'Zone tapped';
+    const body = `Price tapped a Directional Zone (${z.bottom.toFixed(2)} - ${z.top.toFixed(2)}) on ${timeframe}`;
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        new Notification(title, { body, tag: `dztap-${z.top}-${z.bottom}` });
+      }
+    } catch(e) {}
+    try { notificationService.add('divergence', title, body); } catch(e) {}
+    try {
+      const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (AC) {
+        const actx = new AC();
+        const o = actx.createOscillator(); const g = actx.createGain();
+        o.connect(g); g.connect(actx.destination);
+        o.frequency.value = 700; g.gain.value = 0.08;   // distinct from level (880/520) and breakout (990/590/320)
+        o.start(); o.stop(actx.currentTime + 0.18);
+        setTimeout(() => { try { actx.close(); } catch(e) {} }, 400);
+      }
+    } catch(e) {}
+  };
+
+  // Diff the recomputed zone list for newly TAPPED zones. Pure reader: it takes
+  // the output computeDirectionalZones already produced, so the ported maths is
+  // untouched and a failure here can only mean a missing alert, never a wrong box.
+  const detectZoneTaps = (zones: any[], context: string) => {
+    const seen = dzTapSeenRef.current;
+    const fresh = dzTapContextRef.current !== context;
+    if (fresh) { dzTapContextRef.current = context; seen.clear(); }
+    const fire: any[] = [];
+    for (const z of zones) {
+      if (z.kind !== 'old_external_tapped') continue;
+      const key = `${z.time}|${z.top}|${z.bottom}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (!fresh) fire.push(z);          // first pass on a chart only seeds
+    }
+    if (seen.size > 400) dzTapSeenRef.current = new Set(Array.from(seen).slice(-200));
+    if (!zoneTapAlertsOnRef.current) return;
+    for (const z of fire) fireZoneTapAlert(z);
+  };
+
   // Crossing detector, called from the live tick handler. Fires when price crosses
   // a level between consecutive ticks; per-level 3-min cooldown, and re-arms only
   // after price moves >0.05% away from the level (prevents hover spam).
@@ -7799,6 +7869,10 @@ export function AdvancedChart() {
                 if (sig !== obSigRef.current) {
                   obSigRef.current = sig;
                   obZonesRef.current = computeDirectionalZones(closedSince.length ? [...baseC, ...closedSince] : baseC);
+                  // Runs on every recompute regardless of the toggle: the seen-set
+                  // must stay current so switching alerts ON mid-session announces
+                  // only what happens NEXT, not the whole day's taps at once.
+                  try { detectZoneTaps(obZonesRef.current, `${instrumentToken}|${timeframe}`); } catch(e) {}
                 }
                 // Directional Zones render with the Pine script's own colors at its
                 // default inputs — the acceptance test is a box-for-box match with
@@ -8536,6 +8610,19 @@ export function AdvancedChart() {
                         {levelAlertsOn && <Check size={14} className="text-emerald-400" />}
                       </div>
                       <span>Level Touch Alerts (sound + popup)</span>
+                    </button>
+                  </div>
+
+                  {/* Zone Tap Alerts — the ported Pine script's own alert */}
+                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                    <button
+                      onClick={() => setZoneTapAlertsOn(!zoneTapAlertsOn)}
+                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
+                    >
+                      <div className="w-4 flex items-center justify-center">
+                        {zoneTapAlertsOn && <Check size={14} className="text-emerald-400" />}
+                      </div>
+                      <span>Zone Tap Alerts (sound + popup)</span>
                     </button>
                   </div>
 
