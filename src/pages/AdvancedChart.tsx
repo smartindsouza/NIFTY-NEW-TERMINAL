@@ -982,7 +982,12 @@ const formatCountdown = (totalSeconds: number) => {
 
 const IST_OFFSET_SECONDS = 5.5 * 60 * 60;
 const MARKET_OPEN_SECONDS_IST = (9 * 60 + 15) * 60;
-const MARKET_CLOSE_SECONDS_IST = (15 * 60 + 30) * 60;
+// NSE equity DERIVATIVES session ends 15:40 IST since 3 Aug 2026 (SEBI CAS:
+// F&O cash stocks stop at 15:15 and auction until 15:35; index/stock F&O got
+// a 10-minute extension to 15:40). This terminal trades NIFTY options, so
+// 15:40 is the close that matters. Spot-index prints go sparse after 15:15
+// while the cash auction runs — candles simply stop when ticks stop.
+const MARKET_CLOSE_SECONDS_IST = (15 * 60 + 40) * 60;
 
 const getIstDateTime = (unixSeconds: number) => {
   const msInIst = (unixSeconds + IST_OFFSET_SECONDS) * 1000;
@@ -998,7 +1003,7 @@ const getIstDateTime = (unixSeconds: number) => {
 
 const isMarketOpen = (unixSeconds: number): boolean => {
   // IST is UTC+5:30 with no DST, so a fixed offset is exact — the same math as
-  // IstSessionClock below. NSE cash session: 09:15 to 15:30, Monday-Friday.
+  // IstSessionClock below. NSE derivatives session: 09:15 to 15:40, Mon-Fri (CAS era).
   // Deliberately clock-only: NSE holidays are a server concern, and a poll that
   // runs at market cadence on a holiday only hits the 60s TA cache — the safe
   // direction to be wrong in. NOTE: this was a `return true` stub until
@@ -1007,11 +1012,11 @@ const isMarketOpen = (unixSeconds: number): boolean => {
   const ist = new Date(unixSeconds * 1000 + 5.5 * 60 * 60 * 1000);
   const day = ist.getUTCDay();
   const minutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
-  return day !== 0 && day !== 6 && minutes >= 9 * 60 + 15 && minutes < 15 * 60 + 30;
+  return day !== 0 && day !== 6 && minutes >= 9 * 60 + 15 && minutes < 15 * 60 + 40;
 };
 
 // Live Indian-market clock shown beside the chart title: HH:MM:SS in 12-hour
-// format. Renders ONLY during the NSE session (09:15 -> 15:30 IST, Mon-Fri) and
+// format. Renders ONLY during the NSE session (09:15 -> 15:40 IST, Mon-Fri) and
 // disappears outside it. Self-contained so the per-second state change
 // re-renders this pill alone, never the (very large) chart component.
 const IstSessionClock = () => {
@@ -1026,8 +1031,8 @@ const IstSessionClock = () => {
   const ist = new Date(now + 5.5 * 60 * 60 * 1000);
   const istDay = ist.getUTCDay();
   const istMinutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
-  // Matches the server's NSE window: open at 09:15, closed from 15:30.
-  const marketOpen = istDay !== 0 && istDay !== 6 && istMinutes >= 9 * 60 + 15 && istMinutes < 15 * 60 + 30;
+  // Matches the server's NSE window: open at 09:15, closed from 15:40 (CAS derivatives close).
+  const marketOpen = istDay !== 0 && istDay !== 6 && istMinutes >= 9 * 60 + 15 && istMinutes < 15 * 60 + 40;
 
   const two = (n: number) => String(n).padStart(2, '0');
   const h24 = ist.getUTCHours();
@@ -1337,7 +1342,7 @@ const getMarketAlignedCandleStart = (unixSeconds: number, timeframeMinutes: numb
   const elapsedFromOpen = Math.max(0, istSeconds - sessionStart);
   const bucketStartIst = sessionStart + Math.floor(elapsedFromOpen / duration) * duration;
 
-  // Prevent candle start from exceeding the last valid candle start of the daily session (ends at 15:30 IST)
+  // Prevent candle start from exceeding the last valid candle start of the daily session (ends 15:40 IST, CAS era)
   const sessionEndIst = istMidnight + MARKET_CLOSE_SECONDS_IST;
   const maxCandleStartIst = sessionEndIst - duration;
   const cappedBucketStartIst = Math.min(bucketStartIst, maxCandleStartIst);
@@ -7374,7 +7379,7 @@ export function AdvancedChart() {
               const ist = new Date(istMs);
               const istDay = ist.getUTCDay();
               const istMinutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
-              const marketOpen = istDay !== 0 && istDay !== 6 && istMinutes >= 9 * 60 + 15 && istMinutes <= 15 * 60 + 30;
+              const marketOpen = istDay !== 0 && istDay !== 6 && istMinutes >= 9 * 60 + 15 && istMinutes <= 15 * 60 + 40;
 
               // Countdown background matches spot price color slightly darker or same? 
               // User said "keep the market closed background and the countdown to close background to match the spot price background"

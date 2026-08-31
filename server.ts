@@ -418,6 +418,11 @@ async function startServer() {
     ws.send(JSON.stringify({ type: 'connected' }));
   });
 
+  // Session end is 15:40 IST since 3 Aug 2026 (SEBI CAS extended the equity
+  // derivatives segment by 10 minutes). This gate feeds the auto-exit watcher
+  // loops below — with the old 15:30 bound, stop/target/trailing protection
+  // was DEAD for the final 10 minutes of every session while NIFTY options
+  // kept trading. Clock-only on purpose; holidays are handled upstream.
   function isNSEMarketOpen(): boolean {
     const now = new Date();
     const istMs = now.getTime() + (5.5 * 60 * 60 * 1000);
@@ -425,7 +430,7 @@ async function startServer() {
     const day = ist.getUTCDay();
     if (day === 0 || day === 6) return false;
     const minutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
-    return minutes >= 9 * 60 + 15 && minutes <= 15 * 60 + 30;
+    return minutes >= 9 * 60 + 15 && minutes <= 15 * 60 + 40;
   }
 
   setInterval(() => {
@@ -1431,7 +1436,7 @@ setInterval(() => {
       const strike = Number(c.strike);
       // Days to expiry, counted to the close of the expiry day, floored at a few
       // hours so an expiry-day option does not divide by zero.
-      const expMs = new Date(c.expiry + 'T15:30:00+05:30').getTime();
+      const expMs = new Date(c.expiry + 'T15:40:00+05:30').getTime(); // CAS-era F&O close
       const daysLeft = Math.max(0.15, (expMs - Date.now()) / 86400000);
       const T = daysLeft / 365;
       const r = 0.065;
@@ -1709,7 +1714,8 @@ setInterval(() => {
       // own timezone. Defined once and reused for both the per-row tags and the
       // section pills so the two can never disagree. Holidays aren't tracked.
       const NSE_SCHED: Record<number, Array<[number, number]>> = {
-        1: [[555, 930]], 2: [[555, 930]], 3: [[555, 930]], 4: [[555, 930]], 5: [[555, 930]],
+        // 555-940 = 09:15-15:40: CAS-era derivatives close (3 Aug 2026).
+        1: [[555, 940]], 2: [[555, 940]], 3: [[555, 940]], 4: [[555, 940]], 5: [[555, 940]],
       };
       const LSE_SCHED: Record<number, Array<[number, number]>> = {
         1: [[480, 990]], 2: [[480, 990]], 3: [[480, 990]], 4: [[480, 990]], 5: [[480, 990]],
@@ -2174,12 +2180,12 @@ setInterval(() => {
         if (type === 'CE') return spot > strike ? 'ITM' : 'OTM';
         return strike > spot ? 'ITM' : 'OTM';
       };
-      // Time to expiry in years (NIFTY options expire 15:30 IST = 10:00 UTC)
+      // Time to expiry in years (NIFTY options expire 15:40 IST = 10:10 UTC, CAS era)
       const r = 0.065;
       let T = 0;
       if (chain.expiryDate) {
         const exp = new Date(chain.expiryDate);
-        const expMs = Date.UTC(exp.getUTCFullYear(), exp.getUTCMonth(), exp.getUTCDate(), 10, 0, 0);
+        const expMs = Date.UTC(exp.getUTCFullYear(), exp.getUTCMonth(), exp.getUTCDate(), 10, 10, 0);
         T = Math.max((expMs - Date.now()) / (365 * 24 * 3600 * 1000), 0.5 / (365 * 24));
       }
       const side = (ltp: any, intrinsic: number, type: 'CE' | 'PE', strike: number) => {

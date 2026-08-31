@@ -34,7 +34,7 @@ const istDate = () => {
 };
 const istMinuteOfDay = () => { const x = istNow(); return x.getUTCHours() * 60 + x.getUTCMinutes(); };
 
-export const TRIGGER_WINDOW = { openMin: 555, closeMin: 930 }; // 09:15 – 15:30 IST
+export const TRIGGER_WINDOW = { openMin: 555, closeMin: 940 }; // 09:15 – 15:40 IST (CAS-era derivatives close)
 
 /** Pure: is the market open for triggers right now? */
 export function marketOpenFor(dateStr: string, weekday: number, minuteOfDay: number, holiday: boolean): boolean {

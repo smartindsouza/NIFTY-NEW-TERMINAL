@@ -158,7 +158,7 @@ export function registerRecorder(app: any, db: any, guard: any) {
   // Every 5 minutes, market hours only, weekdays, not on NSE holidays.
   cron.schedule('*/5 9-15 * * 1-5', async () => {
     const m = minOfDayIST(Date.now());
-    if (m < 555 || m > 930) return;                 // 09:15 - 15:30 IST
+    if (m < 555 || m > 940) return;                 // 09:15 - 15:40 IST (CAS-era close)
     if (isNseHoliday(istDateStr())) return;
     try { await recordOnce(db); } catch (e: any) { console.error('[recorder] failed', e); state.lastError = e?.message || String(e); }
   }, { timezone: 'Asia/Kolkata' });
