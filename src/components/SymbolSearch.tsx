@@ -103,13 +103,13 @@ export function SymbolSearch({ onSelect, currentSymbol }: Props) {
   return (
     <div className="relative w-full max-w-full sm:w-[250px] sm:shrink-0" ref={containerRef}>
       <div 
-        className="flex items-center bg-card border border-0 rounded-full transition-all cursor-text group w-full px-3 h-9"
+        className="flex items-center bg-card border border-0 rounded-full transition-all cursor-text group w-full px-2 sm:px-3 h-9"
         onClick={() => {
           setIsOpen(true);
           inputRef.current?.focus();
         }}
       >
-        <Search size={16} className={`mr-2 shrink-0 transition-colors ${isOpen ? 'text-muted-foreground' : 'text-muted-foreground group-hover:text-indigo-400'}`} />
+        <Search size={16} className={`mr-1.5 sm:mr-2 shrink-0 transition-colors ${isOpen ? 'text-muted-foreground' : 'text-muted-foreground group-hover:text-indigo-400'}`} />
         
         {isOpen ? (
           <div className="flex items-center w-full flex-1">

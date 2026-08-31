@@ -8369,7 +8369,7 @@ export function AdvancedChart() {
           <MarketContext />
         </div>
         <div ref={bottomBarRef} className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-3 py-1.5 md:p-0 flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap justify-end w-screen md:w-auto max-w-[100vw] overflow-x-hidden md:overflow-visible">
-          <div className="flex flex-1 items-center gap-2 justify-end min-w-0 md:contents">
+          <div className="flex flex-1 items-center gap-1.5 sm:gap-2 justify-end min-w-0 md:contents">
           <div className="flex-1 min-w-0 sm:w-auto md:order-1">
           <SymbolSearch 
             onSelect={setSelectedInstrument} 
@@ -8691,7 +8691,7 @@ export function AdvancedChart() {
             </div>
           </div>
           </div>
-          <div className="flex items-center gap-2 flex-[2] basis-0 min-w-[156px] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents md:min-w-0 md:basis-auto pr-1">
+          <div className="flex items-center gap-2 flex-none max-w-[45%] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents md:min-w-0 md:basis-auto pr-1">
           {(
           <div className="ml-auto md:ml-0 flex items-center justify-center gap-2 h-9 w-9 md:w-auto bg-muted/40 border border-0 rounded-md md:px-3 shrink-0 md:order-2 cursor-pointer" onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled' : 'Quick Trade disabled'); } catch (e) {} }} title="Quick Trade">
              <Zap size={18} className={`md:hidden ${quickTradeEnabled ? 'text-primary' : 'text-muted-foreground'}`} />
