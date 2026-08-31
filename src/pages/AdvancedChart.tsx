@@ -1147,8 +1147,6 @@ function computeFvgZones(candles: any[]): any[] {
 //
 // Lookahead-free: a block needs its confirming candle to have CLOSED, so nothing is
 // ever drawn using information the market had not yet produced.
-const OB_MIN_PTS = 10;
-const OB_MAX_ZONES = 6;
 // MARKET STRUCTURE — Break of Structure and Change of Character.
 //
 // The two are opposites and must never be confused, so the rule is written out:
@@ -1217,46 +1215,270 @@ function computeMarketStructure(candles: any[]): any[] {
   return events.slice(-STRUCT_MAX);
 }
 
-function computeOrderBlocks(candles: any[]): any[] {
+// ============================================================================
+// DIRECTIONAL ZONES — faithful port of the TradingView Pine v5 indicator
+// "Directional Zones" by hash (the.underdog420@gmail.com), open source,
+// supplied by Martin on 31 Aug 2026. Replaces the old computeOrderBlocks.
+//
+// This is a bar-by-bar replay of the Pine script with its execution order,
+// its quirks and even its latent bugs preserved on purpose — the acceptance
+// test is that the terminal's zones match TradingView box-for-box on the
+// same candles, so "fixing" anything here would be a porting error:
+//
+//   * Pine's box.delete() destroys the drawing but leaves the id in the
+//     array; get_*() on a deleted box returns na, so every condition on it
+//     is false and it sits inert until array.shift() caps push it out.
+//     Ported as tombstones: alive=false entries keep their pool slot and
+//     count against the caps exactly like Pine.
+//   * rangehighesthigh / rangelowestlow / highesthigh / lowestlow all start
+//     at the literal 1.0, toprange/bottomrange at 0.0. On an index trading
+//     ~24,000 that means rangelowestlow sticks at 1.0 until the first flip
+//     resets it. TradingView runs the same warmup over its loaded history,
+//     so replicating it (plus enough history) is what makes states converge.
+//   * A box's POOL (b/c/d/a) drives its lifecycle; its COLOR (kind here)
+//     drives visibility, and every transition recolors explicitly — e.g. a
+//     counter zone moved d→c on a range flip is already old_external (faint
+//     blue) while it keeps living in pool c.
+//
+// Pools, as in the source:  c = fresh internal zones for the current range,
+// b = zones promoted "external" once the range moves past them, d = counter-
+// trend zones, a = graveyard (aged-out and tapped boxes, frozen). Visible at
+// the script's default inputs: external (blue .30), old_external (blue .10),
+// old_external_tapped (purple .27). internal / old_internal / counter render
+// at alpha 0 in the source's defaults but MUST still be simulated — they
+// promote into visible kinds. Inputs are fixed at the script's defaults per
+// Martin (bias=true, both directions on, boxes_stored=40, box_len=4).
+// ============================================================================
+
+type DzCandle = { time: number; open: number; high: number; low: number; close: number };
+
+type DzKind =
+  | 'internal' | 'old_internal' | 'counter'          // alpha 0 at default inputs
+  | 'external' | 'old_external' | 'old_external_tapped'; // visible
+
+type DzZone = {
+  kind: DzKind;
+  top: number;
+  bottom: number;
+  time: number;          // left edge as candle time (leftIdx clamped to 0)
+  endTime: number | null; // null = still extending to the live edge
+};
+
+type Box = { leftIdx: number; rightIdx: number; top: number; bottom: number; kind: DzKind; alive: boolean };
+
+const BOX_LEN = 4;          // input box_len
+const BOXES_STORED = 40;    // input "Number of boxes stored" (pool a cap)
+const POOL_CAP = 20;        // hardcoded caps on b, c, d
+
+// Pine: ( low < top and high > top ) or ( low < bottom and high > bottom )
+//       or ( low < bottom and high > top ) — strict crossings only; a bar
+// that merely equals a boundary does not tap.
+const taps = (lo: number, hi: number, b: Box) =>
+  (lo < b.top && hi > b.top) || (lo < b.bottom && hi > b.bottom) || (lo < b.bottom && hi > b.top);
+
+function computeDirectionalZones(candles: DzCandle[]): DzZone[] {
   if (!candles || candles.length < 3) return [];
-  // Displacement bar scales with recent candle size, so a violent day needs a bigger
-  // push to qualify and a calm day still finds real blocks.
-  const tail = candles.slice(-20);
-  const avgRange = tail.length ? tail.reduce((a: number, c: any) => a + (c.high - c.low), 0) / tail.length : 0;
-  const minDisp = Math.max(OB_MIN_PTS, +(1.2 * avgRange).toFixed(1));
 
-  const found: any[] = [];
-  for (let i = 1; i < candles.length - 1; i++) {
-    const c = candles[i], n = candles[i + 1];
-    if (!c || !n) continue;
-    const bull = c.close < c.open && n.close > c.high && (n.close - c.low) >= minDisp;
-    const bear = c.close > c.open && n.close < c.low && (c.high - n.close) >= minDisp;
-    if (!bull && !bear) continue;
-    // Back-to-back candidates describe one move, not two blocks — keep the first.
-    if (found.length && i - found[found.length - 1].born <= 1) continue;
-    found.push({ type: bull ? 'bull' : 'bear', top: c.high, bottom: c.low, time: c.time, born: i });
-  }
+  // --- var state, initials copied verbatim from the script ---
+  let isBullish = true;
+  let highesthigh = 1.0;
+  let lowestlow = 1.0;
+  let count = 1;
+  let topbreak = false;
+  let bottombreak = false;
+  let rangeHH = 1.0;
+  let rangeLL = 1.0;
+  let toprange = 0.0;
+  let bottomrange = 0.0;
+  let barsSince = 0.0;
+  let barsSinceLast2 = 0.0;
 
-  // Close each block off: superseded by the next block, or broken by a close through it.
-  for (let k = 0; k < found.length; k++) {
-    const z = found[k];
-    const supersededAt = k + 1 < found.length ? found[k + 1].born : Infinity;
-    let endIdx: number | null = null;
-    let endReason = '';
-    for (let m = z.born + 2; m < candles.length; m++) {
-      if (m >= supersededAt) { endIdx = supersededAt; endReason = 'superseded'; break; }
-      const cc = candles[m];
-      if (z.type === 'bull' ? cc.close < z.bottom : cc.close > z.top) { endIdx = m; endReason = 'broken'; break; }
+  // series values committed at end of each bar (Pine's [1] reads)
+  let prevBullRange = true;   // bool bull_range = true on the first bar
+  let prevImbalance = false;
+  let prevBarsSince = 0.0;
+
+  const a: Box[] = [];
+  const b: Box[] = [];
+  const c: Box[] = [];
+  const d: Box[] = [];
+
+  const kill = (x: Box) => { x.alive = false; };
+
+  for (let i = 0; i < candles.length; i++) {
+    const bar = candles[i];
+    const hi = bar.high, lo = bar.low, cl = bar.close;
+    const p1 = i >= 1 ? candles[i - 1] : null; // [1]
+    const p2 = i >= 2 ? candles[i - 2] : null; // [2]
+
+    // 1) range extremes expand first (top of script)
+    rangeHH = rangeHH > hi ? rangeHH : hi;
+    rangeLL = rangeLL < lo ? rangeLL : lo;
+
+    // 2) break detection; bull_range defaults to its previous committed value
+    let bullRange = prevBullRange;
+    if (cl > toprange) {
+      bullRange = true;
+      topbreak = true;                    // alert("Top range broken") lives here
+    } else if (cl < bottomrange) {
+      bullRange = false;
+      bottombreak = true;                 // alert("Bottom range broken")
     }
-    if (endIdx !== null && endIdx < candles.length) {
-      z.endTime = candles[endIdx].time;
-      z.endReason = endReason;
+
+    // 3) market structure — flips compare against the PREVIOUS bar's low/high
+    //    (na on bar 0 → condition false, exactly as Pine treats it)
+    if (isBullish) {
+      if (p1 && cl < p1.low) {
+        isBullish = false;
+        count = 1;
+        if (topbreak) {
+          topbreak = false;
+          barsSince = i;
+          bullRange = true;               // yes, a DOWN flip after a TOP break keeps the regime bullish
+          toprange = rangeHH;
+          bottomrange = rangeLL;
+          rangeHH = highesthigh;
+          rangeLL = lo;
+        }
+      } else {
+        count = count + 1;
+      }
     } else {
-      z.endTime = null;   // still live — this one keeps running to the current candle
-      z.endReason = 'live';
+      if (p1 && cl > p1.high) {
+        isBullish = true;
+        count = 1;
+        if (bottombreak) {
+          bottombreak = false;
+          barsSince = i;
+          bullRange = false;              // mirror: an UP flip after a BOTTOM break keeps it bearish
+          bottomrange = rangeLL;
+          toprange = rangeHH;
+          rangeLL = lowestlow;            // note the asymmetry vs the bearish flip — source has it too
+          rangeHH = hi;
+        }
+      } else {
+        count = count + 1;
+      }
     }
+
+    // 4) swing extremes since the last structure flip
+    if (count === 1) { highesthigh = hi; lowestlow = lo; }
+    else {
+      highesthigh = highesthigh > hi ? highesthigh : hi;
+      lowestlow = lowestlow < lo ? lowestlow : lo;
+    }
+
+    // 5) previous range's start (bars_since[1] vs the possibly-just-updated value)
+    if (prevBarsSince < barsSince) barsSinceLast2 = prevBarsSince;
+
+    // 6) pool caps — shift() regardless of alive/tombstone, like Pine
+    if (a.length > BOXES_STORED) a.shift();
+    if (b.length > POOL_CAP) b.shift();
+    if (c.length > POOL_CAP) c.shift();
+    if (d.length > POOL_CAP) d.shift();
+
+    // 7) pool b — external zones: age out two ranges back, or die on tap
+    for (const ln of [...b]) {
+      if (!ln.alive) continue;                       // deleted box: every get_* is na → all branches false
+      if (ln.leftIdx < barsSinceLast2 - 1) {
+        a.push({ ...ln, kind: 'old_external' });     // recolored, frozen copy
+        kill(ln);
+      } else if (taps(lo, hi, ln)) {
+        ln.rightIdx += 2;
+        a.push({ ...ln, kind: 'old_external_tapped' }); // the purple ones; alert point in the source
+        kill(ln);
+      } else {
+        ln.rightIdx = i;
+      }
+    }
+
+    // 8) pool c — internal zones: promote to external once the range moves on
+    for (const ln of [...c]) {
+      if (!ln.alive) continue;
+      if (ln.leftIdx < barsSince) {
+        b.push({ ...ln, kind: 'external' });         // becomes a visible blue box in pool b
+        kill(ln);
+      } else if (taps(lo, hi, ln)) {
+        ln.rightIdx += 2;
+        a.push({ ...ln, kind: 'old_internal' });     // invisible at defaults, still caps pool a
+        kill(ln);
+      } else {
+        ln.rightIdx = i;
+      }
+    }
+
+    // 9) regime flip: clear pool c, move pool d in — already faint blue
+    if (prevBullRange !== bullRange) {
+      for (const ln of [...c]) if (ln.alive) kill(ln);
+      for (const ln of [...d]) {
+        // Pine pushes box.new(get_left(ln), ...) even when ln is already
+        // deleted — get_* returns na, so TradingView creates an inert box
+        // that never renders but does consume a pool-c cap slot. Tombstones
+        // therefore move across as tombstones.
+        c.push(ln.alive ? { ...ln, kind: 'old_external' } : { ...ln });
+        kill(ln);
+      }
+    }
+
+    // 10) pool d — counter zones: age out or die silently
+    for (const ln of [...d]) {
+      if (!ln.alive) continue;
+      if (ln.leftIdx < barsSinceLast2) kill(ln);
+      else if (taps(lo, hi, ln)) kill(ln);
+      else ln.rightIdx = i;
+    }
+
+    // 11) three-bar imbalance (fair value gap vs bar[2])
+    const imbalance = p2 ? (hi < p2.low || lo > p2.high) : false;
+
+    // 12) zone creation on the FIRST imbalance bar; boxes wrap bar[2]
+    if (imbalance && !prevImbalance && p1 && p2) {
+      const mid = (rangeHH + rangeLL) / 2;
+      const geo = { leftIdx: i - 2, rightIdx: i + BOX_LEN - 2, top: p2.high, bottom: p2.low, alive: true };
+      if (bullRange && p1.close > p1.open && p2.low < mid) {
+        c.push({ ...geo, kind: 'internal' });
+      } else if (!bullRange && p1.close < p1.open && p2.high > mid) {
+        c.push({ ...geo, kind: 'internal' });
+      }
+      if (!bullRange && p1.close > p1.open) d.push({ ...geo, kind: 'counter' });
+      if (bullRange && p1.close < p1.open) d.push({ ...geo, kind: 'counter' });
+    }
+
+    // 13) commit this bar's series values for the next bar's [1] reads
+    prevBullRange = bullRange;
+    prevImbalance = imbalance;
+    prevBarsSince = barsSince;
   }
-  return found.slice(-OB_MAX_ZONES);
+
+  // --- emit --------------------------------------------------------------
+  // Visibility follows the box's color at the script's default inputs; the
+  // live edge is any still-alive box in b/c/d (its right edge tracked the
+  // current bar every pass). Frozen boxes clamp to the last candle when
+  // their +2 tail extends past loaded history — the tail materialises on
+  // the next recompute once those candles exist.
+  const lastIdx = candles.length - 1;
+  const VISIBLE: Record<string, boolean> = { external: true, old_external: true, old_external_tapped: true };
+  const out: DzZone[] = [];
+  const emit = (pool: Box[], frozen: boolean) => {
+    for (const ln of pool) {
+      if (!VISIBLE[ln.kind]) continue;
+      if (!frozen && !ln.alive) continue;            // b/c/d tombstones are gone from the screen
+      out.push({
+        kind: ln.kind,
+        top: ln.top,
+        bottom: ln.bottom,
+        time: candles[Math.max(0, Math.min(ln.leftIdx, lastIdx))].time,
+        endTime: !frozen && ln.alive && ln.rightIdx >= lastIdx
+          ? null
+          : candles[Math.max(0, Math.min(ln.rightIdx, lastIdx))].time,
+      });
+    }
+  };
+  emit(a, true);   // graveyard boxes stay drawn until capped out — Pine keeps them on the chart
+  emit(b, false);
+  emit(c, false);  // carries the d→c survivors, which are visible old_external
+  emit(d, false);  // counter zones: invisible kind, emit() filters them
+  return out;
 }
 
 // Turn a Zerodha option tradingsymbol into something readable at a glance.
@@ -7576,50 +7798,36 @@ export function AdvancedChart() {
                 const sig = `${instrumentToken}|${timeframe}|${baseC.length}|${closedSince.length}|${closedSince.length ? closedSince[closedSince.length - 1].time : 0}`;
                 if (sig !== obSigRef.current) {
                   obSigRef.current = sig;
-                  obZonesRef.current = computeOrderBlocks(closedSince.length ? [...baseC, ...closedSince] : baseC);
+                  obZonesRef.current = computeDirectionalZones(closedSince.length ? [...baseC, ...closedSince] : baseC);
                 }
-                const liveC = lastCandleDataRef.current;
-                const pctB = Math.min(100, Math.max(1, parseFloat(dsZoneOpacity) || 8)) / 100;
+                // Directional Zones render with the Pine script's own colors at its
+                // default inputs — the acceptance test is a box-for-box match with
+                // TradingView on the same candles, so the DS-zone opacity slider
+                // deliberately does not apply here. border_width=0 in the source
+                // means fill only: no stroke, no end-cap, no label.
+                const DZ_FILL: Record<string, string> = {
+                  external: 'rgba(69,118,255,0.30)',
+                  old_external: 'rgba(69,118,255,0.10)',
+                  old_external_tapped: 'rgba(178,106,211,0.27)',
+                };
                 for (const z of obZonesRef.current) {
                   const yTop = mainSeriesRef.current.priceToCoordinate(z.top);
                   const yBot = mainSeriesRef.current.priceToCoordinate(z.bottom);
                   if (yTop === null || yBot === null) continue;
                   const x0 = mainChartRef.current?.timeScale()?.timeToCoordinate(z.time as any);
                   const zx = (x0 === null || x0 === undefined) ? 0 : Math.max(0, x0);
-                  // A live block can be broken by the candle forming right now — end it at
-                  // the current bar rather than letting it run on a level price has left.
-                  const brokenLive = !z.endTime && liveC &&
-                    (z.type === 'bull' ? liveC.close < z.bottom : liveC.close > z.top);
+                  // Alive boxes track the live edge every bar (Pine's set_right(bar_index));
+                  // frozen ones stop where their box stopped.
                   let zRight = textAlignX;
-                  if (z.endTime || brokenLive) {
-                    const endT = z.endTime || (liveC && liveC.time);
-                    const x1 = endT ? mainChartRef.current?.timeScale()?.timeToCoordinate(endT as any) : null;
+                  if (z.endTime) {
+                    const x1 = mainChartRef.current?.timeScale()?.timeToCoordinate(z.endTime as any);
                     if (x1 !== null && x1 !== undefined) zRight = Math.min(textAlignX, x1);
                   }
                   const zw = Math.max(0, zRight - zx);
                   if (zw <= 0) continue;
-                  const rgb = z.type === 'bull' ? '245,158,11' : '139,92,246';
                   const yA = Math.min(yTop, yBot), h = Math.abs(yBot - yTop);
-                  ctx.fillStyle = `rgba(${rgb},${Math.min(0.30, pctB + 0.03)})`;
+                  ctx.fillStyle = DZ_FILL[z.kind] || 'rgba(69,118,255,0.10)';
                   ctx.fillRect(zx, yA, zw, h);
-                  ctx.strokeStyle = `rgba(${rgb},0.55)`;
-                  ctx.lineWidth = 1;
-                  ctx.strokeRect(zx, yA, zw, h);
-                  // Hard cap on a finished block, so "this one stopped here" is visible at a
-                  // glance rather than inferred from where the shading happens to end.
-                  if (z.endTime || brokenLive) {
-                    ctx.beginPath();
-                    ctx.strokeStyle = `rgba(${rgb},0.9)`;
-                    ctx.lineWidth = 1.5;
-                    ctx.moveTo(zx + zw, yA);
-                    ctx.lineTo(zx + zw, yA + h);
-                    ctx.stroke();
-                  }
-                  ctx.font = 'bold 9px monospace';
-                  ctx.textAlign = 'left';
-                  ctx.textBaseline = 'middle';
-                  ctx.fillStyle = `rgba(${rgb},0.85)`;
-                  ctx.fillText(z.type === 'bull' ? 'OB▲' : 'OB▼', zx + 6, yA + h / 2);
                 }
               }
 
@@ -8269,7 +8477,7 @@ export function AdvancedChart() {
                   </div>
                   )}
 
-                  {/* Order Blocks */}
+                  {/* Directional Zones (ported TradingView indicator; replaced Order Blocks) */}
                   <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
                     <button
                       onClick={() => setShowOrderBlocks(!showOrderBlocks)}
@@ -8278,7 +8486,7 @@ export function AdvancedChart() {
                       <div className="w-4 flex items-center justify-center">
                         {showOrderBlocks && <Check size={14} className="text-emerald-400" />}
                       </div>
-                      <span>Order Blocks</span>
+                      <span>Directional Zones</span>
                     </button>
                   </div>
 
