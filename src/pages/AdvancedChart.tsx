@@ -4095,7 +4095,7 @@ export function AdvancedChart() {
   const manualLinesRef = useRef<any[]>([]);
   const pdhPdlLinesRef = useRef<{ pdh: any; pdl: any } | null>(null);
   const isHoveringButtonRef = useRef(false);
-  const draggingLineRef = useRef<{ id: number, startY: number, dragged: boolean, sl?: 'upper' | 'lower' } | null>(null);
+  const draggingLineRef = useRef<{ id: number, startY: number, dragged: boolean, sl?: 'upper' | 'lower', smap?: 'sl' | 'tp' } | null>(null);
 
   // ===== Phase 2: draggable SL/Target lines feeding the server-side auto-exit watcher =====
   const slLinesRef = useRef<{ kind: 'upper' | 'lower', price: number, instance: any, label: string, color: string }[]>([]);
@@ -4141,6 +4141,125 @@ export function AdvancedChart() {
   const premRuleRef = useRef<{ symbol: string; sl: number; tp: number } | null>(null);
   useEffect(() => { slActivePosRef.current = slActivePos; }, [slActivePos]);
 
+  // ===== Premium SL/TP mirrored onto the SPOT chart =====
+  // Deliberately its OWN refs. The option-chart lines (slLinesRef) are the live
+  // rule and are left completely alone; these are a translated VIEW of that same
+  // rule, so a fault here can never disturb the chart that arms it.
+  //
+  // The armed rule is and remains PREMIUM-based server-side. What the spot chart
+  // shows is "the index level at which this option is worth the SL / the TP",
+  // solved on the server from the option's own live implied vol. That mapping is
+  // not fixed: vol moves and theta bleeds, so these levels DRIFT during the day
+  // even when the rule has not changed. They are therefore re-fetched
+  // continuously rather than pinned, and they are drawn dashed and labelled with
+  // the premium they mean, so they never masquerade as hard index triggers.
+  const spotMapLinesRef = useRef<{ kind: 'sl' | 'tp', price: number, premium: number, instance: any }[]>([]);
+  const spotMapSeriesRef = useRef<any>(null);
+  const spotMapRef = useRef<{ spot: number; delta: number; iv: number; slSpot: number | null; tpSpot: number | null; sl: number; tp: number; symbol: string } | null>(null);
+  const spotMapBusyRef = useRef(false);
+
+  // Is the CURRENT chart the spot index that the open position is written on?
+  const onUnderlyingSpotChart = () => {
+    const pos = slActivePosRef.current;
+    if (!pos || !pos.symbol) return false;
+    if (isOptionViewRef.current) return false;              // an option chart, not spot
+    const under = String(pos.symbol).replace(/\d.*$/, '').toUpperCase();
+    const label = String(indexLabelRef.current || '').replace(/[^A-Z]/gi, '').toUpperCase();
+    if (!under || !label) return false;
+    return label.startsWith(under) || under.startsWith(label);
+  };
+
+  // Ask the server to translate the ARMED premium levels into spot levels.
+  const refreshSpotMap = async () => {
+    if (spotMapBusyRef.current) return;
+    const pos = slActivePosRef.current;
+    const rule = premRuleRef.current;
+    if (!pos || !rule || rule.symbol !== pos.symbol) { spotMapRef.current = null; return; }
+    if (!onUnderlyingSpotChart()) return;                   // don't poll from charts that won't draw it
+    spotMapBusyRef.current = true;
+    try {
+      const r = await fetch(`/api/premium-spot-map?tradingsymbol=${encodeURIComponent(pos.symbol)}&premium=${rule.sl},${rule.tp}`);
+      const d = await r.json().catch(() => null);
+      // Any failure clears the map, which tears the lines down. A stale mapping
+      // is worse than none: it would point at an index level that no longer
+      // corresponds to the rule.
+      if (!r.ok || !d || !Array.isArray(d.spotFor)) { spotMapRef.current = null; return; }
+      spotMapRef.current = {
+        spot: d.spot, delta: d.delta, iv: d.iv,
+        slSpot: d.spotFor[0] ?? null, tpSpot: d.spotFor[1] ?? null,
+        sl: rule.sl, tp: rule.tp, symbol: pos.symbol,
+      };
+    } catch { spotMapRef.current = null; }
+    finally { spotMapBusyRef.current = false; }
+  };
+
+  // Draw / refresh / tear down the mirrored lines.
+  const ensureSpotMapLines = () => {
+    const ser = mainSeriesRef.current;
+    const drop = () => {
+      if (spotMapLinesRef.current.length && ser) {
+        spotMapLinesRef.current.forEach(l => { try { ser.removePriceLine(l.instance); } catch (e) {} });
+      }
+      spotMapLinesRef.current = [];
+      spotMapSeriesRef.current = null;
+    };
+    if (!ser) { spotMapLinesRef.current = []; spotMapSeriesRef.current = null; return; }
+    const m = spotMapRef.current;
+    const pos = slActivePosRef.current;
+    if (!m || !pos || m.symbol !== pos.symbol || !onUnderlyingSpotChart()) { drop(); return; }
+    if (spotMapSeriesRef.current !== ser) drop();           // series rebuilt: start clean
+
+    const want: { kind: 'sl' | 'tp'; price: number | null; premium: number; color: string; label: string }[] = [
+      { kind: 'sl', price: m.slSpot, premium: m.sl, color: '#f43f5e', label: 'SL' },
+      { kind: 'tp', price: m.tpSpot, premium: m.tp, color: '#10b981', label: 'TARGET' },
+    ];
+    for (const w of want) {
+      const existing = spotMapLinesRef.current.find(l => l.kind === w.kind);
+      // An unreachable level (premium below intrinsic, say) has no spot answer —
+      // remove the line rather than parking it at an invented price.
+      if (w.price === null || !Number.isFinite(w.price)) {
+        if (existing) { try { ser.removePriceLine(existing.instance); } catch (e) {} 
+          spotMapLinesRef.current = spotMapLinesRef.current.filter(l => l !== existing); }
+        continue;
+      }
+      const title = `${w.label} ≈ ₹${w.premium.toFixed(2)}`;
+      if (existing) {
+        existing.price = w.price; existing.premium = w.premium;
+        try { existing.instance.applyOptions({ price: w.price, title }); } catch (e) {}
+      } else {
+        try {
+          const inst = ser.createPriceLine({
+            price: w.price, color: w.color, lineWidth: 2,
+            lineStyle: 1,                                   // DOTTED: a translated level, not a hard index trigger
+            axisLabelVisible: true, title,
+          });
+          spotMapLinesRef.current.push({ kind: w.kind, price: w.price, premium: w.premium, instance: inst });
+        } catch (e) {}
+      }
+    }
+    spotMapSeriesRef.current = ser;
+  };
+
+  // Convert a dragged SPOT level back to a premium. Exact answer comes from the
+  // server; delta gives an instant local estimate for the label while the finger
+  // is still down.
+  const premiumForSpotLocal = (spotPx: number): number | null => {
+    const m = spotMapRef.current;
+    if (!m || !Number.isFinite(m.delta) || !Number.isFinite(m.spot)) return null;
+    const pos = slActivePosRef.current;
+    const live = Number(pos?.lastPrice ?? pos?.ltp);
+    const base = Number.isFinite(live) && live > 0 ? live : null;
+    if (base === null) return null;
+    return Math.max(0.05, base + m.delta * (spotPx - m.spot));
+  };
+
+  useEffect(() => {
+    if (!slActivePos) { spotMapRef.current = null; return; }
+    refreshSpotMap();
+    const iv = setInterval(refreshSpotMap, 4000);
+    return () => clearInterval(iv);
+  }, [slActivePos]);
+
   // Push the premium SL/TP rule to the server — the dragged lines become the
   // LIVE protective rule immediately, no confirmation step.
   const pushPremiumRule = async (slPx: number, tpPx: number) => {
@@ -4178,6 +4297,17 @@ export function AdvancedChart() {
         }
     }
 
+    // Mirrored spot SL/TP: same 24px thumb zone. Checked AFTER the real premium
+    // lines so that on the option chart those always win.
+    for (const ml of spotMapLinesRef.current) {
+        const lineY = mainSeriesRef.current.priceToCoordinate(ml.price);
+        if (lineY !== null && Math.abs(lineY - y) < 24) {
+            draggingLineRef.current = { id: -2, startY: y, dragged: false, smap: ml.kind };
+            mainChartRef.current.applyOptions({ handleScroll: false, handleScale: false });
+            return;
+        }
+    }
+
     let foundLineId = null;
     for (let i = 0; i < manualLinesRef.current.length; i++) {
         const line = manualLinesRef.current[i];
@@ -4204,6 +4334,28 @@ export function AdvancedChart() {
     }
 
     const newPrice = mainSeriesRef.current.coordinateToPrice(y);
+
+    // Mirrored spot line drag. The label shows the premium this index level
+    // implies, estimated locally from delta so it tracks the finger; the EXACT
+    // value is recomputed server-side on release before anything is armed.
+    if (draggingLineRef.current.smap) {
+       if (newPrice !== null) {
+          const kind = draggingLineRef.current.smap;
+          const ml = spotMapLinesRef.current.find(l => l.kind === kind);
+          if (ml) {
+            ml.price = newPrice;
+            const est = premiumForSpotLocal(newPrice);
+            const label = kind === 'sl' ? 'SL' : 'TARGET';
+            try {
+              ml.instance.applyOptions({
+                price: newPrice,
+                title: est !== null ? `${label} ≈ ₹${est.toFixed(2)}` : label,
+              });
+            } catch (e) {}
+          }
+       }
+       return;
+    }
 
     // SL/Target line drag — move the line and update the live readout
     if (draggingLineRef.current.sl) {
@@ -4235,6 +4387,42 @@ export function AdvancedChart() {
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
+    // Mirrored spot line release. The dragged INDEX level is converted back to a
+    // premium on the server — the same model, the same live IV — and that premium
+    // is what gets armed. The protective rule stays premium-based throughout;
+    // this is only a different way of choosing its number.
+    if (draggingLineRef.current && draggingLineRef.current.smap) {
+        const kind = draggingLineRef.current.smap;
+        const moved = draggingLineRef.current.dragged;
+        if (mainChartRef.current) {
+           mainChartRef.current.applyOptions({
+              handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
+              handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true }
+           });
+        }
+        setTimeout(() => { draggingLineRef.current = null; }, 150);
+        if (!moved) return;                       // a tap is not an edit
+        const ml = spotMapLinesRef.current.find(l => l.kind === kind);
+        const pos = slActivePosRef.current;
+        const rule = premRuleRef.current;
+        if (!ml || !pos || !rule || rule.symbol !== pos.symbol) return;
+        (async () => {
+          try {
+            const r = await fetch(`/api/premium-spot-map?tradingsymbol=${encodeURIComponent(pos.symbol)}&spot=${ml.price.toFixed(2)}`);
+            const d = await r.json().catch(() => null);
+            const px = d && Array.isArray(d.premiumFor) ? d.premiumFor[0] : null;
+            // No exact conversion, no arming. The line snaps back on the next
+            // refresh, so the chart cannot end up disagreeing with the rule.
+            if (!r.ok || !Number.isFinite(px) || px <= 0) { setPremSync('ERROR'); refreshSpotMap(); return; }
+            const nextSl = kind === 'sl' ? +px.toFixed(2) : rule.sl;
+            const nextTp = kind === 'tp' ? +px.toFixed(2) : rule.tp;
+            await pushPremiumRule(nextSl, nextTp);
+            refreshSpotMap();
+          } catch { setPremSync('ERROR'); refreshSpotMap(); }
+        })();
+        return;
+    }
+
     // SL/Target line release — restore scroll and clear (levels already synced during move)
     if (draggingLineRef.current && draggingLineRef.current.sl) {
         // On the traded option's chart the lines ARE the live rule: apply the new
@@ -4604,8 +4792,12 @@ export function AdvancedChart() {
       if (!viewingTrade) setSlLevels({ upper, lower });
     };
     ensure();
+    // The mirrored spot lines refresh on the same beat. Wrapped so a fault in the
+    // mirror can never stop ensure() from maintaining the REAL rule's lines.
+    const tick = () => { ensure(); try { ensureSpotMapLines(); } catch (e) {} };
+    try { ensureSpotMapLines(); } catch (e) {}
     slEnsureRef.current = ensure;
-    const iv = setInterval(ensure, 1000);
+    const iv = setInterval(tick, 1000);
     return () => {
       clearInterval(iv);
       slEnsureRef.current = null;
@@ -5468,6 +5660,10 @@ export function AdvancedChart() {
   // rebuild — a ref keeps it correct even if the view changes without a rebuild.
   const isOptionViewRef = useRef(isOptionView);
   isOptionViewRef.current = isOptionView;
+  // Same reason as isOptionViewRef: the spot-mirror helpers are defined far above
+  // this line and read the label at call time.
+  const indexLabelRef = useRef(indexLabel);
+  indexLabelRef.current = indexLabel;
   const queryClient = useQueryClient();
 
   const { data: taInfo, isLoading: isLoadingTa, isError: isTaError, error: taError, refetch: refetchTa } = useQuery({

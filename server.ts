@@ -14,7 +14,7 @@ import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, se
 import { getHistoricalAnalytics } from './server/analytics_service';
 import { runRsiBacktest } from './server/rsi_backtest';
 import { getLiveSignal, runOptionConfirmBacktest, getAlertSignal } from './server/option_rsi';
-import { ivAndDelta, bsThetaPerDay } from './server/options_math';
+import { ivAndDelta, bsThetaPerDay, impliedVol, bsPrice, bsDelta } from './server/options_math';
 import { getGammaBlast } from './server/gamma_blast';
 import { getPremiumPulse, getPremiumPulseBias } from './server/premium_pulse';
 import { getFiiData, getCashFiiDii } from './server/fii_service';
@@ -1397,6 +1397,101 @@ setInterval(() => {
       const c = await resolveOptionContract(underlying, expiry, strike, type as 'CE' | 'PE');
       if (!c) return res.status(404).json({ error: 'no listed contract for that expiry and strike' });
       res.json(c);
+    } catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
+  });
+
+  // PREMIUM <-> SPOT MAP. The exit rule is, and stays, a PREMIUM rule. This is a
+  // read-only translator so the same rule can be SHOWN and DRAGGED on the spot
+  // chart: it answers "what index level makes this option worth X right now?"
+  // and the reverse.
+  //
+  // Method: back the option's implied vol out of its OWN live premium at the
+  // live spot, then hold that vol and the time-to-expiry fixed and solve
+  // bsPrice(spot) = target by bisection. Calibrating on the live premium is
+  // what makes the map exact AT THIS MOMENT — feed it the current premium and
+  // it returns the current spot, by construction.
+  //
+  // It is NOT a fixed relationship. Volatility moves and theta bleeds, so the
+  // spot level that corresponds to a given premium DRIFTS during the day; the
+  // client re-asks continuously rather than caching an answer. Monotonicity
+  // makes bisection safe: a call is strictly increasing in spot, a put strictly
+  // decreasing, so a bracket that straddles the target contains exactly one root.
+  app.get('/api/premium-spot-map', async (req, res) => {
+    try {
+      const ts = String(req.query.tradingsymbol || '').trim().toUpperCase();
+      if (!ts) return res.status(400).json({ error: 'tradingsymbol required' });
+      const c = await getContractInfo(ts);
+      if (!c || !c.strike || !c.expiry) return res.status(404).json({ error: 'contract not found' });
+
+      const under = ts.replace(/\d.*$/, '');
+      const spotToken = under === 'BANKNIFTY' ? 260105
+        : under === 'NIFTY' ? 256265
+        : (under === 'SENSEX' && sensexIndexToken) ? sensexIndexToken : null;
+      const spotTick = spotToken ? getLatestTick(spotToken) : null;
+      const spot = spotTick?.ltp || (under === 'NIFTY' ? latestSpot : 0);
+      const optTick = getLatestTick(Number(c.instrument_token));
+      const premium = optTick?.ltp || 0;
+      // No live prices means no honest map. Say so rather than inventing one —
+      // the client draws nothing when this fails.
+      if (!(spot > 0) || !(premium > 0)) {
+        return res.status(503).json({ error: 'no live prices for this contract yet' });
+      }
+
+      const type: 'CE' | 'PE' = c.instrument_type === 'PE' ? 'PE' : 'CE';
+      const strike = Number(c.strike);
+      const expMs = new Date(c.expiry + 'T15:40:00+05:30').getTime();
+      const daysLeft = Math.max(0.15, (expMs - Date.now()) / 86400000);
+      const T = daysLeft / 365;
+      const r = 0.065;   // same rate the analytics endpoint uses
+
+      const iv = impliedVol(type, spot, strike, T, r, premium);
+      if (!iv) return res.status(503).json({ error: 'implied vol not solvable for this contract right now' });
+
+      // spot -> premium is a direct evaluation.
+      const priceAt = (S: number) => bsPrice(type, S, strike, T, r, iv);
+
+      // premium -> spot by bisection on a bracket grown outward from live spot.
+      // Returns null when the target is unreachable at ANY spot (a premium below
+      // a deep-ITM option's intrinsic floor, say) rather than clamping to an
+      // edge, because a line at a fabricated level is the failure mode this
+      // whole endpoint exists to avoid.
+      const spotFor = (target: number): number | null => {
+        if (!(target > 0)) return null;
+        const up = type === 'CE';                       // premium rises with spot for a call
+        let lo = spot, hi = spot;
+        for (let i = 0; i < 60; i++) {
+          const span = spot * 0.004 * (i + 1);          // widen ~0.4% at a time, to ~24%
+          lo = Math.max(1, spot - span); hi = spot + span;
+          const pLo = priceAt(lo), pHi = priceAt(hi);
+          const bracketed = up ? (pLo <= target && pHi >= target) : (pHi <= target && pLo >= target);
+          if (bracketed) {
+            for (let k = 0; k < 80; k++) {
+              const mid = (lo + hi) / 2;
+              const pm = priceAt(mid);
+              const tooLow = up ? pm < target : pm > target;
+              if (tooLow) lo = mid; else hi = mid;
+            }
+            return +(((lo + hi) / 2).toFixed(2));
+          }
+        }
+        return null;
+      };
+
+      const nums = (v: any) => String(v || '').split(',').map(x => parseFloat(x)).filter(n => Number.isFinite(n));
+      const premiums = nums(req.query.premium);
+      const spots = nums(req.query.spot);
+
+      res.json({
+        tradingsymbol: c.tradingsymbol, type, strike, expiry: c.expiry,
+        spot: +spot.toFixed(2), premium: +premium.toFixed(2),
+        iv: +(iv * 100).toFixed(1),
+        delta: +bsDelta(type, spot, strike, T, r, iv).toFixed(3),
+        daysLeft: +daysLeft.toFixed(2),
+        // premium[i] -> the spot that produces it; null where unreachable
+        spotFor: premiums.map(p => spotFor(p)),
+        // spot[i] -> the premium it produces
+        premiumFor: spots.map(S => +priceAt(S).toFixed(2)),
+      });
     } catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
   });
 
