@@ -6621,14 +6621,24 @@ export function AdvancedChart() {
   // Fire one alert: OS notification (works from background tabs) + beep. No in-app
   // toast — see fireBreakoutAlert: on a phone these cards cover the chart they are
   // describing, and the same information is already arriving as a notification.
+  // Market alerts are about a moment, so their tray entries should not outlive
+  // it. Each one is closed after 25s: without this every touch left a permanent
+  // card in the phone's notification shade, and by the afternoon Martin was
+  // scrolling past a wall of stale "Support touched" cards to find anything
+  // current. The in-app Alerts list remains the durable record for the session.
+  const TRAY_TTL_MS = 25000;
+  const trayNotify = (title: string, body: string, tag: string) => {
+    try {
+      if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+      const n = new Notification(title, { body, tag });
+      setTimeout(() => { try { n.close(); } catch (e) {} }, TRAY_TTL_MS);
+    } catch (e) {}
+  };
+
   const fireLevelAlert = (label: string, price: number, spot: number, dirUp: boolean) => {
     const title = `${label} touched`;
     const body = `Price ${spot.toFixed(2)} crossed ${dirUp ? 'up through' : 'down through'} ${label} (${price})`;
-    try {
-      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-        new Notification(title, { body, tag: `lvl-${label}-${price}` });
-      }
-    } catch(e) {}
+    trayNotify(title, body, `lvl-${label}-${price}`);
     try {
       const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
       if (AC) {
@@ -6649,11 +6659,7 @@ export function AdvancedChart() {
   const fireZoneTapAlert = (z: { top: number; bottom: number }) => {
     const title = 'Zone tapped';
     const body = `Price tapped a Directional Zone (${z.bottom.toFixed(2)} - ${z.top.toFixed(2)}) on ${timeframe}`;
-    try {
-      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-        new Notification(title, { body, tag: `dztap-${z.top}-${z.bottom}` });
-      }
-    } catch(e) {}
+    trayNotify(title, body, `dztap-${z.top}-${z.bottom}`);
     try { notificationService.add('divergence', title, body); } catch(e) {}
     try {
       const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
@@ -6720,11 +6726,7 @@ export function AdvancedChart() {
       ? `⚠️ Fakeout risk: ${r.level}`
       : `Breakout ${r.verdict === 'STRONG' ? '✓ strong' : 'moderate'}: ${r.level}`;
     const body = `${dirWord} @ ${r.price} · score ${r.score}/100 · ${r.reasons.slice(0, 3).join(', ')}`;
-    try {
-      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-        new Notification(title, { body, tag: `brk-${r.level}-${r.brokeAt}` });
-      }
-    } catch(e) {}
+    trayNotify(title, body, `brk-${r.level}-${r.brokeAt}`);
     // NO in-app toast. This alert already reaches Martin three other ways — the
     // phone notification above, the bell/Notifications list below, and the tone —
     // so the toast was a fourth copy of the same thing, and it landed as a large
