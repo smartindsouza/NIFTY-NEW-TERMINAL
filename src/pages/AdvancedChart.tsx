@@ -3043,6 +3043,39 @@ export function AdvancedChart() {
     } catch(e) {}
     return true;
   });
+  // Directional Zones appearance. Defaults are the Pine script's OWN colours and
+  // alphas, so an untouched terminal still matches TradingView box-for-box — the
+  // parity Martin verified. Changing these is a display choice and cannot affect
+  // zone detection: computeDirectionalZones never sees them.
+  const DZ_DEFAULTS = {
+    external:            { color: '#4576ff', opacity: 30 },
+    old_external:        { color: '#4576ff', opacity: 10 },
+    old_external_tapped: { color: '#b26ad3', opacity: 27 },
+  };
+  const [dzStyle, setDzStyle] = useState<Record<string, { color: string; opacity: number }>>(() => {
+    try {
+      const raw = localStorage.getItem('dzStyle');
+      if (raw) {
+        const p = JSON.parse(raw);
+        // Merge over defaults so a partial or older saved object cannot leave a
+        // zone kind undefined and unrenderable.
+        return {
+          external: { ...DZ_DEFAULTS.external, ...(p?.external || {}) },
+          old_external: { ...DZ_DEFAULTS.old_external, ...(p?.old_external || {}) },
+          old_external_tapped: { ...DZ_DEFAULTS.old_external_tapped, ...(p?.old_external_tapped || {}) },
+        };
+      }
+    } catch(e) {}
+    return { ...DZ_DEFAULTS };
+  });
+  useEffect(() => {
+    try { localStorage.setItem('dzStyle', JSON.stringify(dzStyle)); } catch(e) {}
+  }, [dzStyle]);
+  const dzStyleRef = useRef(dzStyle);
+  dzStyleRef.current = dzStyle;
+  const setDzPart = (kind: string, patch: { color?: string; opacity?: number }) =>
+    setDzStyle(prev => ({ ...prev, [kind]: { ...prev[kind], ...patch } }));
+
   const [dsZoneOpacity, setDsZoneOpacity] = useState<string>(() => {
     try { return localStorage.getItem('dsZoneOpacity') || '8'; } catch(e) {}
     return '8';
@@ -8070,15 +8103,17 @@ export function AdvancedChart() {
                   // only what happens NEXT, not the whole day's taps at once.
                   try { detectZoneTaps(obZonesRef.current, `${instrumentToken}|${timeframe}`); } catch(e) {}
                 }
-                // Directional Zones render with the Pine script's own colors at its
-                // default inputs — the acceptance test is a box-for-box match with
-                // TradingView on the same candles, so the DS-zone opacity slider
-                // deliberately does not apply here. border_width=0 in the source
-                // means fill only: no stroke, no end-cap, no label.
-                const DZ_FILL: Record<string, string> = {
-                  external: 'rgba(69,118,255,0.30)',
-                  old_external: 'rgba(69,118,255,0.10)',
-                  old_external_tapped: 'rgba(178,106,211,0.27)',
+                // Directional Zones fills come from the user's own settings, which
+                // START at the Pine script's colours and alphas — so an untouched
+                // terminal still matches TradingView. Read through a ref because
+                // this canvas callback is created once per chart build. The
+                // separate DS-zone opacity slider still does not apply here: these
+                // are a different indicator with their own controls.
+                // border_width=0 in the source means fill only: no stroke, no label.
+                const dzS = dzStyleRef.current || {};
+                const dzFill = (kind: string) => {
+                  const st = (dzS as any)[kind] || { color: '#4576ff', opacity: 10 };
+                  return hexToRgba(st.color, Math.min(100, Math.max(0, st.opacity)) / 100);
                 };
                 for (const z of obZonesRef.current) {
                   const yTop = mainSeriesRef.current.priceToCoordinate(z.top);
@@ -8096,7 +8131,7 @@ export function AdvancedChart() {
                   const zw = Math.max(0, zRight - zx);
                   if (zw <= 0) continue;
                   const yA = Math.min(yTop, yBot), h = Math.abs(yBot - yTop);
-                  ctx.fillStyle = DZ_FILL[z.kind] || 'rgba(69,118,255,0.10)';
+                  ctx.fillStyle = dzFill(z.kind);
                   ctx.fillRect(zx, yA, zw, h);
                 }
               }
@@ -8759,6 +8794,33 @@ export function AdvancedChart() {
                       <span>Directional Zones</span>
                     </button>
                   </div>
+                  {/* Per-kind colour + transparency. Only shown while the indicator
+                      is on, so the menu does not grow for people not using it. */}
+                  {showOrderBlocks && (
+                    <div className="px-3 pb-2 pl-9 space-y-2">
+                      {([
+                        ['external', 'Active zone'],
+                        ['old_external', 'Old zone'],
+                        ['old_external_tapped', 'Tapped zone'],
+                      ] as [string, string][]).map(([kind, label]) => (
+                        <div key={kind} className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] text-muted-foreground">{label}</span>
+                          <TVStylePicker
+                            color={dzStyle[kind].color}
+                            opacity={dzStyle[kind].opacity}
+                            onColorChange={(c) => setDzPart(kind, { color: c })}
+                            onOpacityChange={(o) => setDzPart(kind, { opacity: o })}
+                          />
+                        </div>
+                      ))}
+                      <button
+                        onClick={() => setDzStyle({ ...DZ_DEFAULTS })}
+                        className="text-[11px] text-muted-foreground hover:text-foreground transition-colors underline"
+                      >
+                        Reset to TradingView colours
+                      </button>
+                    </div>
+                  )}
 
                   {/* Fair Value Gaps */}
                   <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
