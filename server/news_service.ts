@@ -150,38 +150,89 @@ interface CheckResult {
   sentiment: 'bullish' | 'bearish' | 'neutral';
 }
 
+// Sentiment for the NIFTY, which is not the same thing as sentiment for the
+// subject of the headline. Two faults made the old counter unreliable, and both
+// are fixed here:
+//
+// 1) It matched raw substrings, so 'up' fired inside sUPply and disrUPtion,
+//    'gain' inside aGAINst ("rupee falls against dollar" scored BULLISH), and
+//    'low' inside infLOW ("FII inflows" scored BEARISH). Everything is now
+//    matched on word boundaries.
+//
+// 2) It had no idea WHAT was rising. Crude, the dollar and US yields going up
+//    are BEARISH for Indian equities, but 'gain'/'rise' were hardcoded bullish —
+//    which is how "Crude oil prices gain on fresh US-Iran tensions" was tagged
+//    BULLISH while its own explainer said fuel inflation and a wider current
+//    account deficit. Direction is now read separately from subject, and the
+//    subject decides the sign.
+//
+// Deliberately conservative: anything mixed, weak or unrecognised returns
+// neutral. On a trading screen a wrong direction is far worse than no call.
+const WORD = (term: string) => {
+  // Terms ending in '*' are prefixes (escalat* -> escalate/escalating/escalation).
+  const esc = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return term.endsWith('*')
+    ? new RegExp(`\\b${esc.slice(0, -2)}`, 'i')
+    : new RegExp(`\\b${esc}\\b`, 'i');
+};
+const HITS = (text: string, terms: string[]) => terms.filter(t => WORD(t).test(text));
+
+// Things that move OPPOSITE to Indian equities: when these rise, NIFTY suffers.
+const INVERSE_SUBJECTS = [
+  'crude', 'crude oil', 'brent', 'wti', 'oil price', 'oil prices', 'opec',
+  'dollar index', 'dxy', 'us yields', 'bond yields', 'treasury yields',
+  'vix', 'india vix', 'inflation', 'cpi', 'wpi', 'current account deficit',
+];
+// Subjects whose direction says nothing reliable about NIFTY. Gold at a record
+// high can mean risk-off (bearish) or ordinary inflation drift (neutral), so no
+// directional call is made from them at all — the risk/good/bad terms in the
+// same headline still count.
+const NEUTRAL_SUBJECTS = ['gold', 'silver', 'bitcoin', 'crypto', 'ethereum'];
+const UP_WORDS = ['gain', 'gains', 'rise', 'rises', 'rising', 'surge', 'surges', 'jump', 'jumps',
+  'rally', 'rallies', 'climb', 'climbs', 'soar', 'soars', 'spike', 'spikes', 'higher', 'up',
+  'advance', 'advances', 'above', 'record high', 'all-time high', 'lift', 'lifts', 'boost'];
+const DOWN_WORDS = ['fall', 'falls', 'falling', 'drop', 'drops', 'decline', 'declines', 'slump',
+  'slumps', 'plunge', 'plunges', 'crash', 'crashes', 'slip', 'slips', 'sink', 'sinks', 'tumble',
+  'tumbles', 'lower', 'down', 'ease', 'eases', 'easing', 'cool', 'cools', 'below', 'retreat', 'retreats'];
+
+// Bearish for India regardless of which way the sentence points them.
+const RISK_TERMS = ['war', 'missile', 'strike', 'strikes', 'attack', 'attacks', 'sanction', 'sanctions',
+  'escalat*', 'conflict', 'invasion', 'tension', 'tensions', 'tariff', 'tariffs', 'hawkish',
+  'rate hike', 'rate hikes', 'downgrade', 'default', 'crisis', 'disruption', 'disruptions',
+  'shortage', 'shortages', 'ban', 'curbs'];
+// Directly good / bad for Indian equities, subject already implied.
+const GOOD_TERMS = ['fii inflow', 'fii inflows', 'net buyer', 'net buyers', 'inflow', 'inflows',
+  'dividend', 'buyback', 'acquisition', 'merger', 'expansion', 'upgrade', 'beat earnings',
+  'profit rise', 'profit rises', 'stimulus', 'rate cut', 'rate cuts', 'dovish', 'gdp growth'];
+const BAD_TERMS = ['fii outflow', 'fii outflows', 'net seller', 'net sellers', 'outflow', 'outflows',
+  'profit fall', 'profit falls', 'loss', 'losses', 'weak', 'weakness', 'slippage', 'layoff',
+  'layoffs', 'fraud', 'probe', 'selling pressure'];
+
 function determineSentiment(title: string, description: string): 'bullish' | 'bearish' | 'neutral' {
-  const combined = `${title} ${description}`.toLowerCase();
-  
-  const bearishTerms = [
-    'crash', 'plunge', 'slump', 'drop', 'fall', 'decline', 'loss', 'weak', 'drag', 'low',
-    'bearish', 'selling', 'outflow', 'net seller', 'hawkish', 'rate hike', 'escalat', 'war',
-    'conflict', 'missile', 'tension', 'tariff', 'strike', 'inflation spike', 'crude spike', 
-    'rupee slide', 'profit fall', 'deficit', 'slippage'
-  ];
+  // The TITLE carries the claim; descriptions often list unrelated context, so
+  // the title is weighted double.
+  const t = String(title || '');
+  const combined = `${t} ${description || ''}`;
 
-  const bullishTerms = [
-    'bounce', 'rise', 'rally', 'surge', 'jump', 'gain', 'growth', 'up', 'all-time high',
-    'record high', 'bullish', 'buying', 'inflow', 'net buyer', 'easing rate', 'dividend',
-    'acquisition', 'merger', 'expansion', 'recover', 'beat earnings', 'profit rise'
-  ];
+  let score = 0;
 
-  let bearishCount = 0;
-  let bullishCount = 0;
-
-  for (const term of bearishTerms) {
-    if (combined.includes(term)) bearishCount++;
+  // Directional move, signed by what is actually moving.
+  const subjectIsInverse = HITS(t, INVERSE_SUBJECTS).length > 0 || HITS(combined, INVERSE_SUBJECTS).length > 1;
+  const subjectIsNeutral = HITS(t, NEUTRAL_SUBJECTS).length > 0 && !subjectIsInverse;
+  const ups = HITS(t, UP_WORDS).length * 2 + HITS(description || '', UP_WORDS).length;
+  const downs = HITS(t, DOWN_WORDS).length * 2 + HITS(description || '', DOWN_WORDS).length;
+  if (ups !== downs && !subjectIsNeutral) {
+    const dir = ups > downs ? 1 : -1;
+    score += subjectIsInverse ? -dir * 2 : dir * 2;   // crude/dollar/inflation UP => bearish
   }
 
-  for (const term of bullishTerms) {
-    if (combined.includes(term)) bullishCount++;
-  }
+  // Standing risk backdrop, and India-specific good/bad.
+  score -= HITS(t, RISK_TERMS).length * 2 + HITS(description || '', RISK_TERMS).length;
+  score += HITS(t, GOOD_TERMS).length * 2 + HITS(description || '', GOOD_TERMS).length;
+  score -= HITS(t, BAD_TERMS).length * 2 + HITS(description || '', BAD_TERMS).length;
 
-  if (bearishCount > bullishCount) {
-    return 'bearish';
-  } else if (bullishCount > bearishCount) {
-    return 'bullish';
-  }
+  if (score >= 2) return 'bullish';
+  if (score <= -2) return 'bearish';
   return 'neutral';
 }
 
