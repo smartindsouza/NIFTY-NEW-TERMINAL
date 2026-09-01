@@ -1807,6 +1807,75 @@ function OiBarsEditorModal({
   );
 }
 
+// Directional Zones appearance. Live preview like the OI Bars editor: every
+// change paints immediately via onChange, Cancel restores the snapshot taken on
+// open, Ok keeps it. Display only — computeDirectionalZones never sees any of it.
+function DirectionalZonesEditorModal({
+  onClose,
+  initialStyle,
+  defaults,
+  onApply,
+  onChange,
+}: {
+  onClose: () => void,
+  initialStyle: Record<string, { color: string; opacity: number }>,
+  defaults: Record<string, { color: string; opacity: number }>,
+  onApply: (style: Record<string, { color: string; opacity: number }>) => void,
+  onChange?: (style: Record<string, { color: string; opacity: number }>) => void,
+}) {
+  const [style, setStyle] = useState(initialStyle);
+  useEffect(() => { if (onChange) onChange(style); }, [style, onChange]);
+  const setPart = (kind: string, patch: { color?: string; opacity?: number }) =>
+    setStyle(prev => ({ ...prev, [kind]: { ...prev[kind], ...patch } }));
+  const ROWS: [string, string][] = [
+    ['external', 'Active zone'],
+    ['old_external', 'Old zone'],
+    ['old_external_tapped', 'Tapped zone'],
+  ];
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-transparent p-4 animate-in fade-in duration-250" onClick={onClose}>
+      <div
+        className="bg-card border border-0 rounded-lg w-full max-w-[320px] overflow-visible flex flex-col pt-1 relative"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between p-4 border-b border-0">
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-medium text-foreground">Directional Zones</h2>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-5">
+          {ROWS.map(([kind, label]) => (
+            <div key={kind} className="flex items-center justify-between">
+              <div className="text-sm font-medium text-foreground/80">{label}</div>
+              <TVStylePicker
+                color={style[kind]?.color ?? defaults[kind].color}
+                opacity={style[kind]?.opacity ?? defaults[kind].opacity}
+                onColorChange={(c) => setPart(kind, { color: c })}
+                onOpacityChange={(o) => setPart(kind, { opacity: o })}
+              />
+            </div>
+          ))}
+          <button
+            onClick={() => setStyle({ ...defaults })}
+            className="text-[11px] text-muted-foreground hover:text-foreground transition-colors underline"
+          >
+            Reset to TradingView colours
+          </button>
+        </div>
+
+        <div className="flex items-center justify-end p-4 border-t border-0 bg-muted gap-2 mt-2">
+          <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
+          <button onClick={() => onApply(style)} className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium">Ok</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RsiEditorModal({
   onClose,
   initialColor,
@@ -3073,8 +3142,6 @@ export function AdvancedChart() {
   }, [dzStyle]);
   const dzStyleRef = useRef(dzStyle);
   dzStyleRef.current = dzStyle;
-  const setDzPart = (kind: string, patch: { color?: string; opacity?: number }) =>
-    setDzStyle(prev => ({ ...prev, [kind]: { ...prev[kind], ...patch } }));
 
   const [dsZoneOpacity, setDsZoneOpacity] = useState<string>(() => {
     try { return localStorage.getItem('dsZoneOpacity') || '8'; } catch(e) {}
@@ -3865,6 +3932,9 @@ export function AdvancedChart() {
   const [isEditingSnR, setIsEditingSnR] = useState(false);
   const [isEditingBB, setIsEditingBB] = useState(false);
   const [isEditingOiBars, setIsEditingOiBars] = useState(false);
+  const [isEditingDz, setIsEditingDz] = useState(false);
+  // Snapshot taken when the editor opens, so Cancel can undo a live preview.
+  const dzStyleSnapshotRef = useRef(dzStyle);
   const [isEditingRsi, setIsEditingRsi] = useState(false);
 
   const logicalRangeRef = useRef<any>(null);
@@ -8795,34 +8865,21 @@ export function AdvancedChart() {
                       </div>
                       <span>Directional Zones</span>
                     </button>
+                    {/* Same gear affordance as OI Bars / RSI: settings on tap
+                        rather than an always-open panel cluttering the menu. */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        dzStyleSnapshotRef.current = dzStyle;   // for Cancel
+                        setIsEditingDz(true);
+                        setIsIndicatorsOpen(false);
+                      }}
+                      className="text-muted-foreground hover:text-foreground p-1 hover:bg-slate-700 rounded transition-colors"
+                      title="Directional Zones Settings"
+                    >
+                      <Settings size={13} />
+                    </button>
                   </div>
-                  {/* Per-kind colour + transparency. Only shown while the indicator
-                      is on, so the menu does not grow for people not using it. */}
-                  {showOrderBlocks && (
-                    <div className="px-3 pb-2 pl-9 space-y-2">
-                      {([
-                        ['external', 'Active zone'],
-                        ['old_external', 'Old zone'],
-                        ['old_external_tapped', 'Tapped zone'],
-                      ] as [string, string][]).map(([kind, label]) => (
-                        <div key={kind} className="flex items-center justify-between gap-2">
-                          <span className="text-[11px] text-muted-foreground">{label}</span>
-                          <TVStylePicker
-                            color={dzStyle[kind].color}
-                            opacity={dzStyle[kind].opacity}
-                            onColorChange={(c) => setDzPart(kind, { color: c })}
-                            onOpacityChange={(o) => setDzPart(kind, { opacity: o })}
-                          />
-                        </div>
-                      ))}
-                      <button
-                        onClick={() => setDzStyle({ ...DZ_DEFAULTS })}
-                        className="text-[11px] text-muted-foreground hover:text-foreground transition-colors underline"
-                      >
-                        Reset to TradingView colours
-                      </button>
-                    </div>
-                  )}
 
                   {/* Fair Value Gaps */}
                   <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
@@ -9685,6 +9742,16 @@ export function AdvancedChart() {
             setBbColor(color);
             setIsEditingBB(false);
           }}
+        />
+      )}
+
+      {isEditingDz && (
+        <DirectionalZonesEditorModal
+          initialStyle={dzStyle}
+          defaults={DZ_DEFAULTS}
+          onClose={() => { setDzStyle(dzStyleSnapshotRef.current); setIsEditingDz(false); }}
+          onApply={(style) => { setDzStyle(style); setIsEditingDz(false); }}
+          onChange={(style) => setDzStyle(style)}
         />
       )}
 
