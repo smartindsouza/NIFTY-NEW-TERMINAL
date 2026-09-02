@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight } from "lucide-react";
+import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale } from "lucide-react";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { getDivergences } from "../lib/divergence";
@@ -4005,6 +4005,31 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const [isEditingOiBars, setIsEditingOiBars] = useState(false);
   const [isEditingDz, setIsEditingDz] = useState(false);
   const [isEditingTpSl, setIsEditingTpSl] = useState(false);
+
+  // ===== Risk:Reward tool =====
+  // A measuring tool, deliberately inert: it never arms, orders or touches the
+  // exit rule. Placing one is tap-to-place like a drawing, and the box is local
+  // to the chart it was placed on.
+  const [rrArm, setRrArm] = useState<null | 'long' | 'short'>(null);
+  const [rrMenuOpen, setRrMenuOpen] = useState(false);
+  const rrMenuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!rrMenuOpen) return;
+    const onDown = (ev: MouseEvent | TouchEvent) => {
+      if (rrMenuRef.current && !rrMenuRef.current.contains(ev.target as Node)) setRrMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('touchstart', onDown);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('touchstart', onDown);
+    };
+  }, [rrMenuOpen]);
+  const [rrBox, setRrBox] = useState<null | { kind: 'long' | 'short'; entry: number; stop: number; target: number }>(null);
+  const rrBoxRef = useRef(rrBox);
+  rrBoxRef.current = rrBox;
+  const rrArmRef = useRef(rrArm);
+  rrArmRef.current = rrArm;
   // 10 / 20 preserves the levels this terminal has always defaulted to, so
   // nothing changes for a trade taken before these are ever opened.
   const [tpSlDefaults, setTpSlDefaults] = useState<{ slPct: number; tpPct: number }>(() => {
@@ -4314,7 +4339,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // under the finger the instant you touch it — with a 24px grab zone that is a
   // visible jump of up to 24px before you have moved at all, which is what made
   // the lines feel imprecise.
-  const draggingLineRef = useRef<{ id: number, startY: number, dragged: boolean, grabOffset?: number, sl?: 'upper' | 'lower', smap?: 'sl' | 'tp' } | null>(null);
+  const draggingLineRef = useRef<{ id: number, startY: number, dragged: boolean, grabOffset?: number, sl?: 'upper' | 'lower', smap?: 'sl' | 'tp', rr?: 'stop' | 'target' } | null>(null);
 
   // NSE quotes options in 5-paise ticks. Snapping means the value armed is a
   // price that can actually exist, instead of 162.38471 from wherever a thumb
@@ -4556,6 +4581,22 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         }
     }
 
+    // R:R stop and target edges. Checked before manual lines so a box sitting on
+    // top of a drawing still grabs; the entry line is intentionally not draggable
+    // (move the whole box by placing a new one).
+    if (rrBoxRef.current) {
+      const box = rrBoxRef.current;
+      for (const edge of ['stop', 'target'] as const) {
+        const edgeY = mainSeriesRef.current.priceToCoordinate(box[edge]);
+        if (edgeY !== null && Math.abs(edgeY - y) < 22) {
+          draggingLineRef.current = { id: -3, startY: y, dragged: false, grabOffset: edgeY - y, rr: edge };
+          mainChartRef.current.applyOptions({ handleScroll: false, handleScale: false });
+          beginLineDrag(e);
+          return;
+        }
+      }
+    }
+
     let foundLineId = null;
     for (let i = 0; i < manualLinesRef.current.length; i++) {
         const line = manualLinesRef.current[i];
@@ -4586,6 +4627,16 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     const anchoredY = y + (draggingLineRef.current.grabOffset || 0);
     const rawPrice = mainSeriesRef.current.coordinateToPrice(anchoredY);
     const newPrice = rawPrice === null ? null : snapTick(rawPrice);
+
+    // R:R edge drag. Purely visual, so it updates state directly and needs no
+    // commit on release.
+    if (draggingLineRef.current.rr) {
+      if (newPrice !== null) {
+        const edge = draggingLineRef.current.rr;
+        setRrBox(prev => prev ? { ...prev, [edge]: newPrice } : prev);
+      }
+      return;
+    }
 
     // Mirrored spot line drag. The label shows the premium this index level
     // implies, estimated locally from delta so it tracks the finger; the EXACT
@@ -7393,6 +7444,27 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
           const price = mainSeries.coordinateToPrice(y);
 
+          // R:R tool takes the tap before anything else, so arming it cannot fire
+          // a trade by accident — and it returns, so the click never reaches the
+          // order paths below.
+          if (rrArmRef.current && price !== null) {
+            const kind = rrArmRef.current;
+            // Stop distance from recent range rather than a fixed percentage, so
+            // the box is sized to how this instrument is actually moving. Target
+            // is placed at 2R, which is what the ratio readout starts from.
+            const cds = chartDataRef.current?.candles || [];
+            const recent = cds.slice(-14);
+            const avgRange = recent.length
+              ? recent.reduce((a: number, c: any) => a + Math.abs((c.high ?? 0) - (c.low ?? 0)), 0) / recent.length
+              : Math.abs(price) * 0.003;
+            const risk = Math.max(avgRange, Math.abs(price) * 0.0005) || 1;
+            setRrBox(kind === 'long'
+              ? { kind, entry: price, stop: price - risk, target: price + risk * 2 }
+              : { kind, entry: price, stop: price + risk, target: price - risk * 2 });
+            setRrArm(null);
+            return;
+          }
+
           // OPTION CHART: tapping buys THE CONTRACT ON SCREEN, at market, via the
           // normal order ticket — which is the confirmation step. The strike menu
           // is still never shown here: the y-coordinate on this chart is a PREMIUM,
@@ -8453,6 +8525,47 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                  const y = mainSeriesRef.current.priceToCoordinate(pdlPrice);
                  if (y !== null) linesToDraw.push({ text: `PDL ${pdlPrice}`, y, color: pdlColor, dash: pdhPdlDash, lineWidth: pdhPdlWidth });
               }
+              // R:R box: risk zone entry->stop, reward zone entry->target, with the
+              // live ratio. Drawn before the level labels so those stay readable.
+              if (rrBox) {
+                const yE = mainSeriesRef.current.priceToCoordinate(rrBox.entry);
+                const yS = mainSeriesRef.current.priceToCoordinate(rrBox.stop);
+                const yT = mainSeriesRef.current.priceToCoordinate(rrBox.target);
+                if (yE !== null && yS !== null && yT !== null) {
+                  const x0 = 0, x1 = textAlignX;
+                  ctx.fillStyle = 'rgba(244,63,94,0.14)';
+                  ctx.fillRect(x0, Math.min(yE, yS), x1 - x0, Math.abs(yS - yE));
+                  ctx.fillStyle = 'rgba(16,185,129,0.14)';
+                  ctx.fillRect(x0, Math.min(yE, yT), x1 - x0, Math.abs(yT - yE));
+                  const edge = (yy: number, color: string) => {
+                    ctx.beginPath(); ctx.setLineDash([]); ctx.strokeStyle = color; ctx.lineWidth = 1.5;
+                    ctx.moveTo(x0, yy); ctx.lineTo(x1, yy); ctx.stroke();
+                  };
+                  edge(yS, 'rgba(244,63,94,0.95)');
+                  edge(yT, 'rgba(16,185,129,0.95)');
+                  edge(yE, 'rgba(226,232,240,0.9)');
+                  const risk = Math.abs(rrBox.entry - rrBox.stop);
+                  const reward = Math.abs(rrBox.target - rrBox.entry);
+                  const ratio = risk > 0 ? reward / risk : 0;
+                  const tag = (yy: number, text: string, bg: string) => {
+                    ctx.font = 'bold 10px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+                    const w = ctx.measureText(text).width + 10;
+                    ctx.fillStyle = bg; ctx.fillRect(6, yy - 8, w, 16);
+                    ctx.fillStyle = '#0b0f14'; ctx.fillText(text, 11, yy);
+                  };
+                  tag(yE, `${rrBox.kind === 'long' ? 'LONG' : 'SHORT'} ${rrBox.entry.toFixed(2)}`, 'rgba(226,232,240,0.95)');
+                  tag(yS, `SL ${rrBox.stop.toFixed(2)}  −${risk.toFixed(2)}`, 'rgba(244,63,94,0.95)');
+                  tag(yT, `TP ${rrBox.target.toFixed(2)}  +${reward.toFixed(2)}`, 'rgba(16,185,129,0.95)');
+                  const rrText = `R:R  1 : ${ratio.toFixed(2)}`;
+                  ctx.font = 'bold 11px monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+                  const rw = ctx.measureText(rrText).width + 12;
+                  const ry = (Math.min(yS, yT) + Math.max(yS, yT)) / 2;
+                  ctx.fillStyle = ratio >= 2 ? 'rgba(16,185,129,0.95)' : ratio >= 1 ? 'rgba(234,179,8,0.95)' : 'rgba(244,63,94,0.95)';
+                  ctx.fillRect(x1 - rw - 6, ry - 9, rw, 18);
+                  ctx.fillStyle = '#0b0f14'; ctx.fillText(rrText, x1 - 12, ry);
+                }
+              }
+
               // 15m Opening Range (first 15 min high/low) — centered labels, no Y-axis value
               {
                 const or = (taInfo as any)?.openingRange;
@@ -8961,6 +9074,40 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             currentSymbol={selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel} 
           />
           </div>
+
+          {/* Risk:Reward tool — sits between search and timeframe. md:order-2 puts
+              it in the same slot on desktop, where the toolbar children are
+              explicitly ordered rather than laid out in source order. */}
+          <div className="relative shrink-0 md:order-2" ref={rrMenuRef}>
+            <button
+              onClick={() => {
+                // A placed box is cleared by the same button, so the tool needs no
+                // separate delete affordance on a phone.
+                if (rrBox) { setRrBox(null); setRrArm(null); setRrMenuOpen(false); return; }
+                setRrMenuOpen(o => !o);
+              }}
+              title={rrBox ? 'Clear risk:reward box' : 'Risk:reward tool'}
+              className={`flex items-center justify-center h-9 w-9 rounded-md transition-colors ${
+                rrArm ? 'bg-primary/25 text-primary' : rrBox ? 'bg-emerald-500/15 text-emerald-300' : 'bg-muted/40 text-muted-foreground hover:text-foreground'}`}
+            >
+              <Scale size={17} />
+            </button>
+            {rrMenuOpen && !rrBox && (
+              <div className="absolute bottom-full mb-2 right-0 z-[90] w-40 bg-card border border-white/10 rounded-lg shadow-xl overflow-hidden">
+                <button
+                  onClick={() => { setRrArm('long'); setRrMenuOpen(false); }}
+                  className="w-full text-left px-3 py-2 text-xs font-medium text-emerald-300 hover:bg-muted transition-colors">
+                  Long position
+                </button>
+                <button
+                  onClick={() => { setRrArm('short'); setRrMenuOpen(false); }}
+                  className="w-full text-left px-3 py-2 text-xs font-medium text-rose-300 hover:bg-muted transition-colors">
+                  Short position
+                </button>
+              </div>
+            )}
+          </div>
+
           <div className="flex items-center gap-2 shrink-0 md:order-4">
             <span className="hidden md:inline text-sm text-muted-foreground font-medium">
               Timeframe:
