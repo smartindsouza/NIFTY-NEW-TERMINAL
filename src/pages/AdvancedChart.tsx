@@ -5196,12 +5196,29 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     ? triggerMargin.total / triggerBox.lots : 0;
   const maxLots = marginPerLot > 0 ? Math.max(0, Math.floor((availBalance || 0) / marginPerLot)) : 0;
 
+  // AUTO MAX cannot know the size until Zerodha has quoted a margin, and the
+  // quote needs a lot count to ask about — so the box necessarily opens at 1 lot
+  // and resolves a moment later. It was DISPLAYING that placeholder, which is why
+  // tapping the chart always flashed "1 lot / 65 qty" even though the mode said
+  // AUTO MAX (and why it stayed there for good whenever the margin quote failed).
+  // The count is now withheld until it is the real answer; see sizingPending.
+  //
+  // Functional update: this effect deliberately does not depend on triggerBox, so
+  // its closure holds whatever box existed when the margin last changed. Spreading
+  // that stale copy would silently revert a side or product the user picked while
+  // the quote was in flight.
   useEffect(() => {
-    if (!triggerBox || triggerBox.lotMode !== 'AUTO') return;
-    if (maxLots >= 1 && triggerBox.lots !== maxLots) {
-      setTriggerBox({ ...triggerBox, lots: maxLots });
-    }
-  }, [maxLots, triggerBox?.lotMode]);
+    if (maxLots < 1) return;
+    setTriggerBox(prev => {
+      if (!prev || prev.lotMode !== 'AUTO' || prev.lots === maxLots) return prev;
+      return { ...prev, lots: maxLots };
+    });
+  }, [maxLots]);
+
+  // True while AUTO MAX is still waiting on the margin quote that decides the size.
+  // Once the quote comes back unavailable there is nothing more to wait for, so the
+  // box falls back to showing its real 1-lot size rather than hanging on "sizing".
+  const sizingPending = !!triggerBox && triggerBox.lotMode === 'AUTO' && maxLots < 1 && triggerMargin !== 'unavailable';
 
   // Shortfall reported by the broker at arm time; null when there is nothing to warn about.
   const [marginWarn, setMarginWarn] = useState<any>(null);
@@ -10103,8 +10120,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                 onClick={() => setTriggerBox({ ...triggerBox, lotMode: 'MANUAL', lots: Math.max(1, triggerBox.lots - 1) })}
                 className="w-7 h-7 rounded bg-black/30 text-sm font-bold">−</button>
               <span className="text-xs font-mono">
-                {triggerBox.lots} lot{triggerBox.lots > 1 ? 's' : ''}
-                <span className="text-muted-foreground"> · {triggerBox.lots * (triggerBox.contract.lot_size || 0)} qty</span>
+                {sizingPending ? (
+                  <span className="text-muted-foreground">sizing…</span>
+                ) : (
+                  <>
+                    {triggerBox.lots} lot{triggerBox.lots > 1 ? 's' : ''}
+                    <span className="text-muted-foreground"> · {triggerBox.lots * (triggerBox.contract.lot_size || 0)} qty</span>
+                  </>
+                )}
               </span>
               <button
                 onClick={() => setTriggerBox({ ...triggerBox, lotMode: 'MANUAL', lots: triggerBox.lots + 1 })}
@@ -10120,7 +10143,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                 <button key={b.label}
                   disabled={b.label !== '1 LOT' && maxLots < 1}
                   onClick={() => setTriggerBox({ ...triggerBox, lotMode: 'MANUAL', lots: b.lots })}
-                  className={`flex-1 text-[10px] font-bold py-1.5 rounded transition-colors disabled:opacity-40 ${triggerBox.lots === b.lots ? 'bg-primary/25 text-primary' : 'bg-muted/40 text-muted-foreground hover:text-foreground'}`}>
+                  className={`flex-1 text-[10px] font-bold py-1.5 rounded transition-colors disabled:opacity-40 ${!sizingPending && triggerBox.lots === b.lots ? 'bg-primary/25 text-primary' : 'bg-muted/40 text-muted-foreground hover:text-foreground'}`}>
                   {b.label}
                 </button>
               ))}
