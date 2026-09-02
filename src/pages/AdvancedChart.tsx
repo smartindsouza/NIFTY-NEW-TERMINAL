@@ -4389,8 +4389,17 @@ export function AdvancedChart() {
     const rect = chartContainerRef.current.getBoundingClientRect();
     const y = e.clientY - rect.top;
 
-    // SL/Target lines take priority for dragging
-    for (const sl of slLinesRef.current) {
+    // SL/Target lines take priority for dragging — but ONLY while Quick Trade is
+    // on. Both the premium lines and their mirrored spot counterparts commit a
+    // real change to the armed exit rule when released, so switching Quick Trade
+    // off makes them read-only: they stay visible and keep updating, they just
+    // cannot be moved by a stray thumb on a chart being scrolled. This is the
+    // same switch that already gates one-tap trigger placement, so "Quick Trade
+    // off" now consistently means "no chart gesture changes an order".
+    // Falls through to normal chart panning when off, rather than swallowing it.
+    const canDragExitLines = quickTradeEnabledRef.current;
+
+    for (const sl of (canDragExitLines ? slLinesRef.current : [])) {
         const lineY = mainSeriesRef.current.priceToCoordinate(sl.price);
         // 24px grab zone — draggable with a thumb on mobile, not just a mouse.
         if (lineY !== null && Math.abs(lineY - y) < 24) {
@@ -4402,7 +4411,7 @@ export function AdvancedChart() {
 
     // Mirrored spot SL/TP: same 24px thumb zone. Checked AFTER the real premium
     // lines so that on the option chart those always win.
-    for (const ml of spotMapLinesRef.current) {
+    for (const ml of (canDragExitLines ? spotMapLinesRef.current : [])) {
         const lineY = mainSeriesRef.current.priceToCoordinate(ml.price);
         if (lineY !== null && Math.abs(lineY - y) < 24) {
             draggingLineRef.current = { id: -2, startY: y, dragged: false, smap: ml.kind };
