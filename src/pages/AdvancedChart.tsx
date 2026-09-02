@@ -1810,6 +1810,63 @@ function OiBarsEditorModal({
 // Directional Zones appearance. Live preview like the OI Bars editor: every
 // change paints immediately via onChange, Cancel restores the snapshot taken on
 // open, Ok keeps it. Display only — computeDirectionalZones never sees any of it.
+// Default exit levels applied when a NEW trade appears and the server holds no
+// rule for it yet. Percentages OF THE ENTRY PREMIUM, because that is what the
+// exit rule is denominated in — the same number then drives the spot mirror
+// through the existing Black-Scholes map, so both charts stay consistent.
+function TpSlDefaultsModal({
+  onClose, initialSl, initialTp, onApply,
+}: {
+  onClose: () => void, initialSl: number, initialTp: number,
+  onApply: (slPct: number, tpPct: number) => void,
+}) {
+  const [sl, setSl] = useState(String(initialSl));
+  const [tp, setTp] = useState(String(initialTp));
+  const slN = parseFloat(sl), tpN = parseFloat(tp);
+  // A stop at or beyond 100% of premium cannot be hit before the option is
+  // worthless, and a non-positive target is not a target.
+  const valid = Number.isFinite(slN) && Number.isFinite(tpN) && slN > 0 && slN < 100 && tpN > 0;
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-transparent p-4 animate-in fade-in duration-250" onClick={onClose}>
+      <div className="bg-card border border-0 rounded-lg w-full max-w-[320px] overflow-visible flex flex-col pt-1 relative" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-0">
+          <h2 className="text-lg font-medium text-foreground">TP &amp; SL Defaults</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-4 space-y-4">
+          <div className="text-[11px] text-muted-foreground">
+            Applied when a new trade opens and no exit rule exists yet. Percentages of the entry premium; the spot chart mirrors them automatically.
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium text-foreground/80">Stop loss</div>
+            <div className="flex items-center gap-1">
+              <input type="number" step="0.5" min="0.5" max="99" value={sl} onChange={e => setSl(e.target.value)}
+                className="w-20 text-center bg-card/40 border border-0 font-mono text-sm h-9 rounded focus:outline-none focus:border-primary text-foreground" />
+              <span className="text-xs text-muted-foreground">%</span>
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium text-foreground/80">Target</div>
+            <div className="flex items-center gap-1">
+              <input type="number" step="0.5" min="0.5" value={tp} onChange={e => setTp(e.target.value)}
+                className="w-20 text-center bg-card/40 border border-0 font-mono text-sm h-9 rounded focus:outline-none focus:border-primary text-foreground" />
+              <span className="text-xs text-muted-foreground">%</span>
+            </div>
+          </div>
+          {!valid && <div className="text-[11px] text-amber-400">Stop must be between 0 and 100%; target above 0.</div>}
+          <button onClick={() => { setSl('10'); setTp('20'); }}
+            className="text-[11px] text-muted-foreground hover:text-foreground transition-colors underline">Reset to 10% / 20%</button>
+        </div>
+        <div className="flex items-center justify-end p-4 border-t border-0 bg-muted gap-2 mt-2">
+          <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
+          <button disabled={!valid} onClick={() => onApply(slN, tpN)}
+            className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium disabled:opacity-40">Ok</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DirectionalZonesEditorModal({
   onClose,
   initialStyle,
@@ -3947,6 +4004,25 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const [isEditingBB, setIsEditingBB] = useState(false);
   const [isEditingOiBars, setIsEditingOiBars] = useState(false);
   const [isEditingDz, setIsEditingDz] = useState(false);
+  const [isEditingTpSl, setIsEditingTpSl] = useState(false);
+  // 10 / 20 preserves the levels this terminal has always defaulted to, so
+  // nothing changes for a trade taken before these are ever opened.
+  const [tpSlDefaults, setTpSlDefaults] = useState<{ slPct: number; tpPct: number }>(() => {
+    try {
+      const raw = localStorage.getItem('tpSlDefaults');
+      if (raw) {
+        const p = JSON.parse(raw);
+        const sl = Number(p?.slPct), tp = Number(p?.tpPct);
+        if (Number.isFinite(sl) && sl > 0 && sl < 100 && Number.isFinite(tp) && tp > 0) return { slPct: sl, tpPct: tp };
+      }
+    } catch (e) {}
+    return { slPct: 10, tpPct: 20 };
+  });
+  useEffect(() => {
+    try { localStorage.setItem('tpSlDefaults', JSON.stringify(tpSlDefaults)); } catch (e) {}
+  }, [tpSlDefaults]);
+  const tpSlDefaultsRef = useRef(tpSlDefaults);
+  tpSlDefaultsRef.current = tpSlDefaults;
   // Snapshot taken when the editor opens, so Cancel can undo a live preview.
   const dzStyleSnapshotRef = useRef(dzStyle);
   const [isEditingRsi, setIsEditingRsi] = useState(false);
@@ -4233,7 +4309,30 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const manualLinesRef = useRef<any[]>([]);
   const pdhPdlLinesRef = useRef<{ pdh: any; pdl: any } | null>(null);
   const isHoveringButtonRef = useRef(false);
-  const draggingLineRef = useRef<{ id: number, startY: number, dragged: boolean, sl?: 'upper' | 'lower', smap?: 'sl' | 'tp' } | null>(null);
+  // grabOffset is the gap between the finger and the line's actual position at
+  // the moment it was grabbed. Without it the line teleports so its centre sits
+  // under the finger the instant you touch it — with a 24px grab zone that is a
+  // visible jump of up to 24px before you have moved at all, which is what made
+  // the lines feel imprecise.
+  const draggingLineRef = useRef<{ id: number, startY: number, dragged: boolean, grabOffset?: number, sl?: 'upper' | 'lower', smap?: 'sl' | 'tp' } | null>(null);
+
+  // NSE quotes options in 5-paise ticks. Snapping means the value armed is a
+  // price that can actually exist, instead of 162.38471 from wherever a thumb
+  // happened to land.
+  const TICK = 0.05;
+  const snapTick = (p: number) => Math.round(p / TICK) * TICK;
+
+  // A vertical drag on a chart is also a page-scroll gesture. Without claiming
+  // it the browser can take it mid-drag and the line stops following the finger —
+  // the "doesn't move easily" part. Claimed only while a line is held.
+  const beginLineDrag = (e: React.PointerEvent) => {
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch (err) {}
+    try { if (chartContainerRef.current) chartContainerRef.current.style.touchAction = 'none'; } catch (err) {}
+  };
+  const endLineDrag = (e?: React.PointerEvent) => {
+    try { if (e) (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch (err) {}
+    try { if (chartContainerRef.current) chartContainerRef.current.style.touchAction = ''; } catch (err) {}
+  };
 
   // ===== Phase 2: draggable SL/Target lines feeding the server-side auto-exit watcher =====
   const slLinesRef = useRef<{ kind: 'upper' | 'lower', price: number, instance: any, label: string, color: string }[]>([]);
@@ -4438,8 +4537,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         const lineY = mainSeriesRef.current.priceToCoordinate(sl.price);
         // 24px grab zone — draggable with a thumb on mobile, not just a mouse.
         if (lineY !== null && Math.abs(lineY - y) < 24) {
-            draggingLineRef.current = { id: -1, startY: y, dragged: false, sl: sl.kind };
+            draggingLineRef.current = { id: -1, startY: y, dragged: false, grabOffset: lineY - y, sl: sl.kind };
             mainChartRef.current.applyOptions({ handleScroll: false, handleScale: false });
+            beginLineDrag(e);
             return;
         }
     }
@@ -4449,8 +4549,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     for (const ml of (canDragExitLines ? spotMapLinesRef.current : [])) {
         const lineY = mainSeriesRef.current.priceToCoordinate(ml.price);
         if (lineY !== null && Math.abs(lineY - y) < 24) {
-            draggingLineRef.current = { id: -2, startY: y, dragged: false, smap: ml.kind };
+            draggingLineRef.current = { id: -2, startY: y, dragged: false, grabOffset: lineY - y, smap: ml.kind };
             mainChartRef.current.applyOptions({ handleScroll: false, handleScale: false });
+            beginLineDrag(e);
             return;
         }
     }
@@ -4480,7 +4581,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
        draggingLineRef.current.dragged = true;
     }
 
-    const newPrice = mainSeriesRef.current.coordinateToPrice(y);
+    // Convert the line's position, not the finger's: the line keeps the same
+    // distance from the thumb it had when grabbed, so it tracks rather than jumps.
+    const anchoredY = y + (draggingLineRef.current.grabOffset || 0);
+    const rawPrice = mainSeriesRef.current.coordinateToPrice(anchoredY);
+    const newPrice = rawPrice === null ? null : snapTick(rawPrice);
 
     // Mirrored spot line drag. The label shows the premium this index level
     // implies, estimated locally from delta so it tracks the finger; the EXACT
@@ -4534,6 +4639,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
+    if (draggingLineRef.current) endLineDrag(e);
     // Mirrored spot line release. The dragged INDEX level is converted back to a
     // premium on the server — the same model, the same live IV — and that premium
     // is what gets armed. The protective rule stays premium-based throughout;
@@ -4691,8 +4797,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           };
           apply(0);
         } else {
-          const slP = +((long ? pos.entryPrice * 0.9 : pos.entryPrice * 1.1)).toFixed(2);
-          const tpP = +((long ? pos.entryPrice * 1.2 : pos.entryPrice * 0.8)).toFixed(2);
+          // Read from a ref: this runs inside an async effect, and the user may
+          // have changed the defaults since it started.
+          const { slPct, tpPct } = tpSlDefaultsRef.current;
+          const slP = +((long ? pos.entryPrice * (1 - slPct / 100) : pos.entryPrice * (1 + slPct / 100))).toFixed(2);
+          const tpP = +((long ? pos.entryPrice * (1 + tpPct / 100) : pos.entryPrice * (1 - tpPct / 100))).toFixed(2);
           pushPremiumRule(slP, tpP);   // also sets premRuleRef
         }
       } catch { if (!cancelled) setPremSync('ERROR'); }
@@ -8980,6 +9089,24 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     </button>
                   </div>
 
+                  {/* TP & SL — settings only; there is nothing to draw, so no toggle. */}
+                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                    <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 text-left flex-grow">
+                      <div className="w-4" />
+                      <span>TP &amp; SL</span>
+                      <span className="text-[10px] font-mono text-muted-foreground">
+                        {tpSlDefaults.slPct}% / {tpSlDefaults.tpPct}%
+                      </span>
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setIsEditingTpSl(true); setIsIndicatorsOpen(false); }}
+                      className="text-muted-foreground hover:text-foreground p-1 hover:bg-slate-700 rounded transition-colors"
+                      title="TP & SL Default Levels"
+                    >
+                      <Settings size={13} />
+                    </button>
+                  </div>
+
                   {/* Fair Value Gaps */}
                   <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
                     <button
@@ -9849,6 +9976,15 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             setBbColor(color);
             setIsEditingBB(false);
           }}
+        />
+      )}
+
+      {isEditingTpSl && (
+        <TpSlDefaultsModal
+          initialSl={tpSlDefaults.slPct}
+          initialTp={tpSlDefaults.tpPct}
+          onClose={() => setIsEditingTpSl(false)}
+          onApply={(slPct, tpPct) => { setTpSlDefaults({ slPct, tpPct }); setIsEditingTpSl(false); }}
         />
       )}
 
