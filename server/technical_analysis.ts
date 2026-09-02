@@ -208,6 +208,24 @@ function computeOpeningRange(raw: any[]): { high: number; low: number; date: str
     }
   }
   if (cnt === 0 || hi === -Infinity) return null;
+
+  // The range is only published once the 09:15-09:30 window has CLOSED — i.e.
+  // after the first three 5-minute candles are complete. Previously a single
+  // guard on "at least one candle exists" meant that from 09:16 the terminal
+  // drew 15M HIGH/LOW lines and armed their touch alerts against a window still
+  // being built: the levels crept with every new candle until 09:30, and each
+  // creep re-armed the alerts, so the first fifteen minutes produced touch
+  // notifications for levels that were never the opening range.
+  //
+  // Checked on the CLOCK rather than by counting candles, so it holds at any
+  // chart timeframe — three candles on a 5m, fifteen on a 1m, one on a 15m, all
+  // complete at the same instant. A maxDay in the past is a closed session and
+  // needs no check. IST is UTC+5:30 with no DST.
+  const nowIst = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  const todayIst = nowIst.toISOString().slice(0, 10);
+  const nowMins = nowIst.getUTCHours() * 60 + nowIst.getUTCMinutes();
+  if (maxDay === todayIst && nowMins < 9 * 60 + 30) return null;
+
   return { high: hi, low: lo, date: maxDay };
 }
 
