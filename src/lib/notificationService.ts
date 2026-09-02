@@ -33,6 +33,17 @@ const STORAGE_KEY = "quant_terminal_notification_history";
  */
 const SESSION_SCOPED: SavedNotification["type"][] = ["oi_alert", "divergence"];
 
+/**
+ * Live-chart observations — a level touched, a breakout scored, a divergence
+ * formed, price nearing a midpoint — are marked { ephemeral: true } by the
+ * chart and self-delete after this long. Session scoping alone was not enough:
+ * an alert from 10am was still sitting in the list at 3pm, which is what Martin
+ * meant by old messages. These describe a moment on a live chart; if he did not
+ * see it within a few minutes it has no value, and the chart itself is the
+ * record. Orders and anything without the flag are unaffected.
+ */
+const EPHEMERAL_TTL_MS = 10 * 60 * 1000;
+
 /** Start of the session currently in play: 09:15 IST today, or yesterday's if
  *  the day's session has not opened yet. IST is UTC+5:30 with no DST, so
  *  09:15 IST is exactly 03:45 UTC and fixed arithmetic is safe. */
@@ -48,6 +59,8 @@ function currentSessionStartMs(now: number = Date.now()): number {
 function pruneExpired(list: SavedNotification[], now: number = Date.now()) {
   const cutoff = currentSessionStartMs(now);
   const kept = list.filter((n) => {
+    const t0 = Date.parse(n.timestamp);
+    if (n.metadata?.ephemeral && Number.isFinite(t0) && now - t0 > EPHEMERAL_TTL_MS) return false;
     if (!SESSION_SCOPED.includes(n.type)) return true;
     const t = Date.parse(n.timestamp);
     // An unparseable timestamp is kept rather than silently binned.

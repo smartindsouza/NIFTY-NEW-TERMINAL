@@ -6745,6 +6745,29 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // card in the phone's notification shade, and by the afternoon Martin was
   // scrolling past a wall of stale "Support touched" cards to find anything
   // current. The in-app Alerts list remains the durable record for the session.
+  // THE REPLAY BUG. None of the chart-alert producers below checked whether the
+  // market was open, and all of them hang off effects keyed on chartData — which
+  // re-run on every mount. So opening the app in the evening re-evaluated the
+  // 15:35 closing bar and fired "breakout" and "divergence" alerts for it hours
+  // after the fact, which is exactly what Martin kept receiving. The per-bar
+  // guards (lastBreakoutBarRef and friends) are refs, so a remount resets them
+  // and the same bar alerts again.
+  //
+  // Two conditions now, both required:
+  //   - the market is actually open (09:15-15:40 IST, Mon-Fri), and
+  //   - the data being judged is CURRENT, not a bar being re-read from history.
+  // The second matters even during the session: a mid-morning reload should not
+  // re-announce something that happened before it.
+  const MAX_ALERT_BAR_AGE_MS = 6 * 60 * 1000;
+  const marketAlertsAllowed = (barTimeSec?: number) => {
+    const nowSec = Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current;
+    if (!isMarketOpen(nowSec)) return false;
+    if (typeof barTimeSec === 'number' && Number.isFinite(barTimeSec)) {
+      if (nowSec * 1000 - barTimeSec * 1000 > MAX_ALERT_BAR_AGE_MS) return false;
+    }
+    return true;
+  };
+
   const TRAY_TTL_MS = 25000;
   const trayNotify = (title: string, body: string, tag: string) => {
     try {
@@ -6755,6 +6778,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   };
 
   const fireLevelAlert = (label: string, price: number, spot: number, dirUp: boolean) => {
+    if (!marketAlertsAllowed()) return;
     const title = `${label} touched`;
     const body = `Price ${spot.toFixed(2)} crossed ${dirUp ? 'up through' : 'down through'} ${label} (${price})`;
     trayNotify(title, body, `lvl-${label}-${price}`);
@@ -6776,10 +6800,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // him) + bell-list entry + a tone, and deliberately NO in-app toast, which on
   // a phone covers the chart it is describing.
   const fireZoneTapAlert = (z: { top: number; bottom: number }) => {
+    if (!marketAlertsAllowed()) return;
     const title = 'Zone tapped';
     const body = `Price tapped a Directional Zone (${z.bottom.toFixed(2)} - ${z.top.toFixed(2)}) on ${timeframe}`;
     trayNotify(title, body, `dztap-${z.top}-${z.bottom}`);
-    try { notificationService.add('divergence', title, body); } catch(e) {}
+    try { notificationService.add('divergence', title, body, { ephemeral: true }); } catch(e) {}
     try {
       const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
       if (AC) {
@@ -6840,6 +6865,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
   // Fire a breakout-authenticity alert (distinct sound from level-touch).
   const fireBreakoutAlert = (r: any) => {
+    if (!marketAlertsAllowed(r?.barTime ?? lastBreakoutBarRef.current)) return;
     const dirWord = r.direction === 'up' ? 'break UP' : 'break DOWN';
     const title = r.verdict === 'FAKEOUT_RISK'
       ? `⚠️ Fakeout risk: ${r.level}`
@@ -6853,7 +6879,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     // was describing. The phone notification is deliberately kept: that one is
     // useful when the app is not in front of him, which is the point of an alert.
     try {
-      notificationService.add('divergence', title, body);
+      notificationService.add('divergence', title, body, { ephemeral: true });
     } catch(e) {}
     try {
       const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
@@ -6939,6 +6965,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       const latestDiv = divergences[divergences.length - 1];
       const divKey = `${timeframe}-${latestDiv.type}-${latestDiv.p1.time}-${latestDiv.p2.time}`;
       
+      // The ref resets on remount, so without the gate a reload re-announced the
+      // last divergence of the day. Judged against the pivot's own bar time.
+      if (!marketAlertsAllowed(latestDiv?.p2?.time)) return;
       if (lastAlertedDivergenceRef.current !== divKey) {
         lastAlertedDivergenceRef.current = divKey;
 
@@ -6964,6 +6993,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           {
             divType: latestDiv.type,
             timeframe,
+            ephemeral: true,   // live-chart observation: self-deletes, see notificationService
           }
         );
       }
@@ -6993,6 +7023,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         const lastAlert = lastAlertedFiftyPercentLevelRef.current;
         
         // Prevent spamming the alert for the same level within 5 minutes
+        if (!marketAlertsAllowed()) continue;
         if (!lastAlert || lastAlert.level !== mid || (now - lastAlert.time > 5 * 60 * 1000)) {
           lastAlertedFiftyPercentLevelRef.current = { level: mid, time: now };
           toast(`⚠️ Approaching 50% Levels`, {
@@ -7002,10 +7033,12 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           });
 
           notificationService.add(
-            "system",
+            // Was filed as "system", which is the one category that never expires —
+            // so this live-price observation outlived every other chart alert.
+            "divergence",
             `Approaching 50% Levels`,
             `Price (${currentPrice}) is near internal H Level midpoint (${mid}).`,
-            { level: mid }
+            { level: mid, ephemeral: true }
           );
         }
       }
