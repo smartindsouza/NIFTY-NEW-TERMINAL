@@ -21,7 +21,10 @@ const OptionChain = lazy(() => import('./pages/OptionChain').then(module => ({ d
 const KiteLogin = lazy(() => import('./pages/KiteLogin').then(module => ({ default: module.KiteLogin })));
 const FiiDii = lazy(() => import('./pages/FiiDii').then(module => ({ default: module.FiiDii })));
 const News = lazy(() => import('./pages/News').then(module => ({ default: module.News })));
-const AdvancedChart = lazy(() => import('./pages/AdvancedChart').then(module => ({ default: module.AdvancedChart })));
+// The chart route now mounts the workspace, which decides between the desktop
+// split (spot left / options right) and — below md — the original single chart,
+// rendered with no props and therefore on its exact previous code path.
+const AdvancedChart = lazy(() => import('./pages/ChartWorkspace').then(module => ({ default: module.ChartWorkspace })));
 
 // New diagnostic lazy performance tabs / auxiliary pages
 const Backtesting = lazy(() => import('./pages/Backtesting'));

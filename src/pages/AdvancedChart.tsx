@@ -2983,7 +2983,18 @@ function persistLogicalRanges() {
   }, 800);
 }
 
-export function AdvancedChart() {
+/**
+ * paneRole splits this component into the two halves of the desktop workspace:
+ *   'spot'   — index charts ONLY. Never displays an option; anything that would
+ *              open one is re-routed to the option pane instead.
+ *   'option' — option charts ONLY, in the tab strip they already use.
+ *   undefined — unchanged single-chart behaviour. MOBILE ALWAYS PASSES NOTHING,
+ *              so every code path below that is not explicitly gated on a role
+ *              behaves exactly as it did before this feature existed.
+ */
+export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {}) {
+  const isSpotPane = paneRole === 'spot';
+  const isOptionPane = paneRole === 'option';
   useProfiler("AdvancedChart");
   const { data: kiteDiagnosticsData } = useQuery({
     queryKey: ['kiteDiagnostics'],
@@ -3890,6 +3901,8 @@ export function AdvancedChart() {
     // hid the index behind a contract that may not even be relevant any more.
     // sessionStorage gives exactly that: survives reloads, dies with the tab.
     try {
+      // The spot pane never restores a saved option — that is the option pane's job.
+      if (paneRole === 'spot') return null;
       const saved = sessionStorage.getItem('selectedInstrument');
       if (saved) return JSON.parse(saved);
     } catch(e) {}
@@ -3903,6 +3916,7 @@ export function AdvancedChart() {
 
   useEffect(() => {
     try {
+      if (isSpotPane) return;               // spot pane owns none of this key
       if (selectedInstrument) {
         sessionStorage.setItem('selectedInstrument', JSON.stringify(selectedInstrument));
       } else {
@@ -3942,6 +3956,27 @@ export function AdvancedChart() {
   // "the user is pinned to the live edge" from "the user scrolled back to look at
   // something", so new candles push the view along in the first case only.
   const rangeBarCountRef = useRef<number>(0);
+
+  // Every path that opens an option chart goes through here. In the spot pane it
+  // hands the contract to the option pane instead of displaying it, which is the
+  // whole point of the split: the left half stays on the index no matter what is
+  // traded or searched. Outside the split (mobile, or the plain component) it is
+  // exactly the old setSelectedInstrument call.
+  const openOptionChart = (instr: any) => {
+    if (isSpotPane) {
+      try { window.dispatchEvent(new CustomEvent('terminal:open-option', { detail: instr })); } catch (e) {}
+      return;
+    }
+    setSelectedInstrument(instr);
+  };
+
+  // The option pane receives contracts opened from the spot pane.
+  useEffect(() => {
+    if (!isOptionPane) return;
+    const onOpen = (e: any) => { if (e?.detail) setSelectedInstrument(e.detail); };
+    window.addEventListener('terminal:open-option', onOpen as any);
+    return () => window.removeEventListener('terminal:open-option', onOpen as any);
+  }, [isOptionPane]);
 
   const cacheKey = `${selectedInstrument?.instrument_token}_${timeframe}`;
 
@@ -4618,7 +4653,7 @@ export function AdvancedChart() {
           tradeInstrumentRef.current = exact;
           setTradeTabInstr(exact);
           autoOpenedForRef.current = sym;
-          setSelectedInstrument(exact); // open the traded option's chart
+          openOptionChart(exact); // open the traded option's chart (routes to the option pane in split view)
         }
       } catch (e) {}
     })();
@@ -5408,7 +5443,7 @@ export function AdvancedChart() {
       // scattered charts across windows; the phone path already did the right
       // thing. Selecting an instrument is what registers it in openCharts, so the
       // tab strip picks it up automatically.
-      setSelectedInstrument({
+      openOptionChart({
         instrument_token: String(contract.instrument_token),
         tradingsymbol: contract.tradingsymbol,
         ...(contract.lot_size ? { lot_size: contract.lot_size } : {}),
@@ -5923,14 +5958,19 @@ export function AdvancedChart() {
   // like the selected contract itself, so a fresh open of the app starts clean.
   const [openCharts, setOpenCharts] = useState<any[]>(() => {
     try {
+      // The spot pane owns no option tabs. It must not even LOAD them: holding a
+      // stale copy in state while the option pane closes one would let the spot
+      // pane's persist effect write the old list back and resurrect a closed tab.
+      if (paneRole === 'spot') return [];
       const saved = sessionStorage.getItem('openOptionCharts');
       const arr = saved ? JSON.parse(saved) : [];
       return Array.isArray(arr) ? arr : [];
     } catch (e) { return []; }
   });
   useEffect(() => {
+    if (isSpotPane) return;                  // single writer: the option pane
     try { sessionStorage.setItem('openOptionCharts', JSON.stringify(openCharts)); } catch (e) {}
-  }, [openCharts]);
+  }, [openCharts, isSpotPane]);
 
   // Whatever option chart gets shown joins the list. Capped so the row cannot grow
   // past what a phone can display.
@@ -9159,22 +9199,22 @@ export function AdvancedChart() {
       ) : (
       <div className="flex flex-col flex-grow gap-0 md:gap-2 min-h-0">
         <div className={`items-center gap-0 px-0 pb-0 shrink-0 overflow-x-auto border-b border-border/60 bg-background/40 ${isFocusedChart ? 'hidden' : 'flex'}`}>
-          <button onClick={() => { setUnderlying('NIFTY'); setSelectedInstrument(null); }}
+          {!isOptionPane && (<button onClick={() => { setUnderlying('NIFTY'); setSelectedInstrument(null); }}
             className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${!selectedInstrument && underlying === 'NIFTY' ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
             NIFTY 50
-          </button>
-          <button onClick={() => { setUnderlying('BANKNIFTY'); setSelectedInstrument(null); }}
+          </button>)}
+          {!isOptionPane && (<button onClick={() => { setUnderlying('BANKNIFTY'); setSelectedInstrument(null); }}
             className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${!selectedInstrument && underlying === 'BANKNIFTY' ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
             BANK NIFTY
-          </button>
-          <button onClick={() => { setUnderlying('SENSEX'); setSelectedInstrument(null); }}
+          </button>)}
+          {!isOptionPane && (<button onClick={() => { setUnderlying('SENSEX'); setSelectedInstrument(null); }}
             className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${!selectedInstrument && underlying === 'SENSEX' ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
             SENSEX
-          </button>
+          </button>)}
 
           {/* Charts opened this session, kept after the index tabs. Tapping an index
               does not close them; the highlight simply moves. */}
-          {openCharts.map((c) => {
+          {(isSpotPane ? [] : openCharts).map((c) => {
             const active = selectedInstrument?.tradingsymbol === c.tradingsymbol;
             return (
               <div key={c.tradingsymbol}
@@ -9187,7 +9227,15 @@ export function AdvancedChart() {
                 </button>
                 <button
                   onClick={() => {
-                    setOpenCharts(prev => prev.filter(x => x.tradingsymbol !== c.tradingsymbol));
+                    setOpenCharts(prev => {
+                      const next = prev.filter(x => x.tradingsymbol !== c.tradingsymbol);
+                      // Last option closed: tell the workspace to collapse back to a
+                      // full-width spot chart rather than leaving an empty half.
+                      if (isOptionPane && next.length === 0) {
+                        try { window.dispatchEvent(new CustomEvent('terminal:options-empty')); } catch (e) {}
+                      }
+                      return next;
+                    });
                     // Only leave the chart if the one being closed is the one on screen.
                     if (active) setSelectedInstrument(null);
                   }}
@@ -9199,7 +9247,7 @@ export function AdvancedChart() {
             );
           })}
 
-          {tradeTabInstr && (
+          {tradeTabInstr && !isSpotPane && (
           <button onClick={() => setSelectedInstrument(tradeTabInstr)}
             className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${selectedInstrument && String(selectedInstrument.instrument_token) === String(tradeTabInstr.instrument_token) ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
             {tradeTabInstr.tradingsymbol}
