@@ -4386,6 +4386,31 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch (err) {}
     try { if (chartContainerRef.current) chartContainerRef.current.style.touchAction = 'none'; } catch (err) {}
   };
+  // WHY touch-action alone was not enough. The browser decides whether a touch
+  // is a scroll at touchstart, from the touch-action in force AT THAT MOMENT.
+  // beginLineDrag sets touch-action:none during pointerdown — which fires first,
+  // but the decision for the gesture already in flight is not revisited, so the
+  // page kept scrolling while a line was being dragged and the line appeared
+  // stuck to the chart. The only reliable way to stop a gesture already underway
+  // is a NON-PASSIVE touchmove listener calling preventDefault, which React's
+  // onTouchMove cannot do because it registers passively.
+  //
+  // Scoped hard: it only preventDefaults while a line drag is actually active, so
+  // ordinary chart panning and pinch-zoom are untouched. Covers all three drag
+  // kinds — premium SL/TP, mirrored spot levels, and R:R edges — because they all
+  // set draggingLineRef.
+  // Bound to the DOCUMENT rather than the chart container on purpose: on first
+  // render the chart is still loading and that container does not exist yet, so a
+  // mount-time listener on the ref would attach to nothing and never re-attach.
+  // Document level also keeps the drag alive if a finger strays off the chart.
+  useEffect(() => {
+    const onTouchMove = (ev: TouchEvent) => {
+      if (draggingLineRef.current && ev.cancelable) ev.preventDefault();
+    };
+    document.addEventListener('touchmove', onTouchMove, { passive: false });
+    return () => document.removeEventListener('touchmove', onTouchMove);
+  }, []);
+
   const endLineDrag = (e?: React.PointerEvent) => {
     try { if (e) (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch (err) {}
     try { if (chartContainerRef.current) chartContainerRef.current.style.touchAction = ''; } catch (err) {}
