@@ -10368,30 +10368,35 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       {/* OPTION REALITY CHECK. A call can fall on a day the index rises, and the
           reasons are not visible anywhere on a price chart: the index never crossed
           the strike, a day of time value evaporated, and calm markets make hope
-          cheaper. These are those numbers, stated plainly. */}
+          cheaper. These are those numbers, stated plainly.
+
+          Kept to ONE horizontally scrolled line: this row used to wrap, and the
+          rows it wrapped onto sat underneath the fixed bottom toolbar on a phone —
+          rendered but unreachable. Every chip is shrink-0 and nowrap so the row
+          scrolls rather than squeezing them to unreadable widths. */}
       {isOptionView && optionReality && (
-        <div className="flex flex-wrap items-center gap-1.5 px-1 pb-1 shrink-0">
-          <span className={`text-[10px] font-mono font-bold px-2 py-1 rounded ${optionReality.inTheMoney ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'}`}>
+        <div className="flex flex-nowrap items-center gap-1.5 px-1 pb-1 shrink-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <span className={`shrink-0 whitespace-nowrap text-[10px] font-mono font-bold px-2 py-1 rounded ${optionReality.inTheMoney ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'}`}>
             {optionReality.inTheMoney
               ? `IN THE MONEY by ${Math.round(optionReality.intrinsic)}`
               : `NEEDS ${Math.round(Math.abs(optionReality.type === 'CE' ? optionReality.strike - optionReality.spot : optionReality.spot - optionReality.strike))} PTS TO REACH STRIKE`}
           </span>
-          <span className="text-[10px] font-mono px-2 py-1 rounded bg-muted/50 text-muted-foreground">
+          <span className="shrink-0 whitespace-nowrap text-[10px] font-mono px-2 py-1 rounded bg-muted/50 text-muted-foreground">
             BREAK EVEN {Math.round(optionReality.breakeven)}
             <span className="text-foreground/80 font-bold"> · {optionReality.moveNeeded > 0 ? `${Math.round(optionReality.moveNeeded)} pts away` : 'passed'}</span>
           </span>
           {optionReality.thetaPerDayRupees != null && (
-            <span className="text-[10px] font-mono px-2 py-1 rounded bg-rose-500/15 text-rose-300" title="What one lot loses per day from time alone, index unchanged">
+            <span className="shrink-0 whitespace-nowrap text-[10px] font-mono px-2 py-1 rounded bg-rose-500/15 text-rose-300" title="What one lot loses per day from time alone, index unchanged">
               TIME COST ₹{Math.abs(optionReality.thetaPerDayRupees).toLocaleString('en-IN')}/day
               {optionReality.thetaPctPerDay ? ` (${optionReality.thetaPctPerDay}%)` : ''}
             </span>
           )}
-          <span className="text-[10px] font-mono px-2 py-1 rounded bg-muted/50 text-muted-foreground">
+          <span className="shrink-0 whitespace-nowrap text-[10px] font-mono px-2 py-1 rounded bg-muted/50 text-muted-foreground">
             HOPE VALUE {optionReality.timeValuePct}%
             <span className="opacity-70"> · {optionReality.daysLeft < 1 ? 'expires today' : `${Math.floor(optionReality.daysLeft)}d left`}</span>
           </span>
           {optionReality.iv != null && (
-            <span className="text-[10px] font-mono px-2 py-1 rounded bg-muted/50 text-muted-foreground">IV {optionReality.iv}%</span>
+            <span className="shrink-0 whitespace-nowrap text-[10px] font-mono px-2 py-1 rounded bg-muted/50 text-muted-foreground">IV {optionReality.iv}%</span>
           )}
         </div>
       )}
