@@ -9145,7 +9145,80 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           <AiMarketRead taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} model="claude-sonnet-4-6" />
           <MarketContext />
         </div>
-        <div ref={bottomBarRef} className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-3 py-1.5 md:p-0 flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap justify-end w-screen md:w-auto max-w-[100vw] overflow-x-hidden md:overflow-visible">
+
+      </div>
+      
+
+
+      {isLoading && (!chartData || chartData.candles.length === 0) ? (
+        <div className="flex items-center justify-center flex-grow">
+          <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : (
+      <div className="flex flex-col flex-grow gap-0 md:gap-2 min-h-0">
+        {/* Tabs left, controls right, one line, directly above the chart. The
+            tabs keep their own overflow-x so they still scroll; the controls sit
+            OUTSIDE that scroller, because dropdowns opened from inside it would
+            be clipped. */}
+        <div className={`items-center gap-2 px-0 pb-0 shrink-0 border-b border-border/60 bg-background/40 ${isFocusedChart ? 'hidden' : 'flex'}`}>
+          <div className="flex items-center gap-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden min-w-0">
+          {!isOptionPane && (<button onClick={() => { setUnderlying('NIFTY'); setSelectedInstrument(null); }}
+            className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${!selectedInstrument && underlying === 'NIFTY' ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
+            NIFTY 50
+          </button>)}
+          {!isOptionPane && (<button onClick={() => { setUnderlying('BANKNIFTY'); setSelectedInstrument(null); }}
+            className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${!selectedInstrument && underlying === 'BANKNIFTY' ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
+            BANK NIFTY
+          </button>)}
+          {!isOptionPane && (<button onClick={() => { setUnderlying('SENSEX'); setSelectedInstrument(null); }}
+            className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${!selectedInstrument && underlying === 'SENSEX' ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
+            SENSEX
+          </button>)}
+
+          {/* Charts opened this session, kept after the index tabs. Tapping an index
+              does not close them; the highlight simply moves. */}
+          {(isSpotPane ? [] : openCharts).map((c) => {
+            const active = selectedInstrument?.tradingsymbol === c.tradingsymbol;
+            return (
+              <div key={c.tradingsymbol}
+                className={`flex items-center gap-1 pl-2 pr-1 h-8 rounded-none shrink-0 transition-colors border-b-2 border-r border-r-border/40 ${active ? 'border-b-primary bg-primary/10' : 'border-b-transparent bg-transparent hover:bg-muted/30'}`}>
+                <button
+                  onClick={() => setSelectedInstrument(c)}
+                  className={`text-xs font-mono font-bold whitespace-nowrap ${active ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
+                  {prettyOptionName(c.tradingsymbol,
+                    contractExpiry?.symbol === c.tradingsymbol ? contractExpiry.expiry : null)}
+                </button>
+                <button
+                  onClick={() => {
+                    setOpenCharts(prev => {
+                      const next = prev.filter(x => x.tradingsymbol !== c.tradingsymbol);
+                      // Last option closed: tell the workspace to collapse back to a
+                      // full-width spot chart rather than leaving an empty half.
+                      if (isOptionPane && next.length === 0) {
+                        try { window.dispatchEvent(new CustomEvent('terminal:options-empty')); } catch (e) {}
+                      }
+                      return next;
+                    });
+                    // Only leave the chart if the one being closed is the one on screen.
+                    if (active) setSelectedInstrument(null);
+                  }}
+                  title="Close this chart"
+                  className={`text-sm leading-none px-1 ${active ? 'text-primary/70 hover:text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
+                  ×
+                </button>
+              </div>
+            );
+          })}
+
+          {tradeTabInstr && !isSpotPane && (
+          <button onClick={() => setSelectedInstrument(tradeTabInstr)}
+            className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${selectedInstrument && String(selectedInstrument.instrument_token) === String(tradeTabInstr.instrument_token) ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
+            {tradeTabInstr.tradingsymbol}
+          </button>
+          )}
+          <TradePnl sync={premSync} />
+          </div>
+        <div ref={bottomBarRef} className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-3 py-1.5 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-nowrap justify-end w-screen md:w-auto md:ml-auto md:mb-1 md:rounded-md md:border md:border-border/60 md:bg-muted/30 max-w-[100vw] overflow-x-hidden md:overflow-visible">
           <div className="flex flex-1 items-center gap-1.5 sm:gap-2 justify-end min-w-0 md:contents">
           {/* Desktop: an icon until clicked. Mobile: unchanged — the field is
               always shown, which is what the bottom toolbar was built around. */}
@@ -9203,9 +9276,6 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           </div>
 
           <div className="flex items-center gap-2 shrink-0 md:order-4">
-            <span className="hidden md:inline text-sm text-muted-foreground font-medium">
-              Timeframe:
-            </span>
             <select
               value={timeframe}
               onChange={(e) => setTimeframe(e.target.value)}
@@ -9222,15 +9292,15 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               <option value="43200">1M</option>
             </select>
           </div>
-          <div className="flex md:bg-muted md:p-1 rounded-md shrink-0 md:order-3">
+          <div className="flex rounded-md shrink-0 md:order-3">
             <div className="relative" ref={indicatorsRef}>
               <button
                 onClick={() => setIsIndicatorsOpen(!isIndicatorsOpen)}
-                className={`flex items-center justify-center md:justify-start gap-1.5 h-9 w-9 md:w-auto md:h-auto md:px-3 md:py-1.5 text-sm font-medium rounded-md md:rounded-sm transition-colors ${isIndicatorsOpen ? 'bg-primary/20 text-primary md:bg-background/50' : 'bg-muted/40 md:bg-transparent text-muted-foreground hover:bg-background/50 hover:text-foreground'}`}
+                className={`flex items-center justify-center gap-1.5 h-9 w-9 text-sm font-medium rounded-md transition-colors ${isIndicatorsOpen ? 'bg-primary/20 text-primary md:bg-background/50' : 'bg-muted/40 md:bg-transparent text-muted-foreground hover:bg-background/50 hover:text-foreground'}`}
               >
-                <SlidersHorizontal size={18} className="md:hidden" />
-                <span className="hidden md:inline">Indicators</span>
-                <ChevronDown size={14} className={`hidden md:block transition-transform ${isIndicatorsOpen ? 'rotate-180' : ''}`} />
+                {/* TradingView marks indicators with a beaker; matching it and
+                    dropping the word keeps the strip to one line of icons. */}
+                <FlaskConical size={18} />
               </button>
               {isIndicatorsOpen && (
                 <div className="fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto md:overflow-hidden bg-card border border-white/10 md:border-0 rounded-md py-1.5 z-[45] shadow-2xl flex flex-col">
@@ -9564,13 +9634,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           </div>
           <div className="flex items-center gap-2 flex-none max-w-[45%] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents md:min-w-0 md:basis-auto pr-1">
           {(
-          <div className="ml-auto md:ml-0 flex items-center justify-center gap-2 h-9 w-9 md:w-auto bg-muted/40 border border-0 rounded-md md:px-3 shrink-0 md:order-2 cursor-pointer" onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled' : 'Quick Trade disabled'); } catch (e) {} }} title="Quick Trade">
-             <Zap size={18} className={`md:hidden ${quickTradeEnabled ? 'text-primary' : 'text-muted-foreground'}`} />
-             <span className="hidden md:inline text-xs font-medium text-foreground/80">Quick Trade</span>
-             <label className="relative hidden md:inline-flex items-center cursor-pointer pointer-events-none">
-               <input type="checkbox" className="sr-only peer" checked={quickTradeEnabled} readOnly />
-               <div className="w-7 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after: after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
-             </label>
+          <div className={`ml-auto md:ml-0 flex items-center justify-center gap-2 h-9 w-9 shrink-0 md:order-2 cursor-pointer rounded-md border border-0 transition-colors ${quickTradeEnabled ? "bg-primary/20" : "bg-muted/40"}`} onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled' : 'Quick Trade disabled'); } catch (e) {} }} title="Quick Trade">
+             {/* Icon on both platforms now; the desktop label and toggle are gone.
+                 Colour carries the state, as it already did on mobile. */}
+             <Zap size={18} className={quickTradeEnabled ? 'text-primary' : 'text-muted-foreground'} />
           </div>
           )}
             <button
@@ -9606,72 +9673,6 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
           </div>
         </div>
-      </div>
-      
-
-
-      {isLoading && (!chartData || chartData.candles.length === 0) ? (
-        <div className="flex items-center justify-center flex-grow">
-          <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-        </div>
-      ) : (
-      <div className="flex flex-col flex-grow gap-0 md:gap-2 min-h-0">
-        <div className={`items-center gap-0 px-0 pb-0 shrink-0 overflow-x-auto border-b border-border/60 bg-background/40 ${isFocusedChart ? 'hidden' : 'flex'}`}>
-          {!isOptionPane && (<button onClick={() => { setUnderlying('NIFTY'); setSelectedInstrument(null); }}
-            className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${!selectedInstrument && underlying === 'NIFTY' ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
-            NIFTY 50
-          </button>)}
-          {!isOptionPane && (<button onClick={() => { setUnderlying('BANKNIFTY'); setSelectedInstrument(null); }}
-            className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${!selectedInstrument && underlying === 'BANKNIFTY' ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
-            BANK NIFTY
-          </button>)}
-          {!isOptionPane && (<button onClick={() => { setUnderlying('SENSEX'); setSelectedInstrument(null); }}
-            className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${!selectedInstrument && underlying === 'SENSEX' ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
-            SENSEX
-          </button>)}
-
-          {/* Charts opened this session, kept after the index tabs. Tapping an index
-              does not close them; the highlight simply moves. */}
-          {(isSpotPane ? [] : openCharts).map((c) => {
-            const active = selectedInstrument?.tradingsymbol === c.tradingsymbol;
-            return (
-              <div key={c.tradingsymbol}
-                className={`flex items-center gap-1 pl-2 pr-1 h-8 rounded-none shrink-0 transition-colors border-b-2 border-r border-r-border/40 ${active ? 'border-b-primary bg-primary/10' : 'border-b-transparent bg-transparent hover:bg-muted/30'}`}>
-                <button
-                  onClick={() => setSelectedInstrument(c)}
-                  className={`text-xs font-mono font-bold whitespace-nowrap ${active ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
-                  {prettyOptionName(c.tradingsymbol,
-                    contractExpiry?.symbol === c.tradingsymbol ? contractExpiry.expiry : null)}
-                </button>
-                <button
-                  onClick={() => {
-                    setOpenCharts(prev => {
-                      const next = prev.filter(x => x.tradingsymbol !== c.tradingsymbol);
-                      // Last option closed: tell the workspace to collapse back to a
-                      // full-width spot chart rather than leaving an empty half.
-                      if (isOptionPane && next.length === 0) {
-                        try { window.dispatchEvent(new CustomEvent('terminal:options-empty')); } catch (e) {}
-                      }
-                      return next;
-                    });
-                    // Only leave the chart if the one being closed is the one on screen.
-                    if (active) setSelectedInstrument(null);
-                  }}
-                  title="Close this chart"
-                  className={`text-sm leading-none px-1 ${active ? 'text-primary/70 hover:text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
-                  ×
-                </button>
-              </div>
-            );
-          })}
-
-          {tradeTabInstr && !isSpotPane && (
-          <button onClick={() => setSelectedInstrument(tradeTabInstr)}
-            className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${selectedInstrument && String(selectedInstrument.instrument_token) === String(tradeTabInstr.instrument_token) ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
-            {tradeTabInstr.tradingsymbol}
-          </button>
-          )}
-          <TradePnl sync={premSync} />
         </div>
 
 
