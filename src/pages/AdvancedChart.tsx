@@ -4050,8 +4050,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     };
   }, [rrMenuOpen]);
   const [rrBox, setRrBox] = useState<null | { kind: 'long' | 'short'; entry: number; stop: number; target: number }>(null);
+  // While an edge is being dragged the REF is the source of truth, not state —
+  // see the move handler. Syncing from state on every render would clobber the
+  // in-flight value, and during market hours ticks re-render constantly.
+  // A dedicated flag rather than draggingLineRef, which is declared far below
+  // this line and would be in its temporal dead zone here.
+  const rrDraggingRef = useRef(false);
   const rrBoxRef = useRef(rrBox);
-  rrBoxRef.current = rrBox;
+  if (!rrDraggingRef.current) rrBoxRef.current = rrBox;
   const rrArmRef = useRef(rrArm);
   rrArmRef.current = rrArm;
   // 10 / 20 preserves the levels this terminal has always defaulted to, so
@@ -4647,6 +4653,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         const edgeY = mainSeriesRef.current.priceToCoordinate(box[edge]);
         if (edgeY !== null && Math.abs(edgeY - y) < 22) {
           draggingLineRef.current = { id: -3, startY: y, dragged: false, grabOffset: edgeY - y, rr: edge };
+          rrDraggingRef.current = true;
           mainChartRef.current.applyOptions({ handleScroll: false, handleScale: false });
           beginLineDrag(e);
           return;
@@ -4685,12 +4692,17 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     const rawPrice = mainSeriesRef.current.coordinateToPrice(anchoredY);
     const newPrice = rawPrice === null ? null : snapTick(rawPrice);
 
-    // R:R edge drag. Purely visual, so it updates state directly and needs no
-    // commit on release.
+    // R:R edge drag. Writes the REF and does not touch state: setRrBox on every
+    // pointermove re-rendered this whole component per event, which is what made
+    // the lines feel heavy. The canvas draw loop already reads rrBoxRef every
+    // frame, so mutating the ref paints at the display's own rate with no React
+    // work in between. State is reconciled once, on release.
     if (draggingLineRef.current.rr) {
       if (newPrice !== null) {
         const edge = draggingLineRef.current.rr;
-        setRrBox(prev => prev ? { ...prev, [edge]: newPrice } : prev);
+        const cur = rrBoxRef.current;
+        // Skip identical values — pointermove can fire several times per frame.
+        if (cur && cur[edge] !== newPrice) rrBoxRef.current = { ...cur, [edge]: newPrice };
       }
       return;
     }
@@ -4748,6 +4760,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
   const handlePointerUp = (e: React.PointerEvent) => {
     if (draggingLineRef.current) endLineDrag(e);
+    // R:R edge release: hand control back to React with the value the ref has
+    // been carrying. Done before the branches below so an interrupted or
+    // cancelled drag still reconciles instead of leaving the two out of step.
+    if (rrDraggingRef.current) {
+      rrDraggingRef.current = false;
+      const finalBox = rrBoxRef.current;
+      setRrBox(finalBox ? { ...finalBox } : finalBox);
+    }
     // Mirrored spot line release. The dragged INDEX level is converted back to a
     // premium on the server — the same model, the same live IV — and that premium
     // is what gets armed. The protective rule stays premium-based throughout;
