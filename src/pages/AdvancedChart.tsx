@@ -4936,6 +4936,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     } catch (e) {}
   };
 
+  // Each chart instance already knows how to reload itself; it was only ever
+  // reachable through a GLOBAL window event, so in split view one button would
+  // refresh both halves. Exposing it through a ref lets each pane's own button
+  // call its own instance. The global listener stays for the existing callers.
+  const reloadChartRef = useRef<() => void>(() => {});
   useEffect(() => {
     const onReload = () => {
       try { refetchTa(); } catch (e) {}
@@ -4960,6 +4965,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       };
       setTimeout(() => snap(0), 150);
     };
+    reloadChartRef.current = onReload;
     window.addEventListener('chart_reload', onReload);
     return () => window.removeEventListener('chart_reload', onReload);
     // refetchTa is only invoked inside the handler (runs long after mount), so it
@@ -7005,6 +7011,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // re-announce something that happened before it.
   const MAX_ALERT_BAR_AGE_MS = 6 * 60 * 1000;
   const marketAlertsAllowed = (barTimeSec?: number) => {
+    // Option charts announce nothing. These alerts are all about INDEX structure —
+    // support and resistance touches, breakouts, divergences, zone taps — and on a
+    // premium chart the same levels are noise: a decaying contract drifts through
+    // them all day for reasons that have nothing to do with the level. Gating here
+    // rather than at each producer means every one of them is covered, including
+    // any added later.
+    if (isOptionViewRef.current) return false;
     const nowSec = Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current;
     if (!isMarketOpen(nowSec)) return false;
     if (typeof barTimeSec === 'number' && Number.isFinite(barTimeSec)) {
@@ -9643,11 +9656,19 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             <button
               onClick={() => {
                 setTbReloading(true);
+                if (isPane) {
+                  // Split view: refresh THIS chart only. A page reload here would
+                  // take the other half down with it, and the whole point of two
+                  // buttons is that each half can be refreshed on its own.
+                  try { reloadChartRef.current(); } catch (e) {}
+                  setTimeout(() => setTbReloading(false), 900);
+                  return;
+                }
                 try { window.dispatchEvent(new CustomEvent('chart_reload')); } catch (e) {}
                 setTimeout(() => { try { window.location.reload(); } catch (e) {} }, 150);
               }}
-              className="md:hidden shrink-0 md:order-4 flex items-center justify-center h-9 w-9 rounded-md bg-muted/40 text-foreground/80"
-              title="Reload chart and hard-refresh the app"
+              className={`${isPane ? '' : 'md:hidden'} shrink-0 md:order-4 flex items-center justify-center h-9 w-9 rounded-md bg-muted/40 text-foreground/80`}
+              title={isPane ? 'Refresh this chart' : 'Reload chart and hard-refresh the app'}
             >
               <RefreshCw size={18} className={tbReloading ? 'animate-spin' : ''} />
             </button>
