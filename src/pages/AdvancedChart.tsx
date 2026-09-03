@@ -8608,10 +8608,16 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               }
               // R:R box: risk zone entry->stop, reward zone entry->target, with the
               // live ratio. Drawn before the level labels so those stay readable.
-              if (rrBox) {
-                const yE = mainSeriesRef.current.priceToCoordinate(rrBox.entry);
-                const yS = mainSeriesRef.current.priceToCoordinate(rrBox.stop);
-                const yT = mainSeriesRef.current.priceToCoordinate(rrBox.target);
+              // Read through the REF, not the state value. This draw function is
+              // created once inside a requestAnimationFrame effect that does not
+              // depend on the box, so the closure captured null and kept redrawing
+              // null — placing a box changed the state but never the picture.
+              // dzStyleRef in this same block exists for exactly this reason.
+              const rrB = rrBoxRef.current;
+              if (rrB) {
+                const yE = mainSeriesRef.current.priceToCoordinate(rrB.entry);
+                const yS = mainSeriesRef.current.priceToCoordinate(rrB.stop);
+                const yT = mainSeriesRef.current.priceToCoordinate(rrB.target);
                 if (yE !== null && yS !== null && yT !== null) {
                   const x0 = 0, x1 = textAlignX;
                   ctx.fillStyle = 'rgba(244,63,94,0.14)';
@@ -8625,8 +8631,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   edge(yS, 'rgba(244,63,94,0.95)');
                   edge(yT, 'rgba(16,185,129,0.95)');
                   edge(yE, 'rgba(226,232,240,0.9)');
-                  const risk = Math.abs(rrBox.entry - rrBox.stop);
-                  const reward = Math.abs(rrBox.target - rrBox.entry);
+                  const risk = Math.abs(rrB.entry - rrB.stop);
+                  const reward = Math.abs(rrB.target - rrB.entry);
                   const ratio = risk > 0 ? reward / risk : 0;
                   const tag = (yy: number, text: string, bg: string) => {
                     ctx.font = 'bold 10px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
@@ -8634,9 +8640,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     ctx.fillStyle = bg; ctx.fillRect(6, yy - 8, w, 16);
                     ctx.fillStyle = '#0b0f14'; ctx.fillText(text, 11, yy);
                   };
-                  tag(yE, `${rrBox.kind === 'long' ? 'LONG' : 'SHORT'} ${rrBox.entry.toFixed(2)}`, 'rgba(226,232,240,0.95)');
-                  tag(yS, `SL ${rrBox.stop.toFixed(2)}  −${risk.toFixed(2)}`, 'rgba(244,63,94,0.95)');
-                  tag(yT, `TP ${rrBox.target.toFixed(2)}  +${reward.toFixed(2)}`, 'rgba(16,185,129,0.95)');
+                  tag(yE, `${rrB.kind === 'long' ? 'LONG' : 'SHORT'} ${rrB.entry.toFixed(2)}`, 'rgba(226,232,240,0.95)');
+                  tag(yS, `SL ${rrB.stop.toFixed(2)}  −${risk.toFixed(2)}`, 'rgba(244,63,94,0.95)');
+                  tag(yT, `TP ${rrB.target.toFixed(2)}  +${reward.toFixed(2)}`, 'rgba(16,185,129,0.95)');
                   const rrText = `R:R  1 : ${ratio.toFixed(2)}`;
                   ctx.font = 'bold 11px monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
                   const rw = ctx.measureText(rrText).width + 12;
