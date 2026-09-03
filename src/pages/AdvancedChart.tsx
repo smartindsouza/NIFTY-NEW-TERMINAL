@@ -4412,7 +4412,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // Document level also keeps the drag alive if a finger strays off the chart.
   useEffect(() => {
     const onTouchMove = (ev: TouchEvent) => {
-      if ((draggingLineRef.current || rrDraggingRef.current) && ev.cancelable) ev.preventDefault();
+      if ((draggingLineRef.current || rrDraggingRef.current || exitDragRef.current) && ev.cancelable) ev.preventDefault();
     };
     document.addEventListener('touchmove', onTouchMove, { passive: false });
     return () => document.removeEventListener('touchmove', onTouchMove);
@@ -4458,6 +4458,113 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       try { if (chartContainerRef.current) chartContainerRef.current.style.touchAction = ''; } catch (e) {}
       const fb = rrBoxRef.current;
       setRrBox(fb ? { ...fb } : fb);
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', end);
+    document.addEventListener('pointercancel', end);
+  };
+
+  // The SL/TP lines and their spot mirrors now use the SAME document-listener
+  // drag as the R:R edges, for the same two reasons that broke those: the
+  // chart's onPointerLeave is wired to the release handler, so crossing the pane
+  // edge mid-gesture ended the drag and left the line stranded; and a drag that
+  // ends outside the element never reaches the React handler at all. Document
+  // listeners are immune to element boundaries and end only on a real pointerup
+  // or pointercancel.
+  //
+  // Movement writes straight to the price-line instance — lightweight-charts
+  // repaints those itself, so there is no React work per move here either.
+  const exitDragRef = useRef<{ mode: 'sl' | 'smap'; kind: string; grabOffset: number; moved: boolean } | null>(null);
+  const startExitLineDrag = () => {
+    const move = (ev: PointerEvent) => {
+      const cont = chartContainerRef.current;
+      const series = mainSeriesRef.current;
+      const d = exitDragRef.current;
+      if (!cont || !series || !d) return;
+      const rect = cont.getBoundingClientRect();
+      const raw = series.coordinateToPrice(ev.clientY - rect.top + d.grabOffset);
+      if (raw === null) return;
+      const newPrice = snapTick(raw);
+      d.moved = true;
+      if (d.mode === 'smap') {
+        const ml = spotMapLinesRef.current.find(l => l.kind === d.kind);
+        if (!ml || ml.price === newPrice) return;
+        ml.price = newPrice;
+        const est = premiumForSpotLocal(newPrice);
+        const label = d.kind === 'sl' ? 'SL' : 'TARGET';
+        try {
+          ml.instance.applyOptions({
+            price: newPrice,
+            title: est !== null ? `${label} ≈ ₹${est.toFixed(2)}` : label,
+          });
+        } catch (e) {}
+        return;
+      }
+      const sl = slLinesRef.current.find((l: any) => l.kind === d.kind);
+      if (!sl || sl.price === newPrice) return;
+      sl.price = newPrice;
+      const entry = slEntryRef.current;
+      try {
+        if (entry) {
+          const pct = ((newPrice - entry) / entry) * 100;
+          sl.instance.applyOptions({ price: newPrice, title: `${sl.label} ${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%` });
+        } else {
+          sl.instance.applyOptions({ price: newPrice });
+        }
+      } catch (e) {}
+      // Off the traded option's chart these feed the spot exit panel, which is
+      // React state — but only while there is no entry, so the live rule's own
+      // chart still does zero React work per move.
+      if (!entry) setSlLevels(prev => ({ ...prev, [d.kind]: Math.round(newPrice) }));
+    };
+    const end = () => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', end);
+      document.removeEventListener('pointercancel', end);
+      const d = exitDragRef.current;
+      exitDragRef.current = null;
+      try {
+        mainChartRef.current?.applyOptions({
+          handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
+          handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
+        });
+      } catch (e) {}
+      try { if (chartContainerRef.current) chartContainerRef.current.style.touchAction = ''; } catch (e) {}
+      if (!d || !d.moved) return;                 // a tap is not an edit
+
+      if (d.mode === 'sl') {
+        // On the traded option's chart the lines ARE the live rule: apply the new
+        // SL/TP the moment the finger lifts. Unchanged behaviour.
+        if (slEntryRef.current) {
+          const posNow = slActivePosRef.current;
+          const u = slLinesRef.current.find((l: any) => l.kind === 'upper');
+          const lo = slLinesRef.current.find((l: any) => l.kind === 'lower');
+          if (posNow && u && lo) {
+            const long = posNow.side === 'BUY';
+            pushPremiumRule(long ? lo.price : u.price, long ? u.price : lo.price);
+          }
+        }
+        return;
+      }
+
+      // Mirrored spot line: convert the dropped INDEX level back to a premium on
+      // the server and arm that. Unchanged behaviour.
+      const ml = spotMapLinesRef.current.find(l => l.kind === d.kind);
+      const pos = slActivePosRef.current;
+      const rule = premRuleRef.current;
+      if (!ml || !pos || !rule || rule.symbol !== pos.symbol) return;
+      (async () => {
+        try {
+          const r = await fetch(`/api/premium-spot-map?tradingsymbol=${encodeURIComponent(pos.symbol)}&spot=${ml.price.toFixed(2)}`);
+          const dd = await r.json().catch(() => null);
+          const px = dd && Array.isArray(dd.premiumFor) ? dd.premiumFor[0] : null;
+          if (!r.ok || !Number.isFinite(px) || px <= 0) { setPremSync('ERROR'); refreshSpotMap(); return; }
+          const nextSl = d.kind === 'sl' ? +px.toFixed(2) : rule.sl;
+          const nextTp = d.kind === 'tp' ? +px.toFixed(2) : rule.tp;
+          await pushPremiumRule(nextSl, nextTp);
+          refreshSpotMap();
+        } catch { setPremSync('ERROR'); refreshSpotMap(); }
+      })();
     };
     document.addEventListener('pointermove', move);
     document.addEventListener('pointerup', end);
@@ -4672,9 +4779,12 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         const lineY = mainSeriesRef.current.priceToCoordinate(sl.price);
         // 24px grab zone — draggable with a thumb on mobile, not just a mouse.
         if (lineY !== null && Math.abs(lineY - y) < 24) {
-            draggingLineRef.current = { id: -1, startY: y, dragged: false, grabOffset: lineY - y, sl: sl.kind };
+            // No draggingLineRef: that ref is read by the chart's own handlers,
+            // including the pointerleave-bound release that was cutting drags short.
+            exitDragRef.current = { mode: 'sl', kind: sl.kind, grabOffset: lineY - y, moved: false };
             mainChartRef.current.applyOptions({ handleScroll: false, handleScale: false });
             beginLineDrag(e);
+            startExitLineDrag();
             return;
         }
     }
@@ -4684,9 +4794,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     for (const ml of (canDragExitLines ? spotMapLinesRef.current : [])) {
         const lineY = mainSeriesRef.current.priceToCoordinate(ml.price);
         if (lineY !== null && Math.abs(lineY - y) < 24) {
-            draggingLineRef.current = { id: -2, startY: y, dragged: false, grabOffset: lineY - y, smap: ml.kind };
+            exitDragRef.current = { mode: 'smap', kind: ml.kind, grabOffset: lineY - y, moved: false };
             mainChartRef.current.applyOptions({ handleScroll: false, handleScale: false });
             beginLineDrag(e);
+            startExitLineDrag();
             return;
         }
     }
@@ -4743,47 +4854,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     const rawPrice = mainSeriesRef.current.coordinateToPrice(anchoredY);
     const newPrice = rawPrice === null ? null : snapTick(rawPrice);
 
-    // Mirrored spot line drag. The label shows the premium this index level
-    // implies, estimated locally from delta so it tracks the finger; the EXACT
-    // value is recomputed server-side on release before anything is armed.
-    if (draggingLineRef.current.smap) {
-       if (newPrice !== null) {
-          const kind = draggingLineRef.current.smap;
-          const ml = spotMapLinesRef.current.find(l => l.kind === kind);
-          if (ml) {
-            ml.price = newPrice;
-            const est = premiumForSpotLocal(newPrice);
-            const label = kind === 'sl' ? 'SL' : 'TARGET';
-            try {
-              ml.instance.applyOptions({
-                price: newPrice,
-                title: est !== null ? `${label} ≈ ₹${est.toFixed(2)}` : label,
-              });
-            } catch (e) {}
-          }
-       }
-       return;
-    }
-
-    // SL/Target line drag — move the line and update the live readout
-    if (draggingLineRef.current.sl) {
-       if (newPrice !== null) {
-          const kind = draggingLineRef.current.sl;
-          const sl = slLinesRef.current.find(s => s.kind === kind);
-          if (sl) {
-            sl.price = newPrice;
-            const entry = slEntryRef.current;
-            if (entry) {
-              const pct = ((newPrice - entry) / entry) * 100;
-              sl.instance.applyOptions({ price: newPrice, title: `${sl.label} ${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%` });
-            } else {
-              sl.instance.applyOptions({ price: newPrice });
-            }
-          }
-          if (!slEntryRef.current) setSlLevels(prev => ({ ...prev, [kind]: Math.round(newPrice) }));
-       }
-       return;
-    }
+    // The SL/TP and spot-mirror move branches are gone: those drags run on
+    // document listeners now (startExitLineDrag), so they never depend on the
+    // chart's own pointer events. Manual drawing lines still use this path.
 
     if (newPrice !== null) {
        const lineObj = manualLinesRef.current.find((l: any) => l.id === draggingLineRef.current!.id);
@@ -4796,64 +4869,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
   const handlePointerUp = (e: React.PointerEvent) => {
     if (draggingLineRef.current) endLineDrag(e);
-    // Mirrored spot line release. The dragged INDEX level is converted back to a
-    // premium on the server — the same model, the same live IV — and that premium
-    // is what gets armed. The protective rule stays premium-based throughout;
-    // this is only a different way of choosing its number.
-    if (draggingLineRef.current && draggingLineRef.current.smap) {
-        const kind = draggingLineRef.current.smap;
-        const moved = draggingLineRef.current.dragged;
-        if (mainChartRef.current) {
-           mainChartRef.current.applyOptions({
-              handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
-              handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true }
-           });
-        }
-        setTimeout(() => { draggingLineRef.current = null; }, 150);
-        if (!moved) return;                       // a tap is not an edit
-        const ml = spotMapLinesRef.current.find(l => l.kind === kind);
-        const pos = slActivePosRef.current;
-        const rule = premRuleRef.current;
-        if (!ml || !pos || !rule || rule.symbol !== pos.symbol) return;
-        (async () => {
-          try {
-            const r = await fetch(`/api/premium-spot-map?tradingsymbol=${encodeURIComponent(pos.symbol)}&spot=${ml.price.toFixed(2)}`);
-            const d = await r.json().catch(() => null);
-            const px = d && Array.isArray(d.premiumFor) ? d.premiumFor[0] : null;
-            // No exact conversion, no arming. The line snaps back on the next
-            // refresh, so the chart cannot end up disagreeing with the rule.
-            if (!r.ok || !Number.isFinite(px) || px <= 0) { setPremSync('ERROR'); refreshSpotMap(); return; }
-            const nextSl = kind === 'sl' ? +px.toFixed(2) : rule.sl;
-            const nextTp = kind === 'tp' ? +px.toFixed(2) : rule.tp;
-            await pushPremiumRule(nextSl, nextTp);
-            refreshSpotMap();
-          } catch { setPremSync('ERROR'); refreshSpotMap(); }
-        })();
-        return;
-    }
-
-    // SL/Target line release — restore scroll and clear (levels already synced during move)
-    if (draggingLineRef.current && draggingLineRef.current.sl) {
-        // On the traded option's chart the lines ARE the live rule: apply the new
-        // SL/TP the moment the finger lifts. No confirmation.
-        if (slEntryRef.current) {
-          const posNow = slActivePosRef.current;
-          const u = slLinesRef.current.find((l: any) => l.kind === 'upper');
-          const lo = slLinesRef.current.find((l: any) => l.kind === 'lower');
-          if (posNow && u && lo) {
-            const long = posNow.side === 'BUY';
-            pushPremiumRule(long ? lo.price : u.price, long ? u.price : lo.price);
-          }
-        }
-        if (mainChartRef.current) {
-           mainChartRef.current.applyOptions({
-              handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
-              handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true }
-           });
-        }
-        setTimeout(() => { draggingLineRef.current = null; }, 150);
-        return;
-    }
+    // SL/TP and spot-mirror releases are handled by startExitLineDrag's own
+    // pointerup listener, which also restores chart scrolling. Manual lines below.
 
     if (draggingLineRef.current && mainChartRef.current) {
         const id = draggingLineRef.current.id;
