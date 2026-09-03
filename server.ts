@@ -10,7 +10,7 @@ import Database from 'better-sqlite3';
 import { generateSimulatedChain } from './server/simulate_data';
 import { computeAnalytics } from './server/analytics_engine';
 import { getTechnicalAnalysis, kiteDiagnostics, taFreshness } from './server/technical_analysis';
-import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData, getIndexFuturesTokens, getBseIndexToken, getOptionToken, getContractInfo, getOrderMargin, resolveOptionContract } from './server/kite_service';
+import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData, getIndexFuturesTokens, getBseIndexToken, getOptionToken, getContractInfo, getOrderMargin, resolveOptionContract, getGiftNiftyInstrument } from './server/kite_service';
 import { getHistoricalAnalytics } from './server/analytics_service';
 import { runRsiBacktest } from './server/rsi_backtest';
 import { getLiveSignal, runOptionConfirmBacktest, getAlertSignal } from './server/option_rsi';
@@ -462,6 +462,8 @@ let latestAnalytics: any = null;
 // signalled by /api/option-chain?symbol=SENSEX hits — keeps the ticker set and
 // Kite quote calls small when Martin is trading NIFTY as usual.
 let sensexIndexToken: number | null = null;
+// GIFT NIFTY (NSE IX). Reference chart only — nothing in this app trades it.
+let giftNiftyToken: number | null = null;
 let latestSensexChainData: any = null;
 let latestSensexAnalytics: any = null;
 let latestSensexChainAt = 0;
@@ -493,6 +495,7 @@ let lastSensexChainTokens: number[] = [];
 function pushTickerSubscriptions() {
   const all = new Set<number>(lastNiftyChainTokens);
   if (sensexIndexToken) all.add(sensexIndexToken);
+  if (giftNiftyToken) all.add(giftNiftyToken);
   all.add(BANKNIFTY_TOKEN);
   for (const t of activeWatchedTokens()) all.add(t);
   // Without this an armed trigger would sit waiting for ticks that never arrive.
@@ -526,6 +529,15 @@ async function refreshData() {
       // SENSEX side: resolve the index token once (24h-cached downstream), and
       // refresh the SENSEX chain only inside the activity window. Best-effort —
       // a SENSEX failure must never break the NIFTY feed.
+      // GIFT NIFTY: resolve once and keep it subscribed. Best-effort — NSE IX is
+      // a separate segment and an account without it must not break the feed.
+      try {
+        if (!giftNiftyToken) {
+          const gift = await getGiftNiftyInstrument();
+          if (gift?.token) giftNiftyToken = gift.token;
+        }
+      } catch (e) { /* reference chart only */ }
+
       try {
         if (!sensexIndexToken) sensexIndexToken = await getBseIndexToken('SENSEX');
         if (Date.now() < sensexActiveUntil) {
@@ -606,6 +618,14 @@ function connectTicker() {
       // and exit rule in this app runs on the NIFTY number.
       const ts = Math.floor(Date.now() / 1000);
       broadcast({ type: 'tick', symbol: 'NSE:NIFTY BANK', price: tick.ltp, timestamp: ts,
+        candle: { time: ts, open: tick.ltp, high: tick.ltp, low: tick.ltp, close: tick.ltp } });
+    } else if (giftNiftyToken && tick.token === giftNiftyToken) {
+      // GIFT NIFTY tick → the same live-candle shape the chart consumes. Like
+      // SENSEX it deliberately does NOT touch latestSpot: every watcher, exit
+      // rule and scorecard here runs on the NIFTY number, and GIFT is a
+      // USD-denominated offshore future that would corrupt all of them.
+      const ts = Math.floor(Date.now() / 1000);
+      broadcast({ type: 'tick', symbol: 'NSEIX:GIFT NIFTY', price: tick.ltp, timestamp: ts,
         candle: { time: ts, open: tick.ltp, high: tick.ltp, low: tick.ltp, close: tick.ltp } });
     } else if (sensexIndexToken && tick.token === sensexIndexToken) {
       // SENSEX index tick → same live-candle shape the chart consumes for NIFTY.
@@ -2066,6 +2086,12 @@ setInterval(() => {
     try {
       const symbol = String(req.query.symbol || '').toUpperCase();
       if (symbol === 'NIFTY 50' || symbol === 'NIFTY') return res.json({ symbol, token: 256265 });
+      if (symbol === 'GIFT' || symbol === 'GIFT NIFTY' || symbol === 'GIFTNIFTY') {
+        const gift = await getGiftNiftyInstrument();
+        // Null token rather than a fallback: the client must show "unavailable"
+        // instead of silently drawing NIFTY candles under a GIFT NIFTY label.
+        return res.json({ symbol: 'GIFT NIFTY', token: gift?.token ?? null, contract: gift?.symbol ?? null });
+      }
       const token = await getBseIndexToken(symbol);
       return res.json({ symbol, token });
     } catch (e: any) {

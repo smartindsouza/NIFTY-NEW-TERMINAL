@@ -207,6 +207,45 @@ export async function getBseIndexToken(name: string): Promise<number | null> {
   return bseIndicesCache[key] ?? null;
 }
 
+let nseixCache: { token: number; symbol: string } | null = null;
+let lastNseixFetch = 0;
+
+/**
+ * GIFT NIFTY lives on NSE IX (GIFT City), a different exchange from NSE and BSE,
+ * so its token is not a constant we can hardcode the way NIFTY 50 (256265) and
+ * NIFTY BANK (260105) are. It is also a FUTURES contract rather than an index:
+ * the dump carries one row per expiry, so the front month is chosen and the
+ * result cached for the day. A plain 'GIFT NIFTY' row is preferred when the dump
+ * exposes one, since that is the symbol Kite's own marketwatch uses.
+ */
+export async function getGiftNiftyInstrument(): Promise<{ token: number; symbol: string } | null> {
+  const now = Date.now();
+  if (nseixCache && (now - lastNseixFetch < 12 * 60 * 60 * 1000)) return nseixCache;
+  const kc = getKiteClient();
+  // @ts-ignore
+  if (!kc || !kc.access_token) return nseixCache;
+  let dump: any[] = [];
+  try {
+    dump = await kc.getInstruments('NSEIX');
+  } catch (e) {
+    // NSE IX is a separate segment and the account may not have it enabled.
+    // Returning null lets the caller show "unavailable" instead of wrong candles.
+    return nseixCache;
+  }
+  const rows = (dump || []).filter((i: any) => {
+    const t = String(i.tradingsymbol || '').toUpperCase().replace(/\s+/g, '');
+    return t.startsWith('GIFTNIFTY');
+  });
+  if (!rows.length) return nseixCache;
+  const exact = rows.find((i: any) => String(i.tradingsymbol).toUpperCase().replace(/\s+/g, '') === 'GIFTNIFTY');
+  const front = exact || [...rows].sort((a: any, b: any) =>
+    String(a.expiry || '').localeCompare(String(b.expiry || '')))[0];
+  if (!front?.instrument_token) return nseixCache;
+  nseixCache = { token: Number(front.instrument_token), symbol: String(front.tradingsymbol) };
+  lastNseixFetch = now;
+  return nseixCache;
+}
+
 // Instrument token for a specific option contract, from the same cached NFO/BFO
 // files the chain uses. The premium-exit tick engine stores this at arm time so
 // the ticker can stream that contract directly. Returns null when unresolvable —

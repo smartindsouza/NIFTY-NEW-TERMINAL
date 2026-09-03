@@ -6085,14 +6085,38 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // NIFTY 50 (256265) and NIFTY BANK (260105) are NSE's published index tokens and
   // are as stable as the exchange itself; SENSEX is resolved from Zerodha's dump
   // because BSE's token is not a constant we should be inventing.
+  // GIFT NIFTY sits on NSE IX, a different exchange, and is a futures contract
+  // rather than an index — so like SENSEX its token is resolved from Zerodha's
+  // dump rather than hardcoded. Null token means the segment is unavailable on
+  // this account, and the chart shows nothing rather than NIFTY candles under a
+  // GIFT NIFTY label.
+  const { data: giftTokenData } = useQuery({
+    queryKey: ['index-token', 'GIFT'],
+    queryFn: async () => {
+      const res = await fetch('/api/index-token?symbol=GIFT');
+      if (!res.ok) throw new Error('gift token fetch failed');
+      return res.json();
+    },
+    enabled: underlying === 'GIFT',
+    staleTime: Infinity,
+    gcTime: Infinity,
+    retry: 2,
+  });
   const indexToken: string | null =
     underlying === 'NIFTY' ? '256265'
     : underlying === 'BANKNIFTY' ? '260105'
+    : underlying === 'GIFT' ? (giftTokenData?.token ? String(giftTokenData.token) : null)
     : (sensexTokenData?.token ? String(sensexTokenData.token) : null);
   const indexLabel =
     underlying === 'NIFTY' ? 'NIFTY 50'
     : underlying === 'BANKNIFTY' ? 'NIFTY BANK'
+    : underlying === 'GIFT' ? 'GIFT NIFTY'
     : 'SENSEX';
+  // Reference chart: no order can be placed from it. Read through a ref in the
+  // chart click handler, which is built once per chart rebuild.
+  const isReferenceChart = underlying === 'GIFT';
+  const isReferenceChartRef = useRef(isReferenceChart);
+  isReferenceChartRef.current = isReferenceChart;
   const instrumentToken = selectedInstrument ? String(selectedInstrument.instrument_token) : indexToken;
   const instrumentTokenRef = useRef(instrumentToken);
   instrumentTokenRef.current = instrumentToken;
@@ -7570,6 +7594,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
           const price = mainSeries.coordinateToPrice(y);
 
+          // GIFT NIFTY is a reference chart. Nothing here is tradeable through this
+          // terminal — it is a USD-denominated NSE IX future — so the tap stops
+          // before every order path below. Placed after the R:R capture so the
+          // measuring tool still works, which is the one interaction that makes
+          // sense on a chart you cannot trade.
+          // (The R:R branch immediately below returns on its own when armed.)
+
           // R:R tool takes the tap before anything else, so arming it cannot fire
           // a trade by accident — and it returns, so the click never reaches the
           // order paths below.
@@ -7590,6 +7621,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             setRrArm(null);
             return;
           }
+
+          if (isReferenceChartRef.current) return;   // GIFT NIFTY: measure only
 
           // OPTION CHART: tapping buys THE CONTRACT ON SCREEN, at market, via the
           // normal order ticket — which is the confirmation step. The strike menu
@@ -9235,6 +9268,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${!selectedInstrument && underlying === 'NIFTY' ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
             NIFTY 50
           </button>)}
+          {!isOptionPane && (<button onClick={() => { setUnderlying('GIFT'); setSelectedInstrument(null); }}
+            className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${!selectedInstrument && underlying === 'GIFT' ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
+            GIFT NIFTY
+          </button>)}
           {!isOptionPane && (<button onClick={() => { setUnderlying('BANKNIFTY'); setSelectedInstrument(null); }}
             className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${!selectedInstrument && underlying === 'BANKNIFTY' ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
             BANK NIFTY
@@ -9703,7 +9740,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           </div>
           <div className="flex items-center gap-2 flex-none max-w-[45%] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents md:min-w-0 md:basis-auto pr-1">
           {(
-          <div className={`ml-auto md:ml-0 flex items-center justify-center gap-2 h-9 w-9 shrink-0 md:order-2 cursor-pointer rounded-md border border-0 transition-colors ${quickTradeEnabled ? "bg-primary/20" : "bg-muted/40"}`} onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled' : 'Quick Trade disabled'); } catch (e) {} }} title="Quick Trade">
+          <div className={`ml-auto md:ml-0 ${isReferenceChart ? 'hidden' : 'flex'} items-center justify-center gap-2 h-9 w-9 shrink-0 md:order-2 cursor-pointer rounded-md border border-0 transition-colors ${quickTradeEnabled ? "bg-primary/20" : "bg-muted/40"}`} onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled' : 'Quick Trade disabled'); } catch (e) {} }} title="Quick Trade">
              {/* Icon on both platforms now; the desktop label and toggle are gone.
                  Colour carries the state, as it already did on mobile. */}
              <Zap size={18} className={quickTradeEnabled ? 'text-primary' : 'text-muted-foreground'} />
