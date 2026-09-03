@@ -9284,7 +9284,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               <Scale size={17} />
             </button>
             {rrMenuOpen && !rrBox && (
-              <div className="absolute bottom-full mb-2 right-0 z-[90] w-40 bg-card border border-white/10 rounded-lg shadow-xl overflow-hidden">
+              <div className="fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)] md:bottom-full md:mb-2 md:right-0 z-[90] md:w-40 bg-card border border-white/10 rounded-lg shadow-2xl md:shadow-xl overflow-hidden">
                 <button
                   onClick={() => { setRrArm('long'); setRrMenuOpen(false); }}
                   className="w-full text-left px-3 py-2 text-xs font-medium text-emerald-300 hover:bg-muted transition-colors">
