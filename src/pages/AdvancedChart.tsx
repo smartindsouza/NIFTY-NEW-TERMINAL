@@ -3052,6 +3052,7 @@ function persistLogicalRanges() {
 export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {}) {
   const isSpotPane = paneRole === 'spot';
   const isOptionPane = paneRole === 'option';
+  const isPane = paneRole === 'spot' || paneRole === 'option';
   useProfiler("AdvancedChart");
   const { data: kiteDiagnosticsData } = useQuery({
     queryKey: ['kiteDiagnostics'],
@@ -4065,6 +4066,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // exactly the old setSelectedInstrument call.
   const openOptionChart = (instr: any) => {
     if (isSpotPane) {
+      // HAND-OFF, NOT A BROADCAST. The option pane is only MOUNTED in response to
+      // this same event, so when the split is opening it does not exist yet and
+      // cannot be listening — the event reached the workspace, the pane mounted a
+      // moment later, and it came up with no contract, which is why the right half
+      // showed the index. Writing the contract to the session first means a pane
+      // mounting at any point afterwards initialises from it; the event then only
+      // has to cover the case where the pane is ALREADY mounted.
+      try { sessionStorage.setItem('selectedInstrument', JSON.stringify(instr)); } catch (e) {}
       try { window.dispatchEvent(new CustomEvent('terminal:open-option', { detail: instr })); } catch (e) {}
       return;
     }
@@ -8957,7 +8966,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         </div>
       )}
 
-      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2 md:gap-3 pb-2 mb-2 md:mb-2 md:flex-nowrap md:h-11 md:border-b md:border-border/60">
+      {/* In a half-width pane the badge row has nowhere to wrap to, and a fixed
+          h-11 made the overflow spill across the tabs below. Panes get a header
+          that sizes to its content and a badge strip that scrolls instead. */}
+      <div className={`flex flex-col md:flex-row md:justify-between md:items-center gap-2 md:gap-3 pb-2 mb-2 md:mb-2 md:flex-nowrap md:border-b md:border-border/60 ${isPane ? 'md:h-auto md:min-h-11 md:py-1' : 'md:h-11'}`}>
         <div className="relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-nowrap md:min-w-0 max-md:pr-24">
           <h1 className="text-base md:text-sm font-semibold text-foreground tracking-tight whitespace-nowrap md:truncate">
             {isFocusedChart && selectedInstrument
@@ -8974,8 +8986,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             <ChevronDown size={16} className={`transition-transform ${showBiases ? 'rotate-180' : ''}`} />
           </button>
           <IstSessionClock />
-          <div className={`${showBiases ? 'flex' : 'hidden'} md:flex absolute md:static top-full left-0 mt-1 md:mt-0 z-[80] md:z-auto flex-col md:flex-row items-start md:items-center gap-1.5 md:gap-4 bg-card md:bg-transparent border border-white/10 md:border-0 rounded-lg md:rounded-none p-2 md:p-0 shadow-xl md:shadow-none max-h-[60vh] md:max-h-none overflow-y-auto md:overflow-visible md:flex-wrap`}>
-          {lastTickMessage && (
+          <div className={`${showBiases ? 'flex' : 'hidden'} md:flex absolute md:static top-full left-0 mt-1 md:mt-0 z-[80] md:z-auto flex-col md:flex-row items-start md:items-center gap-1.5 md:gap-4 bg-card md:bg-transparent border border-white/10 md:border-0 rounded-lg md:rounded-none p-2 md:p-0 shadow-xl md:shadow-none max-h-[60vh] md:max-h-none overflow-y-auto md:overflow-visible ${isPane ? 'md:flex-nowrap md:min-w-0 md:overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden' : 'md:flex-wrap'}`}>
+          {lastTickMessage && !isOptionPane && (
              <span className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-md text-xs font-mono font-bold animate-pulse whitespace-nowrap">
               LIVE TICK: {lastTickMessage}
              </span>
