@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale } from "lucide-react";
+import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search } from "lucide-react";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { getDivergences } from "../lib/divergence";
@@ -4012,6 +4012,29 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // exit rule. Placing one is tap-to-place like a drawing, and the box is local
   // to the chart it was placed on.
   const [rrArm, setRrArm] = useState<null | 'long' | 'short'>(null);
+  // Desktop search collapses to an icon. Mobile is untouched — its search lives
+  // in the bottom toolbar and stays the full pill.
+  const [searchExpanded, setSearchExpanded] = useState(false);
+  const searchWrapRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!searchExpanded) return;
+    // Focus the field the click was meant for; SymbolSearch owns the input.
+    const t = setTimeout(() => {
+      try { searchWrapRef.current?.querySelector('input')?.focus(); } catch (e) {}
+    }, 30);
+    const onDown = (ev: MouseEvent | TouchEvent) => {
+      if (searchWrapRef.current && !searchWrapRef.current.contains(ev.target as Node)) setSearchExpanded(false);
+    };
+    const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') setSearchExpanded(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [searchExpanded]);
+
   const [rrMenuOpen, setRrMenuOpen] = useState(false);
   const rrMenuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -9005,8 +9028,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       {/* In a half-width pane the badge row has nowhere to wrap to, and a fixed
           h-11 made the overflow spill across the tabs below. Panes get a header
           that sizes to its content and a badge strip that scrolls instead. */}
-      <div className={`flex flex-col md:flex-row md:justify-between md:items-center gap-2 md:gap-3 pb-2 mb-2 md:mb-2 md:flex-nowrap md:border-b md:border-border/60 ${isPane ? 'md:h-auto md:min-h-11 md:py-1' : 'md:h-11'}`}>
-        <div className="relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-nowrap md:min-w-0 max-md:pr-24">
+      {/* Desktop header is two rows now: title + clock above, live badges below.
+          Height therefore has to size to content rather than the old fixed h-11.
+          Mobile keeps its single column and its chevron-dropdown for the badges. */}
+      <div className={`flex flex-col md:flex-row md:justify-between md:items-start gap-2 md:gap-3 pb-2 mb-2 md:mb-2 md:flex-nowrap md:border-b md:border-border/60 md:h-auto md:min-h-11 md:py-1`}>
+        <div className="relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-col md:items-start md:gap-1 md:flex-nowrap md:min-w-0 max-md:pr-24">
+          {/* Row 1 — title and clock */}
+          <div className="flex items-center gap-2 md:gap-3 min-w-0">
           <h1 className="text-base md:text-sm font-semibold text-foreground tracking-tight whitespace-nowrap md:truncate">
             {isFocusedChart && selectedInstrument
               ? prettyOptionName(selectedInstrument.tradingsymbol,
@@ -9022,7 +9050,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             <ChevronDown size={16} className={`transition-transform ${showBiases ? 'rotate-180' : ''}`} />
           </button>
           <IstSessionClock />
-          <div className={`${showBiases ? 'flex' : 'hidden'} md:flex absolute md:static top-full left-0 mt-1 md:mt-0 z-[80] md:z-auto flex-col md:flex-row items-start md:items-center gap-1.5 md:gap-4 bg-card md:bg-transparent border border-white/10 md:border-0 rounded-lg md:rounded-none p-2 md:p-0 shadow-xl md:shadow-none max-h-[60vh] md:max-h-none overflow-y-auto md:overflow-visible ${isPane ? 'md:flex-nowrap md:min-w-0 md:overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden' : 'md:flex-wrap'}`}>
+          </div>
+          {/* Row 2 — live tick, trend and signal badges. Hidden on desktop while
+              the search is expanded, so the field has the width to itself. */}
+          <div className={`${showBiases ? 'flex' : 'hidden'} ${searchExpanded ? 'md:hidden' : 'md:flex'} absolute md:static top-full left-0 mt-1 md:mt-0 z-[80] md:z-auto flex-col md:flex-row items-start md:items-center gap-1.5 md:gap-4 bg-card md:bg-transparent border border-white/10 md:border-0 rounded-lg md:rounded-none p-2 md:p-0 shadow-xl md:shadow-none max-h-[60vh] md:max-h-none overflow-y-auto md:overflow-visible ${isPane ? 'md:flex-nowrap md:min-w-0 md:overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden' : 'md:flex-wrap'}`}>
           {lastTickMessage && !isOptionPane && (
              <span className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-md text-xs font-mono font-bold animate-pulse whitespace-nowrap">
               LIVE TICK: {lastTickMessage}
@@ -9116,7 +9147,22 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         </div>
         <div ref={bottomBarRef} className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-3 py-1.5 md:p-0 flex items-center gap-2 md:gap-4 flex-nowrap md:flex-wrap justify-end w-screen md:w-auto max-w-[100vw] overflow-x-hidden md:overflow-visible">
           <div className="flex flex-1 items-center gap-1.5 sm:gap-2 justify-end min-w-0 md:contents">
-          <div className="flex-1 min-w-0 sm:w-auto md:order-1">
+          {/* Desktop: an icon until clicked. Mobile: unchanged — the field is
+              always shown, which is what the bottom toolbar was built around. */}
+          {!searchExpanded && (
+            <button
+              onClick={() => setSearchExpanded(true)}
+              title="Search symbol"
+              aria-label="Search symbol"
+              className="hidden md:flex md:order-1 shrink-0 items-center justify-center h-9 w-9 rounded-md bg-muted/40 text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Search size={17} />
+            </button>
+          )}
+          <div
+            ref={searchWrapRef}
+            className={`flex-1 min-w-0 sm:w-auto md:order-1 ${searchExpanded ? 'md:block md:w-64 md:flex-none' : 'md:hidden'}`}
+          >
           <SymbolSearch 
             onSelect={setSelectedInstrument} 
             currentSymbol={selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel} 
