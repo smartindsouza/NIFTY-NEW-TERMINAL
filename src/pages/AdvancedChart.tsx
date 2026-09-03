@@ -3090,6 +3090,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const chartDataRef = useRef<any>(null);
   const confSignalsRef = useRef<any[]>([]);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const rrCanvasRef = useRef<HTMLCanvasElement>(null);
   const serverTimeOffsetRef = useRef<number>(0);
   
   const [timeframe, setTimeframe] = useState(() => {
@@ -8208,6 +8209,78 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartData, divergences, showRsi, showBB, bbData, bbColor, rsiColor, rsiLineWidth, rsiLineStyle, rsiSmaLineWidth, rsiSmaLineStyle, rsiOverbought1, rsiOverbought2, rsiOversold1, rsiOversold2, rsiSmaColor, rsiOverboughtColor, rsiOversoldColor, showHLevels, hLevels, hLevelsStyle, hLevelsWidth, selectedStrikeOnChart]);
 
+  // Dedicated R:R renderer. Mounted ONCE with no dependencies and reading only
+  // refs, so it never rebuilds and never waits on the heavy overlay loop. Its
+  // frame does one clear and one box, which is what makes the drag track the
+  // finger instead of jumping between long frames.
+  useEffect(() => {
+    let raf = 0;
+    const drawRR = () => {
+      raf = requestAnimationFrame(drawRR);
+      const canvas = rrCanvasRef.current;
+      const series = mainSeriesRef.current;
+      if (!canvas || !canvas.parentElement || !series) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      try {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const cw = Math.floor(rect.width), ch = Math.floor(rect.height);
+        const bw = Math.floor(cw * dpr), bh = Math.floor(ch * dpr);
+        if (canvas.width !== bw) canvas.width = bw;
+        if (canvas.height !== bh) canvas.height = bh;
+        if (canvas.style.width !== `${cw}px`) canvas.style.width = `${cw}px`;
+        if (canvas.style.height !== `${ch}px`) canvas.style.height = `${ch}px`;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, cw, ch);
+
+        const rrB = rrBoxRef.current;
+        if (!rrB) return;
+        const yE = series.priceToCoordinate(rrB.entry);
+        const yS = series.priceToCoordinate(rrB.stop);
+        const yT = series.priceToCoordinate(rrB.target);
+        if (yE === null || yS === null || yT === null) return;
+        const priceScaleWidth = mainChartRef.current
+          ? mainChartRef.current.priceScale('right').width() : 0;
+        const x0 = 0, x1 = Math.max(0, cw - priceScaleWidth);
+
+        ctx.fillStyle = 'rgba(244,63,94,0.14)';
+        ctx.fillRect(x0, Math.min(yE, yS), x1 - x0, Math.abs(yS - yE));
+        ctx.fillStyle = 'rgba(16,185,129,0.14)';
+        ctx.fillRect(x0, Math.min(yE, yT), x1 - x0, Math.abs(yT - yE));
+        const edge = (yy: number, color: string) => {
+          ctx.beginPath(); ctx.setLineDash([]); ctx.strokeStyle = color; ctx.lineWidth = 1.5;
+          ctx.moveTo(x0, yy); ctx.lineTo(x1, yy); ctx.stroke();
+        };
+        edge(yS, 'rgba(244,63,94,0.95)');
+        edge(yT, 'rgba(16,185,129,0.95)');
+        edge(yE, 'rgba(226,232,240,0.9)');
+        const risk = Math.abs(rrB.entry - rrB.stop);
+        const reward = Math.abs(rrB.target - rrB.entry);
+        const ratio = risk > 0 ? reward / risk : 0;
+        const pct = (d: number) => (rrB.entry > 0 ? ` (${(d / rrB.entry * 100).toFixed(1)}%)` : '');
+        const tag = (yy: number, text: string, bg: string) => {
+          ctx.font = 'bold 10px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+          const w = ctx.measureText(text).width + 10;
+          ctx.fillStyle = bg; ctx.fillRect(6, yy - 8, w, 16);
+          ctx.fillStyle = '#0b0f14'; ctx.fillText(text, 11, yy);
+        };
+        tag(yE, `${rrB.kind === 'long' ? 'LONG' : 'SHORT'} ${rrB.entry.toFixed(2)}`, 'rgba(226,232,240,0.95)');
+        tag(yS, `SL ${rrB.stop.toFixed(2)}  −${risk.toFixed(2)}${pct(risk)}`, 'rgba(244,63,94,0.95)');
+        tag(yT, `TP ${rrB.target.toFixed(2)}  +${reward.toFixed(2)}${pct(reward)}`, 'rgba(16,185,129,0.95)');
+        const rrText = `R:R  1 : ${ratio.toFixed(2)}`;
+        ctx.font = 'bold 11px monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+        const rw = ctx.measureText(rrText).width + 12;
+        const ry = (Math.min(yS, yT) + Math.max(yS, yT)) / 2;
+        ctx.fillStyle = ratio >= 2 ? 'rgba(16,185,129,0.95)' : ratio >= 1 ? 'rgba(234,179,8,0.95)' : 'rgba(244,63,94,0.95)';
+        ctx.fillRect(x1 - rw - 6, ry - 9, rw, 18);
+        ctx.fillStyle = '#0b0f14'; ctx.fillText(rrText, x1 - 12, ry);
+      } catch (e) { /* disposed mid-frame */ }
+    };
+    drawRR();
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   // Hook for drawing Overlays (OI Bars & Bollinger Bands) via requestAnimationFrame
   useEffect(() => {
     if (!overlayCanvasRef.current || !mainChartRef.current || !mainSeriesRef.current) return;
@@ -8695,57 +8768,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                  const y = mainSeriesRef.current.priceToCoordinate(pdlPrice);
                  if (y !== null) linesToDraw.push({ text: `PDL ${pdlPrice}`, y, color: pdlColor, dash: pdhPdlDash, lineWidth: pdhPdlWidth });
               }
-              // R:R box: risk zone entry->stop, reward zone entry->target, with the
-              // live ratio. Drawn before the level labels so those stay readable.
-              // Read through the REF, not the state value. This draw function is
-              // created once inside a requestAnimationFrame effect that does not
-              // depend on the box, so the closure captured null and kept redrawing
-              // null — placing a box changed the state but never the picture.
-              // dzStyleRef in this same block exists for exactly this reason.
-              const rrB = rrBoxRef.current;
-              if (rrB) {
-                const yE = mainSeriesRef.current.priceToCoordinate(rrB.entry);
-                const yS = mainSeriesRef.current.priceToCoordinate(rrB.stop);
-                const yT = mainSeriesRef.current.priceToCoordinate(rrB.target);
-                if (yE !== null && yS !== null && yT !== null) {
-                  const x0 = 0, x1 = textAlignX;
-                  ctx.fillStyle = 'rgba(244,63,94,0.14)';
-                  ctx.fillRect(x0, Math.min(yE, yS), x1 - x0, Math.abs(yS - yE));
-                  ctx.fillStyle = 'rgba(16,185,129,0.14)';
-                  ctx.fillRect(x0, Math.min(yE, yT), x1 - x0, Math.abs(yT - yE));
-                  const edge = (yy: number, color: string) => {
-                    ctx.beginPath(); ctx.setLineDash([]); ctx.strokeStyle = color; ctx.lineWidth = 1.5;
-                    ctx.moveTo(x0, yy); ctx.lineTo(x1, yy); ctx.stroke();
-                  };
-                  edge(yS, 'rgba(244,63,94,0.95)');
-                  edge(yT, 'rgba(16,185,129,0.95)');
-                  edge(yE, 'rgba(226,232,240,0.9)');
-                  const risk = Math.abs(rrB.entry - rrB.stop);
-                  const reward = Math.abs(rrB.target - rrB.entry);
-                  const ratio = risk > 0 ? reward / risk : 0;
-                  // Percentages are OF THE ENTRY PRICE, which on an option chart is
-                  // the premium — so on the premium chart these read directly as
-                  // "this stop costs 6% of what I paid". Guarded against a zero or
-                  // negative entry so a bad tap cannot print Infinity or NaN.
-                  const pct = (d: number) => (rrB.entry > 0 ? ` (${(d / rrB.entry * 100).toFixed(1)}%)` : '');
-                  const tag = (yy: number, text: string, bg: string) => {
-                    ctx.font = 'bold 10px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-                    const w = ctx.measureText(text).width + 10;
-                    ctx.fillStyle = bg; ctx.fillRect(6, yy - 8, w, 16);
-                    ctx.fillStyle = '#0b0f14'; ctx.fillText(text, 11, yy);
-                  };
-                  tag(yE, `${rrB.kind === 'long' ? 'LONG' : 'SHORT'} ${rrB.entry.toFixed(2)}`, 'rgba(226,232,240,0.95)');
-                  tag(yS, `SL ${rrB.stop.toFixed(2)}  −${risk.toFixed(2)}${pct(risk)}`, 'rgba(244,63,94,0.95)');
-                  tag(yT, `TP ${rrB.target.toFixed(2)}  +${reward.toFixed(2)}${pct(reward)}`, 'rgba(16,185,129,0.95)');
-                  const rrText = `R:R  1 : ${ratio.toFixed(2)}`;
-                  ctx.font = 'bold 11px monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-                  const rw = ctx.measureText(rrText).width + 12;
-                  const ry = (Math.min(yS, yT) + Math.max(yS, yT)) / 2;
-                  ctx.fillStyle = ratio >= 2 ? 'rgba(16,185,129,0.95)' : ratio >= 1 ? 'rgba(234,179,8,0.95)' : 'rgba(244,63,94,0.95)';
-                  ctx.fillRect(x1 - rw - 6, ry - 9, rw, 18);
-                  ctx.fillStyle = '#0b0f14'; ctx.fillText(rrText, x1 - 12, ry);
-                }
-              }
+              // The R:R box is NOT drawn here any more — it has its own canvas and
+              // its own frame loop above, so dragging it does not wait on this
+              // loop's heavy frame (live-recomputed bands, OI bars, zones, levels,
+              // structure, crosshair). Drawing it in both places would also
+              // double-paint its translucent fills.
 
               // 15m Opening Range (first 15 min high/low) — centered labels, no Y-axis value
               {
@@ -9970,6 +9997,15 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             <canvas
               ref={overlayCanvasRef}
               className="absolute inset-0 w-full h-full pointer-events-none rounded-none z-30"
+            />
+            {/* The R:R box gets its own canvas. The overlay above redraws EVERYTHING
+                every frame — Bollinger bands recomputed live, OI bars, zones, S&R,
+                levels, structure, crosshair — so on a phone its frames are long,
+                and a dragged line could only move when one finished. That is the
+                stutter. This canvas draws one box and nothing else. */}
+            <canvas
+              ref={rrCanvasRef}
+              className="absolute inset-0 w-full h-full pointer-events-none rounded-none z-[31]"
             />
             {(() => {
               if (showOiBars && !isOptionView && oiData && crosshairInfo) {
