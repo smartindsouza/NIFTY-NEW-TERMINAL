@@ -5306,6 +5306,12 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     lotMode: 'AUTO' | 'MANUAL';
   }>(null);
   const [triggerMargin, setTriggerMargin] = useState<null | { total: number; source: string } | 'unavailable' | 'loading'>(null);
+  // Per-lot margin, fixed per contract/side/product. See the loop note below.
+  const marginBaseRef = useRef<{ key: string; perLot: number } | null>(null);
+  // Last-resort guard: whatever goes wrong upstream — a slow broker, a throttled
+  // endpoint, a balance that never arrives — the box must not sit on "sizing…"
+  // forever. After this it shows its real lot count instead.
+  const [sizingTimedOut, setSizingTimedOut] = useState(false);
   const [armingTrigger, setArmingTrigger] = useState(false);
 
   const openTriggerBox = async (tappedPrice: number) => {
@@ -5341,10 +5347,16 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // Margin comes from Kite, never estimated — a sell's SPAN requirement cannot be
   // guessed, and a wrong number beside a sell button is one the user would act on.
   useEffect(() => {
-    if (!triggerBox) { setTriggerMargin(null); return; }
+    if (!triggerBox) { setTriggerMargin(null); marginBaseRef.current = null; return; }
     let cancelled = false;
     setTriggerMargin('loading');
     const qty = triggerBox.lots * (triggerBox.contract.lot_size || 0);
+    const lotsAtFetch = triggerBox.lots;
+    const baseKey = `${triggerBox.contract.tradingsymbol}|${triggerBox.side}|${triggerBox.product}`;
+    // Debounced: AUTO MAX changes the lot count as soon as the first quote lands,
+    // which re-runs this effect immediately. Without a delay the two requests land
+    // on top of each other and trip the frequency guard.
+    const timer = setTimeout(() => {
     fetch('/api/order-margin', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -5353,16 +5365,32 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       }),
     })
       .then(r => r.ok ? r.json() : Promise.reject(new Error('unavailable')))
-      .then(m => { if (!cancelled) setTriggerMargin({ total: m.total, source: m.source }); })
+      .then(m => {
+        if (cancelled) return;
+        setTriggerMargin({ total: m.total, source: m.source });
+        // THE FEEDBACK LOOP. maxLots used to be derived from whichever quote was
+        // current, but that quote is FOR the lot count maxLots had just produced —
+        // and margin is not linear in lots, so each answer changed the question.
+        // The size chased itself, refetching every round, which is what spammed
+        // /api/order-margin and left the box stuck on "sizing…". The per-lot cost
+        // is now fixed from the FIRST quote for a given contract/side/product and
+        // does not move when the lot count does.
+        if (!marginBaseRef.current || marginBaseRef.current.key !== baseKey) {
+          const perLot = m.total / Math.max(1, lotsAtFetch);
+          if (perLot > 0) marginBaseRef.current = { key: baseKey, perLot };
+        }
+      })
       .catch(() => { if (!cancelled) setTriggerMargin('unavailable'); });
-    return () => { cancelled = true; };
+    }, 350);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [triggerBox?.contract?.tradingsymbol, triggerBox?.side, triggerBox?.product, triggerBox?.lots, triggerBox?.level]);
 
   // Margin per lot is inferred from the quote we already have, so AUTO MAX costs
   // no extra request. Sell-side margin is not perfectly linear across lots, so
   // this is a close estimate and the quoted total below is always the real number.
-  const marginPerLot = (triggerBox && triggerMargin && typeof triggerMargin === 'object' && triggerBox.lots > 0)
-    ? triggerMargin.total / triggerBox.lots : 0;
+  const baseKeyNow = triggerBox ? `${triggerBox.contract.tradingsymbol}|${triggerBox.side}|${triggerBox.product}` : '';
+  const marginPerLot = (marginBaseRef.current && marginBaseRef.current.key === baseKeyNow)
+    ? marginBaseRef.current.perLot : 0;
   const maxLots = marginPerLot > 0 ? Math.max(0, Math.floor((availBalance || 0) / marginPerLot)) : 0;
 
   // AUTO MAX cannot know the size until Zerodha has quoted a margin, and the
@@ -5387,7 +5415,15 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // True while AUTO MAX is still waiting on the margin quote that decides the size.
   // Once the quote comes back unavailable there is nothing more to wait for, so the
   // box falls back to showing its real 1-lot size rather than hanging on "sizing".
-  const sizingPending = !!triggerBox && triggerBox.lotMode === 'AUTO' && maxLots < 1 && triggerMargin !== 'unavailable';
+  useEffect(() => {
+    if (!triggerBox) { setSizingTimedOut(false); return; }
+    setSizingTimedOut(false);
+    const t = setTimeout(() => setSizingTimedOut(true), 4000);
+    return () => clearTimeout(t);
+  }, [triggerBox?.contract?.tradingsymbol, triggerBox?.side, triggerBox?.product]);
+
+  const sizingPending = !!triggerBox && triggerBox.lotMode === 'AUTO' && maxLots < 1
+    && triggerMargin !== 'unavailable' && !sizingTimedOut;
 
   // Shortfall reported by the broker at arm time; null when there is nothing to warn about.
   const [marginWarn, setMarginWarn] = useState<any>(null);
