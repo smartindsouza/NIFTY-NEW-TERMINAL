@@ -7408,8 +7408,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         borderColor: 'rgba(255, 255, 255, 0.1)',
         timeVisible: true,
         secondsVisible: false,
+        // barSpacing is the DEFAULT zoom and is deliberately unchanged — every
+        // chart still opens exactly as before. minBarSpacing is the FLOOR: it was
+        // 6px per candle, which is what stopped the chart zooming out any
+        // further. 0.5 is lightweight-charts' own floor, so this hands back the
+        // library's full range rather than inventing a limit — roughly twelve
+        // times as many candles on screen at full zoom-out.
         barSpacing: 12,
-        minBarSpacing: 6,
+        minBarSpacing: 0.5,
         tickMarkFormatter: (time: any, tickMarkType: any, locale: string) => {
           const date = new Date(time * 1000);
           
@@ -8311,6 +8317,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         // 2. OI Bars — defined as a function here, but drawn AFTER the horizontal lines below,
         //    so the bars always sit clearly on top of S&R / PDH-PDL / H-Level lines.
         const drawOiBars = () => {
+          // GIFT NIFTY has no option chain of its own — the OI in scope here is
+          // NIFTY's, and painting it over a different instrument's candles would
+          // put strike levels where they do not belong. Read through the ref
+          // because this draw function is built once per chart rebuild.
+          if (isReferenceChartRef.current) return;
           if (!(showOiBars && oiData && oiData.strikes && oiData.ceData && oiData.peData)) return;
           const optionRows = oiData.strikes.map((strike: number) => ({
             strike,
