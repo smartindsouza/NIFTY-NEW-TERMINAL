@@ -8634,6 +8634,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   const risk = Math.abs(rrB.entry - rrB.stop);
                   const reward = Math.abs(rrB.target - rrB.entry);
                   const ratio = risk > 0 ? reward / risk : 0;
+                  // Percentages are OF THE ENTRY PRICE, which on an option chart is
+                  // the premium — so on the premium chart these read directly as
+                  // "this stop costs 6% of what I paid". Guarded against a zero or
+                  // negative entry so a bad tap cannot print Infinity or NaN.
+                  const pct = (d: number) => (rrB.entry > 0 ? ` (${(d / rrB.entry * 100).toFixed(1)}%)` : '');
                   const tag = (yy: number, text: string, bg: string) => {
                     ctx.font = 'bold 10px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
                     const w = ctx.measureText(text).width + 10;
@@ -8641,8 +8646,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     ctx.fillStyle = '#0b0f14'; ctx.fillText(text, 11, yy);
                   };
                   tag(yE, `${rrB.kind === 'long' ? 'LONG' : 'SHORT'} ${rrB.entry.toFixed(2)}`, 'rgba(226,232,240,0.95)');
-                  tag(yS, `SL ${rrB.stop.toFixed(2)}  −${risk.toFixed(2)}`, 'rgba(244,63,94,0.95)');
-                  tag(yT, `TP ${rrB.target.toFixed(2)}  +${reward.toFixed(2)}`, 'rgba(16,185,129,0.95)');
+                  tag(yS, `SL ${rrB.stop.toFixed(2)}  −${risk.toFixed(2)}${pct(risk)}`, 'rgba(244,63,94,0.95)');
+                  tag(yT, `TP ${rrB.target.toFixed(2)}  +${reward.toFixed(2)}${pct(reward)}`, 'rgba(16,185,129,0.95)');
                   const rrText = `R:R  1 : ${ratio.toFixed(2)}`;
                   ctx.font = 'bold 11px monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
                   const rw = ctx.measureText(rrText).width + 12;
