@@ -4429,7 +4429,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   //     restored on this path, so panning stayed dead after the first drag.
   // Document listeners are immune to element boundaries and end only on a real
   // pointerup or pointercancel.
-  const rrDragRef = useRef<{ edge: 'stop' | 'target'; grabOffset: number } | null>(null);
+  const rrDragRef = useRef<{ edge: 'stop' | 'target' | 'entry'; grabOffset: number } | null>(null);
   const startRrDrag = () => {
     const move = (ev: PointerEvent) => {
       const cont = chartContainerRef.current;
@@ -4441,7 +4441,36 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       if (raw === null) return;
       const price = snapTick(raw);
       const cur = rrBoxRef.current;
-      if (cur && cur[d.edge] !== price) rrBoxRef.current = { ...cur, [d.edge]: price };
+      if (!cur) return;
+
+      if (d.edge === 'entry') {
+        // Dragging entry moves the WHOLE box: stop and target keep their exact
+        // distances, so the ratio is unchanged and you are re-pricing the same
+        // idea at a different entry rather than reshaping it.
+        const delta = price - cur.entry;
+        if (delta === 0) return;
+        rrBoxRef.current = {
+          ...cur,
+          entry: price,
+          stop: +(cur.stop + delta).toFixed(2),
+          target: +(cur.target + delta).toFixed(2),
+        };
+        return;
+      }
+
+      // Stop and target may not cross entry — a stop on the wrong side of it is
+      // not a stop, and crossing would silently invert the trade's direction and
+      // print a meaningless ratio. Held one tick clear so risk can never be zero,
+      // which would divide by zero in the ratio.
+      const long = cur.kind === 'long';
+      let next = price;
+      if (d.edge === 'stop') {
+        next = long ? Math.min(price, cur.entry - TICK) : Math.max(price, cur.entry + TICK);
+      } else {
+        next = long ? Math.max(price, cur.entry + TICK) : Math.min(price, cur.entry - TICK);
+      }
+      next = +next.toFixed(2);
+      if (cur[d.edge] !== next) rrBoxRef.current = { ...cur, [d.edge]: next };
     };
     const end = () => {
       document.removeEventListener('pointermove', move);
@@ -4802,12 +4831,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         }
     }
 
-    // R:R stop and target edges. Checked before manual lines so a box sitting on
-    // top of a drawing still grabs; the entry line is intentionally not draggable
-    // (move the whole box by placing a new one).
+    // R:R edges. Checked before manual lines so a box sitting on top of a drawing
+    // still grabs. Entry is checked LAST: it sits between the other two, and when
+    // the box is tight the grab zones overlap — testing stop and target first
+    // means the edge you are aiming at wins rather than the whole box sliding.
     if (rrBoxRef.current) {
       const box = rrBoxRef.current;
-      for (const edge of ['stop', 'target'] as const) {
+      for (const edge of ['stop', 'target', 'entry'] as const) {
         const edgeY = mainSeriesRef.current.priceToCoordinate(box[edge]);
         if (edgeY !== null && Math.abs(edgeY - y) < 22) {
           // Deliberately does NOT set draggingLineRef: that ref is read by the
