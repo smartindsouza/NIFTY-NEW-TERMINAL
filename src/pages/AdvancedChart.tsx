@@ -4412,11 +4412,57 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // Document level also keeps the drag alive if a finger strays off the chart.
   useEffect(() => {
     const onTouchMove = (ev: TouchEvent) => {
-      if (draggingLineRef.current && ev.cancelable) ev.preventDefault();
+      if ((draggingLineRef.current || rrDraggingRef.current) && ev.cancelable) ev.preventDefault();
     };
     document.addEventListener('touchmove', onTouchMove, { passive: false });
     return () => document.removeEventListener('touchmove', onTouchMove);
   }, []);
+
+  // R:R drag runs on its OWN document-level listeners rather than the chart's
+  // React handlers. Two concrete failures forced this:
+  //   * onPointerLeave is wired to the release handler, so the instant a finger
+  //     crossed the chart edge — trivial when dragging toward the top or bottom —
+  //     the drag ENDED mid-gesture. The line froze, and because the release path
+  //     had already cleared the dragging flag, the next render resynced the ref
+  //     from stale state and the box jumped back. That is the snap-back.
+  //   * the chart's handleScroll/handleScale were switched off at grab and never
+  //     restored on this path, so panning stayed dead after the first drag.
+  // Document listeners are immune to element boundaries and end only on a real
+  // pointerup or pointercancel.
+  const rrDragRef = useRef<{ edge: 'stop' | 'target'; grabOffset: number } | null>(null);
+  const startRrDrag = () => {
+    const move = (ev: PointerEvent) => {
+      const cont = chartContainerRef.current;
+      const series = mainSeriesRef.current;
+      const d = rrDragRef.current;
+      if (!cont || !series || !d) return;
+      const rect = cont.getBoundingClientRect();
+      const raw = series.coordinateToPrice(ev.clientY - rect.top + d.grabOffset);
+      if (raw === null) return;
+      const price = snapTick(raw);
+      const cur = rrBoxRef.current;
+      if (cur && cur[d.edge] !== price) rrBoxRef.current = { ...cur, [d.edge]: price };
+    };
+    const end = () => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', end);
+      document.removeEventListener('pointercancel', end);
+      rrDragRef.current = null;
+      rrDraggingRef.current = false;
+      try {
+        mainChartRef.current?.applyOptions({
+          handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
+          handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
+        });
+      } catch (e) {}
+      try { if (chartContainerRef.current) chartContainerRef.current.style.touchAction = ''; } catch (e) {}
+      const fb = rrBoxRef.current;
+      setRrBox(fb ? { ...fb } : fb);
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', end);
+    document.addEventListener('pointercancel', end);
+  };
 
   const endLineDrag = (e?: React.PointerEvent) => {
     try { if (e) (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch (err) {}
@@ -4653,10 +4699,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       for (const edge of ['stop', 'target'] as const) {
         const edgeY = mainSeriesRef.current.priceToCoordinate(box[edge]);
         if (edgeY !== null && Math.abs(edgeY - y) < 22) {
-          draggingLineRef.current = { id: -3, startY: y, dragged: false, grabOffset: edgeY - y, rr: edge };
+          // Deliberately does NOT set draggingLineRef: that ref is read by the
+          // chart's own pointer handlers, including the pointerleave-bound release
+          // that was cutting this drag short.
           rrDraggingRef.current = true;
+          rrDragRef.current = { edge, grabOffset: edgeY - y };
           mainChartRef.current.applyOptions({ handleScroll: false, handleScale: false });
           beginLineDrag(e);
+          startRrDrag();
           return;
         }
       }
@@ -4692,21 +4742,6 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     const anchoredY = y + (draggingLineRef.current.grabOffset || 0);
     const rawPrice = mainSeriesRef.current.coordinateToPrice(anchoredY);
     const newPrice = rawPrice === null ? null : snapTick(rawPrice);
-
-    // R:R edge drag. Writes the REF and does not touch state: setRrBox on every
-    // pointermove re-rendered this whole component per event, which is what made
-    // the lines feel heavy. The canvas draw loop already reads rrBoxRef every
-    // frame, so mutating the ref paints at the display's own rate with no React
-    // work in between. State is reconciled once, on release.
-    if (draggingLineRef.current.rr) {
-      if (newPrice !== null) {
-        const edge = draggingLineRef.current.rr;
-        const cur = rrBoxRef.current;
-        // Skip identical values — pointermove can fire several times per frame.
-        if (cur && cur[edge] !== newPrice) rrBoxRef.current = { ...cur, [edge]: newPrice };
-      }
-      return;
-    }
 
     // Mirrored spot line drag. The label shows the premium this index level
     // implies, estimated locally from delta so it tracks the finger; the EXACT
@@ -4761,14 +4796,6 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
   const handlePointerUp = (e: React.PointerEvent) => {
     if (draggingLineRef.current) endLineDrag(e);
-    // R:R edge release: hand control back to React with the value the ref has
-    // been carrying. Done before the branches below so an interrupted or
-    // cancelled drag still reconciles instead of leaving the two out of step.
-    if (rrDraggingRef.current) {
-      rrDraggingRef.current = false;
-      const finalBox = rrBoxRef.current;
-      setRrBox(finalBox ? { ...finalBox } : finalBox);
-    }
     // Mirrored spot line release. The dragged INDEX level is converted back to a
     // premium on the server — the same model, the same live IV — and that premium
     // is what gets armed. The protective rule stays premium-based throughout;
