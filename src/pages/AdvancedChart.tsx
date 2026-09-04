@@ -4702,28 +4702,41 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       const rule = premRuleRef.current;
       if (!rule || rule.symbol !== pos.symbol) { spotMapRef.current = null; return; }
 
-      // THE LINES STAY PUT. Re-solving every cycle made them creep with every
-      // tick: the answer to "what index level makes this option worth X" genuinely
-      // moves as spot and IV move, so an honest live mapping is a drifting line —
-      // and a drifting stop line is unreadable. The mapping is now solved ONCE per
-      // rule and held until the rule itself changes. The trade-off is stated
-      // plainly: the level is a snapshot taken when the rule was set, and it
-      // becomes approximate as the day's volatility and time decay move on.
+      // LIVE MAPPING, SMOOTHED. The level is re-solved every cycle, so it keeps
+      // tracking the truth as theta bleeds and vol moves — that slow creep is
+      // wanted. What was NOT wanted is the twitch: each solve backs the implied
+      // vol out of the option's own live premium, and a couple of ticks of noise
+      // in that premium swings the implied index level a few points either way,
+      // so the line jittered every cycle instead of drifting.
+      //
+      // So the target is followed rather than jumped to: the drawn level eases
+      // toward each new solve, which averages the noise out while leaving a real
+      // trend to arrive intact. Sub-tick differences are ignored outright, and a
+      // genuinely NEW rule snaps immediately — easing there would look like the
+      // line sliding to a level the user did not ask for.
       const prev = spotMapRef.current;
-      if (prev && prev.symbol === pos.symbol && prev.sl === rule.sl && prev.tp === rule.tp
-          && prev.slSpot !== null && prev.tpSpot !== null) {
-        return;
-      }
+      const sameRule = !!(prev && prev.symbol === pos.symbol && prev.sl === rule.sl && prev.tp === rule.tp);
+      const EASE = 0.25;          // per 4s cycle
+      const DEADBAND = 0.25;      // index points; below this, do not move at all
+      const ease = (prevVal: number | null | undefined, target: number | null) => {
+        if (target === null || !Number.isFinite(target)) return null;
+        if (!sameRule || prevVal === null || prevVal === undefined || !Number.isFinite(prevVal)) return target;
+        const diff = target - prevVal;
+        if (Math.abs(diff) < DEADBAND) return prevVal;
+        return +(prevVal + diff * EASE).toFixed(2);
+      };
       const r = await fetch(`/api/premium-spot-map?tradingsymbol=${encodeURIComponent(pos.symbol)}&premium=${rule.sl},${rule.tp}`);
       const d = await r.json().catch(() => null);
       // Any failure clears the map, which tears the lines down. A stale mapping
       // is worse than none: it would point at an index level that no longer
       // corresponds to the rule.
       if (!r.ok || !d || !Array.isArray(d.spotFor)) { spotMapRef.current = null; return; }
-      // delta and spot are kept for the drag-time estimate; the LEVELS are frozen.
+      // delta and spot are the live values (used by the drag-time estimate); only
+      // the drawn LEVELS are eased.
       spotMapRef.current = {
         spot: d.spot, delta: d.delta, iv: d.iv,
-        slSpot: d.spotFor[0] ?? null, tpSpot: d.spotFor[1] ?? null,
+        slSpot: ease(prev?.slSpot, d.spotFor[0] ?? null),
+        tpSpot: ease(prev?.tpSpot, d.spotFor[1] ?? null),
         sl: rule.sl, tp: rule.tp, symbol: pos.symbol,
       };
     } catch { spotMapRef.current = null; }
