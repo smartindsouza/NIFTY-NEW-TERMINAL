@@ -6207,7 +6207,12 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // is a timeframe gate, not a change to the user's choice, so dropping back to
   // 15m or below restores them.
   const tfMinutes = parseInt(String(timeframe), 10) || 0;
-  const intradayLevelsAllowed = tfMinutes > 0 && tfMinutes <= 15;
+  // Also off on GIFT NIFTY. These levels are computed from the NIFTY session —
+  // its previous-day extremes, its support and resistance, its opening range,
+  // its H levels. GIFT is a separate USD-denominated NSE IX future trading its
+  // own hours, so drawing NIFTY's levels across it puts lines at prices that
+  // mean nothing on that instrument.
+  const intradayLevelsAllowed = tfMinutes > 0 && tfMinutes <= 15 && !isReferenceChart;
 
   const isOptionViewRef = useRef(isOptionView);
   isOptionViewRef.current = isOptionView;
@@ -7113,7 +7118,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       const p = Number(price);
       if (Number.isFinite(p) && p > 0) L.push({ key, label, price: p });
     };
-    if (showHLevels && !isOptionView && Array.isArray(hLevels)) {
+    if (showHLevels && !isOptionView && !isReferenceChart && Array.isArray(hLevels)) {
       const names = ['RED OUTER', 'RED INNER', 'TRAP UPPER', 'TRAP LOWER', 'GREEN INNER', 'GREEN OUTER'];
       hLevels.forEach((v, i) => { if (v > 0) add(`h${i}`, names[i] || `H-Level ${i + 1}`, v); });
     }
@@ -7131,7 +7136,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       add('sup', 'Support', localAnalytics?.supportZone?.strikePrice);
       add('res', 'Resistance', localAnalytics?.resistanceZone?.strikePrice);
     }
-    if (showOpeningRange) {
+    if (showOpeningRange && !isReferenceChart) {
       add('orh', '15m High', (taInfo as any)?.openingRange?.high);
       add('orl', '15m Low', (taInfo as any)?.openingRange?.low);
     }
@@ -7141,7 +7146,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       (dz?.supply || []).forEach((z: any, i: number) => add(`sz${i}`, 'Supply zone', z.bottom));
     }
     alertLevelsRef.current = L;
-  }, [hLevels, showHLevels, showFiftyPercentLevels, pdhPdlData, showPdhPdl, localAnalytics, showSnR, taInfo, showOpeningRange, showDsZones, intradayLevelsAllowed]);
+  }, [hLevels, showHLevels, showFiftyPercentLevels, pdhPdlData, showPdhPdl, localAnalytics, showSnR, taInfo, showOpeningRange, showDsZones, intradayLevelsAllowed, isReferenceChart]);
 
   // Fire one alert: OS notification (works from background tabs) + beep. No in-app
   // toast — see fireBreakoutAlert: on a phone these cards cover the chart they are
@@ -8862,7 +8867,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               // 15m Opening Range (first 15 min high/low) — centered labels, no Y-axis value
               {
                 const or = (taInfo as any)?.openingRange;
-                if (showOpeningRange && !isOptionView && or) {
+                if (showOpeningRange && !isOptionView && !isReferenceChart && or) {
                   if (typeof or.high === 'number') {
                     const y = mainSeriesRef.current.priceToCoordinate(or.high);
                     if (y !== null) linesToDraw.push({ text: `15M HIGH`, y, color: '#ffffff', dash: [], lineWidth: 1 });
@@ -8885,7 +8890,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               }
 
               // H Levels — drawn here (line + pill) so RED OUTER / RED INNER / TRAP UPPER / TRAP LOWER / GREEN OUTER / GREEN INNER text shows on the chart
-              if (showHLevels && !isOptionView && hLevels) {
+              if (showHLevels && !isOptionView && !isReferenceChart && hLevels) {
                  const hColors = ['#ef4444', '#ef4444', '#fbbf24', '#fbbf24', '#22c55e', '#22c55e'];
                  const hTexts = ['RED OUTER', 'RED INNER', 'TRAP UPPER', 'TRAP LOWER', 'GREEN INNER', 'GREEN OUTER'];
                  const hDash = hLevelsStyle === 1 ? [5, 5] : hLevelsStyle === 2 ? [2, 4] : [];
