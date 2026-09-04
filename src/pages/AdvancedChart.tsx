@@ -4606,7 +4606,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   };
 
   // ===== Phase 2: draggable SL/Target lines feeding the server-side auto-exit watcher =====
-  const slLinesRef = useRef<{ kind: 'upper' | 'lower', price: number, instance: any, label: string, color: string }[]>([]);
+  const slLinesRef = useRef<{ kind: 'upper' | 'lower', price: number, instance: any, label: string, color: string, title?: string }[]>([]);
   const slSeriesRef = useRef<any>(null); // the series instance the SL lines were created on (to detect recreation)
   const chartLevelsRef = useRef<number[]>([]); // all chart levels (H-levels, 50%, PDH/PDL, S/R) for default target
   const oiGlowRef = useRef<Record<number, { call: number, put: number }>>({}); // strike -> last time call/put OI grew (ms)
@@ -4681,17 +4681,46 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const refreshSpotMap = async () => {
     if (spotMapBusyRef.current) return;
     const pos = slActivePosRef.current;
-    const rule = premRuleRef.current;
-    if (!pos || !rule || rule.symbol !== pos.symbol) { spotMapRef.current = null; return; }
+    if (!pos) { spotMapRef.current = null; return; }
     if (!onUnderlyingSpotChart()) return;                   // don't poll from charts that won't draw it
     spotMapBusyRef.current = true;
     try {
+      // THE RULE IS RE-READ FROM THE SERVER. It was fetched exactly once per
+      // position, guarded by premSyncedForRef, so when the option chart pushed a
+      // new SL or TP this pane never heard about it and the mirrored lines stayed
+      // on the old levels forever. In split view they are separate component
+      // instances with separate refs, so the server is the only thing they share.
+      try {
+        const rr = await fetch(`/api/premium-exit/get?tradingsymbol=${encodeURIComponent(pos.symbol)}`);
+        const rd = await rr.json().catch(() => null);
+        const live = rd?.rule;
+        if (live && live.status === 'ACTIVE' && Number.isFinite(Number(live.sl)) && Number.isFinite(Number(live.tp))) {
+          premRuleRef.current = { symbol: pos.symbol, sl: Number(live.sl), tp: Number(live.tp) };
+        }
+      } catch (e) { /* keep the last known rule */ }
+
+      const rule = premRuleRef.current;
+      if (!rule || rule.symbol !== pos.symbol) { spotMapRef.current = null; return; }
+
+      // THE LINES STAY PUT. Re-solving every cycle made them creep with every
+      // tick: the answer to "what index level makes this option worth X" genuinely
+      // moves as spot and IV move, so an honest live mapping is a drifting line —
+      // and a drifting stop line is unreadable. The mapping is now solved ONCE per
+      // rule and held until the rule itself changes. The trade-off is stated
+      // plainly: the level is a snapshot taken when the rule was set, and it
+      // becomes approximate as the day's volatility and time decay move on.
+      const prev = spotMapRef.current;
+      if (prev && prev.symbol === pos.symbol && prev.sl === rule.sl && prev.tp === rule.tp
+          && prev.slSpot !== null && prev.tpSpot !== null) {
+        return;
+      }
       const r = await fetch(`/api/premium-spot-map?tradingsymbol=${encodeURIComponent(pos.symbol)}&premium=${rule.sl},${rule.tp}`);
       const d = await r.json().catch(() => null);
       // Any failure clears the map, which tears the lines down. A stale mapping
       // is worse than none: it would point at an index level that no longer
       // corresponds to the rule.
       if (!r.ok || !d || !Array.isArray(d.spotFor)) { spotMapRef.current = null; return; }
+      // delta and spot are kept for the drag-time estimate; the LEVELS are frozen.
       spotMapRef.current = {
         spot: d.spot, delta: d.delta, iv: d.iv,
         slSpot: d.spotFor[0] ?? null, tpSpot: d.spotFor[1] ?? null,
@@ -5117,11 +5146,47 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     if (!slActivePos) { setSlPanelOpen(false); return; }
     // The SL/TP setup box no longer auto-opens after a trade: the draggable
     // premium lines ARE the live SL/TP now, applied instantly on drag release.
+    // Label text for an exit line: percentage AND rupee value at the position's
+    // real quantity. Extracted so it can be recomputed for lines that ALREADY
+    // exist — the rupee figure needs posNow.qty, which arrives from the position
+    // poll a moment after the lines are drawn. ensure() used to bail out the
+    // instant lines existed, so a title created before qty was known kept its
+    // percentage-only text until something rebuilt the chart. That is the delay.
+    const exitTitle = (label: string, price: number) => {
+      const entry = slEntryRef.current;
+      if (!entry) return '';
+      const pos = slActivePosRef.current;
+      const isBuy = (pos?.side || 'BUY') !== 'SELL';
+      const move = isBuy ? (price - entry) : (entry - price);   // + when it makes money
+      const pct = (move / entry) * 100;
+      const qty = Number(pos?.qty) || 0;
+      const sign = (v: number) => (v >= 0 ? '+' : '-');
+      const money = qty > 0
+        ? ` · ${sign(move)}₹${Math.abs(Math.round(move * qty)).toLocaleString('en-IN')}`
+        : '';
+      return `${label} ${sign(pct)}${Math.abs(pct).toFixed(1)}%${money}`;
+    };
+
     const ensure = () => {
       const s = mainSeriesRef.current;
       if (!s) return;
       if (slLinesRef.current.length > 0) {
-        if (slSeriesRef.current === s) return; // lines already exist on the current series
+        if (slSeriesRef.current === s) {
+          // Lines exist: refresh their labels rather than bailing out, so the
+          // rupee amount appears as soon as the quantity is known instead of
+          // waiting for a chart rebuild. Skipped mid-drag — the drag owns the
+          // title while a finger is down.
+          if (!exitDragRef.current) {
+            for (const l of slLinesRef.current) {
+              const t = exitTitle(l.label, l.price);
+              if (t && t !== l.title) {
+                l.title = t;
+                try { l.instance.applyOptions({ title: t }); } catch (e) {}
+              }
+            }
+          }
+          return;
+        }
         // Series was recreated (timeframe/symbol change). The old price lines are orphaned
         // with the removed series, so drop the stale entries and rebuild on the new series.
         slLinesRef.current = [];
@@ -5220,26 +5285,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       // always reads positive and an SL always negative. Previously the percentage
       // was raw price change, which on a SHORT showed a profitable target as a
       // negative — and would have contradicted the rupee figure sitting next to it.
-      const pctTitle = (label: string, price: number) => {
-        const entry = slEntryRef.current;
-        if (!entry) return '';
-        const isBuy = (posNow?.side || 'BUY') !== 'SELL';
-        const move = isBuy ? (price - entry) : (entry - price);   // + when it makes money
-        const pct = (move / entry) * 100;
-        const qty = Number(posNow?.qty) || 0;
-        const sign = (v: number) => (v >= 0 ? '+' : '-');
-        const money = qty > 0
-          ? ` · ${sign(move)}₹${Math.abs(Math.round(move * qty)).toLocaleString('en-IN')}`
-          : '';
-        return `${label} ${sign(pct)}${Math.abs(pct).toFixed(1)}%${money}`;
-      };
+      const pctTitle = exitTitle;   // one implementation, shared with the refresh above
       const upLabel = effBull ? 'TARGET' : 'SL';
       const loLabel = effBull ? 'SL' : 'TARGET';
       const uInst = s.createPriceLine({ price: upper, color: '#f43f5e', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: pctTitle(upLabel, upper) });
       const lInst = s.createPriceLine({ price: lower, color: '#10b981', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: pctTitle(loLabel, lower) });
       slLinesRef.current = [
-        { kind: 'upper', price: upper, instance: uInst, label: upLabel, color: '#f43f5e' },
-        { kind: 'lower', price: lower, instance: lInst, label: loLabel, color: '#10b981' },
+        { kind: 'upper', price: upper, instance: uInst, label: upLabel, color: '#f43f5e', title: pctTitle(upLabel, upper) },
+        { kind: 'lower', price: lower, instance: lInst, label: loLabel, color: '#10b981', title: pctTitle(loLabel, lower) },
       ];
       slSeriesRef.current = s;
       // Fixed ENTRY line on the traded option's chart (reference, not draggable)
