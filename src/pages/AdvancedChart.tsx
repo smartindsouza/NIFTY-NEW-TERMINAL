@@ -10849,6 +10849,37 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               ))}
             </div>
 
+            {/* What this trade actually risks and targets, in rupees, at the lot
+                count currently selected. The exit levels come from the TP & SL
+                defaults, which is exactly what will be armed when this trigger
+                fills — so the numbers shown here are the numbers that will apply,
+                not an illustration. Recomputed from the trigger LEVEL rather than
+                the live premium, because that level is the price this will fill at. */}
+            {(() => {
+              const lotSize = triggerBox.contract.lot_size || 0;
+              const qty = triggerBox.lots * lotSize;
+              const entry = triggerBox.level;
+              if (!(qty > 0) || !(entry > 0) || sizingPending) return null;
+              const { slPct, tpPct } = tpSlDefaults;
+              const long = triggerBox.side === 'BUY';
+              const slPrice = long ? entry * (1 - slPct / 100) : entry * (1 + slPct / 100);
+              const tpPrice = long ? entry * (1 + tpPct / 100) : entry * (1 - tpPct / 100);
+              const risk = Math.abs(entry - slPrice) * qty;
+              const reward = Math.abs(tpPrice - entry) * qty;
+              const money = (v: number) => `₹${Math.round(v).toLocaleString('en-IN')}`;
+              return (
+                <div className="text-[11px] mb-2 px-1 flex items-center justify-between gap-2">
+                  <span className="text-rose-400 font-mono">
+                    SL {slPrice.toFixed(2)} <span className="font-bold">−{money(risk)}</span>
+                  </span>
+                  <span className="text-muted-foreground font-mono">1:{(risk > 0 ? reward / risk : 0).toFixed(1)}</span>
+                  <span className="text-emerald-400 font-mono">
+                    TP {tpPrice.toFixed(2)} <span className="font-bold">+{money(reward)}</span>
+                  </span>
+                </div>
+              );
+            })()}
+
             <div className="text-[11px] mb-3 px-1">
               Margin:{' '}
               {triggerMargin === 'loading' ? <span className="text-muted-foreground">checking…</span>
