@@ -6200,6 +6200,15 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const isOptionView = !!selectedInstrument && (indexToken === null || instrumentToken !== indexToken);
   // Read inside the chart effect's click handler, which is created once per chart
   // rebuild — a ref keeps it correct even if the view changes without a rebuild.
+  // PDH/PDL and S&R are intraday levels: the previous day's extremes and the
+  // day's support/resistance zones. On an hourly chart or higher a single candle
+  // spans or swallows them, so they stop marking anything price is reacting to.
+  // Disabled above 15m on every chart. The toggles keep their saved state — this
+  // is a timeframe gate, not a change to the user's choice, so dropping back to
+  // 15m or below restores them.
+  const tfMinutes = parseInt(String(timeframe), 10) || 0;
+  const intradayLevelsAllowed = tfMinutes > 0 && tfMinutes <= 15;
+
   const isOptionViewRef = useRef(isOptionView);
   isOptionViewRef.current = isOptionView;
   // Same reason as isOptionViewRef: the spot-mirror helpers are defined far above
@@ -7115,8 +7124,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         add(`fifty${i}`, '50% Level', mid);
       }
     }
-    if (showPdhPdl) { add('pdh', 'PDH', pdhPdlData?.pdh); add('pdl', 'PDL', pdhPdlData?.pdl); }
-    if (showSnR) {
+    // A level that is not drawn must not announce touches either — otherwise an
+    // hourly chart would alert on lines the user cannot see.
+    if (showPdhPdl && intradayLevelsAllowed) { add('pdh', 'PDH', pdhPdlData?.pdh); add('pdl', 'PDL', pdhPdlData?.pdl); }
+    if (showSnR && intradayLevelsAllowed) {
       add('sup', 'Support', localAnalytics?.supportZone?.strikePrice);
       add('res', 'Resistance', localAnalytics?.resistanceZone?.strikePrice);
     }
@@ -7130,7 +7141,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       (dz?.supply || []).forEach((z: any, i: number) => add(`sz${i}`, 'Supply zone', z.bottom));
     }
     alertLevelsRef.current = L;
-  }, [hLevels, showHLevels, showFiftyPercentLevels, pdhPdlData, showPdhPdl, localAnalytics, showSnR, taInfo, showOpeningRange, showDsZones]);
+  }, [hLevels, showHLevels, showFiftyPercentLevels, pdhPdlData, showPdhPdl, localAnalytics, showSnR, taInfo, showOpeningRange, showDsZones, intradayLevelsAllowed]);
 
   // Fire one alert: OS notification (works from background tabs) + beep. No in-app
   // toast — see fireBreakoutAlert: on a phone these cards cover the chart they are
@@ -7660,7 +7671,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           const y = param.point.y;
 
           // Check PDH/PDL click
-          if (showPdhPdl && !isOptionView && pdhPrice !== null && pdlPrice !== null) {
+          if (showPdhPdl && intradayLevelsAllowed && !isOptionView && pdhPrice !== null && pdlPrice !== null) {
             const pdhY = mainSeries.priceToCoordinate(pdhPrice);
             if (pdhY !== null && Math.abs(pdhY - y) < 10) {
               setIsEditingPdhPdl(true);
@@ -8825,20 +8836,20 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               }
 
               const snrDash = snrStyle === 1 ? [5, 5] : snrStyle === 2 ? [2, 4] : [];
-              if (showSnR && !isOptionView && localAnalytics?.supportZone?.strikePrice) {
+              if (showSnR && intradayLevelsAllowed && !isOptionView && localAnalytics?.supportZone?.strikePrice) {
                  const y = mainSeriesRef.current.priceToCoordinate(localAnalytics.supportZone.strikePrice);
                  if (y !== null) linesToDraw.push({ text: `SUP`, y, color: supportColor, dash: snrDash, lineWidth: snrWidth });
               }
-              if (showSnR && !isOptionView && localAnalytics?.resistanceZone?.strikePrice) {
+              if (showSnR && intradayLevelsAllowed && !isOptionView && localAnalytics?.resistanceZone?.strikePrice) {
                  const y = mainSeriesRef.current.priceToCoordinate(localAnalytics.resistanceZone.strikePrice);
                  if (y !== null) linesToDraw.push({ text: `RES`, y, color: resistanceColor, dash: snrDash, lineWidth: snrWidth });
               }
               const pdhPdlDash = pdhPdlStyle === 1 ? [5, 5] : pdhPdlStyle === 2 ? [2, 4] : [];
-              if (showPdhPdl && !isOptionView && pdhPrice !== null) {
+              if (showPdhPdl && intradayLevelsAllowed && !isOptionView && pdhPrice !== null) {
                  const y = mainSeriesRef.current.priceToCoordinate(pdhPrice);
                  if (y !== null) linesToDraw.push({ text: `PDH ${pdhPrice}`, y, color: pdhColor, dash: pdhPdlDash, lineWidth: pdhPdlWidth });
               }
-              if (showPdhPdl && !isOptionView && pdlPrice !== null) {
+              if (showPdhPdl && intradayLevelsAllowed && !isOptionView && pdlPrice !== null) {
                  const y = mainSeriesRef.current.priceToCoordinate(pdlPrice);
                  if (y !== null) linesToDraw.push({ text: `PDL ${pdlPrice}`, y, color: pdlColor, dash: pdhPdlDash, lineWidth: pdhPdlWidth });
               }
