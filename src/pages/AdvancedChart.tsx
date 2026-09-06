@@ -1815,13 +1815,14 @@ function OiBarsEditorModal({
 // exit rule is denominated in — the same number then drives the spot mirror
 // through the existing Black-Scholes map, so both charts stay consistent.
 function TpSlDefaultsModal({
-  onClose, initialSl, initialTp, onApply,
+  onClose, initialSl, initialTp, initialTrail, onApply,
 }: {
-  onClose: () => void, initialSl: number, initialTp: number,
-  onApply: (slPct: number, tpPct: number) => void,
+  onClose: () => void, initialSl: number, initialTp: number, initialTrail: boolean,
+  onApply: (slPct: number, tpPct: number, trail: boolean) => void,
 }) {
   const [sl, setSl] = useState(String(initialSl));
   const [tp, setTp] = useState(String(initialTp));
+  const [trail, setTrail] = useState(initialTrail);
   const slN = parseFloat(sl), tpN = parseFloat(tp);
   // A stop at or beyond 100% of premium cannot be hit before the option is
   // worthless, and a non-positive target is not a target.
@@ -1854,12 +1855,25 @@ function TpSlDefaultsModal({
             </div>
           </div>
           {!valid && <div className="text-[11px] text-amber-400">Stop must be between 0 and 100%; target above 0.</div>}
+          <div className="border-t border-white/10 pt-3">
+            <button onClick={() => setTrail(t => !t)} className="w-full flex items-center justify-between text-left">
+              <div>
+                <div className="text-sm font-medium text-foreground/80">Trailing exit</div>
+                <div className="text-[10px] text-muted-foreground leading-snug mt-0.5">
+                  Half books at TP1. Stop to cost at 70%, then trails each spot pullback break; target ×1.2 per trail.
+                </div>
+              </div>
+              <div className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ml-3 ${trail ? 'bg-primary' : 'bg-slate-700'}`}>
+                <div className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${trail ? 'left-[18px]' : 'left-0.5'}`} />
+              </div>
+            </button>
+          </div>
           <button onClick={() => { setSl('10'); setTp('20'); }}
             className="text-[11px] text-muted-foreground hover:text-foreground transition-colors underline">Reset to 10% / 20%</button>
         </div>
         <div className="flex items-center justify-end p-4 border-t border-0 bg-muted gap-2 mt-2">
           <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
-          <button disabled={!valid} onClick={() => onApply(slN, tpN)}
+          <button disabled={!valid} onClick={() => onApply(slN, tpN, trail)}
             className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium disabled:opacity-40">Ok</button>
         </div>
       </div>
@@ -4063,16 +4077,17 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   rrArmRef.current = rrArm;
   // 10 / 20 preserves the levels this terminal has always defaulted to, so
   // nothing changes for a trade taken before these are ever opened.
-  const [tpSlDefaults, setTpSlDefaults] = useState<{ slPct: number; tpPct: number }>(() => {
+  const [tpSlDefaults, setTpSlDefaults] = useState<{ slPct: number; tpPct: number; trail: boolean }>(() => {
     try {
       const raw = localStorage.getItem('tpSlDefaults');
       if (raw) {
         const p = JSON.parse(raw);
         const sl = Number(p?.slPct), tp = Number(p?.tpPct);
-        if (Number.isFinite(sl) && sl > 0 && sl < 100 && Number.isFinite(tp) && tp > 0) return { slPct: sl, tpPct: tp };
+        const trail = p?.trail === undefined ? true : !!p.trail;   // absent = ON: it is Martin's method
+        if (Number.isFinite(sl) && sl > 0 && sl < 100 && Number.isFinite(tp) && tp > 0) return { slPct: sl, tpPct: tp, trail };
       }
     } catch (e) {}
-    return { slPct: 10, tpPct: 20 };
+    return { slPct: 10, tpPct: 20, trail: true };
   });
   useEffect(() => {
     try { localStorage.setItem('tpSlDefaults', JSON.stringify(tpSlDefaults)); } catch (e) {}
@@ -4646,7 +4661,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // re-ran. The lines then disagreed with the live protective rule: the chart said
   // -10% while the server was holding whatever had been dragged. This ref is the
   // last known armed pair and is what the lines are seeded from.
-  const premRuleRef = useRef<{ symbol: string; sl: number; tp: number } | null>(null);
+  const premRuleRef = useRef<{ symbol: string; sl: number; tp: number; trail?: any } | null>(null);
   useEffect(() => { slActivePosRef.current = slActivePos; }, [slActivePos]);
 
   // ===== Premium SL/TP mirrored onto the SPOT chart =====
@@ -4822,7 +4837,12 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     try {
       const r = await fetch('/api/premium-exit/set', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tradingsymbol: pos.symbol, sl: +(+slPx).toFixed(2), tp: +(+tpPx).toFixed(2), entry: pos.entryPrice })
+        body: JSON.stringify({
+          tradingsymbol: pos.symbol, sl: +(+slPx).toFixed(2), tp: +(+tpPx).toFixed(2), entry: pos.entryPrice,
+          // Trailing exit (pullback method) — the server builds the state at arm time.
+          trail: !!tpSlDefaultsRef.current.trail,
+          optionType: pos.optionType || (String(pos.symbol).endsWith('PE') ? 'PE' : 'CE'),
+        })
       });
       const d = await r.json().catch(() => null);
       setPremSync(d && d.success ? 'ACTIVE' : 'ERROR');
@@ -5177,7 +5197,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       const money = qty > 0
         ? ` · ${sign(move)}₹${Math.abs(Math.round(move * qty)).toLocaleString('en-IN')}`
         : '';
-      return `${label} ${sign(pct)}${Math.abs(pct).toFixed(1)}%${money}`;
+      const tr = premRuleRef.current?.trail;
+      const stage = tr ? (tr.trailCount > 0 ? ` · T${tr.trailCount}` : tr.costMoved ? ' · COST' : '') + (tr.tp1Done ? ' · ½ booked' : '') : '';
+      return `${label} ${sign(pct)}${Math.abs(pct).toFixed(1)}%${money}${stage}`;
     };
 
     const ensure = () => {
@@ -5323,14 +5345,47 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       if (!viewingTrade) setSlLevels({ upper, lower });
     };
     ensure();
-    // The mirrored spot lines refresh on the same beat. Wrapped so a fault in the
-    // mirror can never stop ensure() from maintaining the REAL rule's lines.
+    // The server may move SL/TP on its own now (70% rule, pullback trails, TP1
+    // lift). The option chart used to read the rule once and then trust its own
+    // drags, so a trailed stop would sit on screen at the OLD level while the
+    // real one had moved — dangerous to look at. Re-read every 5s and move the
+    // lines to wherever the server has them, unless a finger is on one.
+    let ruleSyncBusy = false;
+    const syncRuleFromServer = async () => {
+      if (ruleSyncBusy || exitDragRef.current) return;
+      const pos = slActivePosRef.current;
+      if (!pos || !isOptionViewRef.current) return;
+      ruleSyncBusy = true;
+      try {
+        const r = await fetch(`/api/premium-exit/get?tradingsymbol=${encodeURIComponent(pos.symbol)}`);
+        const d = await r.json().catch(() => null);
+        const live = d?.rule;
+        if (!live || live.status !== 'ACTIVE') return;
+        const sl = Number(live.sl), tp = Number(live.tp);
+        if (!Number.isFinite(sl) || !Number.isFinite(tp)) return;
+        premRuleRef.current = { symbol: pos.symbol, sl, tp, trail: live.trail || null };
+        if (exitDragRef.current) return;
+        const long = (pos.side || 'BUY') !== 'SELL';
+        for (const l of slLinesRef.current) {
+          const want = l.kind === 'upper' ? (long ? tp : sl) : (long ? sl : tp);
+          if (Number.isFinite(want) && Math.abs(l.price - want) > 0.004) {
+            l.price = want;
+            const t = exitTitle(l.label, want);
+            l.title = t;
+            try { l.instance.applyOptions({ price: want, title: t }); } catch (e) {}
+          }
+        }
+      } catch (e) { /* keep the last known rule */ }
+      finally { ruleSyncBusy = false; }
+    };
+    const ruleSyncIv = setInterval(syncRuleFromServer, 5000);
     const tick = () => { ensure(); try { ensureSpotMapLines(); } catch (e) {} };
     try { ensureSpotMapLines(); } catch (e) {}
     slEnsureRef.current = ensure;
     const iv = setInterval(tick, 1000);
     return () => {
       clearInterval(iv);
+      clearInterval(ruleSyncIv);
       slEnsureRef.current = null;
       const s = mainSeriesRef.current;
       slLinesRef.current.forEach(l => { try { s && s.removePriceLine(l.instance); } catch {} });
@@ -9706,7 +9761,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       <div className="w-4" />
                       <span>TP &amp; SL</span>
                       <span className="text-[10px] font-mono text-muted-foreground">
-                        {tpSlDefaults.slPct}% / {tpSlDefaults.tpPct}%
+                        {tpSlDefaults.slPct}% / {tpSlDefaults.tpPct}%{tpSlDefaults.trail ? ' · trail' : ''}
                       </span>
                     </div>
                     <button
@@ -10542,8 +10597,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         <TpSlDefaultsModal
           initialSl={tpSlDefaults.slPct}
           initialTp={tpSlDefaults.tpPct}
+          initialTrail={tpSlDefaults.trail}
           onClose={() => setIsEditingTpSl(false)}
-          onApply={(slPct, tpPct) => { setTpSlDefaults({ slPct, tpPct }); setIsEditingTpSl(false); }}
+          onApply={(slPct, tpPct, trail) => { setTpSlDefaults({ slPct, tpPct, trail }); setIsEditingTpSl(false); }}
         />
       )}
 

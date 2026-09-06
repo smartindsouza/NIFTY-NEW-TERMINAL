@@ -15,6 +15,7 @@ import { getHistoricalAnalytics } from './server/analytics_service';
 import { runRsiBacktest } from './server/rsi_backtest';
 import { getLiveSignal, runOptionConfirmBacktest, getAlertSignal } from './server/option_rsi';
 import { ivAndDelta, bsThetaPerDay, impliedVol, bsPrice, bsDelta } from './server/options_math';
+import { createTrailState, onPremiumTick, onSpotClose5m, onSpotClose1m, type TrailState, type TrailAction } from './server/trail_engine';
 import { getGammaBlast } from './server/gamma_blast';
 import { getPremiumPulse, getPremiumPulseBias } from './server/premium_pulse';
 import { getFiiData, getCashFiiDii } from './server/fii_service';
@@ -75,6 +76,31 @@ db.exec(`CREATE TABLE IF NOT EXISTS premium_exit_rules (
 // the Kite ticker can stream it. Nullable — rules without a token still work
 // through the 3s poll. ALTER throws if the column already exists; that's fine.
 try { db.exec(`ALTER TABLE premium_exit_rules ADD COLUMN instrument_token INTEGER`); } catch (e) { /* column exists */ }
+// Trailing-exit state (JSON) for rules armed with Martin's pullback method. NULL
+// means the rule is a plain SL/TP and is evaluated exactly as before.
+try { db.exec(`ALTER TABLE premium_exit_rules ADD COLUMN trail_state TEXT`); } catch (e) { /* column exists */ }
+
+// Live TrailState per armed symbol. The DB copy is the durable one; this is the
+// one the tick path mutates. Written back on every ACTION (a trail, a booking,
+// the 70% move) — never per tick, since premLowSincePeak is the only per-tick
+// field and losing it across a restart just means one pullback's premium low
+// is measured from the restart rather than the peak.
+const trailStates = new Map<string, TrailState>();
+function loadTrailState(row: any): void {
+  if (!row || row.status !== 'ACTIVE' || !row.trail_state) { trailStates.delete(row?.tradingsymbol); return; }
+  try { trailStates.set(row.tradingsymbol, JSON.parse(row.trail_state)); }
+  catch (e) { console.error('[trail] bad trail_state for', row.tradingsymbol); trailStates.delete(row.tradingsymbol); }
+}
+function persistTrail(tradingsymbol: string, st: TrailState): void {
+  try {
+    db.prepare("UPDATE premium_exit_rules SET sl=?, tp=?, trail_state=?, updated_at=? WHERE tradingsymbol=?")
+      .run(st.sl, st.tp, JSON.stringify(st), Date.now(), tradingsymbol);
+  } catch (e) { console.error('[trail] persist failed', tradingsymbol, e); }
+  // keep the tick-path mirror's sl/tp current too
+  for (const [tok, r] of premiumRulesByToken) {
+    if (r.tradingsymbol === tradingsymbol) { r.sl = st.sl; r.tp = st.tp; r.trail_state = JSON.stringify(st); premiumRulesByToken.set(tok, r); }
+  }
+}
 
 // In-memory mirror of ACTIVE premium-exit rules, keyed by instrument token, so
 // the tick handler can evaluate SL/TP in O(1) per tick without touching sqlite.
@@ -90,9 +116,10 @@ function syncPremiumRuleInMemory(row: any | null, removeToken?: number | null) {
 }
 function loadActivePremiumRules() {
   premiumRulesByToken.clear();
+  trailStates.clear();
   try {
     const rows: any[] = db.prepare("SELECT * FROM premium_exit_rules WHERE status='ACTIVE'").all() as any[];
-    for (const r of rows) syncPremiumRuleInMemory(r);
+    for (const r of rows) { syncPremiumRuleInMemory(r); loadTrailState(r); }
   } catch (e) { console.error('[premium-exit] load ACTIVE rules failed', e); }
 }
 loadActivePremiumRules();
@@ -356,6 +383,80 @@ async function firePremiumExit(tradingsymbol: string, reason: string): Promise<v
   }
 }
 
+// Partial exit for the TP1 half-booking. Same broker path as a full exit but a
+// caller-supplied quantity, capped at what Zerodha actually reports open.
+// Idempotence lives in the trail state: tp1Done is set and PERSISTED before the
+// order goes out, so a restart or a racing poll cannot book the half twice.
+const partialExitBusy = new Set<string>();
+async function closePartialBySymbol(tradingsymbol: string, qty: number, reason: string): Promise<{ ok: boolean; error?: string }> {
+  if (partialExitBusy.has(tradingsymbol)) return { ok: false, error: 'partial exit already in flight' };
+  partialExitBusy.add(tradingsymbol);
+  try {
+    const kc = getKiteClient();
+    // @ts-ignore
+    if (!kc || !kc.access_token) return { ok: false, error: 'No active Kite session' };
+    const positions = await kc.getPositions();
+    const pos = ((positions && positions.net) || []).find((p: any) => p.tradingsymbol === tradingsymbol && p.quantity !== 0);
+    if (!pos) return { ok: false, error: 'no open position' };
+    const open = Math.abs(pos.quantity);
+    const q = Math.min(qty, open);
+    if (q <= 0) return { ok: false, error: 'nothing to exit' };
+    const side = pos.quantity > 0 ? 'SELL' : 'BUY';
+    console.log(`[trail] ${reason} -> partial exit ${q}/${open} ${tradingsymbol}`);
+    return await placeKiteLimitExit({ exchange: pos.exchange || 'NFO', tradingsymbol, qty: q, product: pos.product || 'NRML', side });
+  } catch (e: any) {
+    return { ok: false, error: e?.message || String(e) };
+  } finally {
+    partialExitBusy.delete(tradingsymbol);
+  }
+}
+
+// Execute what the engine decided. State is persisted FIRST so that whatever
+// happens to the broker call, the decision is not made twice.
+async function applyTrailActions(tradingsymbol: string, st: TrailState, actions: TrailAction[], source: string): Promise<void> {
+  if (!actions.length) return;
+  persistTrail(tradingsymbol, st);
+  for (const a of actions) {
+    if (a.type === 'SET_SL' || a.type === 'SET_TP') {
+      console.log(`[trail] ${tradingsymbol} ${a.type} ${a.type === 'SET_SL' ? a.sl : a.tp} (${a.reason}, ${source})`);
+      try { db.prepare("UPDATE premium_exit_rules SET detail=?, updated_at=? WHERE tradingsymbol=?").run(`${a.reason}: SL ${st.sl} TP ${st.tp}`, Date.now(), tradingsymbol); } catch (e) {}
+    } else if (a.type === 'EXIT_PARTIAL') {
+      const r = await closePartialBySymbol(tradingsymbol, a.qty, a.reason);
+      try { db.prepare("UPDATE premium_exit_rules SET detail=?, updated_at=? WHERE tradingsymbol=?").run(r.ok ? `TP1 half booked (${a.qty})` : `TP1 half FAILED: ${r.error}`, Date.now(), tradingsymbol); } catch (e) {}
+      if (!r.ok) console.error('[trail] partial exit failed', tradingsymbol, r.error);
+    } else if (a.type === 'EXIT_ALL') {
+      await firePremiumExit(tradingsymbol, `${a.reason} @ ${st.lastPrem} (${source}, trail)`);
+      trailStates.delete(tradingsymbol);
+    }
+  }
+}
+
+// Spot candles for the pullback structure, built from the real NIFTY index tick.
+// Closed-bar semantics: a bar's close is emitted when the first tick of the NEXT
+// bar arrives. 5m is processed before 1m at a shared boundary so the pullback
+// that a 5m close opens cannot be "broken" by the 1m close of the same price.
+let spotBar1m: { key: number; close: number } | null = null;
+let spotBar5m: { key: number; close: number } | null = null;
+const isNiftyOptionSymbol = (sym: string) => /^NIFTY\d/.test(String(sym || '').toUpperCase());
+function feedSpotForTrails(ltp: number, tsSec: number): void {
+  if (!(ltp > 0) || trailStates.size === 0) { spotBar1m = { key: Math.floor(tsSec / 60), close: ltp }; spotBar5m = { key: Math.floor(tsSec / 300), close: ltp }; return; }
+  const k1 = Math.floor(tsSec / 60), k5 = Math.floor(tsSec / 300);
+  const closed5 = spotBar5m && spotBar5m.key !== k5 ? spotBar5m.close : null;
+  const closed1 = spotBar1m && spotBar1m.key !== k1 ? spotBar1m.close : null;
+  if (spotBar5m && spotBar5m.key === k5) spotBar5m.close = ltp; else spotBar5m = { key: k5, close: ltp };
+  if (spotBar1m && spotBar1m.key === k1) spotBar1m.close = ltp; else spotBar1m = { key: k1, close: ltp };
+  if (closed5 === null && closed1 === null) return;
+  for (const [sym, st] of trailStates) {
+    if (!isNiftyOptionSymbol(sym)) continue;      // spot structure is NIFTY-only; other underlyings keep 70% + TP1
+    try {
+      const acts: TrailAction[] = [];
+      if (closed5 !== null) acts.push(...onSpotClose5m(st, closed5));
+      if (closed1 !== null) acts.push(...onSpotClose1m(st, closed1));
+      if (acts.length) void applyTrailActions(sym, st, acts, 'spot').catch(e => console.error('[trail] spot apply failed', e));
+    } catch (e) { console.error('[trail] spot feed error', sym, e); }
+  }
+}
+
 async function startServer() {
   const app = express();
 
@@ -609,6 +710,7 @@ function connectTicker() {
     if (tick.token === 256265) {
       latestSpot = tick.ltp;
       lastRealSpotTickAt = Date.now();
+      try { feedSpotForTrails(tick.ltp, Math.floor(Date.now() / 1000)); } catch (e) {}
       const ts = Math.floor(Date.now() / 1000);
       broadcast({ type: 'tick', symbol: 'NSE:NIFTY 50', price: tick.ltp, timestamp: ts,
         candle: { time: ts, open: tick.ltp, high: tick.ltp, low: tick.ltp, close: tick.ltp } });
@@ -645,12 +747,20 @@ function connectTicker() {
       // firePremiumExit makes the two paths race-safe.
       const rule = premiumRulesByToken.get(tick.token);
       if (rule && typeof tick.ltp === 'number' && tick.ltp > 0) {
-        const hit = evalPremiumRule(rule, tick.ltp);
         persistRuleLtpThrottled(rule.tradingsymbol, tick.ltp);
-        if (hit) {
-          const reason = `PREMIUM ${hit} @ ${tick.ltp} (tick)`;
-          void firePremiumExit(rule.tradingsymbol, reason).catch((e) =>
-            console.error('[premium-exit] tick fire failed', e?.message || e));
+        const st = trailStates.get(rule.tradingsymbol);
+        if (st) {
+          // Trailing rule: the engine owns SL/TP/booking decisions.
+          const acts = onPremiumTick(st, tick.ltp);
+          if (acts.length) void applyTrailActions(rule.tradingsymbol, st, acts, 'tick').catch((e) =>
+            console.error('[trail] tick apply failed', e?.message || e));
+        } else {
+          const hit = evalPremiumRule(rule, tick.ltp);
+          if (hit) {
+            const reason = `PREMIUM ${hit} @ ${tick.ltp} (tick)`;
+            void firePremiumExit(rule.tradingsymbol, reason).catch((e) =>
+              console.error('[premium-exit] tick fire failed', e?.message || e));
+          }
         }
       }
       broadcast({ type: 'optionTick', token: tick.token, ltp: tick.ltp, oi: tick.oi, volume: tick.volume });
@@ -1008,7 +1118,7 @@ setInterval(() => {
   // set: validates the position live on Zerodha, then arms/updates the rule.
   app.post('/api/premium-exit/set', express.json(), async (req, res) => {
     try {
-      const { tradingsymbol, sl, tp, entry } = req.body || {};
+      const { tradingsymbol, sl, tp, entry, trail, optionType: optTypeIn } = req.body || {};
       const slN = Number(sl), tpN = Number(tp);
       if (!tradingsymbol || !isFinite(slN) || !isFinite(tpN) || slN <= 0 || tpN <= 0) {
         return res.status(400).json({ success: false, error: 'Missing tradingsymbol / sl / tp' });
@@ -1038,14 +1148,59 @@ setInterval(() => {
       // tick engine's primary path). null is fine — the 3s poll covers the rule.
       let ruleToken: number | null = null;
       try { ruleToken = await getOptionToken(pos.exchange || 'NFO', tradingsymbol); } catch (e) { ruleToken = null; }
-      db.prepare(`INSERT INTO premium_exit_rules (tradingsymbol, exchange, side, qty, entry, sl, tp, status, attempts, last_ltp, detail, instrument_token, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 0, NULL, '', ?, ?, ?)
+      // TRAILING EXIT (Martin's pullback method). Built here, at arm time, from
+      // the position's real quantity and lot size. Re-arming an already-trailing
+      // rule with new SL/TP keeps the trail's progress (tp1Done, trailCount) but
+      // adopts the new levels — a drag on the chart must not reset the booking.
+      let trailJson: string | null = null;
+      if (trail === true || trail === 'true') {
+        try {
+          const info = await getContractInfo(tradingsymbol);
+          const lotSize = Number(info?.lot_size) || 75;
+          const optionType: 'CE' | 'PE' = (String(optTypeIn || info?.instrument_type || (tradingsymbol.endsWith('PE') ? 'PE' : 'CE')).toUpperCase() === 'PE') ? 'PE' : 'CE';
+          const risk = Math.abs(entryPx - slN);
+          // Minimum pullback: a quarter of the risk, translated to spot points via
+          // delta. Delta from the option's own live premium; 0.5 if unsolvable.
+          let delta = 0.5;
+          try {
+            if (info?.strike && info?.expiry && latestSpot > 0 && pos.last_price > 0) {
+              const expMs = new Date(info.expiry + 'T15:40:00+05:30').getTime();
+              const T = Math.max(0.15, (expMs - Date.now()) / 86400000) / 365;
+              const iv = impliedVol(optionType, latestSpot, Number(info.strike), T, 0.065, pos.last_price);
+              if (iv) delta = Math.abs(bsDelta(optionType, latestSpot, Number(info.strike), T, 0.065, iv)) || 0.5;
+            }
+          } catch (e) { delta = 0.5; }
+          const minPullbackSpot = +(0.25 * risk / Math.max(0.15, delta)).toFixed(2);
+          const isNifty = isNiftyOptionSymbol(tradingsymbol);
+          const prev = trailStates.get(tradingsymbol);
+          const st = createTrailState({
+            side, optionType, entry: entryPx, sl: slN, tp: tpN,
+            qty: Math.abs(pos.quantity), lotSize, minPullbackSpot,
+            spotNow: isNifty && latestSpot > 0 ? latestSpot : null,
+          });
+          if (prev && prev.entry === entryPx) {
+            // carry progress across a re-arm (chart drag)
+            st.tp1Done = prev.tp1Done; st.costMoved = prev.costMoved; st.trailCount = prev.trailCount;
+            st.qtyRemaining = prev.qtyRemaining; st.phase = prev.phase; st.swingHigh = prev.swingHigh;
+            st.pbLowSpot = prev.pbLowSpot; st.premLowSincePeak = prev.premLowSincePeak; st.lastPrem = prev.lastPrem;
+            st.tp1 = prev.tp1; st.origRisk = prev.origRisk; st.origReward = prev.origReward;
+          }
+          trailJson = JSON.stringify(st);
+          console.log(`[trail] ARMED ${tradingsymbol} ${optionType} lot=${lotSize} minPullback=${minPullbackSpot} delta=${delta.toFixed(2)} spotStructure=${isNifty ? 'on' : 'off (non-NIFTY)'}`);
+        } catch (e: any) {
+          console.error('[trail] could not build trail state, arming as plain SL/TP:', e?.message || e);
+          trailJson = null;
+        }
+      }
+      db.prepare(`INSERT INTO premium_exit_rules (tradingsymbol, exchange, side, qty, entry, sl, tp, status, attempts, last_ltp, detail, instrument_token, trail_state, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 0, NULL, '', ?, ?, ?, ?)
         ON CONFLICT(tradingsymbol) DO UPDATE SET exchange=excluded.exchange, side=excluded.side, qty=excluded.qty,
           entry=excluded.entry, sl=excluded.sl, tp=excluded.tp, status='ACTIVE', attempts=0, detail='',
-          instrument_token=excluded.instrument_token, updated_at=excluded.updated_at`)
-        .run(tradingsymbol, pos.exchange || 'NFO', side, Math.abs(pos.quantity), entryPx, slN, tpN, ruleToken, Date.now(), Date.now());
+          instrument_token=excluded.instrument_token, trail_state=excluded.trail_state, updated_at=excluded.updated_at`)
+        .run(tradingsymbol, pos.exchange || 'NFO', side, Math.abs(pos.quantity), entryPx, slN, tpN, ruleToken, trailJson, Date.now(), Date.now());
       const armedRow: any = db.prepare("SELECT * FROM premium_exit_rules WHERE tradingsymbol=?").get(tradingsymbol);
       syncPremiumRuleInMemory(armedRow);
+      loadTrailState(armedRow);
       pushTickerSubscriptions(); // stream the armed contract right away (don't wait for the 10s refresh)
       console.log(`[premium-exit] ARMED ${tradingsymbol} side=${side} entry=${entryPx} sl=${slN} tp=${tpN} token=${ruleToken ?? 'unresolved (poll only)'}`);
       return res.json({ success: true, rule: { tradingsymbol, side, entry: entryPx, sl: slN, tp: tpN, status: 'ACTIVE' } });
@@ -1060,7 +1215,12 @@ setInterval(() => {
       const sym = String(req.query.tradingsymbol || '');
       if (!sym) return res.json({ rule: null });
       const row: any = db.prepare("SELECT * FROM premium_exit_rules WHERE tradingsymbol=?").get(sym);
-      return res.json({ rule: row && row.status === 'ACTIVE' ? row : null });
+      if (!row || row.status !== 'ACTIVE') return res.json({ rule: null });
+      let trailSummary: any = null;
+      const st = trailStates.get(sym);
+      if (st) trailSummary = { tp1: st.tp1, tp1Done: st.tp1Done, costMoved: st.costMoved, trailCount: st.trailCount,
+        qtyRemaining: st.qtyRemaining, phase: st.phase, swingHigh: st.swingHigh, minPullbackSpot: st.minPullbackSpot };
+      return res.json({ rule: { ...row, trail: trailSummary } });
     } catch (e: any) { return res.status(500).json({ rule: null, error: e?.message || String(e) }); }
   });
 
@@ -1071,6 +1231,7 @@ setInterval(() => {
       const prevRow: any = db.prepare("SELECT instrument_token FROM premium_exit_rules WHERE tradingsymbol=?").get(tradingsymbol);
       db.prepare("UPDATE premium_exit_rules SET status='CANCELLED', updated_at=? WHERE tradingsymbol=? AND status='ACTIVE'").run(Date.now(), tradingsymbol);
       syncPremiumRuleInMemory(null, prevRow?.instrument_token ? Number(prevRow.instrument_token) : null);
+      trailStates.delete(tradingsymbol);
       return res.json({ success: true });
     } catch (e: any) { return res.status(500).json({ success: false, error: e?.message || String(e) }); }
   });
@@ -1096,6 +1257,12 @@ setInterval(() => {
         const ltp = ltpMap && ltpMap[k] && ltpMap[k].last_price;
         if (typeof ltp !== 'number' || ltp <= 0) continue;
         try { db.prepare("UPDATE premium_exit_rules SET last_ltp=?, updated_at=? WHERE tradingsymbol=?").run(ltp, Date.now(), r.tradingsymbol); } catch (e) {}
+        const st = trailStates.get(r.tradingsymbol);
+        if (st) {
+          const acts = onPremiumTick(st, ltp);
+          if (acts.length) await applyTrailActions(r.tradingsymbol, st, acts, 'poll');
+          continue;
+        }
         const hit = evalPremiumRule(r, ltp);
         if (!hit) continue;
         const reason = `PREMIUM ${hit} @ ${ltp} (poll)`;
