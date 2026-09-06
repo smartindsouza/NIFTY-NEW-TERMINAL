@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search, ChartNoAxesCombined } from "lucide-react";
+import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search, ChartNoAxesCombined, Star } from "lucide-react";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { getDivergences } from "../lib/divergence";
@@ -9674,9 +9674,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        {showPdhPdl && <Check size={14} className="text-emerald-400" />}
+                        <Star size={14} className={(showPdhPdl) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span>Previous Day High/Low</span>
+                      <span className="truncate">Previous Day High/Low</span>
                     </button>
                     <button
                       onClick={(e) => {
@@ -9687,7 +9687,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="text-muted-foreground hover:text-foreground p-1 hover:bg-slate-700 rounded transition-colors"
                       title="PDH/PDL Settings"
                     >
-                      <Settings size={13} />
+                      <Settings size={14} />
                     </button>
                   </div>
 
@@ -9698,10 +9698,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        {showOpeningRange && <Check size={14} className="text-emerald-400" />}
+                        <Star size={14} className={(showOpeningRange) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span>15m Opening Range (High/Low)</span>
+                      <span className="truncate">15m Opening Range (High/Low)</span>
                     </button>
+                    <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
                   </div>
 
                   {/* Buy/Sell confluence signals — forward test, 5-min index charts */}
@@ -9712,10 +9713,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        {showConfSignals && <Check size={14} className="text-emerald-400" />}
+                        <Star size={14} className={(showConfSignals) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span>Buy/Sell Signals (5-min · backtest FAILED)</span>
+                      <span className="truncate">Buy/Sell Signals (5-min · backtest FAILED)</span>
                     </button>
+                    <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
                   </div>
                   )}
 
@@ -9727,10 +9729,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        {showStructure && <Check size={14} className="text-emerald-400" />}
+                        <Star size={14} className={(showStructure) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span>Market Structure (BOS / CHoCH)</span>
+                      <span className="truncate">Market Structure (BOS / CHoCH)</span>
                     </button>
+                    <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
                   </div>
                   )}
 
@@ -9741,9 +9744,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        {showOrderBlocks && <Check size={14} className="text-emerald-400" />}
+                        <Star size={14} className={(showOrderBlocks) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span>Directional Zones</span>
+                      <span className="truncate">Directional Zones</span>
                     </button>
                     {/* Same gear affordance as OI Bars / RSI: settings on tap
                         rather than an always-open panel cluttering the menu. */}
@@ -9757,7 +9760,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="text-muted-foreground hover:text-foreground p-1 hover:bg-slate-700 rounded transition-colors"
                       title="Directional Zones Settings"
                     >
-                      <Settings size={13} />
+                      <Settings size={14} />
                     </button>
                   </div>
 
@@ -9775,7 +9778,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="text-muted-foreground hover:text-foreground p-1 hover:bg-slate-700 rounded transition-colors"
                       title="TP & SL Default Levels"
                     >
-                      <Settings size={13} />
+                      <Settings size={14} />
                     </button>
                   </div>
 
@@ -9786,10 +9789,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        {showFvg && <Check size={14} className="text-emerald-400" />}
+                        <Star size={14} className={(showFvg) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span>Fair Value Gaps (3-candle)</span>
+                      <span className="truncate">Fair Value Gaps (3-candle)</span>
                     </button>
+                    <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
                   </div>
 
                   {/* Demand / Supply Zones */}
@@ -9799,9 +9803,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        {showDsZones && <Check size={14} className="text-emerald-400" />}
+                        <Star size={14} className={(showDsZones) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span>Demand/Supply Zones (intraday)</span>
+                      <span className="truncate">Demand/Supply Zones (intraday)</span>
                     </button>
                     <div className="flex items-center gap-1 pr-1" onClick={(e) => e.stopPropagation()}>
                       <input
@@ -9813,6 +9817,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       />
                       <span className="text-[10px] text-muted-foreground">%</span>
                     </div>
+                    <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
                   </div>
 
                   {/* Level Touch Alerts */}
@@ -9822,10 +9827,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        {levelAlertsOn && <Check size={14} className="text-emerald-400" />}
+                        <Star size={14} className={(levelAlertsOn) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span>Level Touch Alerts (sound + popup)</span>
+                      <span className="truncate">Level Touch Alerts (sound + popup)</span>
                     </button>
+                    <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
                   </div>
 
                   {/* Zone Tap Alerts — the ported Pine script's own alert */}
@@ -9835,10 +9841,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        {zoneTapAlertsOn && <Check size={14} className="text-emerald-400" />}
+                        <Star size={14} className={(zoneTapAlertsOn) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span>Zone Tap Alerts (sound + popup)</span>
+                      <span className="truncate">Zone Tap Alerts (sound + popup)</span>
                     </button>
+                    <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
                   </div>
 
                   {/* Breakout Authenticity Alerts */}
@@ -9848,10 +9855,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        {breakoutAlertsOn && <Check size={14} className="text-emerald-400" />}
+                        <Star size={14} className={(breakoutAlertsOn) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span>Breakout / Fakeout Alerts (sound + popup)</span>
+                      <span className="truncate">Breakout / Fakeout Alerts (sound + popup)</span>
                     </button>
+                    <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
                   </div>
 
                   {/* Support/Resistance Lines */}
@@ -9861,9 +9869,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        {showSnR && <Check size={14} className="text-emerald-400" />}
+                        <Star size={14} className={(showSnR) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span>Support/Resistance Lines</span>
+                      <span className="truncate">Support/Resistance Lines</span>
                     </button>
                     <button
                       onClick={(e) => {
@@ -9874,7 +9882,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="text-muted-foreground hover:text-foreground p-1 hover:bg-slate-700 rounded transition-colors"
                       title="Support/Resistance Settings"
                     >
-                      <Settings size={13} />
+                      <Settings size={14} />
                     </button>
                   </div>
 
@@ -9888,9 +9896,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        {showOiBars && <Check size={14} className="text-emerald-400" />}
+                        <Star size={14} className={(showOiBars) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span>OI Bars</span>
+                      <span className="truncate">OI Bars</span>
                     </button>
                     <button
                       onClick={(e) => {
@@ -9901,7 +9909,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="text-muted-foreground hover:text-foreground p-1 hover:bg-slate-700 rounded transition-colors"
                       title="OI Bars Settings"
                     >
-                      <Settings size={13} />
+                      <Settings size={14} />
                     </button>
                   </div>
                   )}
@@ -9913,9 +9921,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        {showRsi && <Check size={14} className="text-emerald-400" />}
+                        <Star size={14} className={(showRsi) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span>RSI</span>
+                      <span className="truncate">RSI</span>
                     </button>
                     <button
                       onClick={(e) => {
@@ -9926,7 +9934,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="text-muted-foreground hover:text-foreground p-1 hover:bg-slate-700 rounded transition-colors"
                       title="RSI Settings"
                     >
-                      <Settings size={13} />
+                      <Settings size={14} />
                     </button>
                   </div>
 
@@ -9937,9 +9945,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        {showBB && <Check size={14} className="text-emerald-400" />}
+                        <Star size={14} className={(showBB) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span>Bollinger Bands</span>
+                      <span className="truncate">Bollinger Bands</span>
                     </button>
                     <button
                       onClick={(e) => {
@@ -9950,7 +9958,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="text-muted-foreground hover:text-foreground p-1 hover:bg-slate-700 rounded transition-colors"
                       title="Bollinger Bands Settings"
                     >
-                      <Settings size={13} />
+                      <Settings size={14} />
                     </button>
                   </div>
 
@@ -9961,9 +9969,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        {showHLevels && <Check size={14} className="text-emerald-400" />}
+                        <Star size={14} className={(showHLevels) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span>H Levels</span>
+                      <span className="truncate">H Levels</span>
                     </button>
                     <button
                       onClick={(e) => {
@@ -9974,7 +9982,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className="text-muted-foreground hover:text-foreground p-1 hover:bg-slate-700 rounded transition-colors"
                       title="H Levels Settings"
                     >
-                      <Settings size={13} />
+                      <Settings size={14} />
                     </button>
                   </div>
 
@@ -9984,9 +9992,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     className="flex items-center gap-2 px-3 py-2 text-sm text-foreground/80 hover:bg-muted hover:text-foreground transition-colors text-left"
                   >
                     <div className="w-4 flex items-center justify-center">
-                      {showDiagnostic && <Check size={14} className="text-emerald-400" />}
+                      <Star size={14} className={(showDiagnostic) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                     </div>
-                    <span>Diagnostic Panel</span>
+                    <span className="truncate">Diagnostic Panel</span>
                   </button>
                 </div>
               )}
