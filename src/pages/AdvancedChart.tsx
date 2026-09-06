@@ -9225,8 +9225,15 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     enabled: showDiagnostic,
   });
 
+  // DESKTOP HEIGHT. The root used to be height:auto with a min-height of the
+  // screen, so the chart's flex-grow had nothing to grow into and stopped at its
+  // 450px floor — the rest of the screen was the page's own p-8 + pb-20, the
+  // shell's pb-12, and empty space. It is now a fixed-height column: viewport
+  // minus the shell's remaining 2rem top padding, no vertical padding of its own,
+  // overflow hidden so nothing can push the page into a scroll. The chart grows
+  // to fill whatever the toolbar, tabs and strips leave. Mobile classes unchanged.
   return (
-    <div className="px-1 pt-0 pb-0 md:p-8 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto md:pb-20 flex flex-col h-[calc(100dvh-124px-env(safe-area-inset-bottom))] md:h-auto md:min-h-screen overflow-hidden md:overflow-visible relative">
+    <div className="px-1 pt-0 pb-0 md:px-8 md:py-0 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto flex flex-col h-[calc(100dvh-124px-env(safe-area-inset-bottom))] md:h-[calc(100dvh-2rem)] md:min-h-0 overflow-hidden relative">
       
       {showDiagnostic && (
         <div className="fixed bottom-6 right-6 z-50 bg-card/95 backdrop-blur-md border border-0 p-4 rounded-lg text-xs font-mono w-[340px] max-h-[80vh] overflow-y-auto">

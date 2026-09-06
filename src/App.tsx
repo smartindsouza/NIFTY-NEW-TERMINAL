@@ -175,7 +175,10 @@ export default function App() {
             it shows the traded option after every trade, and hiding the rail there
             would strand the user with no way back. */}
         {!isFocusedChart && <Header />}
-        <main className={`flex-1 overflow-y-auto w-full relative bg-transparent pl-0 ${isFocusedChart ? '' : 'md:pl-[80px]'} pt-[max(env(safe-area-inset-top),12px)] md:pt-8 md:pb-12 pr-0 md:pr-6 lg:pr-8 ${onChart ? 'max-md:overflow-hidden max-md:overscroll-none pb-24 max-md:pb-0' : 'pb-24'}`}>
+        {/* On the chart route the page fills the viewport exactly (see the chart's
+            root), so the shell's desktop bottom padding would only ever be blank
+            space under it. Other routes keep their padding. */}
+        <main className={`flex-1 overflow-y-auto w-full relative bg-transparent pl-0 ${isFocusedChart ? '' : 'md:pl-[80px]'} pt-[max(env(safe-area-inset-top),12px)] md:pt-8 ${onChart ? 'md:pb-0' : 'md:pb-12'} pr-0 md:pr-6 lg:pr-8 ${onChart ? 'max-md:overflow-hidden max-md:overscroll-none pb-24 max-md:pb-0' : 'pb-24'}`}>
           <ActivePositions />
           <Suspense fallback={<TerminalLoader />}>
             <Switch>
