@@ -959,6 +959,44 @@ function LineEditorModal({
   );
 }
 
+// The armed exit rule is read by three separate pollers — the option chart's
+// rule sync, the spot mirror's re-solve, and the armed-rule discovery — and in
+// split view each runs in BOTH pane instances, so a single position produced up
+// to six identical requests per cycle and tripped the frequency warning.
+//
+// Module scope on purpose: that is what lets the two pane instances share one
+// request. A short TTL plus in-flight sharing collapses the burst to one network
+// call every few seconds, and every caller still gets an answer immediately.
+// The endpoint itself only reads a local SQLite row — it never touches Zerodha —
+// so this is about noise and needless work, not about broker rate limits.
+const RULE_TTL_MS = 3000;
+let ruleCache: { symbol: string; at: number; data: any } | null = null;
+let ruleInFlight: { symbol: string; p: Promise<any> } | null = null;
+async function fetchArmedRule(symbol: string, force = false): Promise<any> {
+  const now = Date.now();
+  if (!force && ruleCache && ruleCache.symbol === symbol && now - ruleCache.at < RULE_TTL_MS) return ruleCache.data;
+  if (ruleInFlight && ruleInFlight.symbol === symbol) return ruleInFlight.p;
+  const p = (async () => {
+    try {
+      const r = await fetch(`/api/premium-exit/get?tradingsymbol=${encodeURIComponent(symbol)}`);
+      const d = await r.json().catch(() => null);
+      // ok is carried through so callers can tell "no rule" from "no answer" —
+      // that distinction is what decides whether the mirrored lines are removed.
+      const out = { ok: r.ok, rule: d?.rule ?? null };
+      ruleCache = { symbol, at: Date.now(), data: out };
+      return out;
+    } catch (e) {
+      return { ok: false, rule: null };
+    } finally {
+      ruleInFlight = null;
+    }
+  })();
+  ruleInFlight = { symbol, p };
+  return p;
+}
+/** Drop the cache so the next read is fresh — used right after arming. */
+function invalidateArmedRule() { ruleCache = null; }
+
 const hexToRgba = (hex: string, alpha: number) => {
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
@@ -4775,8 +4813,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       // on the old levels forever. In split view they are separate component
       // instances with separate refs, so the server is the only thing they share.
       try {
-        const rr = await fetch(`/api/premium-exit/get?tradingsymbol=${encodeURIComponent(pos.symbol)}`);
-        const rd = await rr.json().catch(() => null);
+        const rr = await fetchArmedRule(pos.symbol);
+        const rd = rr;
         const live = rd?.rule;
         if (live && live.status === 'ACTIVE' && Number.isFinite(Number(live.sl)) && Number.isFinite(Number(live.tp))) {
           premRuleRef.current = { symbol: pos.symbol, sl: Number(live.sl), tp: Number(live.tp) };
@@ -4914,6 +4952,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     // just dragged — that is the snap-back: the line returned to where the server
     // still thought it was, then jumped forward when the round trip landed.
     rulePushPendingRef.current += 1;
+    invalidateArmedRule();   // the cached copy is now out of date by definition
     // Tell every chart at once. In split view the panes are separate component
     // instances that share nothing but the server, so a drag on the SPOT chart
     // only reached the option chart when its 5s poll next ran — and not at all if
@@ -5132,8 +5171,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     let cancelled = false;
     (async () => {
       try {
-        const r = await fetch(`/api/premium-exit/get?tradingsymbol=${encodeURIComponent(pos.symbol)}`);
-        const d = await r.json();
+        const d = await fetchArmedRule(pos.symbol);
         if (cancelled) return;
         const rule = d?.rule;
         const long = pos.side === 'BUY';
@@ -5451,8 +5489,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       if (!pos || !isOptionViewRef.current) return;
       ruleSyncBusy = true;
       try {
-        const r = await fetch(`/api/premium-exit/get?tradingsymbol=${encodeURIComponent(pos.symbol)}`);
-        const d = await r.json().catch(() => null);
+        const d = await fetchArmedRule(pos.symbol);
         const live = d?.rule;
         if (!live || live.status !== 'ACTIVE') return;
         const sl = Number(live.sl), tp = Number(live.tp);

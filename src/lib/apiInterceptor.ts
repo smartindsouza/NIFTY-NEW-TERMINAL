@@ -32,6 +32,11 @@ const SERVER_CACHED_ENDPOINTS = new Map<string, string>([
   // market-hours pre-warm and 350ms request spacing, so request frequency here
   // is not broker frequency.
   ['/api/ta', '60s shared TA cache + in-flight dedupe + pre-warm in server/technical_analysis.ts'],
+  // Reads one row from the local SQLite exit-rule table and an in-memory map.
+  // It never calls Zerodha, so a broker 429 is not a possible outcome here.
+  // Client side it is behind a 3s shared cache with in-flight dedupe, shared
+  // across both split-view panes (fetchArmedRule in AdvancedChart.tsx).
+  ['/api/premium-exit/get', 'local SQLite read; 3s shared client cache + in-flight dedupe, no broker call'],
 ]);
 
 function showTooFrequentWarning(endpoint: string, rate: number) {
