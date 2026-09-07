@@ -1964,6 +1964,33 @@ setInterval(() => {
   }
 
   let marketContextCache: { at: number; data: any } | null = null;
+
+  // Yahoo's chart meta carries chartPreviousClose for CASH indices but not for
+  // continuous futures (ES=F, NQ=F, YM=F). The old fallback chain ended at
+  // regularMarketPrice, so prev === price and every future reported exactly
+  // +0.00% — the Dow cash index right beneath them showing a real move is what
+  // made it obvious. Daily bars carry the prior session's close; it changes once
+  // a day, so it is cached 30 minutes and fetched only for symbols that need it.
+  const prevCloseCache = new Map<string, { at: number; value: number }>();
+  async function fetchPrevClose(sym: string): Promise<number | null> {
+    const hit = prevCloseCache.get(sym);
+    if (hit && Date.now() - hit.at < 30 * 60 * 1000) return hit.value;
+    try {
+      const r = await axios.get(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=5d`,
+        { timeout: 8000, headers: { 'User-Agent': 'Mozilla/5.0' } }
+      );
+      const res0 = r.data?.chart?.result?.[0];
+      const closes: any[] = (res0?.indicators?.quote?.[0]?.close || []).filter((x: any) => typeof x === 'number');
+      // Last bar is today (in progress); the one before it is the prior close.
+      const prev = closes.length >= 2 ? closes[closes.length - 2] : null;
+      if (typeof prev === 'number' && prev > 0) {
+        prevCloseCache.set(sym, { at: Date.now(), value: prev });
+        return prev;
+      }
+    } catch (e) { /* fall through to the caller's own fallback */ }
+    return null;
+  }
   app.get('/api/market-context', async (_req, res) => {
     try {
       if (marketContextCache && Date.now() - marketContextCache.at < 5000) {
@@ -2079,7 +2106,11 @@ setInterval(() => {
           const result = r.data?.chart?.result?.[0];
           const meta = result?.meta;
           if (meta && typeof meta.regularMarketPrice === 'number') {
-            const prev = meta.chartPreviousClose ?? meta.previousClose ?? meta.regularMarketPrice;
+            let prev = meta.chartPreviousClose ?? meta.previousClose ?? null;
+            // No previous close in meta (futures): take it from daily bars rather
+            // than falling back to the current price, which reports a flat 0.00%.
+            if (typeof prev !== 'number' || !(prev > 0)) prev = await fetchPrevClose(u.sym);
+            if (typeof prev !== 'number' || !(prev > 0)) prev = meta.regularMarketPrice;
             const chg = meta.regularMarketPrice - prev;
             const chgPct = prev ? (chg / prev) * 100 : 0;
             // sparkline: intraday closes (compact)
@@ -2132,7 +2163,11 @@ setInterval(() => {
           const result = r.data?.chart?.result?.[0];
           const meta = result?.meta;
           if (meta && typeof meta.regularMarketPrice === 'number') {
-            const prev = meta.chartPreviousClose ?? meta.previousClose ?? meta.regularMarketPrice;
+            let prev = meta.chartPreviousClose ?? meta.previousClose ?? null;
+            // No previous close in meta (futures): take it from daily bars rather
+            // than falling back to the current price, which reports a flat 0.00%.
+            if (typeof prev !== 'number' || !(prev > 0)) prev = await fetchPrevClose(u.sym);
+            if (typeof prev !== 'number' || !(prev > 0)) prev = meta.regularMarketPrice;
             const chg = meta.regularMarketPrice - prev;
             const chgPct = prev ? (chg / prev) * 100 : 0;
             uk.push({
@@ -2181,7 +2216,11 @@ setInterval(() => {
           const result = r.data?.chart?.result?.[0];
           const meta = result?.meta;
           if (meta && typeof meta.regularMarketPrice === 'number') {
-            const prev = meta.chartPreviousClose ?? meta.previousClose ?? meta.regularMarketPrice;
+            let prev = meta.chartPreviousClose ?? meta.previousClose ?? null;
+            // No previous close in meta (futures): take it from daily bars rather
+            // than falling back to the current price, which reports a flat 0.00%.
+            if (typeof prev !== 'number' || !(prev > 0)) prev = await fetchPrevClose(g.sym);
+            if (typeof prev !== 'number' || !(prev > 0)) prev = meta.regularMarketPrice;
             const chg = meta.regularMarketPrice - prev;
             const chgPct = prev ? (chg / prev) * 100 : 0;
             globalMkts.push({
