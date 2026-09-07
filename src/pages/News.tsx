@@ -191,71 +191,60 @@ export function News() {
                   : "hover:border-0"
               )}
             >
-              {/* Card Meta Row */}
-              <div className="flex flex-wrap items-center justify-between gap-2.5">
-                <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
-                  <span className="font-semibold text-foreground/80 uppercase text-[10px] tracking-wide px-2 py-0.5 rounded bg-white/5">
-                    {item.source}
+              {/* Top line: every indicator on ONE row — category, critical flag,
+                  sentiment, impact. The source name is gone at Martin's request,
+                  and the timestamp has moved to the footer, which is what frees
+                  this row to stay on a single line instead of wrapping. */}
+              <div className="flex items-center gap-1.5 flex-nowrap overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <span className={cn(
+                  "shrink-0 px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider transition-colors whitespace-nowrap",
+                  item.category === 'India Market'
+                    ? "bg-primary/15 text-primary border border-primary/30 font-bold"
+                    : "bg-white/5 text-muted-foreground border border-white/5"
+                )}>
+                  {item.category}
+                </span>
+
+                {isExtremeImpact && (
+                  <span className="shrink-0 flex items-center gap-0.5 text-[9px] font-extrabold text-rose-500 tracking-wider uppercase animate-pulse whitespace-nowrap">
+                    <Flame className="w-3.5 h-3.5 fill-current" />
+                    Critical
                   </span>
-                  
-                  <div className="flex items-center gap-1 text-[11px]">
-                    <Clock className="w-3.5 h-3.5 text-muted-foreground" />
-                    <span>{item.timeIST}</span>
-                  </div>
+                )}
 
-                  <span className={cn(
-                    "px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider transition-colors",
-                    item.category === 'India Market'
-                      ? "bg-primary/15 text-primary border border-primary/30 font-bold"
-                      : "bg-white/5 text-muted-foreground border border-white/5"
-                  )}>
-                    {item.category}
+                {item.sentiment === 'bullish' && (
+                  <span className="shrink-0 flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 whitespace-nowrap">
+                    <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>BULLISH</span>
                   </span>
-                </div>
+                )}
 
-                {/* Sentiment and Score Tags */}
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {isExtremeImpact && (
-                    <span className="flex items-center gap-0.5 text-[9px] font-extrabold text-rose-500 tracking-wider uppercase animate-pulse">
-                      <Flame className="w-3.5 h-3.5 fill-current" />
-                      Critical
-                    </span>
+                {item.sentiment === 'bearish' && (
+                  <span className="shrink-0 flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 whitespace-nowrap">
+                    <TrendingDown className="w-3.5 h-3.5 text-rose-400" />
+                    <span>BEARISH</span>
+                  </span>
+                )}
+
+                {item.sentiment === 'neutral' && (
+                  <span className="shrink-0 flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold rounded bg-primary/10 text-primary border border-primary/20 whitespace-nowrap">
+                    <Minus className="w-3.5 h-3.5 text-primary" />
+                    <span>NEUTRAL</span>
+                  </span>
+                )}
+
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "shrink-0 font-mono text-xs font-semibold px-2.5 py-0.5 border flex items-center gap-1 whitespace-nowrap",
+                    isExtremeImpact
+                      ? "bg-rose-950/20 text-rose-400 border-rose-500/30"
+                      : "bg-background/40 text-foreground/80 border-0"
                   )}
-
-                  {item.sentiment === 'bullish' && (
-                    <span className="flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20  -500/5">
-                      <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>BULLISH</span>
-                    </span>
-                  )}
-
-                  {item.sentiment === 'bearish' && (
-                    <span className="flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold rounded bg-rose-500/10 text-rose-400 border border-rose-500/20  -500/5">
-                      <TrendingDown className="w-3.5 h-3.5 text-rose-400" />
-                      <span>BEARISH</span>
-                    </span>
-                  )}
-
-                  {item.sentiment === 'neutral' && (
-                    <span className="flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold rounded bg-primary/10 text-primary border border-primary/20">
-                      <Minus className="w-3.5 h-3.5 text-primary" />
-                      <span>NEUTRAL</span>
-                    </span>
-                  )}
-
-                  <Badge 
-                    variant="outline" 
-                    className={cn(
-                      "font-mono text-xs font-semibold px-2.5 py-0.5 border flex items-center gap-1",
-                      isExtremeImpact
-                        ? "bg-rose-950/20 text-rose-400 border-rose-500/30"
-                        : "bg-background/40 text-foreground/80 border-0"
-                    )}
-                  >
-                    <span>Impact:</span>
-                    <span className="font-bold text-foreground">{item.impactScore}</span>
-                  </Badge>
-                </div>
+                >
+                  <span>Impact:</span>
+                  <span className="font-bold text-foreground">{item.impactScore}</span>
+                </Badge>
               </div>
 
               {/* Headline */}
@@ -280,12 +269,19 @@ export function News() {
                 </div>
               </div>
 
-              {/* Bottom footer bar containing outbound links */}
-              <div className="flex items-center justify-end text-xs text-muted-foreground mt-2">
-                <div className="flex items-center gap-1 text-[11px] group-hover:text-foreground transition-colors">
-                  <span>Explore full coverage</span>
-                  <ExternalLink className="w-3.2 h-3.2 text-muted-foreground group-hover:translate-x-0.5 transition-transform" />
+              {/* Footer: timestamp bottom-LEFT, the outbound link as an icon only
+                  bottom-RIGHT. The whole card is already clickable, so the icon is
+                  an affordance rather than a separate control — hence a title
+                  instead of a label, and no button that would swallow the click. */}
+              <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground mt-2">
+                <div className="flex items-center gap-1 text-[11px] min-w-0">
+                  <Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                  <span className="truncate">{item.timeIST}</span>
                 </div>
+                <ExternalLink
+                  className="w-4 h-4 shrink-0 text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all"
+                  aria-label="Open full coverage"
+                />
               </div>
             </Card>
           );
