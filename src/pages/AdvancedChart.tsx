@@ -4065,6 +4065,16 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     };
   }, [searchExpanded]);
 
+  // The leverage/greeks readout is now opt-in: it sat permanently over the top-left
+  // of the option chart, covering candles on the one chart where every rupee of
+  // premium matters. Behind an "i" button, remembered per browser.
+  const [levInfoOpen, setLevInfoOpen] = useState(() => {
+    try { return localStorage.getItem('levInfoOpen') === 'true'; } catch (e) { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('levInfoOpen', String(levInfoOpen)); } catch (e) {}
+  }, [levInfoOpen]);
+
   const [rrMenuOpen, setRrMenuOpen] = useState(false);
   const rrMenuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -10097,7 +10107,20 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             {/* Leverage meter — why the premium is moving more (or less) than the
                 index right now. Display only: pointer-events-none, so it can never
                 block a drag, a crosshair, or a level being placed. */}
+            {/* The "i" toggle. Top-RIGHT so it cannot sit under the OHLC row, and
+                the only part of this block that takes pointer events. */}
             {isOptionView && lev && !lev.error && (
+              <button
+                onClick={() => setLevInfoOpen(o => !o)}
+                title={levInfoOpen ? 'Hide greeks & gearing' : 'Show greeks & gearing'}
+                aria-label="Greeks and gearing"
+                className={`absolute top-11 right-2 z-[6] h-6 w-6 rounded-full border text-[11px] font-bold font-mono flex items-center justify-center transition-colors ${
+                  levInfoOpen ? 'bg-primary/25 border-primary/50 text-primary' : 'bg-background/80 border-border/60 text-muted-foreground hover:text-foreground'}`}
+              >
+                i
+              </button>
+            )}
+            {isOptionView && levInfoOpen && lev && !lev.error && (
               <div className="absolute top-11 left-2 z-[5] pointer-events-none rounded-md bg-background/80 border border-border/60 px-2.5 py-1.5 text-[11px] leading-snug font-mono max-w-[85%]">
                 <div className="text-foreground font-semibold">
                   {lev.lambda != null ? `1% index ≈ ${lev.lambda}% premium` : 'gearing — solving…'}
