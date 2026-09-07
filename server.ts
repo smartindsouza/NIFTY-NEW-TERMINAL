@@ -2061,6 +2061,7 @@ setInterval(() => {
       // the CASH indices are frozen at last night's US close. Both are listed so
       // the two can never be mistaken for each other (they legitimately disagree
       // overnight: the index shows yesterday's move, futures show right now).
+      const usFailures: string[] = [];
       const US = [
         { key: 'SPX', label: 'S&P 500 Fut', sym: 'ES=F' },
         { key: 'NDX', label: 'Nasdaq Fut', sym: 'NQ=F' },
@@ -2091,14 +2092,29 @@ setInterval(() => {
               available: true, open: usOpenNow,
             });
           } else {
-            us.push({ key: u.key, label: u.label, available: false, open: usOpenNow });
+            // A 200 with no price means the response SHAPE changed, which is a
+            // different problem from being blocked — say which.
+            us.push({ key: u.key, label: u.label, available: false, open: usOpenNow, reason: 'no_price_in_response' });
           }
-        } catch (e) {
-          us.push({ key: u.key, label: u.label, available: false, open: usOpenNow });
+        } catch (e: any) {
+          // The reason was being thrown away, so a blocked IP, a timeout and a
+          // changed API were all indistinguishable — the row just went blank.
+          // Yahoo now gates much of its API behind a cookie+crumb handshake and
+          // blocks datacenter ranges, which is what a cloud host looks like, so
+          // this failing on the server while working in a browser is expected
+          // rather than mysterious. Recorded per row and logged once per cycle.
+          const status = e?.response?.status ?? null;
+          const reason = status === 401 || status === 403 ? `blocked_by_yahoo_${status}`
+            : status === 429 ? 'rate_limited_429'
+            : e?.code === 'ECONNABORTED' ? 'timeout'
+            : status ? `http_${status}` : (e?.code || 'network_error');
+          usFailures.push(`${u.key}:${reason}`);
+          us.push({ key: u.key, label: u.label, available: false, open: usOpenNow, reason });
         }
       }));
       // keep US in declared order
       us.sort((a, b) => US.findIndex(x => x.key === a.key) - US.findIndex(x => x.key === b.key));
+      if (usFailures.length) console.warn('[global-markets] US feed unavailable:', usFailures.join(', '));
 
       // --- UK indices via Yahoo (same free feed as US) ---
       const UK = [

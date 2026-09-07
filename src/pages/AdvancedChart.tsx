@@ -7404,7 +7404,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       const names = ['RED OUTER', 'RED INNER', 'TRAP UPPER', 'TRAP LOWER', 'GREEN INNER', 'GREEN OUTER'];
       hLevels.forEach((v, i) => { if (v > 0) add(`h${i}`, names[i] || `H-Level ${i + 1}`, v); });
     }
-    if (showFiftyPercentLevels && !isOptionView && Array.isArray(hLevels)) {
+    if (showFiftyPercentLevels && !isOptionView && !isReferenceChart && Array.isArray(hLevels)) {
       const active = hLevels.filter(v => v > 0).sort((a, b) => b - a);
       for (let i = 0; i < active.length - 1; i++) {
         const mid = Math.round((active[i] + active[i + 1]) / 2);
@@ -7703,7 +7703,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const lastAlertedFiftyPercentLevelRef = useRef<{ level: number, time: number } | null>(null);
 
   useEffect(() => {
-    if (!showFiftyPercentLevels || !hLevels || hLevels.length === 0 || !chartData) return;
+    // Midpoints of NIFTY's H levels — meaningless on GIFT NIFTY, same as the
+    // H levels they are derived from. Missed when those were gated because the
+    // 50% lines are a separate toggle with their own render path.
+    if (!showFiftyPercentLevels || isReferenceChart || !hLevels || hLevels.length === 0 || !chartData) return;
     
     const currentPrice = chartData.spot || (chartData.candles && chartData.candles.length > 0 ? chartData.candles[chartData.candles.length - 1].close : null);
     if (!currentPrice) return;
@@ -7743,7 +7746,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         }
       }
     }
-  }, [chartData, hLevels, showFiftyPercentLevels]);
+  }, [chartData, hLevels, showFiftyPercentLevels, isReferenceChart]);
 
   useEffect(() => {
     if (!chartContainerRef.current || !chartData || chartData.candles.length === 0) return;
@@ -9174,7 +9177,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   }
                 }
               }
-              if (showFiftyPercentLevels && !isOptionView && hLevels) {
+              if (showFiftyPercentLevels && !isOptionView && !isReferenceChart && hLevels) {
                  const activeLevels = hLevels.filter(v => v > 0).sort((a, b) => b - a);
                  for (let i = 0; i < activeLevels.length - 1; i++) {
                    const midPoint = Math.round((activeLevels[i] + activeLevels[i+1]) / 2);

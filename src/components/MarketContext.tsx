@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronDown, TrendingUp, TrendingDown, Globe, X } from "lu
 
 interface Market {
   key: string; label: string; price?: number; change?: number; changePct?: number;
-  asOf?: number; available: boolean;
+  asOf?: number; available: boolean; reason?: string;
   // Per-market session status (used by Global & Commodities, whose rows don't
   // share one schedule). Undefined => the row shows no pill.
   open?: boolean;
@@ -34,7 +34,18 @@ function Row({ m }: { m: Market }) {
           <span className="truncate">{m.label}</span>
           <MiniStatus open={m.open} />
         </span>
-        <span className="text-[10px] text-slate-500 font-mono shrink-0">unavailable</span>
+        {/* Say WHY. 'unavailable' alone left a blocked upstream, a timeout and a
+            changed API looking identical, so a whole empty section gave no clue
+            what to do about it. The server now returns a reason per row. */}
+        <span className="text-[10px] text-slate-500 font-mono shrink-0" title={m.reason || 'no reason reported'}>
+          {m.reason === 'no_kite_session' ? 'no session'
+            : m.reason?.startsWith('blocked_by_yahoo') ? 'source blocked'
+            : m.reason === 'rate_limited_429' ? 'rate limited'
+            : m.reason === 'timeout' ? 'timed out'
+            : m.reason === 'no_price_in_response' ? 'no price'
+            : m.reason ? m.reason
+            : 'unavailable'}
+        </span>
       </div>
     );
   }
