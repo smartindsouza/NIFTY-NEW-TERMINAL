@@ -336,6 +336,65 @@ function journalCloseTrade(tradingsymbol: string, c: { exitPrice?: number; pnl?:
   } catch (e) { console.error('[Journal] close update failed', e); }
 }
 
+// Journal rows are closed by the two paths that exit THROUGH this app. Exit in
+// Kite directly — or let a position square off anywhere else — and the row stays
+// OPEN forever, which is how five trades came to be listed as open with nothing
+// actually held. This reconciles the journal against the broker: Zerodha is the
+// authority on what is open, and the journal follows it.
+//
+// Numbers are never invented. Zerodha keeps same-day closed positions in the net
+// book with quantity 0 and real average prices, so those rows close with a true
+// exit price and P&L. A row whose symbol is absent from the book entirely (an
+// earlier day, already rolled off) is still closed — it is provably not open —
+// but with a null price and an honest reason rather than a fabricated figure.
+let lastJournalReconcile = 0;
+async function reconcileJournalWithBroker(force = false): Promise<{ closed: number; checked: number; reason?: string }> {
+  if (!force && Date.now() - lastJournalReconcile < 60 * 1000) return { closed: 0, checked: 0, reason: 'throttled' };
+  lastJournalReconcile = Date.now();
+  const kc = getKiteClient();
+  // @ts-ignore
+  if (!kc || !kc.access_token) return { closed: 0, checked: 0, reason: 'no_kite_session' };
+  let net: any[] = [];
+  try {
+    const positions = await kc.getPositions();
+    net = (positions && positions.net) || [];
+  } catch (e: any) {
+    return { closed: 0, checked: 0, reason: 'positions_unavailable' };
+  }
+  const bySymbol = new Map<string, any>();
+  for (const p of net) bySymbol.set(String(p.tradingsymbol), p);
+
+  // A just-placed entry may not be in the book yet; leave the last two minutes
+  // alone so reconciliation cannot close a trade that is still being opened.
+  const cutoff = Date.now() - 2 * 60 * 1000;
+  const open: any[] = db.prepare("SELECT * FROM trade_journal WHERE status='OPEN' AND entry_time < ?").all(cutoff) as any[];
+  let closed = 0;
+  for (const row of open) {
+    // Simulated and test rows are not broker trades; the book can say nothing
+    // about them and closing them here would be wrong.
+    if (row.test_mode || row.simulated) continue;
+    const pos = bySymbol.get(String(row.tradingsymbol));
+    if (pos && Math.abs(Number(pos.quantity) || 0) > 0) continue;      // genuinely still open
+    let exitPrice: number | null = null;
+    let pnl: number | null = null;
+    let reason = 'RECONCILED_NOT_IN_BOOK';
+    if (pos) {
+      const long = String(row.side || 'BUY').toUpperCase() !== 'SELL';
+      const px = long ? Number(pos.sell_price) : Number(pos.buy_price);
+      if (Number.isFinite(px) && px > 0) exitPrice = +px.toFixed(2);
+      if (Number.isFinite(Number(pos.pnl))) pnl = +Number(pos.pnl).toFixed(2);
+      reason = 'RECONCILED_CLOSED_AT_BROKER';
+    }
+    try {
+      db.prepare("UPDATE trade_journal SET status='CLOSED', exit_price=?, exit_time=?, exit_reason=?, pnl=?, updated_at=? WHERE id=? AND status='OPEN'")
+        .run(exitPrice as any, Date.now(), reason, pnl as any, Date.now(), row.id);
+      closed++;
+    } catch (e) { console.error('[Journal] reconcile update failed', row.id, e); }
+  }
+  if (closed) console.log(`[Journal] reconciled ${closed} row(s) the broker shows as not open`);
+  return { closed, checked: open.length };
+}
+
 async function closePositionBySymbol(tradingsymbol: string, reason: string = 'MANUAL'): Promise<{ ok: boolean; orderId?: string; error?: string; alreadyClosed?: boolean }> {
   try {
     const kc = getKiteClient();
@@ -1482,8 +1541,11 @@ setInterval(() => {
     }
   });
 
-  app.get('/api/journal', (req, res) => {
+  app.get('/api/journal', async (req, res) => {
     try {
+      // Correct the book before reading it, so opening the screen is what fixes a
+      // stale OPEN row rather than the user having to notice and act.
+      try { await reconcileJournalWithBroker(String(req.query.reconcile || '') === '1'); } catch (e) {}
       const status = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : null;
       const limit = Math.min(parseInt(String(req.query.limit || '500'), 10) || 500, 2000);
       const rows = (status === 'OPEN' || status === 'CLOSED')
