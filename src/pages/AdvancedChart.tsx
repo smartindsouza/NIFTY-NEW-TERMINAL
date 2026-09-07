@@ -3119,6 +3119,37 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const chartDataRef = useRef<any>(null);
   const confSignalsRef = useRef<any[]>([]);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  // DESKTOP PAGE HEIGHT, MEASURED. Three attempts at expressing this in CSS —
+  // viewport calc, flex-1, then a percentage chain — each looked right in the
+  // source and each left the page collapsed to its content on Martin's screen.
+  // The Diag readout finally showed it: main at 986px, the page at 611px, the
+  // chart pinned to its 450px floor. Whatever link between them was failing to
+  // resolve, the fix that cannot fail is the one the mobile canvas already
+  // uses: measure the real floor. The page's height is set inline to the
+  // distance from its own top to the bottom of the window, re-measured every
+  // second (cheap: one rect, written only on change) and on resize, so the
+  // positions banner appearing or vanishing above it is accounted for too.
+  // Mobile keeps its class-based height; the inline style is cleared there.
+  const pageRootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = pageRootRef.current;
+    if (!el) return;
+    const apply = () => {
+      try {
+        if (!window.matchMedia('(min-width: 768px)').matches) { if (el.style.height) el.style.height = ''; return; }
+        const top = el.getBoundingClientRect().top;
+        const h = Math.floor(window.innerHeight - top);
+        if (h < 200) return;                       // mid-layout nonsense: leave it
+        const want = `${h}px`;
+        if (el.style.height !== want) el.style.height = want;
+      } catch (e) {}
+    };
+    apply();
+    const iv = setInterval(apply, 1000);
+    window.addEventListener('resize', apply);
+    return () => { clearInterval(iv); window.removeEventListener('resize', apply); try { el.style.height = ''; } catch (e) {} };
+  }, []);
   const rrCanvasRef = useRef<HTMLCanvasElement>(null);
   const serverTimeOffsetRef = useRef<number>(0);
   
@@ -9310,7 +9341,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // overflow hidden so nothing can push the page into a scroll. The chart grows
   // to fill whatever the toolbar, tabs and strips leave. Mobile classes unchanged.
   return (
-    <div data-layout="page" className="px-1 pt-0 pb-0 md:px-8 md:py-0 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto flex flex-col h-[calc(100dvh-124px-env(safe-area-inset-bottom))] md:h-full md:min-h-0 overflow-hidden relative">
+    <div ref={pageRootRef} data-layout="page" className="px-1 pt-0 pb-0 md:px-8 md:py-0 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto flex flex-col h-[calc(100dvh-124px-env(safe-area-inset-bottom))] md:h-full md:min-h-0 overflow-hidden relative">
       
       {showDiagnostic && (
         <div className="fixed bottom-6 right-6 z-50 bg-card/95 backdrop-blur-md border border-0 p-4 rounded-lg text-xs font-mono w-[340px] max-h-[80vh] overflow-y-auto">
