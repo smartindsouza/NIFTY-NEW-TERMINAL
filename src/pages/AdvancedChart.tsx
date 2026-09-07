@@ -8414,13 +8414,25 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         const vvH = (window as any).visualViewport?.height ?? window.innerHeight;
         let floorY = vvH;
         const bar = bottomBarRef.current;
+        let barIsFixed = false;
         if (bar) {
           const pos = window.getComputedStyle(bar).position;
-          if (pos === 'fixed') floorY = Math.min(floorY, bar.getBoundingClientRect().top);
+          if (pos === 'fixed') { barIsFixed = true; floorY = Math.min(floorY, bar.getBoundingClientRect().top); }
         }
         const visibleH = Math.floor(floorY - rect.top);
-        // Never trust a nonsense measurement mid-layout; fall back to the container.
-        const h = visibleH > 120 ? Math.min(visibleH, Math.floor(el.clientHeight) || visibleH) : Math.floor(el.clientHeight);
+        const containerH = Math.floor(el.clientHeight);
+
+        // The visible-viewport clamp above exists for ONE situation: the mobile
+        // bottom toolbar is position:fixed, so it floats over the page and can
+        // swallow the chart's time axis. On desktop that same bar is static, it
+        // takes real layout space, and the page is now height-bounded — so the
+        // container's height IS the correct answer. Clamping to the viewport there
+        // sized the canvas to (viewport − container top) while the container itself
+        // was taller, leaving the blank band under the chart. Desktop therefore
+        // sizes to the container; mobile keeps the clamp exactly as it was.
+        const h = barIsFixed
+          ? (visibleH > 120 ? Math.min(visibleH, containerH || visibleH) : containerH)
+          : (containerH || (visibleH > 120 ? visibleH : 0));
         if (!h || h <= 0) return;
 
         const o: any = mainChart.options();
