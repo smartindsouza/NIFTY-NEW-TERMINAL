@@ -1607,9 +1607,18 @@ const toUnixSeconds = (value: any): number => {
   return Math.floor(new Date(value).getTime() / 1000);
 };
 
-const getMarketAlignedCandleStart = (unixSeconds: number, timeframeMinutes: number) => {
+// sessionAligned=false is for instruments that do NOT keep NSE's 09:15-15:40 day.
+// GIFT NIFTY trades ~21 hours in two sessions, and forcing its ticks onto the NSE
+// grid corrupted them twice over: the cap at 15:35 collapsed every evening tick
+// onto the afternoon close, and a tick after midnight produced a negative elapsed
+// time, clamped to zero, which threw it forward to the NEXT morning's 09:15. That
+// is why the axis disagreed with the candles. A 21-hour instrument just floors to
+// a plain wall-clock grid, which is what every 24-hour chart does.
+const getMarketAlignedCandleStart = (unixSeconds: number, timeframeMinutes: number, sessionAligned: boolean = true) => {
   const duration = timeframeMinutes * 60;
   if (!duration || duration >= 24 * 60 * 60) return unixSeconds;
+
+  if (!sessionAligned) return Math.floor(unixSeconds / duration) * duration;
 
   const istSeconds = unixSeconds + IST_OFFSET_SECONDS;
   const istMidnight = Math.floor(istSeconds / 86400) * 86400;
@@ -1625,8 +1634,8 @@ const getMarketAlignedCandleStart = (unixSeconds: number, timeframeMinutes: numb
   return Math.floor(cappedBucketStartIst - IST_OFFSET_SECONDS);
 };
 
-const getNextMarketAlignedClose = (unixSeconds: number, timeframeMinutes: number) => {
-  return getMarketAlignedCandleStart(unixSeconds, timeframeMinutes) + timeframeMinutes * 60;
+const getNextMarketAlignedClose = (unixSeconds: number, timeframeMinutes: number, sessionAligned: boolean = true) => {
+  return getMarketAlignedCandleStart(unixSeconds, timeframeMinutes, sessionAligned) + timeframeMinutes * 60;
 };
 
 // Client-side RSI (Wilder's smoothing / RMA) — mirrors the server's calculateRSI exactly,
@@ -7059,13 +7068,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           const isIntradayTf = tfMin < 1440;
           let updateTime: number;
           if (isIntradayTf) {
-            updateTime = getMarketAlignedCandleStart(tickTime, tfMin);
+            updateTime = getMarketAlignedCandleStart(tickTime, tfMin, !isReferenceChartRef.current);
           } else if (lastCandleTimeRef.current !== null) {
             updateTime = lastCandleTimeRef.current;
           } else if (seededLastCandle) {
             updateTime = seededLastCandle.time;
           } else {
-            updateTime = getMarketAlignedCandleStart(tickTime, tfMin);
+            updateTime = getMarketAlignedCandleStart(tickTime, tfMin, !isReferenceChartRef.current);
           }
 
           if (lastCandleTimeRef.current !== null) {
@@ -7170,7 +7179,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         
         if (!isCancelled && data && data.candles && data.candles.length > 0 && mainSeriesRef.current) {
            const latestCandle = data.candles[data.candles.length - 1];
-           const updateTime = getMarketAlignedCandleStart(toUnixSeconds(latestCandle.time), tfMin);
+           const updateTime = getMarketAlignedCandleStart(toUnixSeconds(latestCandle.time), tfMin, !isReferenceChartRef.current);
 
            if (lastCandleTimeRef.current !== null && updateTime < lastCandleTimeRef.current) {
              // The chart's candle clock is AHEAD of the server's. That means we
@@ -7275,7 +7284,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
              const serverClosed = data.candles.slice(-4, -1); // newest bar is handled above
              let drift = '';
              for (const sc of serverClosed) {
-               const t = getMarketAlignedCandleStart(toUnixSeconds(sc.time), tfMin);
+               const t = getMarketAlignedCandleStart(toUnixSeconds(sc.time), tfMin, !isReferenceChartRef.current);
                const oc = ours.get(t);
                if (!oc) { drift = `bar ${t} missing from the chart`; break; }
                // Tolerance is deliberately tight but not zero: a bar built from ticks can
@@ -7362,7 +7371,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     const seen = new Set();
     for (const c of taInfo.candles) {
       // Kite candle timestamps or our server timestamps
-      const timeSec = getMarketAlignedCandleStart(toUnixSeconds(c.time), tfNum);
+      const timeSec = getMarketAlignedCandleStart(toUnixSeconds(c.time), tfNum, !isReferenceChartRef.current);
       if (!seen.has(timeSec)) {
         seen.add(timeSec);
         uniqueCandles.push({
@@ -8105,7 +8114,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     const lastHistRaw = candleData[candleData.length - 1] || null;
     if (lastHistRaw) {
       const tfMinSeed = parseInt(timeframe) || 5;
-      const alignedSeedTime = getMarketAlignedCandleStart(lastHistRaw.time, tfMinSeed);
+      const alignedSeedTime = getMarketAlignedCandleStart(lastHistRaw.time, tfMinSeed, !isReferenceChartRef.current);
       lastCandleTimeRef.current = alignedSeedTime;
       lastCandleDataRef.current = { ...lastHistRaw, time: alignedSeedTime };
     } else {
