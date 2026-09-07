@@ -1,16 +1,11 @@
-import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, TrendingUp, TrendingDown } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 // ============================================================================
-// INSTITUTIONAL FLOW — daily FII/FPI and DII cash-market activity in ₹ crore.
-// Laid out to Martin's reference: a combined headline, the two categories side
-// by side with buy/sell bars, a combined line, a plain-English reading, then
-// every trading day captured so far.
-//
-// Every figure here is NSE's own published report, provisional after the close
-// and occasionally revised. Nothing is computed beyond the sums, and the source
-// and provisional status are stated on screen rather than left implied.
+// INSTITUTIONAL FLOW — the latest published FII/FPI and DII cash-market day,
+// laid out to Martin's reference. Live only: no history, no stored snapshots.
+// If no source answers, the screen says unavailable rather than showing an
+// older day as though it were current.
 // ============================================================================
 
 type Side = { buy: number; sell: number; net: number };
@@ -31,32 +26,15 @@ const fmtDate = (iso: string) => {
   } catch { return iso; }
 };
 
-/** Same reading the server gives, computed here so every SELECTED day gets one. */
-function explainDay(d: FlowDay): string {
-  const fiiBuying = d.fii.net >= 0, diiBuying = d.dii.net >= 0;
-  const c = (n: number) => `₹${Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 2 })} Cr`;
-  if (fiiBuying && diiBuying) return "Both foreign and domestic institutions were net buyers.";
-  if (!fiiBuying && !diiBuying) return "Both foreign and domestic institutions were net sellers.";
-  if (!fiiBuying && diiBuying) {
-    return d.combinedNet >= 0
-      ? `FIIs sold ${c(d.fii.net)}, but stronger DII buying kept the combined institutional flow positive.`
-      : `DIIs bought ${c(d.dii.net)}, but heavier FII selling left the combined flow negative.`;
-  }
-  return d.combinedNet >= 0
-    ? `DIIs sold ${c(d.dii.net)}, but stronger FII buying kept the combined institutional flow positive.`
-    : `FIIs bought ${c(d.fii.net)}, but heavier DII selling left the combined flow negative.`;
-}
-
-/** Buy and sell as proportional bars — the shape of the day at a glance. */
 function FlowBars({ buy, sell }: { buy: number; sell: number }) {
   const max = Math.max(buy, sell, 1);
   return (
     <div className="space-y-1.5">
       <div className="h-1.5 rounded-full bg-emerald-500/15 overflow-hidden">
-        <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${(buy / max) * 100}%` }} />
+        <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${(buy / max) * 100}%` }} />
       </div>
       <div className="h-1.5 rounded-full bg-rose-500/15 overflow-hidden">
-        <div className="h-full bg-rose-500 rounded-full transition-all" style={{ width: `${(sell / max) * 100}%` }} />
+        <div className="h-full bg-rose-500 rounded-full" style={{ width: `${(sell / max) * 100}%` }} />
       </div>
     </div>
   );
@@ -95,28 +73,17 @@ export function InstitutionalFlow() {
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["institutional-flow"],
     queryFn: async () => {
-      const r = await fetch("/api/institutional-flow?days=60");
+      const r = await fetch("/api/institutional-flow");
       if (!r.ok) throw new Error("request failed");
       return r.json();
     },
-    // Published once after the close, so there is nothing to gain from polling.
-    staleTime: 30 * 60 * 1000,
+    staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
 
-  const history: FlowDay[] = data?.history || [];
-  // The five most recent trading days are the picker; whichever is chosen is
-  // the day the whole card describes. Defaults to the latest, and re-anchors to
-  // it when a newer day arrives so the screen never opens on yesterday.
-  const recent = history.slice(0, 5);
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  useEffect(() => {
-    if (!history.length) return;
-    if (!selectedDate || !history.some((d) => d.date === selectedDate)) setSelectedDate(history[0].date);
-  }, [history.length, history[0]?.date]);
-  const latest: FlowDay | null = history.find((d) => d.date === selectedDate) || data?.latest || null;
-  const isLatest = !!latest && history[0]?.date === latest.date;
+  const latest: FlowDay | null = data?.latest || null;
   const netPositive = (latest?.combinedNet ?? 0) >= 0;
+  const unavailable = !isLoading && (isError || !latest);
 
   return (
     <div className="w-full max-w-[1100px] mx-auto px-3 md:px-6 py-4 md:py-6 space-y-5">
@@ -135,44 +102,27 @@ export function InstitutionalFlow() {
 
       {isLoading && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground py-10 justify-center">
-          <Loader2 className="w-4 h-4 animate-spin" /> Loading institutional flow…
+          <Loader2 className="w-4 h-4 animate-spin" /> Fetching the latest report…
         </div>
       )}
 
-      {/* A failed FETCH and a failed SOURCE are different situations and say so.
-          History still renders below either way, so a blocked feed means "no new
-          day" rather than an empty screen. */}
-      {!isLoading && (isError || (data && data.success === false)) && (
-        <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 px-3 py-2 text-xs text-rose-300">
-          Could not load institutional flow{data?.error ? `: ${data.error}` : "."}
-        </div>
-      )}
-      {!isLoading && data?.reason && (
-        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-300/90">
-          Latest day unavailable from NSE ({data.reason}). Showing what has been captured so far.
-        </div>
-      )}
-
-      {recent.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden -mx-1 px-1">
-          {recent.map((d) => {
-            const active = d.date === selectedDate;
-            const pos = d.combinedNet >= 0;
-            return (
-              <button key={d.date} onClick={() => setSelectedDate(d.date)}
-                className={`shrink-0 rounded-lg border px-3 py-2 text-left transition-colors ${
-                  active ? "border-primary bg-primary/15" : "border-border/60 bg-card hover:bg-muted/40"}`}>
-                <div className={`text-[11px] font-mono ${active ? "text-foreground" : "text-muted-foreground"}`}>{fmtDate(d.date)}</div>
-                <div className={`text-xs font-mono font-bold tabular-nums ${pos ? "text-emerald-400" : "text-rose-400"}`}>{cr(d.combinedNet, true)}</div>
-              </button>
-            );
-          })}
+      {unavailable && (
+        <div className="rounded-2xl border border-border/60 bg-card px-5 py-8 text-center space-y-2">
+          <div className="text-lg font-semibold text-foreground">Unavailable</div>
+          <div className="text-xs text-muted-foreground max-w-md mx-auto">
+            The latest FII/DII cash report could not be fetched right now
+            {data?.reason ? <> (<span className="font-mono">{String(data.reason)}</span>)</> : null}.
+            Nothing older is shown in its place.
+          </div>
+          <button onClick={() => refetch()} disabled={isFetching}
+            className="text-[11px] text-primary hover:underline disabled:opacity-50">
+            {isFetching ? "retrying…" : "try again"}
+          </button>
         </div>
       )}
 
       {latest && (
         <>
-          {/* Headline */}
           <div className="rounded-2xl bg-gradient-to-br from-indigo-900/70 to-indigo-950/70 border border-indigo-500/25 p-5 md:p-6">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
@@ -180,7 +130,7 @@ export function InstitutionalFlow() {
                 <div className={`text-3xl md:text-4xl font-bold tabular-nums mt-2 ${netPositive ? "text-emerald-300" : "text-rose-300"}`}>
                   {cr(latest.combinedNet, true)}
                 </div>
-                <div className="text-xs text-indigo-100/70 mt-2 max-w-xl">{explainDay(latest)}</div>
+                <div className="text-xs text-indigo-100/70 mt-2 max-w-xl">{data?.explanation}</div>
               </div>
               <div className="shrink-0 rounded-xl border border-indigo-400/25 bg-indigo-950/50 px-3 py-2 text-center">
                 <div className="text-[9px] uppercase tracking-widest text-indigo-200/60">Official report</div>
@@ -190,19 +140,15 @@ export function InstitutionalFlow() {
             </div>
           </div>
 
-          {/* The day */}
           <div>
             <h2 className="text-base font-semibold text-foreground">Daily cash flow</h2>
-            <p className="text-[11px] text-muted-foreground mb-3">
-              {fmtDate(latest.date)}{isLatest ? " · latest" : ""} · provisional · ₹ crore
-            </p>
+            <p className="text-[11px] text-muted-foreground mb-3">{fmtDate(latest.date)} · provisional · ₹ crore</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <CategoryCard title="FII / FPI" subtitle="Foreign institutions" side={latest.fii} />
               <CategoryCard title="DII" subtitle="Domestic institutions" side={latest.dii} />
             </div>
           </div>
 
-          {/* Combined */}
           <div className="rounded-xl border border-border/60 bg-card px-4 py-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Combined cash</span>
@@ -217,64 +163,16 @@ export function InstitutionalFlow() {
             </div>
           </div>
 
-          {/* Reading */}
           <div className="rounded-xl border border-border/60 bg-muted/30 px-4 py-3">
             <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Simple explanation</div>
-            <div className="text-sm text-foreground/90">{explainDay(latest)}</div>
+            <div className="text-sm text-foreground/90">{data?.explanation}</div>
           </div>
+
+          <p className="text-[10px] text-muted-foreground">
+            Source: {data?.source || "NSE"}. Provisional figures; the exchange may revise them.
+          </p>
         </>
       )}
-
-      {/* Every day captured so far. NSE serves only the latest, so this fills in
-          one trading day at a time from the moment the screen first ran. */}
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-base font-semibold text-foreground">Every trading day</h2>
-          <button onClick={() => refetch()} disabled={isFetching}
-            className="text-[11px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50">
-            {isFetching ? "refreshing…" : "refresh"}
-          </button>
-        </div>
-        {history.length === 0 && !isLoading ? (
-          <div className="rounded-xl border border-border/60 bg-card px-4 py-6 text-center text-xs text-muted-foreground">
-            No days captured yet. NSE publishes this after the close, so the first row appears this evening.
-          </div>
-        ) : (
-          <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-[10px] uppercase tracking-wide text-muted-foreground border-b border-border/60">
-                    <th className="text-left font-medium px-3 py-2">Date</th>
-                    <th className="text-right font-medium px-3 py-2">FII net</th>
-                    <th className="text-right font-medium px-3 py-2">DII net</th>
-                    <th className="text-right font-medium px-3 py-2">Combined</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.map((d) => (
-                    <tr key={d.date} onClick={() => { setSelectedDate(d.date); window.scrollTo({ top: 0, behavior: "smooth" }); }}
-                        className={`border-b border-border/40 last:border-0 hover:bg-muted/40 transition-colors cursor-pointer ${d.date === selectedDate ? "bg-primary/10" : ""}`}>
-                      <td className="px-3 py-2 font-mono text-foreground/80 whitespace-nowrap">{fmtDate(d.date)}</td>
-                      <td className={`px-3 py-2 text-right font-mono tabular-nums ${d.fii.net >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{cr(d.fii.net, true)}</td>
-                      <td className={`px-3 py-2 text-right font-mono tabular-nums ${d.dii.net >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{cr(d.dii.net, true)}</td>
-                      <td className={`px-3 py-2 text-right font-mono font-bold tabular-nums ${d.combinedNet >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                        <span className="inline-flex items-center gap-1 justify-end">
-                          {d.combinedNet >= 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
-                          {cr(d.combinedNet, true)}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-        <p className="text-[10px] text-muted-foreground mt-2">
-          Source: {data?.source || "NSE cash-market report"}. Figures are provisional and may be revised by the exchange.
-        </p>
-      </div>
     </div>
   );
 }
