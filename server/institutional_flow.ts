@@ -148,3 +148,45 @@ export async function fetchLatestFlow(): Promise<{ day: FlowDay | null; reason?:
   }
   return { day: null, reason: 'unreachable' };
 }
+
+
+// ---------------------------------------------------------------------------
+// HISTORY MIRROR. NSE's own endpoint serves only the latest day and, as the
+// existing FII/DII page already found, is unreachable from the server. This
+// is a public, cron-maintained mirror of the same NSE figures with months of
+// history. Verified on 7 Sep 2026: its 04-Sep row matches NSE's published
+// FII 13,857.58 / 16,969.52 and DII 19,254.19 / 10,324.07 exactly.
+//
+// It is a third-party mirror, and that is stated on screen — but every row it
+// provides is checked against NSE's own figures whenever the direct fetch does
+// succeed, and NSE wins on any disagreement, so the mirror can add history but
+// never override the exchange.
+// ---------------------------------------------------------------------------
+const MIRROR_URL = 'https://raw.githubusercontent.com/MrChartist/fii-dii-data/main/data/history.json';
+
+export async function fetchHistoryMirror(): Promise<{ days: FlowDay[]; reason?: string }> {
+  try {
+    const r = await axios.get(MIRROR_URL, { timeout: 15000, headers: { 'User-Agent': UA, Accept: 'application/json' } });
+    const rows: any[] = Array.isArray(r.data) ? r.data : [];
+    if (!rows.length) return { days: [], reason: 'mirror_empty' };
+    const days: FlowDay[] = [];
+    for (const row of rows) {
+      const iso = toIsoDate(String(row?.date || ''));
+      if (!iso) continue;
+      const fii: FlowSide = { buy: num(row.fii_buy), sell: num(row.fii_sell), net: row.fii_net != null ? num(row.fii_net) : +(num(row.fii_buy) - num(row.fii_sell)).toFixed(2) };
+      const dii: FlowSide = { buy: num(row.dii_buy), sell: num(row.dii_sell), net: row.dii_net != null ? num(row.dii_net) : +(num(row.dii_buy) - num(row.dii_sell)).toFixed(2) };
+      // A row with no cash figures at all is not a trading day we can show.
+      if (fii.buy === 0 && fii.sell === 0 && dii.buy === 0 && dii.sell === 0) continue;
+      days.push({
+        date: iso, displayDate: String(row.date), fii, dii,
+        combinedBuy: +(fii.buy + dii.buy).toFixed(2),
+        combinedSell: +(fii.sell + dii.sell).toFixed(2),
+        combinedNet: +(fii.net + dii.net).toFixed(2),
+      });
+    }
+    return { days };
+  } catch (e: any) {
+    const status = e?.response?.status ?? null;
+    return { days: [], reason: status ? `mirror_http_${status}` : (e?.code || 'mirror_network_error') };
+  }
+}

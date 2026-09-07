@@ -68,7 +68,7 @@ export function FiiDii() {
         <div className="flex justify-between items-end p-4 md:p-6">
         <div>
           <h1 className="text-2xl md:text-3xl font-black tracking-tight text-foreground flex items-center gap-3">
-            Institutional Flow
+            FII / DII Positioning
             <MetricSourceBadge 
               type={isUnavailable ? "UNAVAILABLE" : "STORED SNAPSHOT"} 
               source="NSE Participant OI Data"

@@ -16,7 +16,7 @@ import { runRsiBacktest } from './server/rsi_backtest';
 import { getLiveSignal, runOptionConfirmBacktest, getAlertSignal } from './server/option_rsi';
 import { ivAndDelta, bsThetaPerDay, impliedVol, bsPrice, bsDelta } from './server/options_math';
 import { createTrailState, onPremiumTick, onSpotClose5m, onSpotClose1m, type TrailState, type TrailAction } from './server/trail_engine';
-import { fetchLatestFlow, explain as explainFlow, type FlowDay } from './server/institutional_flow';
+import { fetchLatestFlow, fetchHistoryMirror, explain as explainFlow, type FlowDay } from './server/institutional_flow';
 import { getGammaBlast } from './server/gamma_blast';
 import { getPremiumPulse, getPremiumPulseBias } from './server/premium_pulse';
 import { getFiiData, getCashFiiDii } from './server/fii_service';
@@ -118,15 +118,30 @@ const rowToFlowDay = (r: any): FlowDay => ({
 
 let lastFlowFetch = 0;
 let lastFlowReason: string | null = null;
+let lastFlowSource: string = 'none';
 async function refreshFlow(force = false): Promise<void> {
   // NSE publishes once, after the close. Hourly is ample; a forced refresh is
   // allowed so opening the screen can pull a day that is not captured yet.
   if (!force && Date.now() - lastFlowFetch < 60 * 60 * 1000) return;
   lastFlowFetch = Date.now();
+
+  // 1. The mirror first: it carries months of history and is reachable, so the
+  //    screen has a full table from the first load rather than one row a day.
+  const mirror = await fetchHistoryMirror();
+  let saved = 0;
+  for (const d of mirror.days) { saveFlowDay(d); saved++; }
+  if (saved) lastFlowSource = 'mirror';
+  const reasons: string[] = [];
+  if (!saved) reasons.push(mirror.reason || 'mirror_unknown');
+
+  // 2. NSE direct. Wins on any disagreement — the exchange over the mirror — and
+  //    is the only path that can deliver TODAY before the mirror's cron runs.
   const { day, reason } = await fetchLatestFlow();
-  lastFlowReason = day ? null : (reason || 'unknown');
-  if (day) saveFlowDay(day);
-  else console.warn('[flow] fetch failed:', lastFlowReason);
+  if (day) { saveFlowDay(day); lastFlowSource = saved ? 'nse+mirror' : 'nse'; }
+  else reasons.push(reason || 'nse_unknown');
+
+  lastFlowReason = (day || saved) ? null : reasons.join('; ');
+  if (reasons.length) console.warn('[flow] refresh:', reasons.join('; '), '| saved', saved, 'mirror rows', day ? '+ NSE latest' : '');
 }
 
 // Live TrailState per armed symbol. The DB copy is the durable one; this is the
@@ -2071,7 +2086,10 @@ setInterval(() => {
         // Present whenever the last fetch failed. History still renders, so a
         // blocked feed degrades to "no NEW day" rather than an empty screen.
         reason: lastFlowReason,
-        source: 'NSE — provisional, ₹ crore',
+        source: lastFlowSource === 'nse' ? 'NSE direct'
+              : lastFlowSource === 'nse+mirror' ? 'NSE, history via mirror'
+              : lastFlowSource === 'mirror' ? 'NSE figures via public mirror'
+              : 'stored',
       });
     } catch (e: any) {
       res.status(500).json({ success: false, error: e?.message || String(e), latest: null, history: [] });

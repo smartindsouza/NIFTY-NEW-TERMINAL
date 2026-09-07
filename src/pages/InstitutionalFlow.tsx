@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, TrendingUp, TrendingDown } from "lucide-react";
 
@@ -29,6 +30,22 @@ const fmtDate = (iso: string) => {
     return new Date(iso + "T00:00:00+05:30").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
   } catch { return iso; }
 };
+
+/** Same reading the server gives, computed here so every SELECTED day gets one. */
+function explainDay(d: FlowDay): string {
+  const fiiBuying = d.fii.net >= 0, diiBuying = d.dii.net >= 0;
+  const c = (n: number) => `₹${Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 2 })} Cr`;
+  if (fiiBuying && diiBuying) return "Both foreign and domestic institutions were net buyers.";
+  if (!fiiBuying && !diiBuying) return "Both foreign and domestic institutions were net sellers.";
+  if (!fiiBuying && diiBuying) {
+    return d.combinedNet >= 0
+      ? `FIIs sold ${c(d.fii.net)}, but stronger DII buying kept the combined institutional flow positive.`
+      : `DIIs bought ${c(d.dii.net)}, but heavier FII selling left the combined flow negative.`;
+  }
+  return d.combinedNet >= 0
+    ? `DIIs sold ${c(d.dii.net)}, but stronger FII buying kept the combined institutional flow positive.`
+    : `FIIs bought ${c(d.fii.net)}, but heavier DII selling left the combined flow negative.`;
+}
 
 /** Buy and sell as proportional bars — the shape of the day at a glance. */
 function FlowBars({ buy, sell }: { buy: number; sell: number }) {
@@ -87,8 +104,18 @@ export function InstitutionalFlow() {
     refetchOnWindowFocus: false,
   });
 
-  const latest: FlowDay | null = data?.latest || null;
   const history: FlowDay[] = data?.history || [];
+  // The five most recent trading days are the picker; whichever is chosen is
+  // the day the whole card describes. Defaults to the latest, and re-anchors to
+  // it when a newer day arrives so the screen never opens on yesterday.
+  const recent = history.slice(0, 5);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  useEffect(() => {
+    if (!history.length) return;
+    if (!selectedDate || !history.some((d) => d.date === selectedDate)) setSelectedDate(history[0].date);
+  }, [history.length, history[0]?.date]);
+  const latest: FlowDay | null = history.find((d) => d.date === selectedDate) || data?.latest || null;
+  const isLatest = !!latest && history[0]?.date === latest.date;
   const netPositive = (latest?.combinedNet ?? 0) >= 0;
 
   return (
@@ -126,6 +153,23 @@ export function InstitutionalFlow() {
         </div>
       )}
 
+      {recent.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden -mx-1 px-1">
+          {recent.map((d) => {
+            const active = d.date === selectedDate;
+            const pos = d.combinedNet >= 0;
+            return (
+              <button key={d.date} onClick={() => setSelectedDate(d.date)}
+                className={`shrink-0 rounded-lg border px-3 py-2 text-left transition-colors ${
+                  active ? "border-primary bg-primary/15" : "border-border/60 bg-card hover:bg-muted/40"}`}>
+                <div className={`text-[11px] font-mono ${active ? "text-foreground" : "text-muted-foreground"}`}>{fmtDate(d.date)}</div>
+                <div className={`text-xs font-mono font-bold tabular-nums ${pos ? "text-emerald-400" : "text-rose-400"}`}>{cr(d.combinedNet, true)}</div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {latest && (
         <>
           {/* Headline */}
@@ -136,7 +180,7 @@ export function InstitutionalFlow() {
                 <div className={`text-3xl md:text-4xl font-bold tabular-nums mt-2 ${netPositive ? "text-emerald-300" : "text-rose-300"}`}>
                   {cr(latest.combinedNet, true)}
                 </div>
-                <div className="text-xs text-indigo-100/70 mt-2 max-w-xl">{data?.explanation}</div>
+                <div className="text-xs text-indigo-100/70 mt-2 max-w-xl">{explainDay(latest)}</div>
               </div>
               <div className="shrink-0 rounded-xl border border-indigo-400/25 bg-indigo-950/50 px-3 py-2 text-center">
                 <div className="text-[9px] uppercase tracking-widest text-indigo-200/60">Official report</div>
@@ -150,7 +194,7 @@ export function InstitutionalFlow() {
           <div>
             <h2 className="text-base font-semibold text-foreground">Daily cash flow</h2>
             <p className="text-[11px] text-muted-foreground mb-3">
-              {fmtDate(latest.date)} · provisional · ₹ crore
+              {fmtDate(latest.date)}{isLatest ? " · latest" : ""} · provisional · ₹ crore
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <CategoryCard title="FII / FPI" subtitle="Foreign institutions" side={latest.fii} />
@@ -176,7 +220,7 @@ export function InstitutionalFlow() {
           {/* Reading */}
           <div className="rounded-xl border border-border/60 bg-muted/30 px-4 py-3">
             <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Simple explanation</div>
-            <div className="text-sm text-foreground/90">{data?.explanation}</div>
+            <div className="text-sm text-foreground/90">{explainDay(latest)}</div>
           </div>
         </>
       )}
@@ -209,7 +253,8 @@ export function InstitutionalFlow() {
                 </thead>
                 <tbody>
                   {history.map((d) => (
-                    <tr key={d.date} className="border-b border-border/40 last:border-0 hover:bg-muted/40 transition-colors">
+                    <tr key={d.date} onClick={() => { setSelectedDate(d.date); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                        className={`border-b border-border/40 last:border-0 hover:bg-muted/40 transition-colors cursor-pointer ${d.date === selectedDate ? "bg-primary/10" : ""}`}>
                       <td className="px-3 py-2 font-mono text-foreground/80 whitespace-nowrap">{fmtDate(d.date)}</td>
                       <td className={`px-3 py-2 text-right font-mono tabular-nums ${d.fii.net >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{cr(d.fii.net, true)}</td>
                       <td className={`px-3 py-2 text-right font-mono tabular-nums ${d.dii.net >= 0 ? "text-emerald-400" : "text-rose-400"}`}>{cr(d.dii.net, true)}</td>
@@ -227,7 +272,7 @@ export function InstitutionalFlow() {
           </div>
         )}
         <p className="text-[10px] text-muted-foreground mt-2">
-          Source: NSE cash-market report. Figures are provisional and may be revised by the exchange.
+          Source: {data?.source || "NSE cash-market report"}. Figures are provisional and may be revised by the exchange.
         </p>
       </div>
     </div>
