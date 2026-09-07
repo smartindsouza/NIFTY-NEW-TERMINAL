@@ -159,13 +159,16 @@ export function InstitutionalFlow() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-border/60 bg-muted/30 px-4 py-3">
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Simple explanation</div>
-            <div className="text-sm text-foreground/90">{data?.explanation}</div>
-          </div>
-
+          {/* Naming the source and the fetch time turns "it shows the wrong day"
+              into something readable off the screen: a stale bundle, a cached
+              server pick and a genuinely stale upstream look identical without it. */}
           <p className="text-[10px] text-muted-foreground">
-            Source: {data?.source || "NSE"}. Provisional figures; the exchange may revise them.
+            {latest.displayDate || fmtDate(latest.date)} · source: {data?.source || "NSE"}
+            {data?.fetchedAt ? ` · fetched ${new Date(data.fetchedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })} IST` : ""}
+            {" · "}
+            <button onClick={() => refetch()} disabled={isFetching} className="underline hover:text-foreground disabled:opacity-50">
+              {isFetching ? "refreshing…" : "refresh"}
+            </button>
           </p>
         </>
       )}

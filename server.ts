@@ -88,7 +88,9 @@ try { db.exec(`ALTER TABLE premium_exit_rules ADD COLUMN trail_state TEXT`); } c
 // by a restart — it never outlives the process.
 let flowLive: { at: number; day: FlowDay | null; source: string; reason: string | null } | null = null;
 async function getLiveFlow(): Promise<{ day: FlowDay | null; source: string; reason: string | null }> {
-  if (flowLive && Date.now() - flowLive.at < 5 * 60 * 1000) return flowLive;
+  // 60s, not 5 minutes: the report changes once a day, but a WRONG day needs to
+  // be correctable by pressing refresh rather than by waiting out a cache.
+  if (flowLive && Date.now() - flowLive.at < 60 * 1000) return flowLive;
   const reasons: string[] = [];
   // BOTH sources are asked, then the NEWEST day wins. Preferring NSE simply
   // because it answered was wrong: it can be serving an older day than the
