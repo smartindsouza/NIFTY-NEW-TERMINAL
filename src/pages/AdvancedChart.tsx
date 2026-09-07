@@ -6533,6 +6533,22 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // Disabled above 15m on every chart. The toggles keep their saved state — this
   // is a timeframe gate, not a change to the user's choice, so dropping back to
   // 15m or below restores them.
+  // GIFT NIFTY keeps its OWN hours. It trades on NSE IX in two sessions —
+  // 06:30–15:40 and 16:35–02:45 IST, about 21 hours — so the NSE cash window
+  // hardcoded into the price badge marked it CLOSED for most of the time it is
+  // actually trading, including every evening. The second session runs past
+  // midnight, which is why the late-night window is tested against the NEXT
+  // calendar day: 01:00 on a Saturday belongs to Friday's session, while 01:00
+  // on a Monday does not, because Sunday evening has no session to continue.
+  const isGiftSessionOpen = (istDay: number, mins: number): boolean => {
+    const weekdayNow = istDay >= 1 && istDay <= 5;
+    if (weekdayNow && mins >= 6 * 60 + 30 && mins < 15 * 60 + 40) return true;   // session 1
+    if (weekdayNow && mins >= 16 * 60 + 35) return true;                          // session 2, pre-midnight
+    // session 2 after midnight belongs to the PREVIOUS day, so Tue–Sat qualify
+    if (mins < 2 * 60 + 45 && istDay >= 2 && istDay <= 6) return true;
+    return false;
+  };
+
   const tfMinutes = parseInt(String(timeframe), 10) || 0;
   // Also off on GIFT NIFTY. These levels are computed from the NIFTY session —
   // its previous-day extremes, its support and resistance, its opening range,
@@ -8927,7 +8943,12 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               const ist = new Date(istMs);
               const istDay = ist.getUTCDay();
               const istMinutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
-              const marketOpen = istDay !== 0 && istDay !== 6 && istMinutes >= 9 * 60 + 15 && istMinutes <= 15 * 60 + 40;
+              // Whose hours apply depends on the instrument on screen. Read
+              // through the ref because this draw runs inside the once-per-build
+              // canvas callback.
+              const marketOpen = isReferenceChartRef.current
+                ? isGiftSessionOpen(istDay, istMinutes)
+                : (istDay !== 0 && istDay !== 6 && istMinutes >= 9 * 60 + 15 && istMinutes <= 15 * 60 + 40);
 
               // Countdown background matches spot price color slightly darker or same? 
               // User said "keep the market closed background and the countdown to close background to match the spot price background"
