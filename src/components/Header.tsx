@@ -81,7 +81,6 @@ export function Header() {
     { href: '/', label: 'Dashboard', icon: Home },
     { href: '/advanced-chart', label: 'Advanced Chart', icon: LineChart },
     { href: '/option-chain', label: 'Option Chain', icon: List },
-    { href: '/fii-dii', label: 'FII / DII', icon: BarChart2 },
     { href: '/institutional-flow', label: 'Institutional Flow', icon: Landmark },
     { href: '/news', label: 'News & Alerts', icon: Newspaper },
     { href: '/backtesting', label: 'Backtesting', icon: PlayCircle },

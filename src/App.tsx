@@ -19,7 +19,6 @@ import { useUserSettings } from './hooks/useUserSettings';
 const Dashboard = lazy(() => import('./pages/Dashboard').then(module => ({ default: module.Dashboard })));
 const OptionChain = lazy(() => import('./pages/OptionChain').then(module => ({ default: module.OptionChain })));
 const KiteLogin = lazy(() => import('./pages/KiteLogin').then(module => ({ default: module.KiteLogin })));
-const FiiDii = lazy(() => import('./pages/FiiDii').then(module => ({ default: module.FiiDii })));
 // Separate from /fii-dii, which is the F&O participant OI page. This one is the
 // CASH-market rupee flow — different dataset, different question.
 const InstitutionalFlow = lazy(() => import('./pages/InstitutionalFlow').then(module => ({ default: module.InstitutionalFlow })));
@@ -194,7 +193,10 @@ export default function App() {
               <Route path="/" component={Dashboard} />
               <Route path="/option-chain" component={OptionChain} />
               <Route path="/kite-login" component={KiteLogin} />
-              <Route path="/fii-dii" component={FiiDii} />
+              {/* /fii-dii kept as a redirect target only: the old F&O positioning
+                  page is retired, so any saved link or stale bundle lands on its
+                  replacement rather than a dead route. */}
+              <Route path="/fii-dii" component={InstitutionalFlow} />
               <Route path="/institutional-flow" component={InstitutionalFlow} />
               <Route path="/news" component={News} />
               <Route path="/advanced-chart" component={AdvancedChart} />

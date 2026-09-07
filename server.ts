@@ -90,16 +90,25 @@ let flowLive: { at: number; day: FlowDay | null; source: string; reason: string 
 async function getLiveFlow(): Promise<{ day: FlowDay | null; source: string; reason: string | null }> {
   if (flowLive && Date.now() - flowLive.at < 5 * 60 * 1000) return flowLive;
   const reasons: string[] = [];
-  // NSE direct first: the exchange's own figure, and the only path that has
-  // TODAY before the mirror's cron runs.
-  const nse = await fetchLatestFlow();
-  if (nse.day) { flowLive = { at: Date.now(), day: nse.day, source: 'NSE', reason: null }; return flowLive; }
-  reasons.push(`nse:${nse.reason || 'unknown'}`);
-  // Then the mirror of NSE's figures, taking only its most recent day.
-  const mirror = await fetchHistoryMirror();
-  const latest = mirror.days.slice().sort((a, b) => (a.date < b.date ? 1 : -1))[0] || null;
-  if (latest) { flowLive = { at: Date.now(), day: latest, source: 'NSE figures via public mirror', reason: null }; return flowLive; }
-  reasons.push(`mirror:${mirror.reason || 'unknown'}`);
+  // BOTH sources are asked, then the NEWEST day wins. Preferring NSE simply
+  // because it answered was wrong: it can be serving an older day than the
+  // mirror already has — which is how a 03-Sep figure reached the screen when
+  // 04-Sep was the last trading day. Whoever has the later date is right, and
+  // NSE takes ties since it is the exchange itself.
+  const [nse, mirror] = await Promise.all([fetchLatestFlow(), fetchHistoryMirror()]);
+  if (!nse.day) reasons.push(`nse:${nse.reason || 'unknown'}`);
+  const mirrorLatest = mirror.days.slice().sort((a, b) => (a.date < b.date ? 1 : -1))[0] || null;
+  if (!mirrorLatest) reasons.push(`mirror:${mirror.reason || 'unknown'}`);
+
+  let chosen: FlowDay | null = null;
+  let src = 'none';
+  if (nse.day && mirrorLatest) {
+    if (nse.day.date >= mirrorLatest.date) { chosen = nse.day; src = 'NSE'; }
+    else { chosen = mirrorLatest; src = 'NSE figures via public mirror'; }
+  } else if (nse.day) { chosen = nse.day; src = 'NSE'; }
+  else if (mirrorLatest) { chosen = mirrorLatest; src = 'NSE figures via public mirror'; }
+
+  if (chosen) { flowLive = { at: Date.now(), day: chosen, source: src, reason: null }; return flowLive; }
   flowLive = { at: Date.now(), day: null, source: 'none', reason: reasons.join('; ') };
   console.warn('[flow] unavailable:', flowLive.reason);
   return flowLive;

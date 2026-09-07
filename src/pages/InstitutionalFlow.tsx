@@ -124,19 +124,15 @@ export function InstitutionalFlow() {
       {latest && (
         <>
           <div className="rounded-2xl bg-gradient-to-br from-indigo-900/70 to-indigo-950/70 border border-indigo-500/25 p-5 md:p-6">
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="text-[10px] uppercase tracking-widest text-indigo-200/70">Combined net flow</div>
-                <div className={`text-3xl md:text-4xl font-bold tabular-nums mt-2 ${netPositive ? "text-emerald-300" : "text-rose-300"}`}>
-                  {cr(latest.combinedNet, true)}
-                </div>
-                <div className="text-xs text-indigo-100/70 mt-2 max-w-xl">{data?.explanation}</div>
+            {/* The OFFICIAL REPORT / NSE / Provisional panel is gone at Martin's
+                request; the source line at the foot of the page still records
+                where the figures came from. */}
+            <div className="min-w-0">
+              <div className="text-[10px] uppercase tracking-widest text-indigo-200/70">Combined net flow</div>
+              <div className={`text-3xl md:text-4xl font-bold tabular-nums mt-2 ${netPositive ? "text-emerald-300" : "text-rose-300"}`}>
+                {cr(latest.combinedNet, true)}
               </div>
-              <div className="shrink-0 rounded-xl border border-indigo-400/25 bg-indigo-950/50 px-3 py-2 text-center">
-                <div className="text-[9px] uppercase tracking-widest text-indigo-200/60">Official report</div>
-                <div className="text-xs font-semibold text-indigo-100 mt-1">NSE</div>
-                <div className="text-[10px] text-indigo-200/60 mt-1">Provisional · ₹ crore</div>
-              </div>
+              <div className="text-xs text-indigo-100/70 mt-2 max-w-xl">{data?.explanation}</div>
             </div>
           </div>
 
