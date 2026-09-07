@@ -4726,6 +4726,16 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         const live = rd?.rule;
         if (live && live.status === 'ACTIVE' && Number.isFinite(Number(live.sl)) && Number.isFinite(Number(live.tp))) {
           premRuleRef.current = { symbol: pos.symbol, sl: Number(live.sl), tp: Number(live.tp) };
+        } else if (rr.ok) {
+          // The rule is GONE — the stop fired, the target filled, or it was
+          // cleared. Previously this branch did nothing, so the last known rule
+          // stayed in the ref and the mirrored SL/TP kept being drawn on the spot
+          // chart after the position had already been closed out. A network error
+          // still keeps the last rule (the catch below); only a SUCCESSFUL reply
+          // saying it is not active clears it.
+          premRuleRef.current = null;
+          spotMapRef.current = null;
+          return;
         }
       } catch (e) { /* keep the last known rule */ }
 
@@ -4845,6 +4855,12 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const pushPremiumRule = async (slPx: number, tpPx: number) => {
     const pos = slActivePosRef.current;
     if (!pos) return;
+    // Tell every chart at once. In split view the panes are separate component
+    // instances that share nothing but the server, so a drag on the SPOT chart
+    // only reached the option chart when its 5s poll next ran — and not at all if
+    // that poll happened to be busy or the pane was mid-drag. Broadcasting means
+    // both halves move together the moment a level is armed.
+    try { window.dispatchEvent(new CustomEvent('terminal:rule-changed', { detail: { symbol: pos.symbol, sl: slPx, tp: tpPx } })); } catch (e) {}
     // Record what is being armed BEFORE the round trip, so a redraw that happens
     // while the request is in flight still draws the dragged levels.
     premRuleRef.current = { symbol: pos.symbol, sl: slPx, tp: tpPx };
@@ -5393,6 +5409,27 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       } catch (e) { /* keep the last known rule */ }
       finally { ruleSyncBusy = false; }
     };
+    // Adopt a rule change the instant another chart arms one, rather than waiting
+    // for the poll below. Same handler either way.
+    const onRuleChanged = (ev: any) => {
+      const d = ev?.detail;
+      const pos = slActivePosRef.current;
+      if (!d || !pos || d.symbol !== pos.symbol) return;
+      if (!Number.isFinite(d.sl) || !Number.isFinite(d.tp)) return;
+      premRuleRef.current = { symbol: pos.symbol, sl: d.sl, tp: d.tp, trail: premRuleRef.current?.trail };
+      if (!isOptionViewRef.current || exitDragRef.current) return;
+      const long = (pos.side || 'BUY') !== 'SELL';
+      for (const l of slLinesRef.current) {
+        const want = l.kind === 'upper' ? (long ? d.tp : d.sl) : (long ? d.sl : d.tp);
+        if (Number.isFinite(want) && Math.abs(l.price - want) > 0.004) {
+          l.price = want;
+          const t = exitTitle(l.label, want);
+          l.title = t;
+          try { l.instance.applyOptions({ price: want, title: t }); } catch (e) {}
+        }
+      }
+    };
+    window.addEventListener('terminal:rule-changed', onRuleChanged as any);
     const ruleSyncIv = setInterval(syncRuleFromServer, 5000);
     const tick = () => { ensure(); try { ensureSpotMapLines(); } catch (e) {} };
     try { ensureSpotMapLines(); } catch (e) {}
@@ -5401,6 +5438,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     return () => {
       clearInterval(iv);
       clearInterval(ruleSyncIv);
+      window.removeEventListener('terminal:rule-changed', onRuleChanged as any);
       slEnsureRef.current = null;
       const s = mainSeriesRef.current;
       slLinesRef.current.forEach(l => { try { s && s.removePriceLine(l.instance); } catch {} });
