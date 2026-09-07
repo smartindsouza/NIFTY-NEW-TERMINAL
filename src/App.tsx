@@ -178,7 +178,13 @@ export default function App() {
         {/* On the chart route the page fills the viewport exactly (see the chart's
             root), so the shell's desktop bottom padding would only ever be blank
             space under it. Other routes keep their padding. */}
-        <main className={`flex-1 overflow-y-auto w-full relative bg-transparent pl-0 ${isFocusedChart ? '' : 'md:pl-[80px]'} pt-[max(env(safe-area-inset-top),12px)] md:pt-8 ${onChart ? 'md:pb-0' : 'md:pb-12'} pr-0 md:pr-6 lg:pr-8 ${onChart ? 'max-md:overflow-hidden max-md:overscroll-none pb-24 max-md:pb-0' : 'pb-24'}`}>
+        {/* On the chart route this is a fixed-height flex COLUMN: the positions
+            banner takes its natural height and the chart page fills exactly what
+            is left. Previously the chart page sized itself to the whole viewport
+            while sitting BELOW the banner, so the banner's height overflowed the
+            screen — that is the vertical scroll. md:pt-4 (was pt-8) buys the
+            banner most of its space back. */}
+        <main className={`flex-1 w-full relative bg-transparent pl-0 ${isFocusedChart ? '' : 'md:pl-[80px]'} pt-[max(env(safe-area-inset-top),12px)] ${onChart ? 'md:pt-4 md:pb-0 md:h-screen md:flex md:flex-col md:overflow-hidden' : 'md:pt-8 md:pb-12 overflow-y-auto'} pr-0 md:pr-6 lg:pr-8 ${onChart ? 'max-md:overflow-hidden max-md:overscroll-none pb-24 max-md:pb-0' : 'pb-24'}`}>
           <ActivePositions />
           <Suspense fallback={<TerminalLoader />}>
             <Switch>

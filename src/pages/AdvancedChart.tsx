@@ -9288,7 +9288,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // overflow hidden so nothing can push the page into a scroll. The chart grows
   // to fill whatever the toolbar, tabs and strips leave. Mobile classes unchanged.
   return (
-    <div className="px-1 pt-0 pb-0 md:px-8 md:py-0 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto flex flex-col h-[calc(100dvh-124px-env(safe-area-inset-bottom))] md:h-[calc(100dvh-2rem)] md:min-h-0 overflow-hidden relative">
+    <div className="px-1 pt-0 pb-0 md:px-8 md:py-0 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto flex flex-col h-[calc(100dvh-124px-env(safe-area-inset-bottom))] md:h-auto md:flex-1 md:min-h-0 overflow-hidden relative">
       
       {showDiagnostic && (
         <div className="fixed bottom-6 right-6 z-50 bg-card/95 backdrop-blur-md border border-0 p-4 rounded-lg text-xs font-mono w-[340px] max-h-[80vh] overflow-y-auto">
@@ -10481,7 +10481,15 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
           {/* One-tap EXIT — its own full-width bar BELOW the chart, so it never
               covers a single candle and is an easy thumb target on mobile. */}
-          {tradeTabInstr && slActivePos && !slActivePos.testMode && (
+          {/* EXIT sits in a fixed-height slot that BOTH panes render whenever a
+              position is open. Previously it appeared only where tradeTabInstr was
+              set — the option side — so that pane carried an extra row the spot
+              pane did not, and the two charts came out different heights. A slot of
+              the same height on both sides makes the charts match by construction,
+              and puts the button on one line under both, which is what was asked
+              for. tradeTabInstr is dropped from the condition: the position, not
+              which chart you happen to be looking at, is what makes an exit valid. */}
+          {slActivePos && !slActivePos.testMode && (
             <button
               disabled={exitBusy}
               onClick={async () => {
@@ -10769,7 +10777,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           rendered but unreachable. Every chip is shrink-0 and nowrap so the row
           scrolls rather than squeezing them to unreadable widths. */}
       {isOptionView && optionReality && (
-        <div className="flex flex-nowrap items-center gap-1.5 px-1 pb-1 shrink-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="h-7 flex flex-nowrap items-center gap-1.5 px-1 pb-1 shrink-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <span className={`shrink-0 whitespace-nowrap text-[10px] font-mono font-bold px-2 py-1 rounded ${optionReality.inTheMoney ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'}`}>
             {optionReality.inTheMoney
               ? `IN THE MONEY by ${Math.round(optionReality.intrinsic)}`
@@ -10794,6 +10802,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           )}
         </div>
       )}
+
+      {/* The strip above is the option pane's only extra row. In split view its
+          height is reserved on the other side too, so both charts end up the same
+          height instead of the option side losing a row's worth. */}
+      {isPane && !(isOptionView && optionReality) && <div className="h-7 shrink-0" />}
 
       {/* Armed triggers — always visible while any exist. A pending instruction to
           buy or sell that the user cannot SEE is the thing most likely to surprise

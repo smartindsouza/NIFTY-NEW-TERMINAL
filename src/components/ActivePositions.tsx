@@ -543,7 +543,7 @@ export function ActivePositions() {
     // because a failed position check must always be visible somewhere.
     if (!pollError) return null;
     return (
-      <div className="w-full mb-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 flex items-center justify-between gap-3">
+      <div className="w-full mb-1.5 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 flex items-center justify-between gap-3">
         <span className="text-xs text-amber-400">
           Position check failed — a trade taken in the Kite app may not be shown here. {pollError}
         </span>
@@ -559,7 +559,7 @@ export function ActivePositions() {
   }
 
   return (
-    <div className="w-full mb-6 border border-emerald-500/20 bg-emerald-950/10 rounded-xl overflow-hidden backdrop-blur-sm transition-all duration-300 animate-in slide-in-from-top-4">
+    <div className="w-full mb-1.5 border border-emerald-500/20 bg-emerald-950/10 rounded-xl overflow-hidden backdrop-blur-sm transition-all duration-300 animate-in slide-in-from-top-4">
       {/* Ribbon Header */}
       <div className="px-4 py-2 border-b border-emerald-500/15 bg-emerald-500/5 flex items-center justify-between">
         <div className="flex items-center gap-2">
