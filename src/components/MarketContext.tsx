@@ -215,8 +215,15 @@ export default function MarketContext() {
             onToggle={() => toggle("us")}
             right={usAsOf ? <span className="text-slate-600 normal-case font-mono">{freshnessLabel(usAsOf)}</span> : null}
           />
+          {/* "Loading…" was shown for an empty array forever, so a failed fetch and
+              a slow one looked identical and the panel simply read nothing. If the
+              server reported an error, say so instead. */}
           {!collapsed.us && us.length === 0 && (
-            <div className="px-3 py-3 text-xs text-slate-500">Loading…</div>
+            <div className="px-3 py-3 text-xs text-slate-500">
+              {data && (data as any).success === false
+                ? <span className="text-amber-400/80 font-mono text-[10px]">server error: {String((data as any).error || 'unknown').slice(0, 90)}</span>
+                : data ? 'no rows returned' : 'Loading…'}
+            </div>
           )}
           {!collapsed.us && us.map((m) => (
             <Row key={m.key} m={m} />

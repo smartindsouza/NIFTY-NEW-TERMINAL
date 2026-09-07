@@ -2061,6 +2061,8 @@ setInterval(() => {
       // the CASH indices are frozen at last night's US close. Both are listed so
       // the two can never be mistaken for each other (they legitimately disagree
       // overnight: the index shows yesterday's move, futures show right now).
+      // Isolated below: whatever happened above (Kite session, an index lookup)
+      // must not prevent the US, UK and global sections from being attempted.
       const usFailures: string[] = [];
       const US = [
         { key: 'SPX', label: 'S&P 500 Fut', sym: 'ES=F' },
@@ -2206,7 +2208,22 @@ setInterval(() => {
       marketContextCache = { at: Date.now(), data: payload };
       res.json(payload);
     } catch (e: any) {
-      res.json({ success: false, error: e?.message || String(e), indian: [], us: [], uk: [], global: [] });
+      // A throw anywhere in this handler used to return EMPTY arrays for every
+      // section — and the UI shows "Loading…" for an empty array, so the whole
+      // panel just sat there reading nothing, forever, with no clue why. One
+      // failing section must not blank the others, and an empty section must
+      // never be silent. Rows are rebuilt as unavailable, carrying the error.
+      const msg = e?.message || String(e);
+      console.error('[market-context] handler failed:', msg);
+      const dead = (rows: Array<[string, string]>) =>
+        rows.map(([key, label]) => ({ key, label, available: false, reason: `server_error: ${msg}`.slice(0, 80) }));
+      res.json({
+        success: false, error: msg,
+        indian: dead([['NIFTY', 'NIFTY 50'], ['BANKNIFTY', 'BANK NIFTY'], ['SENSEX', 'SENSEX']]),
+        us: dead([['SPX', 'S&P 500 Fut'], ['NDX', 'Nasdaq Fut'], ['DJI', 'Dow Fut'], ['DJI_IDX', 'Dow Jones (index)']]),
+        uk: dead([['FTSE', 'FTSE 100'], ['FTMC', 'FTSE 250']]),
+        global: [],
+      });
     }
   });
 
