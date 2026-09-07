@@ -1015,6 +1015,21 @@ const isMarketOpen = (unixSeconds: number): boolean => {
   return day !== 0 && day !== 6 && minutes >= 9 * 60 + 15 && minutes < 15 * 60 + 40;
 };
 
+// When DATA is worth fetching, which is a wider window than when we TRADE.
+// NSE runs its pre-open session from 09:00, and the index prints through it —
+// Martin watches that. Gating the polls on isMarketOpen (09:15) meant the
+// pre-open no longer updated live, a regression from the 30 Aug fix: that fix
+// was right to stop the polls running overnight, but it took the pre-open with
+// it. The tail to 15:45 covers the last CAS prints settling after the 15:40
+// close. isMarketOpen is left alone and still governs alerts and every
+// order-related path — this window must never be used to decide those.
+const isDataWindow = (unixSeconds: number): boolean => {
+  const ist = new Date(unixSeconds * 1000 + 5.5 * 60 * 60 * 1000);
+  const day = ist.getUTCDay();
+  const minutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  return day !== 0 && day !== 6 && minutes >= 9 * 60 && minutes < 15 * 60 + 45;
+};
+
 // Live Indian-market clock shown beside the chart title: HH:MM:SS in 12-hour
 // format. Renders ONLY during the NSE session (09:15 -> 15:40 IST, Mon-Fri) and
 // disappears outside it. Self-contained so the per-second state change
@@ -6402,7 +6417,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     // behind the /api/ta frequency toast. The mount fetch still runs when closed,
     // so the master signal keeps its data; the inject poll below already carries
     // this same gate, and a morning focus/remount restarts the interval.
-    refetchInterval: () => isMarketOpen(Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current) ? 15000 : false,
+    refetchInterval: () => isDataWindow(Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current) ? 15000 : false,
     staleTime: 8000,
     enabled: Boolean(timeframe && instrumentToken)
   });
@@ -6937,7 +6952,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     const interval = setInterval(async () => {
       // Skip background polling if market is closed
       const now = Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current;
-      if (!isMarketOpen(now)) {
+      if (!isDataWindow(now)) {
         return;
       }
 
