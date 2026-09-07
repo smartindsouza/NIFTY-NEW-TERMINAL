@@ -4653,6 +4653,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       const pos = slActivePosRef.current;
       const rule = premRuleRef.current;
       if (!ml || !pos || !rule || rule.symbol !== pos.symbol) return;
+      // Pin the dropped level into the map straight away. The 1s redraw runs long
+      // before the server round trip finishes, and it draws from the map — so
+      // without this it repainted the line at the OLD mapped level, which is the
+      // snap-back seen on the spot chart. The next successful solve replaces it.
+      if (spotMapRef.current) {
+        if (d.kind === 'sl') spotMapRef.current.slSpot = ml.price;
+        else spotMapRef.current.tpSpot = ml.price;
+      }
       (async () => {
         try {
           const r = await fetch(`/api/premium-spot-map?tradingsymbol=${encodeURIComponent(pos.symbol)}&spot=${ml.price.toFixed(2)}`);
@@ -4718,6 +4726,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // -10% while the server was holding whatever had been dragged. This ref is the
   // last known armed pair and is what the lines are seeded from.
   const premRuleRef = useRef<{ symbol: string; sl: number; tp: number; trail?: any } | null>(null);
+  // >0 while an arm request is in flight. Guards every periodic reader.
+  const rulePushPendingRef = useRef(0);
   useEffect(() => { slActivePosRef.current = slActivePos; }, [slActivePos]);
 
   // ===== Premium SL/TP mirrored onto the SPOT chart =====
@@ -4751,6 +4761,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // Ask the server to translate the ARMED premium levels into spot levels.
   const refreshSpotMap = async () => {
     if (spotMapBusyRef.current) return;
+    // Same reason as the option-chart sync: a re-solve mid-push would map the
+    // OLD premium back onto the spot chart and pull the dragged line backwards.
+    if (rulePushPendingRef.current > 0 || exitDragRef.current) return;
     const pos = slActivePosRef.current;
     if (!pos) { spotMapRef.current = null; return; }
     if (!onUnderlyingSpotChart()) return;                   // don't poll from charts that won't draw it
@@ -4896,6 +4909,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const pushPremiumRule = async (slPx: number, tpPx: number) => {
     const pos = slActivePosRef.current;
     if (!pos) return;
+    // A push is in flight from HERE until the server confirms. While it is, the
+    // periodic re-reads must not write the old server values back over the level
+    // just dragged — that is the snap-back: the line returned to where the server
+    // still thought it was, then jumped forward when the round trip landed.
+    rulePushPendingRef.current += 1;
     // Tell every chart at once. In split view the panes are separate component
     // instances that share nothing but the server, so a drag on the SPOT chart
     // only reached the option chart when its 5s poll next ran — and not at all if
@@ -4920,6 +4938,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       setPremSync(d && d.success ? 'ACTIVE' : 'ERROR');
       if (d && !d.success && d.error) console.warn('[premium-exit] not armed:', d.error);
     } catch { setPremSync('ERROR'); }
+    finally { rulePushPendingRef.current = Math.max(0, rulePushPendingRef.current - 1); }
   };
 
 
@@ -5424,7 +5443,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     // lines to wherever the server has them, unless a finger is on one.
     let ruleSyncBusy = false;
     const syncRuleFromServer = async () => {
-      if (ruleSyncBusy || exitDragRef.current) return;
+      // Skip while a level is being dragged OR while an arm is in flight: the
+      // server has not seen the new level yet, and writing its stale answer onto
+      // the line is what made a dragged line jump back before settling.
+      if (ruleSyncBusy || exitDragRef.current || rulePushPendingRef.current > 0) return;
       const pos = slActivePosRef.current;
       if (!pos || !isOptionViewRef.current) return;
       ruleSyncBusy = true;
@@ -5485,6 +5507,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       slLinesRef.current.forEach(l => { try { s && s.removePriceLine(l.instance); } catch {} });
       slLinesRef.current = [];
       slSeriesRef.current = null;
+      // The MIRRORED spot lines are drawn by the same 1s tick that this cleanup
+      // stops, so when the position ended nothing was left running to take them
+      // off the chart — they stayed drawn for a trade that no longer existed.
+      // Removed here, with the map cleared so a later tick cannot redraw them.
+      spotMapLinesRef.current.forEach(l => { try { s && s.removePriceLine(l.instance); } catch {} });
+      spotMapLinesRef.current = [];
+      spotMapSeriesRef.current = null;
+      spotMapRef.current = null;
     };
   }, [slActivePos]);
 
