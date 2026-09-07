@@ -20,6 +20,9 @@ const Dashboard = lazy(() => import('./pages/Dashboard').then(module => ({ defau
 const OptionChain = lazy(() => import('./pages/OptionChain').then(module => ({ default: module.OptionChain })));
 const KiteLogin = lazy(() => import('./pages/KiteLogin').then(module => ({ default: module.KiteLogin })));
 const FiiDii = lazy(() => import('./pages/FiiDii').then(module => ({ default: module.FiiDii })));
+// Separate from /fii-dii, which is the F&O participant OI page. This one is the
+// CASH-market rupee flow — different dataset, different question.
+const InstitutionalFlow = lazy(() => import('./pages/InstitutionalFlow').then(module => ({ default: module.InstitutionalFlow })));
 const News = lazy(() => import('./pages/News').then(module => ({ default: module.News })));
 // The chart route now mounts the workspace, which decides between the desktop
 // split (spot left / options right) and — below md — the original single chart,
@@ -192,6 +195,7 @@ export default function App() {
               <Route path="/option-chain" component={OptionChain} />
               <Route path="/kite-login" component={KiteLogin} />
               <Route path="/fii-dii" component={FiiDii} />
+              <Route path="/institutional-flow" component={InstitutionalFlow} />
               <Route path="/news" component={News} />
               <Route path="/advanced-chart" component={AdvancedChart} />
               <Route path="/backtesting" component={Backtesting} />

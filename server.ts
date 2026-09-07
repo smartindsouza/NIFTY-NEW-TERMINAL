@@ -16,6 +16,7 @@ import { runRsiBacktest } from './server/rsi_backtest';
 import { getLiveSignal, runOptionConfirmBacktest, getAlertSignal } from './server/option_rsi';
 import { ivAndDelta, bsThetaPerDay, impliedVol, bsPrice, bsDelta } from './server/options_math';
 import { createTrailState, onPremiumTick, onSpotClose5m, onSpotClose1m, type TrailState, type TrailAction } from './server/trail_engine';
+import { fetchLatestFlow, explain as explainFlow, type FlowDay } from './server/institutional_flow';
 import { getGammaBlast } from './server/gamma_blast';
 import { getPremiumPulse, getPremiumPulseBias } from './server/premium_pulse';
 import { getFiiData, getCashFiiDii } from './server/fii_service';
@@ -79,6 +80,54 @@ try { db.exec(`ALTER TABLE premium_exit_rules ADD COLUMN instrument_token INTEGE
 // Trailing-exit state (JSON) for rules armed with Martin's pullback method. NULL
 // means the rule is a plain SL/TP and is evaluated exactly as before.
 try { db.exec(`ALTER TABLE premium_exit_rules ADD COLUMN trail_state TEXT`); } catch (e) { /* column exists */ }
+
+// Daily FII/DII cash flows. NSE serves only the latest day, so history exists
+// only because we keep it — and a day already captured then survives NSE
+// blocking or changing the feed later. Figures are provisional and can be
+// revised, so a re-fetch UPDATES the row rather than being ignored.
+db.exec(`CREATE TABLE IF NOT EXISTS institutional_flow (
+  date TEXT PRIMARY KEY,
+  display_date TEXT,
+  fii_buy REAL, fii_sell REAL, fii_net REAL,
+  dii_buy REAL, dii_sell REAL, dii_net REAL,
+  combined_buy REAL, combined_sell REAL, combined_net REAL,
+  captured_at INTEGER, updated_at INTEGER
+)`);
+
+function saveFlowDay(d: FlowDay): void {
+  try {
+    db.prepare(`INSERT INTO institutional_flow
+      (date, display_date, fii_buy, fii_sell, fii_net, dii_buy, dii_sell, dii_net, combined_buy, combined_sell, combined_net, captured_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(date) DO UPDATE SET display_date=excluded.display_date,
+        fii_buy=excluded.fii_buy, fii_sell=excluded.fii_sell, fii_net=excluded.fii_net,
+        dii_buy=excluded.dii_buy, dii_sell=excluded.dii_sell, dii_net=excluded.dii_net,
+        combined_buy=excluded.combined_buy, combined_sell=excluded.combined_sell,
+        combined_net=excluded.combined_net, updated_at=excluded.updated_at`)
+      .run(d.date, d.displayDate, d.fii.buy, d.fii.sell, d.fii.net, d.dii.buy, d.dii.sell, d.dii.net,
+           d.combinedBuy, d.combinedSell, d.combinedNet, Date.now(), Date.now());
+  } catch (e) { console.error('[flow] save failed', e); }
+}
+
+const rowToFlowDay = (r: any): FlowDay => ({
+  date: r.date, displayDate: r.display_date,
+  fii: { buy: r.fii_buy, sell: r.fii_sell, net: r.fii_net },
+  dii: { buy: r.dii_buy, sell: r.dii_sell, net: r.dii_net },
+  combinedBuy: r.combined_buy, combinedSell: r.combined_sell, combinedNet: r.combined_net,
+});
+
+let lastFlowFetch = 0;
+let lastFlowReason: string | null = null;
+async function refreshFlow(force = false): Promise<void> {
+  // NSE publishes once, after the close. Hourly is ample; a forced refresh is
+  // allowed so opening the screen can pull a day that is not captured yet.
+  if (!force && Date.now() - lastFlowFetch < 60 * 60 * 1000) return;
+  lastFlowFetch = Date.now();
+  const { day, reason } = await fetchLatestFlow();
+  lastFlowReason = day ? null : (reason || 'unknown');
+  if (day) saveFlowDay(day);
+  else console.warn('[flow] fetch failed:', lastFlowReason);
+}
 
 // Live TrailState per armed symbol. The DB copy is the durable one; this is the
 // one the tick path mutates. Written back on every ACTION (a trail, a booking,
@@ -2003,6 +2052,32 @@ setInterval(() => {
     } catch (e) { /* fall through to the caller's own fallback */ }
     return null;
   }
+  // Institutional flow — the daily FII/DII cash-market report, plus history.
+  app.get('/api/institutional-flow', async (req, res) => {
+    try {
+      const days = Math.min(120, Math.max(1, parseInt(String(req.query.days || '30'), 10) || 30));
+      // Pull first when the store is empty or the caller asks, so the screen is
+      // never blank just because the hourly refresh has not run yet.
+      const have: any = db.prepare('SELECT COUNT(*) AS n FROM institutional_flow').get();
+      await refreshFlow(String(req.query.force || '') === '1' || !have?.n);
+      const rows: any[] = db.prepare('SELECT * FROM institutional_flow ORDER BY date DESC LIMIT ?').all(days) as any[];
+      const history = rows.map(rowToFlowDay);
+      const latest = history[0] || null;
+      res.json({
+        success: true,
+        latest,
+        explanation: latest ? explainFlow(latest) : null,
+        history,
+        // Present whenever the last fetch failed. History still renders, so a
+        // blocked feed degrades to "no NEW day" rather than an empty screen.
+        reason: lastFlowReason,
+        source: 'NSE — provisional, ₹ crore',
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e?.message || String(e), latest: null, history: [] });
+    }
+  });
+
   app.get('/api/market-context', async (_req, res) => {
     try {
       if (marketContextCache && Date.now() - marketContextCache.at < 5000) {

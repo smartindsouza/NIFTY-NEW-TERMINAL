@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'wouter';
-import { Home, List, TrendingUp, Newspaper, Activity, LogIn, CheckCircle2, BarChart2, PlayCircle, FileText, Sparkles, LineChart, Settings2, Bell, BellRing, Menu, BookOpen, Gauge, FlaskConical, Radio, Layers, Zap, Wind, ArrowUpDown, RotateCcw, GripVertical, Check, Cpu, Compass } from 'lucide-react';
+import { Home, List, TrendingUp, Newspaper, Activity, LogIn, CheckCircle2, BarChart2, PlayCircle, FileText, Sparkles, LineChart, Settings2, Bell, BellRing, Menu, BookOpen, Gauge, FlaskConical, Radio, Layers, Zap, Wind, ArrowUpDown, RotateCcw, GripVertical, Check, Cpu, Compass, Landmark } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -82,6 +82,7 @@ export function Header() {
     { href: '/advanced-chart', label: 'Advanced Chart', icon: LineChart },
     { href: '/option-chain', label: 'Option Chain', icon: List },
     { href: '/fii-dii', label: 'FII / DII', icon: BarChart2 },
+    { href: '/institutional-flow', label: 'Institutional Flow', icon: Landmark },
     { href: '/news', label: 'News & Alerts', icon: Newspaper },
     { href: '/backtesting', label: 'Backtesting', icon: PlayCircle },
     { href: '/reports', label: 'Reports', icon: FileText },
