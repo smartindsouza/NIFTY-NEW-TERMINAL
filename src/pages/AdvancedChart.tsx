@@ -4144,6 +4144,20 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     try { localStorage.setItem('levInfoOpen', String(levInfoOpen)); } catch (e) {}
   }, [levInfoOpen]);
 
+  // Mobile only: the index tabs and the opened option charts collapse into two
+  // dropdowns. Four index tabs plus every option chart opened in a session runs
+  // off the side of a phone, and a horizontal scroller hides what is in it —
+  // you cannot see a chart you have open without swiping to find it. Desktop
+  // has the width for tabs and keeps them.
+  const [indexMenuOpen, setIndexMenuOpen] = useState(false);
+  const [optionMenuOpen, setOptionMenuOpen] = useState(false);
+  useEffect(() => {
+    if (!indexMenuOpen && !optionMenuOpen) return;
+    const close = () => { setIndexMenuOpen(false); setOptionMenuOpen(false); };
+    window.addEventListener('pointerdown', close);
+    return () => window.removeEventListener('pointerdown', close);
+  }, [indexMenuOpen, optionMenuOpen]);
+
   const [rrMenuOpen, setRrMenuOpen] = useState(false);
   const rrMenuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -9733,7 +9747,90 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             OUTSIDE that scroller, because dropdowns opened from inside it would
             be clipped. */}
         <div className={`items-center gap-2 px-0 pb-0 shrink-0 border-b border-border/60 bg-background/40 ${isFocusedChart ? 'hidden' : 'flex'}`}>
-          <div className="flex items-center gap-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden min-w-0">
+          {/* MOBILE: two dropdowns in place of the tab strip. */}
+          {!isOptionPane && (
+          <div className="md:hidden flex items-center gap-1.5 px-1.5 py-1 min-w-0" onPointerDown={(e) => e.stopPropagation()}>
+            <div className="relative">
+              <button
+                onClick={() => { setOptionMenuOpen(false); setIndexMenuOpen(o => !o); }}
+                className={`flex items-center gap-1 px-2.5 h-8 rounded-md text-xs font-mono font-bold border transition-colors ${
+                  !selectedInstrument ? 'border-primary/50 bg-primary/15 text-primary' : 'border-border/60 bg-card text-muted-foreground'}`}
+              >
+                <span className="truncate max-w-[110px]">{indexLabel}</span>
+                <ChevronDown size={13} className={indexMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
+              </button>
+              {indexMenuOpen && (
+                <div className="absolute left-0 top-full mt-1 z-[60] min-w-[150px] bg-card border border-white/10 rounded-md shadow-2xl overflow-hidden">
+                  {[{ k: 'NIFTY', label: 'NIFTY 50' }, { k: 'GIFT', label: 'GIFT NIFTY' },
+                    { k: 'BANKNIFTY', label: 'BANK NIFTY' }, { k: 'SENSEX', label: 'SENSEX' }].map((o) => (
+                    <button key={o.k}
+                      onClick={() => { setUnderlying(o.k as any); setSelectedInstrument(null); setIndexMenuOpen(false); }}
+                      className={`w-full text-left px-3 py-2 text-xs font-mono transition-colors ${
+                        !selectedInstrument && underlying === o.k ? 'bg-primary/15 text-primary font-bold' : 'text-foreground/80 hover:bg-muted'}`}>
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Option charts. Hidden entirely when none are open rather than
+                showing an empty menu. */}
+            {openCharts.length > 0 && (
+              <div className="relative">
+                <button
+                  onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(o => !o); }}
+                  className={`flex items-center gap-1 px-2.5 h-8 rounded-md text-xs font-mono font-bold border transition-colors ${
+                    selectedInstrument ? 'border-primary/50 bg-primary/15 text-primary' : 'border-border/60 bg-card text-muted-foreground'}`}
+                >
+                  <span className="truncate max-w-[130px]">
+                    {selectedInstrument
+                      ? prettyOptionName(selectedInstrument.tradingsymbol,
+                          contractExpiry?.symbol === selectedInstrument.tradingsymbol ? contractExpiry.expiry : null)
+                      : `Options (${openCharts.length})`}
+                  </span>
+                  <ChevronDown size={13} className={optionMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                </button>
+                {optionMenuOpen && (
+                  <div className="absolute left-0 top-full mt-1 z-[60] min-w-[190px] max-h-[50vh] overflow-y-auto bg-card border border-white/10 rounded-md shadow-2xl">
+                    {openCharts.map((c) => {
+                      const active = selectedInstrument?.tradingsymbol === c.tradingsymbol;
+                      return (
+                        <div key={c.tradingsymbol}
+                          className={`flex items-center justify-between gap-2 px-3 py-2 transition-colors ${active ? 'bg-primary/15' : 'hover:bg-muted'}`}>
+                          <button
+                            onClick={() => { setSelectedInstrument(c); setOptionMenuOpen(false); }}
+                            className={`text-xs font-mono font-bold text-left truncate ${active ? 'text-primary' : 'text-foreground/80'}`}>
+                            {prettyOptionName(c.tradingsymbol,
+                              contractExpiry?.symbol === c.tradingsymbol ? contractExpiry.expiry : null)}
+                          </button>
+                          {/* Close lives in the row, so a chart can be dropped from
+                              the list without first switching to it. */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              dismissedChart.add(c.tradingsymbol);
+                              setOpenCharts(prev => {
+                                const next = prev.filter(x => x.tradingsymbol !== c.tradingsymbol);
+                                if (active) setSelectedInstrument(next.length ? next[next.length - 1] : null);
+                                if (!next.length) setOptionMenuOpen(false);
+                                return next;
+                              });
+                            }}
+                            className="shrink-0 text-muted-foreground hover:text-rose-400 transition-colors">
+                            <X size={12} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          )}
+
+          <div className="hidden md:flex items-center gap-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden min-w-0">
           {!isOptionPane && (<button onClick={() => { setUnderlying('NIFTY'); setSelectedInstrument(null); }}
             className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${!selectedInstrument && underlying === 'NIFTY' ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
             NIFTY 50
