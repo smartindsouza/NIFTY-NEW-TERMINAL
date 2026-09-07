@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronDown, TrendingUp, TrendingDown, Globe, X } from "lu
 
 interface Market {
   key: string; label: string; price?: number; change?: number; changePct?: number;
-  asOf?: number; available: boolean; reason?: string;
+  asOf?: number; available: boolean; reason?: string; prevSrc?: string; prev?: number;
   // Per-market session status (used by Global & Commodities, whose rows don't
   // share one schedule). Undefined => the row shows no pill.
   open?: boolean;
@@ -57,6 +57,15 @@ function Row({ m }: { m: Market }) {
         <div className="text-sm text-white flex items-center gap-1.5 min-w-0">
           <span className="truncate">{m.label}</span>
           <MiniStatus open={m.open} />
+          {m.prevSrc === 'price' && (
+            // Flat by ARITHMETIC, not by market: no prior close was obtainable,
+            // so the change is the price minus itself. Better to say so than to
+            // render a convincing 0.00% that looks like an unchanged market.
+            <span className="text-[9px] font-mono text-amber-500/70 shrink-0"
+                  title="No previous close available from the data source, so the change cannot be computed">
+              no ref
+            </span>
+          )}
         </div>
         <div className="text-xs font-mono text-slate-300 tabular-nums">
           {m.price?.toLocaleString(undefined, { maximumFractionDigits: 2 })}

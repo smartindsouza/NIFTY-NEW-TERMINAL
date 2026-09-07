@@ -1982,12 +1982,21 @@ setInterval(() => {
       );
       const res0 = r.data?.chart?.result?.[0];
       const closes: any[] = (res0?.indicators?.quote?.[0]?.close || []).filter((x: any) => typeof x === 'number');
-      // Last bar is today (in progress); the one before it is the prior close.
-      const prev = closes.length >= 2 ? closes[closes.length - 2] : null;
+      // Three ways out, in order of correctness. The DAILY response often carries
+      // chartPreviousClose even when the intraday one does not; failing that the
+      // bar before the in-progress one; failing that the oldest bar returned,
+      // which is at least a real prior close rather than today's own price.
+      const candidates: Array<number | null | undefined> = [
+        res0?.meta?.chartPreviousClose,
+        closes.length >= 2 ? closes[closes.length - 2] : null,
+        closes.length >= 1 ? closes[0] : null,
+      ];
+      const prev = candidates.find((v) => typeof v === 'number' && v > 0) as number | undefined;
       if (typeof prev === 'number' && prev > 0) {
         prevCloseCache.set(sym, { at: Date.now(), value: prev });
         return prev;
       }
+      console.warn('[market-context] no prior close for', sym, '- daily bars returned', closes.length);
     } catch (e) { /* fall through to the caller's own fallback */ }
     return null;
   }
@@ -2107,10 +2116,13 @@ setInterval(() => {
           const meta = result?.meta;
           if (meta && typeof meta.regularMarketPrice === 'number') {
             let prev = meta.chartPreviousClose ?? meta.previousClose ?? null;
-            // No previous close in meta (futures): take it from daily bars rather
-            // than falling back to the current price, which reports a flat 0.00%.
-            if (typeof prev !== 'number' || !(prev > 0)) prev = await fetchPrevClose(u.sym);
-            if (typeof prev !== 'number' || !(prev > 0)) prev = meta.regularMarketPrice;
+            // prevSrc records WHICH reference produced the change, so a flat
+            // reading can be diagnosed from the payload instead of guessed at:
+            // 'price' means no prior close was obtainable and the row is flat by
+            // arithmetic, not because the market is unchanged.
+            let prevSrc = (typeof prev === 'number' && prev > 0) ? 'meta' : '';
+            if (!prevSrc) { prev = await fetchPrevClose(u.sym); prevSrc = (typeof prev === 'number' && prev > 0) ? 'daily' : ''; }
+            if (!prevSrc) { prev = meta.regularMarketPrice; prevSrc = 'price'; }
             const chg = meta.regularMarketPrice - prev;
             const chgPct = prev ? (chg / prev) * 100 : 0;
             // sparkline: intraday closes (compact)
@@ -2119,7 +2131,7 @@ setInterval(() => {
             const sparkTrim = spark.length > 40 ? spark.filter((_, idx) => idx % Math.ceil(spark.length / 40) === 0) : spark;
             us.push({
               key: u.key, label: u.label, price: +meta.regularMarketPrice.toFixed(2),
-              change: +chg.toFixed(2), changePct: +chgPct.toFixed(2),
+              change: +chg.toFixed(2), changePct: +chgPct.toFixed(2), prevSrc, prev: +Number(prev).toFixed(2),
               spark: sparkTrim.map((v) => +v.toFixed(2)),
               asOf: meta.regularMarketTime ? meta.regularMarketTime * 1000 : Date.now(),
               available: true, open: usOpenNow,
@@ -2164,10 +2176,13 @@ setInterval(() => {
           const meta = result?.meta;
           if (meta && typeof meta.regularMarketPrice === 'number') {
             let prev = meta.chartPreviousClose ?? meta.previousClose ?? null;
-            // No previous close in meta (futures): take it from daily bars rather
-            // than falling back to the current price, which reports a flat 0.00%.
-            if (typeof prev !== 'number' || !(prev > 0)) prev = await fetchPrevClose(u.sym);
-            if (typeof prev !== 'number' || !(prev > 0)) prev = meta.regularMarketPrice;
+            // prevSrc records WHICH reference produced the change, so a flat
+            // reading can be diagnosed from the payload instead of guessed at:
+            // 'price' means no prior close was obtainable and the row is flat by
+            // arithmetic, not because the market is unchanged.
+            let prevSrc = (typeof prev === 'number' && prev > 0) ? 'meta' : '';
+            if (!prevSrc) { prev = await fetchPrevClose(u.sym); prevSrc = (typeof prev === 'number' && prev > 0) ? 'daily' : ''; }
+            if (!prevSrc) { prev = meta.regularMarketPrice; prevSrc = 'price'; }
             const chg = meta.regularMarketPrice - prev;
             const chgPct = prev ? (chg / prev) * 100 : 0;
             uk.push({
@@ -2217,10 +2232,13 @@ setInterval(() => {
           const meta = result?.meta;
           if (meta && typeof meta.regularMarketPrice === 'number') {
             let prev = meta.chartPreviousClose ?? meta.previousClose ?? null;
-            // No previous close in meta (futures): take it from daily bars rather
-            // than falling back to the current price, which reports a flat 0.00%.
-            if (typeof prev !== 'number' || !(prev > 0)) prev = await fetchPrevClose(g.sym);
-            if (typeof prev !== 'number' || !(prev > 0)) prev = meta.regularMarketPrice;
+            // prevSrc records WHICH reference produced the change, so a flat
+            // reading can be diagnosed from the payload instead of guessed at:
+            // 'price' means no prior close was obtainable and the row is flat by
+            // arithmetic, not because the market is unchanged.
+            let prevSrc = (typeof prev === 'number' && prev > 0) ? 'meta' : '';
+            if (!prevSrc) { prev = await fetchPrevClose(g.sym); prevSrc = (typeof prev === 'number' && prev > 0) ? 'daily' : ''; }
+            if (!prevSrc) { prev = meta.regularMarketPrice; prevSrc = 'price'; }
             const chg = meta.regularMarketPrice - prev;
             const chgPct = prev ? (chg / prev) * 100 : 0;
             globalMkts.push({
