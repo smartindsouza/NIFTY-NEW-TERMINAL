@@ -4203,7 +4203,28 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // whole point of the split: the left half stays on the index no matter what is
   // traded or searched. Outside the split (mobile, or the plain component) it is
   // exactly the old setSelectedInstrument call.
+  // Option charts the user has explicitly CLOSED, remembered across reloads.
+  // autoOpenedForRef guards the auto-open to once per position, but it lives in
+  // memory only — so a refresh reset it and the traded option's chart reopened
+  // itself, and no amount of closing the tab could stick. Session-scoped, so a
+  // fresh app start behaves normally.
+  const dismissedChart = {
+    read(): string[] {
+      try { const raw = sessionStorage.getItem('dismissedOptionCharts'); const a = raw ? JSON.parse(raw) : []; return Array.isArray(a) ? a : []; }
+      catch (e) { return []; }
+    },
+    has(sym: string) { return this.read().includes(sym); },
+    add(sym: string) {
+      try { const a = this.read(); if (!a.includes(sym)) { a.push(sym); sessionStorage.setItem('dismissedOptionCharts', JSON.stringify(a.slice(-20))); } } catch (e) {}
+    },
+    remove(sym: string) {
+      try { sessionStorage.setItem('dismissedOptionCharts', JSON.stringify(this.read().filter(x => x !== sym))); } catch (e) {}
+    },
+  };
+
   const openOptionChart = (instr: any) => {
+    // Opening it again is an explicit choice; it is no longer dismissed.
+    try { if (instr?.tradingsymbol) dismissedChart.remove(instr.tradingsymbol); } catch (e) {}
     if (isSpotPane) {
       // HAND-OFF, NOT A BROADCAST. The option pane is only MOUNTED in response to
       // this same event, so when the split is opening it does not exist yet and
@@ -5140,10 +5161,16 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     if (!sym) {
       setTradeTabInstr(null); tradeInstrumentRef.current = null; slEntryRef.current = null;
       premRuleRef.current = null;   // a new position must start from defaults, not the last one's levels
+      // The position is gone, so its dismissal has served its purpose: taking the
+      // same contract again should open its chart as usual.
+      try { const prevSym = autoOpenedForRef.current; if (prevSym) dismissedChart.remove(prevSym); } catch (e) {}
       autoOpenedForRef.current = '';
       return;
     }
     if (autoOpenedForRef.current === sym) return;
+    // Closed on purpose: still resolve the contract (the trade tab, the exit
+    // button and the premium rule all need it) but do NOT reopen the chart.
+    const wasDismissed = dismissedChart.has(sym);
     (async () => {
       try {
         const r = await fetch(`/api/instruments/search?q=${encodeURIComponent(sym)}`);
@@ -5154,7 +5181,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           tradeInstrumentRef.current = exact;
           setTradeTabInstr(exact);
           autoOpenedForRef.current = sym;
-          openOptionChart(exact); // open the traded option's chart (routes to the option pane in split view)
+          if (!wasDismissed) openOptionChart(exact); // routes to the option pane in split view
         }
       } catch (e) {}
     })();
@@ -9730,6 +9757,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                 </button>
                 <button
                   onClick={() => {
+                    // Remember this was closed on purpose, so the auto-open for a
+                    // live position does not bring it straight back on reload.
+                    dismissedChart.add(c.tradingsymbol);
                     setOpenCharts(prev => {
                       const next = prev.filter(x => x.tradingsymbol !== c.tradingsymbol);
                       // Last option closed: tell the workspace to collapse back to a
