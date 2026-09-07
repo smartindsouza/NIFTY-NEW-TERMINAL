@@ -1972,7 +1972,7 @@ setInterval(() => {
   // made it obvious. Daily bars carry the prior session's close; it changes once
   // a day, so it is cached 30 minutes and fetched only for symbols that need it.
   const prevCloseCache = new Map<string, { at: number; value: number }>();
-  async function fetchPrevClose(sym: string): Promise<number | null> {
+  async function fetchPrevClose(sym: string, currentPx?: number): Promise<number | null> {
     const hit = prevCloseCache.get(sym);
     if (hit && Date.now() - hit.at < 30 * 60 * 1000) return hit.value;
     try {
@@ -1991,7 +1991,10 @@ setInterval(() => {
         closes.length >= 2 ? closes[closes.length - 2] : null,
         closes.length >= 1 ? closes[0] : null,
       ];
-      const prev = candidates.find((v) => typeof v === 'number' && v > 0) as number | undefined;
+      // Same rule as the caller: a "previous close" identical to the current
+      // price tells us nothing and must not be accepted as one.
+      const prev = candidates.find((v) => typeof v === 'number' && v > 0
+        && (typeof currentPx !== 'number' || Math.abs(v - currentPx) > 1e-9)) as number | undefined;
       if (typeof prev === 'number' && prev > 0) {
         prevCloseCache.set(sym, { at: Date.now(), value: prev });
         return prev;
@@ -2115,16 +2118,25 @@ setInterval(() => {
           const result = r.data?.chart?.result?.[0];
           const meta = result?.meta;
           if (meta && typeof meta.regularMarketPrice === 'number') {
-            let prev = meta.chartPreviousClose ?? meta.previousClose ?? null;
+            // THE BUG, found by comparing against Yahoo's own page: it shows
+            // ES=F at 7,722.00 -32.75 (-0.42%) while this panel showed 7,722 at
+            // +0.00%. The price was right, so the FEED was never the problem —
+            // the reference was. For these futures the chart meta returns a
+            // previous close EQUAL to regularMarketPrice, which passed every
+            // "is it a positive number" check and then subtracted to exactly
+            // zero. A reference identical to the current price is not a
+            // reference; it is rejected here so the next candidate is tried.
+            const px = meta.regularMarketPrice;
+            const usable = (v: any) => typeof v === 'number' && v > 0 && Math.abs(v - px) > 1e-9;
+            let prev: number | null = usable(meta.chartPreviousClose) ? meta.chartPreviousClose
+                                    : usable(meta.previousClose) ? meta.previousClose : null;
             // prevSrc records WHICH reference produced the change, so a flat
-            // reading can be diagnosed from the payload instead of guessed at:
-            // 'price' means no prior close was obtainable and the row is flat by
-            // arithmetic, not because the market is unchanged.
-            let prevSrc = (typeof prev === 'number' && prev > 0) ? 'meta' : '';
-            if (!prevSrc) { prev = await fetchPrevClose(u.sym); prevSrc = (typeof prev === 'number' && prev > 0) ? 'daily' : ''; }
-            if (!prevSrc) { prev = meta.regularMarketPrice; prevSrc = 'price'; }
-            const chg = meta.regularMarketPrice - prev;
-            const chgPct = prev ? (chg / prev) * 100 : 0;
+            // reading stays diagnosable from the payload rather than guessed at.
+            let prevSrc = prev !== null ? 'meta' : '';
+            if (!prevSrc) { const d = await fetchPrevClose(u.sym, px); prev = usable(d) ? d : null; prevSrc = prev !== null ? 'daily' : ''; }
+            if (!prevSrc) { prev = px; prevSrc = 'price'; }
+            const chg = px - (prev as number);
+            const chgPct = prev ? (chg / (prev as number)) * 100 : 0;
             // sparkline: intraday closes (compact)
             const closesRaw: any[] = result?.indicators?.quote?.[0]?.close || [];
             const spark = closesRaw.filter((x) => typeof x === 'number');
@@ -2175,16 +2187,25 @@ setInterval(() => {
           const result = r.data?.chart?.result?.[0];
           const meta = result?.meta;
           if (meta && typeof meta.regularMarketPrice === 'number') {
-            let prev = meta.chartPreviousClose ?? meta.previousClose ?? null;
+            // THE BUG, found by comparing against Yahoo's own page: it shows
+            // ES=F at 7,722.00 -32.75 (-0.42%) while this panel showed 7,722 at
+            // +0.00%. The price was right, so the FEED was never the problem —
+            // the reference was. For these futures the chart meta returns a
+            // previous close EQUAL to regularMarketPrice, which passed every
+            // "is it a positive number" check and then subtracted to exactly
+            // zero. A reference identical to the current price is not a
+            // reference; it is rejected here so the next candidate is tried.
+            const px = meta.regularMarketPrice;
+            const usable = (v: any) => typeof v === 'number' && v > 0 && Math.abs(v - px) > 1e-9;
+            let prev: number | null = usable(meta.chartPreviousClose) ? meta.chartPreviousClose
+                                    : usable(meta.previousClose) ? meta.previousClose : null;
             // prevSrc records WHICH reference produced the change, so a flat
-            // reading can be diagnosed from the payload instead of guessed at:
-            // 'price' means no prior close was obtainable and the row is flat by
-            // arithmetic, not because the market is unchanged.
-            let prevSrc = (typeof prev === 'number' && prev > 0) ? 'meta' : '';
-            if (!prevSrc) { prev = await fetchPrevClose(u.sym); prevSrc = (typeof prev === 'number' && prev > 0) ? 'daily' : ''; }
-            if (!prevSrc) { prev = meta.regularMarketPrice; prevSrc = 'price'; }
-            const chg = meta.regularMarketPrice - prev;
-            const chgPct = prev ? (chg / prev) * 100 : 0;
+            // reading stays diagnosable from the payload rather than guessed at.
+            let prevSrc = prev !== null ? 'meta' : '';
+            if (!prevSrc) { const d = await fetchPrevClose(u.sym, px); prev = usable(d) ? d : null; prevSrc = prev !== null ? 'daily' : ''; }
+            if (!prevSrc) { prev = px; prevSrc = 'price'; }
+            const chg = px - (prev as number);
+            const chgPct = prev ? (chg / (prev as number)) * 100 : 0;
             uk.push({
               key: u.key, label: u.label, price: +meta.regularMarketPrice.toFixed(2),
               change: +chg.toFixed(2), changePct: +chgPct.toFixed(2),
@@ -2231,16 +2252,25 @@ setInterval(() => {
           const result = r.data?.chart?.result?.[0];
           const meta = result?.meta;
           if (meta && typeof meta.regularMarketPrice === 'number') {
-            let prev = meta.chartPreviousClose ?? meta.previousClose ?? null;
+            // THE BUG, found by comparing against Yahoo's own page: it shows
+            // ES=F at 7,722.00 -32.75 (-0.42%) while this panel showed 7,722 at
+            // +0.00%. The price was right, so the FEED was never the problem —
+            // the reference was. For these futures the chart meta returns a
+            // previous close EQUAL to regularMarketPrice, which passed every
+            // "is it a positive number" check and then subtracted to exactly
+            // zero. A reference identical to the current price is not a
+            // reference; it is rejected here so the next candidate is tried.
+            const px = meta.regularMarketPrice;
+            const usable = (v: any) => typeof v === 'number' && v > 0 && Math.abs(v - px) > 1e-9;
+            let prev: number | null = usable(meta.chartPreviousClose) ? meta.chartPreviousClose
+                                    : usable(meta.previousClose) ? meta.previousClose : null;
             // prevSrc records WHICH reference produced the change, so a flat
-            // reading can be diagnosed from the payload instead of guessed at:
-            // 'price' means no prior close was obtainable and the row is flat by
-            // arithmetic, not because the market is unchanged.
-            let prevSrc = (typeof prev === 'number' && prev > 0) ? 'meta' : '';
-            if (!prevSrc) { prev = await fetchPrevClose(g.sym); prevSrc = (typeof prev === 'number' && prev > 0) ? 'daily' : ''; }
-            if (!prevSrc) { prev = meta.regularMarketPrice; prevSrc = 'price'; }
-            const chg = meta.regularMarketPrice - prev;
-            const chgPct = prev ? (chg / prev) * 100 : 0;
+            // reading stays diagnosable from the payload rather than guessed at.
+            let prevSrc = prev !== null ? 'meta' : '';
+            if (!prevSrc) { const d = await fetchPrevClose(g.sym, px); prev = usable(d) ? d : null; prevSrc = prev !== null ? 'daily' : ''; }
+            if (!prevSrc) { prev = px; prevSrc = 'price'; }
+            const chg = px - (prev as number);
+            const chgPct = prev ? (chg / (prev as number)) * 100 : 0;
             globalMkts.push({
               key: g.key, label: g.label, price: +meta.regularMarketPrice.toFixed(2),
               change: +chg.toFixed(2), changePct: +chgPct.toFixed(2),
