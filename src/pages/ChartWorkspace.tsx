@@ -79,8 +79,16 @@ export function ChartWorkspace() {
   if (!isDesktop) return <AdvancedChart />;
 
   const split = hasOption;
+  // Height chain, desktop. main is a fixed-height flex COLUMN; this wrapper must
+  // be a flex-1 CHILD of it (not h-full — a percentage that also overflowed by
+  // the banner's height whenever a position was open). Each pane is h-full of
+  // this wrapper, and the chart page inside is h-full of the pane. Every link is
+  // a definite height, so the chart's flex-grow has something to grow into.
+  // This was the break behind two failed attempts: the page root sat inside a
+  // plain block using flex-1, which has no effect without a flex parent — its
+  // height collapsed to content and the chart stopped at its 450px floor.
   return (
-    <div className="flex h-full w-full min-h-0 min-w-0">
+    <div className="flex h-full md:h-auto md:flex-1 w-full min-h-0 min-w-0">
       {/* LEFT — spot only. Keyed so it is never remounted when the right pane
           appears or disappears: a remount would rebuild the chart, drop the
           drawings and re-run every query. */}

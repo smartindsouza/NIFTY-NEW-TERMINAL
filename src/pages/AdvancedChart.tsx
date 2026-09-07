@@ -9310,7 +9310,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // overflow hidden so nothing can push the page into a scroll. The chart grows
   // to fill whatever the toolbar, tabs and strips leave. Mobile classes unchanged.
   return (
-    <div className="px-1 pt-0 pb-0 md:px-8 md:py-0 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto flex flex-col h-[calc(100dvh-124px-env(safe-area-inset-bottom))] md:h-auto md:flex-1 md:min-h-0 overflow-hidden relative">
+    <div data-layout="page" className="px-1 pt-0 pb-0 md:px-8 md:py-0 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto flex flex-col h-[calc(100dvh-124px-env(safe-area-inset-bottom))] md:h-full md:min-h-0 overflow-hidden relative">
       
       {showDiagnostic && (
         <div className="fixed bottom-6 right-6 z-50 bg-card/95 backdrop-blur-md border border-0 p-4 rounded-lg text-xs font-mono w-[340px] max-h-[80vh] overflow-y-auto">
@@ -10115,7 +10115,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
 
           {/* Main Chart (Price & Volume) */}
-          <div className="relative flex-grow flex w-full bg-card rounded-none min-h-0 md:min-h-[450px]" onMouseLeave={() => setCrosshairInfo(null)}>
+          <div data-layout="chart" className="relative flex-grow flex w-full bg-card rounded-none min-h-0 md:min-h-[450px]" onMouseLeave={() => setCrosshairInfo(null)}>
             {/* Leverage meter — why the premium is moving more (or less) than the
                 index right now. Display only: pointer-events-none, so it can never
                 block a drag, a crosshair, or a level being placed. */}

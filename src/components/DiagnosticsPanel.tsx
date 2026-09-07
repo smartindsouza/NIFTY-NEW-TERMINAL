@@ -7,7 +7,36 @@ import { Badge } from "@/components/ui/badge";
 // Injected by the `define` block in vite.config.ts at build time.
 declare const __BUILD_TIME__: string;
 
+// Live layout readout. Every height in the chain from viewport to chart canvas,
+// so a "gap under the chart" or "page scrolls" report can be read off a Diag
+// screenshot in one glance instead of guessed at from theory.
+function useLayoutReadout() {
+  const [txt, setTxt] = useState('');
+  useEffect(() => {
+    const read = () => {
+      try {
+        const h = (sel: string) => { const el = document.querySelector(sel) as HTMLElement | null; return el ? Math.round(el.getBoundingClientRect().height) : null; };
+        const canvas = document.querySelector('[data-layout="chart"] canvas') as HTMLCanvasElement | null;
+        const parts = [
+          `vp ${window.innerHeight}`,
+          `main ${h('main') ?? '-'}`,
+          `page ${h('[data-layout="page"]') ?? '-'}`,
+          `chart ${h('[data-layout="chart"]') ?? '-'}`,
+          `canvas ${canvas ? Math.round(canvas.getBoundingClientRect().height) : '-'}`,
+          `doc ${document.documentElement.scrollHeight}${document.documentElement.scrollHeight > window.innerHeight ? ' SCROLLS' : ''}`,
+        ];
+        setTxt(parts.join(' · '));
+      } catch (e) {}
+    };
+    read();
+    const id = setInterval(read, 1500);
+    return () => clearInterval(id);
+  }, []);
+  return txt;
+}
+
 export function DiagnosticsPanel() {
+  const useLayoutReadoutValue = useLayoutReadout();
   const [metrics, setMetrics] = useState(performanceTracker.getMetrics());
 
   useEffect(() => {
@@ -25,6 +54,9 @@ export function DiagnosticsPanel() {
             <Activity className="w-4 h-4 text-emerald-400 animate-pulse" /> Live Terminal Diagnostics
           </span>
           <span className="flex items-center gap-2">
+            <span className="text-[9px] font-mono normal-case tracking-normal text-muted-foreground" title="Layout heights: viewport · main · chart page · chart container · chart canvas · document. If doc exceeds vp the page scrolls.">
+              {useLayoutReadoutValue}
+            </span>
             <span className="text-[9px] font-mono normal-case tracking-normal text-muted-foreground" title="When this UI bundle was built (IST). If this is older than the latest deploy, the phone is still on a cached bundle — hard-refresh.">
               UI {new Date(__BUILD_TIME__).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })} IST
             </span>
