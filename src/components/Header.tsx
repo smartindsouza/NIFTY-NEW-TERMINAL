@@ -157,10 +157,14 @@ export function Header() {
     return () => { cancelled = true; };
   }, []);
 
-  // Mobile bottom-bar groupings: 4 primary tabs + a "More" sheet for the rest
-  const primaryHrefs = ['/', '/advanced-chart', '/option-chain', '/notifications'];
+  // Mobile bottom-bar groupings: 4 primary tabs + a "More" sheet for the rest.
+  // The fourth slot is News & Alerts rather than Notifications — the label
+  // "Alerts" pointed at the notification log, which is not what Martin reaches
+  // for on the phone. Notifications stays available in the More sheet, since
+  // moreLinks is everything not primary and picks it up automatically.
+  const primaryHrefs = ['/', '/advanced-chart', '/option-chain', '/news'];
   const shortLabels: Record<string, string> = {
-    '/': 'Home', '/advanced-chart': 'Chart', '/option-chain': 'Chain', '/notifications': 'Alerts',
+    '/': 'Home', '/advanced-chart': 'Chart', '/option-chain': 'Chain', '/news': 'News',
   };
   const primaryLinks = primaryHrefs
     .map((h) => orderedLinks.find((l) => l.href === h))
