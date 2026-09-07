@@ -21,10 +21,18 @@ const cr = (n: number, sign = false) => {
   const pre = sign ? (n >= 0 ? "+" : "−") : n < 0 ? "−" : "";
   return `${pre}₹${s} Cr`;
 };
+// Formatted from the STRING, with no Date object and no timezone anywhere near
+// it. The previous version built midnight IST and then rendered it in the
+// viewer's local zone — in Dubai, 1.5 hours behind, that is 22:30 the previous
+// evening, so every date printed one day early: 07 Sep showed as 06 Sep and
+// 04 Sep as 03 Sep. The day never came from a clock, it came from NSE as text,
+// so converting it through a timezone could only ever corrupt it.
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const fmtDate = (iso: string) => {
-  try {
-    return new Date(iso + "T00:00:00+05:30").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-  } catch { return iso; }
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ""));
+  if (!m) return iso;
+  const mon = MONTHS[parseInt(m[2], 10) - 1];
+  return mon ? `${m[3]} ${mon} ${m[1]}` : iso;
 };
 
 function FlowBars({ buy, sell }: { buy: number; sell: number }) {
