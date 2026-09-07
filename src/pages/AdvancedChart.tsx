@@ -8810,7 +8810,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               // Confluence buy/sell arrows — forward-test signals from the server
               // log. Closed candles only, so an arrow can never repaint. Drawn on
               // the 5-minute index chart, where the rule actually runs.
-              if (showConfSignals && !isOptionView && String(timeframe) === '5' && mainSeriesRef.current) {
+              // Buy/Sell Signals was retired (its backtest failed). Hard-off rather than
+              // left to a stale localStorage flag with no toggle to turn it back off.
+              if (false && showConfSignals && !isOptionView && String(timeframe) === '5' && mainSeriesRef.current) {
                 const rows = (confSignalsRef.current || []).filter((s: any) => s.symbol === underlying);
                 if (rows.length) {
                   const baseC2 = chartDataRef.current?.candles || [];
@@ -9700,26 +9702,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       <div className="w-4 flex items-center justify-center">
                         <Star size={14} className={(showOpeningRange) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span className="truncate">15m Opening Range (High/Low)</span>
+                      <span className="truncate">15 min High-Low</span>
                     </button>
                     <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
                   </div>
-
-                  {/* Buy/Sell confluence signals — forward test, 5-min index charts */}
-                  {!isOptionView && (
-                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
-                    <button
-                      onClick={() => setShowConfSignals(!showConfSignals)}
-                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
-                    >
-                      <div className="w-4 flex items-center justify-center">
-                        <Star size={14} className={(showConfSignals) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
-                      </div>
-                      <span className="truncate">Buy/Sell Signals (5-min · backtest FAILED)</span>
-                    </button>
-                    <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
-                  </div>
-                  )}
 
                   {/* Market Structure (BOS / CHoCH) — an index study */}
                   {!isOptionView && (
@@ -9731,7 +9717,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       <div className="w-4 flex items-center justify-center">
                         <Star size={14} className={(showStructure) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span className="truncate">Market Structure (BOS / CHoCH)</span>
+                      <span className="truncate">BOS-CHoCH</span>
                     </button>
                     <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
                   </div>
@@ -9791,7 +9777,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       <div className="w-4 flex items-center justify-center">
                         <Star size={14} className={(showFvg) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span className="truncate">Fair Value Gaps (3-candle)</span>
+                      <span className="truncate">Fair Value Gaps</span>
                     </button>
                     <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
                   </div>
@@ -9805,7 +9791,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       <div className="w-4 flex items-center justify-center">
                         <Star size={14} className={(showDsZones) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span className="truncate">Demand/Supply Zones (intraday)</span>
+                      <span className="truncate">Demand/Supply Zones</span>
                     </button>
                     <div className="flex items-center gap-1 pr-1" onClick={(e) => e.stopPropagation()}>
                       <input
@@ -9829,7 +9815,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       <div className="w-4 flex items-center justify-center">
                         <Star size={14} className={(levelAlertsOn) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span className="truncate">Level Touch Alerts (sound + popup)</span>
+                      <span className="truncate">Level Touch Alerts</span>
                     </button>
                     <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
                   </div>
@@ -9843,7 +9829,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       <div className="w-4 flex items-center justify-center">
                         <Star size={14} className={(zoneTapAlertsOn) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span className="truncate">Zone Tap Alerts (sound + popup)</span>
+                      <span className="truncate">Zone Tap Alerts</span>
                     </button>
                     <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
                   </div>
@@ -9857,7 +9843,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       <div className="w-4 flex items-center justify-center">
                         <Star size={14} className={(breakoutAlertsOn) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span className="truncate">Breakout / Fakeout Alerts (sound + popup)</span>
+                      <span className="truncate">Breakout-Fakeouts</span>
                     </button>
                     <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
                   </div>
@@ -9871,7 +9857,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       <div className="w-4 flex items-center justify-center">
                         <Star size={14} className={(showSnR) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
                       </div>
-                      <span className="truncate">Support/Resistance Lines</span>
+                      <span className="truncate">Support-Resistance Lines</span>
                     </button>
                     <button
                       onClick={(e) => {
