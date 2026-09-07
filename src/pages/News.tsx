@@ -82,62 +82,29 @@ export function News() {
   return (
     <div className="p-4 md:p-8 pb-32 max-w-[1600px] w-full mx-auto animate-in fade-in zoom-in-95 duration-500">
       {/* Header and Controls */}
-      <div className="relative bg-card border border-border rounded-xl p-4 md:p-6 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/40 before:to-transparent">
-        <div className="w-full">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="p-1.5 bg-rose-500/10 rounded">
-              <Newspaper className="w-5 h-5 text-rose-500" />
-            </div>
-            <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight">
-              High-Impact Market Intel
-            </h1>
+      {/* Heading and the sync control share one line. The subtitle and the whole
+          AI-status strip (engine, Gemini/local counts, last success, fallback
+          reason) are removed at Martin's request — they described the pipeline's
+          internals, not the news. The sync button keeps only its icon; its
+          purpose is carried by the spinner and the tooltip. */}
+      <div className="relative bg-card border border-border rounded-xl px-4 py-3 md:px-6 md:py-4 mb-6 flex flex-row justify-between items-center gap-3 overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/40 before:to-transparent">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="p-1.5 bg-rose-500/10 rounded shrink-0">
+            <Newspaper className="w-5 h-5 text-rose-500" />
           </div>
-          <p className="text-xs text-muted-foreground">
-            Deduplicated, professional feeds filtered strictly of yesterday & today’s events. Only items with Impact &gt;= 60 are displayed.
-          </p>
-
-          {aiStatus && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground mt-4 pt-3 border-t border-0">
-              <div className="flex items-center gap-1.5">
-                <span className={cn(
-                  "inline-block w-2 h-2 rounded-full",
-                  aiStatus.success ? "bg-green-500" : "bg-primary"
-                )} />
-                <span className="font-semibold text-foreground/90">
-                  {aiStatus.success ? "AI Analysis: Gemini" : "AI Analysis: Local Fallback"}
-                </span>
-              </div>
-              <span className="text-slate-600 hidden sm:inline">|</span>
-              <span className="text-muted-foreground">
-                Gemini Articles: <span className="font-mono text-foreground/90 font-bold">{aiStatus.geminiCount}</span> &nbsp;•&nbsp; Local: <span className="font-mono text-foreground/90 font-bold">{aiStatus.localCount}</span>
-              </span>
-              {aiStatus.lastSuccessTime && (
-                <>
-                  <span className="text-slate-600 hidden sm:inline">|</span>
-                  <span className="text-muted-foreground">
-                    Last Success: <span className="text-emerald-400 font-mono">{new Date(aiStatus.lastSuccessTime).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-                  </span>
-                </>
-              )}
-              {aiStatus.fallbackReason && (
-                <>
-                  <span className="text-slate-600 hidden lg:inline">|</span>
-                  <span className="text-primary/80 italic font-mono text-[11px] max-w-md truncate" title={aiStatus.fallbackReason}>
-                    Fallback: {aiStatus.fallbackReason}
-                  </span>
-                </>
-              )}
-            </div>
-          )}
+          <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight truncate">
+            Market News
+          </h1>
         </div>
 
         <button
           onClick={() => refetch()}
           disabled={isLoading || isRefetching}
-          className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium border border-0 hover:border-0 rounded bg-white/[0.02] hover:bg-white/[0.05] text-foreground/80 hover:text-foreground transition-all disabled:opacity-50 cursor-pointer text-nowrap"
+          title={isRefetching ? 'Refreshing feeds…' : 'Sync feeds'}
+          aria-label="Sync feeds"
+          className="shrink-0 h-9 w-9 flex items-center justify-center border border-0 rounded bg-white/[0.02] hover:bg-white/[0.05] text-foreground/80 hover:text-foreground transition-all disabled:opacity-50 cursor-pointer"
         >
-          <RefreshCw className={cn("w-3.5 h-3.5", (isLoading || isRefetching) && "animate-spin")} />
-          {isRefetching ? 'Refreshing...' : 'Sync Feeds'}
+          <RefreshCw className={cn("w-4 h-4", (isLoading || isRefetching) && "animate-spin")} />
         </button>
       </div>
 
@@ -204,7 +171,7 @@ export function News() {
               No news items fell under the &apos;{activeFilter}&apos; category today.
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              Refine your filter selection or click &quot;Sync Feeds&quot; to fetch recently published events.
+              Refine your filter selection, or use the refresh icon above to fetch recently published events.
             </p>
           </div>
         )}
