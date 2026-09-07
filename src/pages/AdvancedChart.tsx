@@ -4203,22 +4203,26 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // whole point of the split: the left half stays on the index no matter what is
   // traded or searched. Outside the split (mobile, or the plain component) it is
   // exactly the old setSelectedInstrument call.
-  // Option charts the user has explicitly CLOSED, remembered across reloads.
-  // autoOpenedForRef guards the auto-open to once per position, but it lives in
-  // memory only — so a refresh reset it and the traded option's chart reopened
-  // itself, and no amount of closing the tab could stick. Session-scoped, so a
-  // fresh app start behaves normally.
+  // Option charts the user has explicitly CLOSED. autoOpenedForRef guards the
+  // auto-open to once per position but lives in memory, so a reload reopened the
+  // traded option's chart and closing the tab could never stick.
+  //
+  // localStorage, NOT sessionStorage: the desktop app restarting starts a new
+  // session, which wiped the record and brought the chart straight back — the
+  // first attempt at this fix used session scope and did not survive Martin's
+  // restart. Staleness is not a risk because the entry is deleted the moment its
+  // position closes, so it never outlives the trade it belongs to.
   const dismissedChart = {
     read(): string[] {
-      try { const raw = sessionStorage.getItem('dismissedOptionCharts'); const a = raw ? JSON.parse(raw) : []; return Array.isArray(a) ? a : []; }
+      try { const raw = localStorage.getItem('dismissedOptionCharts'); const a = raw ? JSON.parse(raw) : []; return Array.isArray(a) ? a : []; }
       catch (e) { return []; }
     },
     has(sym: string) { return this.read().includes(sym); },
     add(sym: string) {
-      try { const a = this.read(); if (!a.includes(sym)) { a.push(sym); sessionStorage.setItem('dismissedOptionCharts', JSON.stringify(a.slice(-20))); } } catch (e) {}
+      try { const a = this.read(); if (!a.includes(sym)) { a.push(sym); localStorage.setItem('dismissedOptionCharts', JSON.stringify(a.slice(-20))); } } catch (e) {}
     },
     remove(sym: string) {
-      try { sessionStorage.setItem('dismissedOptionCharts', JSON.stringify(this.read().filter(x => x !== sym))); } catch (e) {}
+      try { localStorage.setItem('dismissedOptionCharts', JSON.stringify(this.read().filter(x => x !== sym))); } catch (e) {}
     },
   };
 
@@ -9595,7 +9599,12 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           Height therefore has to size to content rather than the old fixed h-11.
           Mobile keeps its single column and its chevron-dropdown for the badges. */}
       <div className={`flex flex-col md:flex-row md:justify-between md:items-start gap-2 md:gap-3 pb-2 mb-2 md:mb-2 md:flex-nowrap md:border-b md:border-border/60 md:h-auto md:min-h-11 md:py-1`}>
-        <div className="relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-col md:items-start md:gap-1 md:flex-nowrap md:min-w-0 max-md:pr-24">
+        {/* The title, clock, live tick, trend and delta badges are properties of
+            the SESSION, not of one chart — and in split view the spot pane above
+            already shows them. Rendering them again over the option chart just
+            costs it vertical space. Hidden on the option PANE only: mobile has no
+            panes, so it is untouched, and the full-width desktop chart keeps them. */}
+        <div className={`relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-col md:items-start md:gap-1 md:flex-nowrap md:min-w-0 max-md:pr-24 ${isOptionPane ? 'md:hidden' : ''}`}>
           {/* Row 1 — title and clock */}
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
           <h1 className="text-base md:text-sm font-semibold text-foreground tracking-tight whitespace-nowrap md:truncate">
