@@ -110,8 +110,8 @@ export default function TradeJournal() {
         <div className="flex items-center gap-2.5">
           <BookOpen className="w-5 h-5 text-primary" />
           <div>
-            <h1 className="text-lg md:text-2xl font-bold tracking-tight">Trade Journal</h1>
-            <p className="text-xs text-muted-foreground">Every trade with its market context — the data Claude will review.</p>
+            <h1 className="text-lg md:text-2xl font-bold tracking-tight whitespace-nowrap">Trade Journal</h1>
+            
           </div>
         </div>
         <div className="flex items-center gap-2">

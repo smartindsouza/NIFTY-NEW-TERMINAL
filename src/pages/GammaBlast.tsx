@@ -101,11 +101,9 @@ export default function GammaBlast() {
       <div className="relative bg-card border border-border rounded-xl p-4 mb-4 overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/40 before:to-transparent">
         <div className="flex items-center gap-2 mb-1">
           <Zap className="w-5 h-5 text-amber-400" />
-          <h1 className="text-lg font-bold text-foreground">Gamma Blast</h1>
+          <h1 className="text-lg font-bold text-foreground whitespace-nowrap">Gamma Blast</h1>
         </div>
-        <p className="text-xs text-muted-foreground leading-relaxed">
-          On expiry day, tiny time-to-expiry makes near-ATM <span className="text-foreground">gamma</span> explosive — a small index move can multiply a near-dead ATM option. This flags when gamma is <span className="text-foreground">loaded</span> <span className="text-foreground">and</span> a directional break is appearing.
-        </p>
+        
       </div>
 
       {/* Window + verdict banner */}

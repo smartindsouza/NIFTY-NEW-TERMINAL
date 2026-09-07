@@ -80,8 +80,8 @@ export default function GapRisk() {
         <div className="flex items-center gap-2.5">
           <Gauge className="w-5 h-5 text-primary" />
           <div>
-            <h1 className="text-lg md:text-2xl font-bold tracking-tight">Gap Risk Gauge</h1>
-            <p className="text-xs text-muted-foreground">Expected overnight <span className="text-foreground">magnitude</span> — not direction.</p>
+            <h1 className="text-lg md:text-2xl font-bold tracking-tight whitespace-nowrap">Gap Risk Gauge</h1>
+            
           </div>
         </div>
         <div className="flex items-center gap-2">

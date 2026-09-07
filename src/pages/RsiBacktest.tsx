@@ -106,7 +106,7 @@ export default function RsiBacktest() {
     <div className="px-2 py-3 md:p-8 max-w-[1000px] w-full mx-auto pb-24 min-h-screen">
       <div className="relative bg-card border border-border rounded-xl p-4 mb-4 flex items-center gap-2.5 overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/40 before:to-transparent">
         <FlaskConical className="w-5 h-5 text-primary" />
-        <h1 className="text-lg md:text-2xl font-bold tracking-tight">RSI Strategy Backtest</h1>
+        <h1 className="text-lg md:text-2xl font-bold tracking-tight whitespace-nowrap">RSI Backtest</h1>
       </div>
       <p className="text-xs text-muted-foreground mb-4">
         Your RSI zone strategy, tested on real {timeframe}-min NIFTY history. Takes only setups where RSI pushes <span className="text-foreground">deep</span> into a zone (≥{deepOb} / ≤{deepOs}) then closes back out{useDiv ? <span className="text-foreground"> and shows matching RSI divergence (≤{divWindow} bars)</span> : ''}; exit at the opposite zone; {slMode !== 'none' ? <span className="text-foreground">stop = {slMode === 'same' ? 'entry' : slMode === 'prev' ? 'previous' : '2nd previous'} candle low/high on a close beyond it</span> : 'no stop-loss'}; intraday{noEntryAfter ? <span className="text-foreground">, no new entries after {noEntryAfter} IST</span> : ''}{exitAtCutoff && noEntryAfter ? <span className="text-foreground">, open trades squared off at {noEntryAfter}</span> : ', squared off at day end'}.

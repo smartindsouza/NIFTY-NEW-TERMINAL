@@ -28,8 +28,8 @@ export default function OptionValue() {
         <div className="flex items-center gap-2.5">
           <Layers className="w-5 h-5 text-primary" />
           <div>
-            <h1 className="text-lg md:text-2xl font-bold tracking-tight">Option Value</h1>
-            <p className="text-xs text-muted-foreground">Premium split into intrinsic (real) + time value (decays).</p>
+            <h1 className="text-lg md:text-2xl font-bold tracking-tight whitespace-nowrap">Option Value</h1>
+            
           </div>
         </div>
         <button onClick={() => refetch()} className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-card hover:bg-popover transition-colors text-muted-foreground">

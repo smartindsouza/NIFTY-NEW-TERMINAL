@@ -82,13 +82,11 @@ export default function Reports() {
       {/* Title section */}
       <div className="relative bg-card border border-border rounded-xl p-4 md:p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/40 before:to-transparent">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight flex items-center gap-2">
+          <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight flex items-center gap-2 whitespace-nowrap">
             <FileText className="w-7 h-7 md:w-8 md:h-8 text-primary" />
-            Trading Reports & Ledger
+            Reports
           </h1>
-          <p className="text-xs text-muted-foreground mt-1">
-            Analyze consolidated Zerodha statements, tax structures, and high-frequency options margins.
-          </p>
+          
         </div>
         
         <div className="flex items-center gap-2">

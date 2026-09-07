@@ -294,7 +294,7 @@ export function Dashboard() {
         <div className="flex justify-between items-center gap-3 p-4 md:p-6">
           <div className="min-w-0">
             <div className="flex items-center gap-2.5">
-              <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight">NIFTY 50</h1>
+              <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight whitespace-nowrap">NIFTY 50</h1>
               {isMarketOpen ? (
                 <span className="inline-flex items-center gap-1.5 text-[9px] font-bold bg-green-500/15 text-green-500 px-2 py-1 rounded-full uppercase tracking-wider whitespace-nowrap">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> Market Open

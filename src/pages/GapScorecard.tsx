@@ -112,8 +112,8 @@ export default function GapScorecard() {
         <div className="flex items-center gap-2.5">
           <Compass className="w-5 h-5 text-primary" />
           <div>
-            <h1 className="text-lg md:text-2xl font-bold tracking-tight">Gap Scorecard</h1>
-            <p className="text-xs text-muted-foreground">Next-open gap <span className="text-foreground">direction</span> — computed 15:15 IST · 13:45 Dubai. Advisory only.</p>
+            <h1 className="text-lg md:text-2xl font-bold tracking-tight whitespace-nowrap">Gap Scorecard</h1>
+            
           </div>
         </div>
         <div className="flex items-center gap-2">

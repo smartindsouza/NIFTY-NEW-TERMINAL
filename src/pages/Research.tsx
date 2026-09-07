@@ -239,10 +239,8 @@ export default function Research() {
       <div className="flex items-center gap-3">
         <FlaskConical className="w-6 h-6 text-primary" />
         <div>
-          <h1 className="text-xl font-bold text-foreground">Research</h1>
-          <p className="text-xs text-muted-foreground">
-            Every strategy this app has tested, its rule, the bar it had to clear, and the verdict. Read-only.
-          </p>
+          <h1 className="text-xl font-bold text-foreground whitespace-nowrap">Research</h1>
+          
         </div>
       </div>
 

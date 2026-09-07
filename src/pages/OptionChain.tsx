@@ -95,7 +95,7 @@ export function OptionChain() {
       {/* Header */}
       <div className="relative bg-card border border-border rounded-xl p-4 md:p-6 flex flex-col md:flex-row md:justify-between md:items-end gap-3 overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/40 before:to-transparent">
         <div className="min-w-0">
-          <h1 className="text-2xl md:text-3xl font-black tracking-tight text-foreground">OI Data Levels</h1>
+          <h1 className="text-2xl md:text-3xl font-black tracking-tight text-foreground whitespace-nowrap">OI Data Levels</h1>
           {/* Row 1: Spot + Expiry together */}
           <p className="text-sm font-medium text-muted-foreground mt-2 flex items-center flex-wrap gap-2">
              <span className="text-foreground font-mono bg-card/80 backdrop-blur-md px-2 py-0.5 rounded-lg border border-0 whitespace-nowrap">Spot: {spot.toFixed(2)}</span>

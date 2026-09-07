@@ -92,7 +92,7 @@ export function News() {
           <div className="p-1.5 bg-rose-500/10 rounded shrink-0">
             <Newspaper className="w-5 h-5 text-rose-500" />
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight truncate">
+          <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight truncate whitespace-nowrap">
             Market News
           </h1>
         </div>

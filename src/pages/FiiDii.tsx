@@ -67,17 +67,15 @@ export function FiiDii() {
         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
         <div className="flex justify-between items-end p-4 md:p-6">
         <div>
-          <h1 className="text-2xl md:text-3xl font-black tracking-tight text-foreground flex items-center gap-3">
-            FII / DII Positioning
+          <h1 className="text-2xl md:text-3xl font-black tracking-tight text-foreground flex items-center gap-3 whitespace-nowrap">
+            FII / DII
             <MetricSourceBadge 
               type={isUnavailable ? "UNAVAILABLE" : "STORED SNAPSHOT"} 
               source="NSE Participant OI Data"
               lastUpdated={lastUpdated}
             />
           </h1>
-          <p className="text-sm font-medium text-muted-foreground mt-2">
-            Real participant data from NSE EOD reports.
-          </p>
+          
         </div>
         </div>
       </div>

@@ -147,8 +147,8 @@ export default function Notifications() {
             <div className="p-1.5 bg-primary/10 border border-primary/20 rounded-xl">
               <Bell className="w-5 h-5 text-primary" />
             </div>
-            <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight flex items-center gap-2">
-              Quant Notifications Terminal
+            <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight flex items-center gap-2 whitespace-nowrap">
+              Notifications
             </h1>
             {unreadCount > 0 && (
               <Badge className="bg-rose-500/20 border border-rose-500/30 text-rose-400 font-mono font-medium tracking-wider">
@@ -156,9 +156,6 @@ export default function Notifications() {
               </Badge>
             )}
           </div>
-          <p className="text-xs text-muted-foreground">
-            Real-time trace logs capturing high-frequency open interest swings, Bollinger volatility breakouts, and order confirmations.
-          </p>
         </div>
 
         {/* Quick Utilities */}

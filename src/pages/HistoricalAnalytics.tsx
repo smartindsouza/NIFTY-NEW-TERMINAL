@@ -22,13 +22,11 @@ export default function HistoricalAnalytics() {
     <div className="p-4 md:p-8 pb-32 max-w-[1600px] w-full mx-auto space-y-6 animate-in fade-in zoom-in-95 duration-500">
       <div className="relative bg-card border border-border rounded-xl p-4 md:p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/40 before:to-transparent">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight flex items-center gap-2">
+          <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight flex items-center gap-2 whitespace-nowrap">
             <LineChart className="w-7 h-7 md:w-8 md:h-8 text-primary" />
-            Historical Index Analytics
+            Historical Analytics
           </h1>
-          <p className="text-xs text-muted-foreground mt-1">
-            Browse calculated multi-month volatility cones and standard deviation anchors.
-          </p>
+          
         </div>
         <button 
            onClick={handleRefresh}

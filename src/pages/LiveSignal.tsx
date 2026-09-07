@@ -66,8 +66,8 @@ export default function LiveSignal() {
         <div className="flex items-center gap-2.5">
           <Radio className="w-5 h-5 text-primary" />
           <div>
-            <h1 className="text-lg md:text-2xl font-bold tracking-tight">Live Signal</h1>
-            <p className="text-xs text-muted-foreground">Index RSI signal + the ATM option's own RSI confirmation.</p>
+            <h1 className="text-lg md:text-2xl font-bold tracking-tight whitespace-nowrap">Live Signal</h1>
+            
           </div>
         </div>
         <button onClick={() => refetch()} className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-card hover:bg-popover transition-colors text-muted-foreground">

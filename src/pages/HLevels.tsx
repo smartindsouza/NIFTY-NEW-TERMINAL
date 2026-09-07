@@ -58,8 +58,8 @@ export default function HLevels() {
         <div className="flex items-center gap-2.5">
           <Layers className="w-5 h-5 text-primary" />
           <div>
-            <h1 className="text-lg md:text-2xl font-bold tracking-tight">H Levels Journal</h1>
-            <p className="text-xs text-muted-foreground">Auto-filled: every day's values from your chart's H Levels indicator are captured here — no extra entry needed. Manual box below is only for corrections or past dates. After ~30+ days we run the formula hunt.</p>
+            <h1 className="text-lg md:text-2xl font-bold tracking-tight whitespace-nowrap">H Levels</h1>
+            
           </div>
         </div>
       </div>

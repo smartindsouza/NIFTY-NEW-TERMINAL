@@ -105,8 +105,8 @@ export function InstitutionalFlow() {
     <div className="w-full max-w-[1100px] mx-auto px-3 md:px-6 py-4 md:py-6 space-y-5">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl md:text-2xl font-semibold text-foreground">Institutional flow</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Daily exchange cash-market activity in one view</p>
+          <h1 className="text-xl md:text-2xl font-semibold text-foreground whitespace-nowrap">Institutional Flow</h1>
+          
         </div>
         {latest && (
           <span className={`shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold tracking-wide ${
