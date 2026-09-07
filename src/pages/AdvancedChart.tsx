@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search, ChartNoAxesCombined, Star } from "lucide-react";
+import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search, ChartNoAxesCombined } from "lucide-react";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { getDivergences } from "../lib/divergence";
@@ -9667,16 +9667,16 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               </button>
               {isIndicatorsOpen && (
                 <div className="fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto md:overflow-hidden bg-card border border-white/10 md:border-0 rounded-md py-1.5 z-[45] shadow-2xl flex flex-col">
-                  <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase">Available Indicators</div>
+                  <div className="order-0 px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase">Available Indicators</div>
                   
                   {/* Previous Day High/Low */}
-                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showPdhPdl) ? "order-1" : "order-2"}`}>
                     <button
                       onClick={() => setShowPdhPdl(!showPdhPdl)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        <Star size={14} className={(showPdhPdl) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showPdhPdl) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showPdhPdl) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">Previous Day High/Low</span>
                     </button>
@@ -9694,13 +9694,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* 15m Opening Range (first-15-min high/low lines) */}
-                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showOpeningRange) ? "order-1" : "order-2"}`}>
                     <button
                       onClick={() => setShowOpeningRange(!showOpeningRange)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        <Star size={14} className={(showOpeningRange) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showOpeningRange) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showOpeningRange) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">15 min High-Low</span>
                     </button>
@@ -9709,13 +9709,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
                   {/* Market Structure (BOS / CHoCH) — an index study */}
                   {!isOptionView && (
-                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showStructure) ? "order-1" : "order-2"}`}>
                     <button
                       onClick={() => setShowStructure(!showStructure)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        <Star size={14} className={(showStructure) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showStructure) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showStructure) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">BOS-CHoCH</span>
                     </button>
@@ -9724,13 +9724,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   )}
 
                   {/* Directional Zones (ported TradingView indicator; replaced Order Blocks) */}
-                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showOrderBlocks) ? "order-1" : "order-2"}`}>
                     <button
                       onClick={() => setShowOrderBlocks(!showOrderBlocks)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        <Star size={14} className={(showOrderBlocks) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showOrderBlocks) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showOrderBlocks) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">Directional Zones</span>
                     </button>
@@ -9751,7 +9751,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* TP & SL — settings only; there is nothing to draw, so no toggle. */}
-                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                  <div className="order-3 flex items-center justify-between px-3 hover:bg-muted transition-colors group">
                     <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 text-left flex-grow">
                       <div className="w-4" />
                       <span>TP &amp; SL</span>
@@ -9769,13 +9769,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* Fair Value Gaps */}
-                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showFvg) ? "order-1" : "order-2"}`}>
                     <button
                       onClick={() => setShowFvg(!showFvg)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        <Star size={14} className={(showFvg) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showFvg) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showFvg) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">Fair Value Gaps</span>
                     </button>
@@ -9783,13 +9783,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* Demand / Supply Zones */}
-                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showDsZones) ? "order-1" : "order-2"}`}>
                     <button
                       onClick={() => setShowDsZones(!showDsZones)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        <Star size={14} className={(showDsZones) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showDsZones) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showDsZones) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">Demand/Supply Zones</span>
                     </button>
@@ -9807,13 +9807,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* Level Touch Alerts */}
-                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(levelAlertsOn) ? "order-1" : "order-2"}`}>
                     <button
                       onClick={() => setLevelAlertsOn(!levelAlertsOn)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        <Star size={14} className={(levelAlertsOn) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(levelAlertsOn) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(levelAlertsOn) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">Level Touch Alerts</span>
                     </button>
@@ -9821,13 +9821,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* Zone Tap Alerts — the ported Pine script's own alert */}
-                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(zoneTapAlertsOn) ? "order-1" : "order-2"}`}>
                     <button
                       onClick={() => setZoneTapAlertsOn(!zoneTapAlertsOn)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        <Star size={14} className={(zoneTapAlertsOn) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(zoneTapAlertsOn) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(zoneTapAlertsOn) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">Zone Tap Alerts</span>
                     </button>
@@ -9835,13 +9835,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* Breakout Authenticity Alerts */}
-                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(breakoutAlertsOn) ? "order-1" : "order-2"}`}>
                     <button
                       onClick={() => setBreakoutAlertsOn(!breakoutAlertsOn)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        <Star size={14} className={(breakoutAlertsOn) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(breakoutAlertsOn) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(breakoutAlertsOn) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">Breakout-Fakeouts</span>
                     </button>
@@ -9849,13 +9849,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* Support/Resistance Lines */}
-                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showSnR) ? "order-1" : "order-2"}`}>
                     <button
                       onClick={() => setShowSnR(!showSnR)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        <Star size={14} className={(showSnR) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showSnR) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showSnR) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">Support-Resistance Lines</span>
                     </button>
@@ -9876,13 +9876,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       option chart, but leaving the switch visible invited turning on
                       something that could never draw. */}
                   {!isOptionView && (
-                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showOiBars) ? "order-1" : "order-2"}`}>
                     <button
                       onClick={() => setShowOiBars(!showOiBars)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        <Star size={14} className={(showOiBars) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showOiBars) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showOiBars) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">OI Bars</span>
                     </button>
@@ -9901,13 +9901,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   )}
 
                   {/* RSI */}
-                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showRsi) ? "order-1" : "order-2"}`}>
                     <button
                       onClick={() => setShowRsi(!showRsi)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        <Star size={14} className={(showRsi) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showRsi) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showRsi) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">RSI</span>
                     </button>
@@ -9925,13 +9925,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* Bollinger Bands */}
-                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showBB) ? "order-1" : "order-2"}`}>
                     <button
                       onClick={() => setShowBB(!showBB)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        <Star size={14} className={(showBB) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showBB) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showBB) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">Bollinger Bands</span>
                     </button>
@@ -9949,13 +9949,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* H Levels */}
-                  <div className="flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showHLevels) ? "order-1" : "order-2"}`}>
                     <button
                       onClick={() => setShowHLevels(!showHLevels)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
                     >
                       <div className="w-4 flex items-center justify-center">
-                        <Star size={14} className={(showHLevels) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showHLevels) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showHLevels) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">H Levels</span>
                     </button>
@@ -9977,8 +9977,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     onClick={() => setShowDiagnostic(!showDiagnostic)}
                     className="flex items-center gap-2 px-3 py-2 text-sm text-foreground/80 hover:bg-muted hover:text-foreground transition-colors text-left"
                   >
-                    <div className="w-4 flex items-center justify-center">
-                      <Star size={14} className={(showDiagnostic) ? "text-amber-400 fill-amber-400" : "text-muted-foreground/35"} />
+                    <div className={`w-4 flex items-center justify-center ${(showDiagnostic) ? "order-1" : "order-2"}`}>
+                      <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showDiagnostic) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showDiagnostic) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                     </div>
                     <span className="truncate">Diagnostic Panel</span>
                   </button>
