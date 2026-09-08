@@ -2,6 +2,62 @@ import { getKiteClient, getIndexFuturesTokens } from "./kite_service.js";
 import { getLatestTick } from "./ticker_service.js";
 import { aggregateCandles } from "./aggregator.js";
 import { scoreBounceAt } from "./bounce_conviction.js";
+import Database from "better-sqlite3";
+
+// ============================================================================
+// PERSISTENT TA CACHE — survives restarts, which the in-memory cache does not.
+//
+// A cold /api/ta computation fetches ~100 days from Zerodha and runs every
+// indicator: two to three seconds. The memory cache above holds a result for 60s,
+// but every deploy restarts the process and empties it, so the first load after
+// any deploy is cold. This keeps the last computed result per (symbol, timeframe)
+// on disk and serves it as STALE-WHILE-REVALIDATE: on a cold start the caller
+// gets the persisted result immediately and the real computation runs in the
+// background, registered in inFlightRequests so concurrent callers dedupe onto it.
+//
+// Freshness is judged against the market, not a fixed TTL. While the market is
+// open a persisted result is served only if it is under two minutes old, and the
+// client's inject poll — which asks again every few seconds during the session —
+// picks up the refreshed result within one cycle. When the market is closed the
+// candles cannot have changed, so any result from the last 24h is served.
+//
+// Mock data is never persisted. Only the shape a real response has.
+// ============================================================================
+const TA_DATA_DIR = process.env.KITE_DATA_DIR || '.';
+let taDb: any = null;
+try {
+  taDb = new Database(`${TA_DATA_DIR}/ta_cache.db`);
+  taDb.pragma('journal_mode = WAL');
+  taDb.exec(`CREATE TABLE IF NOT EXISTS ta_cache (key TEXT PRIMARY KEY, payload TEXT NOT NULL, at INTEGER NOT NULL)`);
+} catch (e) {
+  console.error('[ta-cache] persistent cache unavailable:', (e as any)?.message || e);
+  taDb = null;
+}
+function persistTa(key: string, data: any): void {
+  if (!taDb || !data || data.isMock || !Array.isArray(data.candles) || data.candles.length < 20) return;
+  try { taDb.prepare('INSERT OR REPLACE INTO ta_cache (key, payload, at) VALUES (?, ?, ?)').run(key, JSON.stringify(data), Date.now()); }
+  catch (e) { /* disk trouble must never break the live path */ }
+}
+function readPersistedTa(key: string): { data: any; at: number } | null {
+  if (!taDb) return null;
+  try {
+    const row: any = taDb.prepare('SELECT payload, at FROM ta_cache WHERE key = ?').get(key);
+    if (!row) return null;
+    const data = JSON.parse(row.payload);
+    if (!data || !Array.isArray(data.candles) || data.candles.length < 20) return null;
+    return { data, at: Number(row.at) };
+  } catch (e) { return null; }
+}
+// 09:00-15:45 IST Mon-Fri: the same data window the client polls in.
+function marketDataWindowOpen(): boolean {
+  const ist = new Date(Date.now() + 5.5 * 3600000);
+  const day = ist.getUTCDay(), mins = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  return day !== 0 && day !== 6 && mins >= 9 * 60 && mins < 15 * 60 + 45;
+}
+function persistedIsServable(at: number): boolean {
+  const age = Date.now() - at;
+  return marketDataWindowOpen() ? age <= 2 * 60 * 1000 : age <= 24 * 3600 * 1000;
+}
 
 function calculateRSI(closes: number[], period: number = 14) {
   if (closes.length <= period) return new Array(closes.length).fill(50);
@@ -458,6 +514,14 @@ export async function getTechnicalAnalysis(
         return await inFlightRequests.get(cacheKey);
       }
 
+      // COLD START: nothing in memory and nothing in flight. If a servable
+      // persisted result exists, hand it back NOW and let the real computation
+      // run behind it. The persisted copy is seeded into the memory cache with
+      // its ORIGINAL timestamp, so the 60s rule above still treats it as due for
+      // a full refresh rather than pinning it for another minute.
+      const persisted = readPersistedTa(cacheKey);
+      const servePersisted = persisted && persistedIsServable(persisted.at);
+
       const fetchPromise = (async () => {
         // Format a Date as an IST string for Kite API ("YYYY-MM-DD HH:MM:SS").
         // The Kite SDK formats dates using the server's LOCAL timezone, but Kite
@@ -742,20 +806,24 @@ export async function getTechnicalAnalysis(
           };
           
           cacheMap.set(cacheKey, { data: resultData, lastUpdate: Date.now(), lastFullFetch: Date.now() });
+          persistTa(cacheKey, resultData);
           return resultData;
         }
         throw new Error("Empty history format");
       })();
       
       inFlightRequests.set(cacheKey, fetchPromise);
-      try {
-        const res = await fetchPromise;
-        inFlightRequests.delete(cacheKey);
-        return res;
-      } catch (err) {
-        inFlightRequests.delete(cacheKey);
-        throw err;
+      // Background completion for the stale-while-revalidate case. The promise
+      // must be observed either way, or a failed refresh becomes an unhandled
+      // rejection.
+      fetchPromise.then(() => inFlightRequests.delete(cacheKey), () => inFlightRequests.delete(cacheKey));
+
+      if (servePersisted && persisted) {
+        cacheMap.set(cacheKey, { data: persisted.data, lastUpdate: persisted.at, lastFullFetch: persisted.at });
+        kiteDiagnostics.cacheHits++;
+        return { ...persisted.data, servedFrom: 'persisted', staleSec: Math.round((Date.now() - persisted.at) / 1000) };
       }
+      return await fetchPromise;
     }
   } catch (e: any) {
     console.error(`[NIFTY DIAGNOSTIC] Error fetching historical TA for ${instrument_token} / ${timeframeMin}m:`, e.message || e);
@@ -878,6 +946,7 @@ export async function getTechnicalAnalysis(
     };
 
   cacheMap.set(cacheKey, { data: result, lastUpdate: now, lastFullFetch: now });
+  persistTa(cacheKey, result);
 
   return result;
 }
