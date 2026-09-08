@@ -4904,7 +4904,6 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const [tradeTabInstr, setTradeTabInstr] = useState<any>(null);
   const autoOpenedForRef = useRef<string>('');
   // Chart-side manual exit: first tap arms (CONFIRM EXIT?), second tap fires.
-  const [exitBusy, setExitBusy] = useState(false);
   const slActivePosRef = useRef<any>(null);
   // The SL/TP levels currently ARMED on the server, per symbol. The chart used to
   // recompute -10%/+20% from entry every time it drew these lines, and the effect
@@ -10696,7 +10695,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   setShowJumpToLatest(false);
                 }}
                 title="Scroll to the latest candle"
-                className="absolute bottom-3 right-[60px] z-[55] h-9 w-9 rounded-full bg-primary/90 text-white shadow-lg flex items-center justify-center hover:bg-primary transition-colors animate-in fade-in duration-200"
+                className="absolute bottom-14 md:bottom-3 right-3 md:right-[60px] z-[55] h-9 w-9 rounded-full bg-primary/90 text-white shadow-lg flex items-center justify-center hover:bg-primary transition-colors animate-in fade-in duration-200"
               >
                 <ChevronsRight size={18} />
               </button>
@@ -11027,47 +11026,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
           {/* One-tap EXIT — its own full-width bar BELOW the chart, so it never
               covers a single candle and is an easy thumb target on mobile. */}
-          {/* EXIT sits in a fixed-height slot that BOTH panes render whenever a
-              position is open. Previously it appeared only where tradeTabInstr was
-              set — the option side — so that pane carried an extra row the spot
-              pane did not, and the two charts came out different heights. A slot of
-              the same height on both sides makes the charts match by construction,
-              and puts the button on one line under both, which is what was asked
-              for. tradeTabInstr is dropped from the condition: the position, not
-              which chart you happen to be looking at, is what makes an exit valid. */}
-          {slActivePos && !slActivePos.testMode && (
-            <button
-              disabled={exitBusy}
-              onClick={async () => {
-                if (exitBusy) return;
-                setExitBusy(true);
-                const sym = slActivePos.symbol;
-                try {
-                  const r = await fetch('/api/exit-position', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ tradingsymbol: sym })
-                  });
-                  const d = await r.json().catch(() => ({ success: false }));
-                  if (d.success || d.alreadyClosed) {
-                    try {
-                      const raw = localStorage.getItem('active_positions');
-                      const list = raw ? JSON.parse(raw) : [];
-                      localStorage.setItem('active_positions', JSON.stringify(list.filter((p: any) => p.symbol !== sym)));
-                      window.dispatchEvent(new Event('active_positions_updated'));
-                    } catch (e) {}
-                    toast.success(`${sym} exit order placed`);
-                  } else {
-                    toast.error(`Exit failed: ${d.error || 'order rejected'} — position still OPEN, check Zerodha.`);
-                  }
-                } catch (e) {
-                  toast.error('Exit failed: network error — position may still be OPEN, check Zerodha.');
-                }
-                setExitBusy(false);
-              }}
-              className={`w-full shrink-0 h-11 mt-1.5 rounded-lg text-sm font-mono font-bold tracking-widest transition-colors bg-red-500/15 text-red-400 border border-red-500/40 active:bg-red-500 active:text-white ${exitBusy ? 'opacity-50' : ''}`}>
-              {exitBusy ? 'EXITING…' : `EXIT ${slActivePos.symbol}`}
-            </button>
-          )}
+          {/* The EXIT bar under the chart is GONE. It was a full-width button
+              directly beneath the candles and immediately above the mobile
+              toolbar — the easiest thing on the screen to hit by accident, and
+              hitting it places a reversing MARKET order. Exiting stays available
+              where it belongs: the active-positions card, behind a deliberate
+              tap to expand. Removing it also frees the vertical space that was
+              pushing the option-reality strip under the bottom bar. */}
+
           {/* RSI Chart */}
           <div ref={rsiPaneRef} style={rsiPaneHeight ? { height: `${rsiPaneHeight}px` } : undefined} className={`relative w-full shrink-0 h-[140px] md:h-[200px] ${!showRsi ? 'hidden' : ''}`}>
             <div
@@ -11323,7 +11289,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           rendered but unreachable. Every chip is shrink-0 and nowrap so the row
           scrolls rather than squeezing them to unreadable widths. */}
       {isOptionView && optionReality && (
-        <div className="h-7 flex flex-nowrap items-center gap-1.5 px-1 pb-1 shrink-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="h-7 flex flex-nowrap items-center gap-1.5 px-1 pb-1 max-md:mb-[calc(4rem+env(safe-area-inset-bottom))] shrink-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <span className={`shrink-0 whitespace-nowrap text-[10px] font-mono font-bold px-2 py-1 rounded ${optionReality.inTheMoney ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'}`}>
             {optionReality.inTheMoney
               ? `IN THE MONEY by ${Math.round(optionReality.intrinsic)}`
