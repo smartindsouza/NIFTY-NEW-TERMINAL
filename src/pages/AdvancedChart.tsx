@@ -9791,10 +9791,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           />
         )}
         <div className={`relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-row md:items-center md:h-9 md:flex-nowrap md:min-w-0 max-md:pr-24 ${isPane && !isOptionPane ? 'md:w-[calc(200%_+_1px)] md:z-30' : ''} ${isOptionPane ? 'md:hidden' : ''}`}>
-          {/* Row 1 — title and clock. Still allowed to shrink, but with the full
-              width available it should never need to. */}
-          <div className="flex items-center gap-2 md:gap-3 min-w-0 md:shrink">
-          <h1 className="text-base md:text-sm font-semibold text-foreground tracking-tight whitespace-nowrap md:truncate">
+          {/* Row 1 — title and clock. shrink-0 and no truncate: the title was
+              still ending in an ellipsis after the row was widened, because the
+              flex algorithm shrinks every shrinkable child proportionally and
+              this group was one of them. With the row spanning both panes there
+              is no reason for the title to give way at all. */}
+          <div className="flex items-center gap-2 md:gap-3 min-w-0 md:shrink-0">
+          <h1 className="text-base md:text-sm font-semibold text-foreground tracking-tight whitespace-nowrap">
             {isFocusedChart && selectedInstrument
               ? prettyOptionName(selectedInstrument.tradingsymbol,
                   contractExpiry?.symbol === selectedInstrument.tradingsymbol ? contractExpiry.expiry : null)
