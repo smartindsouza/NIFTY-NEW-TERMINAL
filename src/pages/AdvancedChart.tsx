@@ -9699,15 +9699,16 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             badges stacked into two rows — and since the option pane does not render
             this block at all, the spot pane ended up that much taller and the two
             chart boxes never lined up. Mobile keeps its wrapping row. */}
-        {/* md:h-9 + nowrap pins this to ONE row so the two split panes keep equal
-            chrome and their charts line up — but on the full-width chart it also
-            clipped whatever did not fit, which is how the futures-pressure badge
-            ended up half cut off at the right edge. That constraint is only
-            needed in a pane, so off the split the row is free to wrap and show
-            everything; the chart below flexes into whatever height is left. */}
-        <div className={`relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-row md:items-center md:min-w-0 max-md:pr-24 ${isPane ? 'md:h-9 md:flex-nowrap' : 'md:h-auto md:flex-wrap'} ${isOptionPane ? 'md:hidden' : ''}`}>
-          {/* Row 1 — title and clock */}
-          <div className="flex items-center gap-2 md:gap-3 min-w-0">
+        {/* ONE row, no wrapping and no sideways scrolling. Everything fits by
+            SHRINKING: the title truncates first, then the badge row compresses.
+            The earlier version clipped because the row was fixed-height and its
+            children refused to shrink, so the overflow simply went under the
+            edge — the fix is min-w-0 on the flex children, without which a flex
+            item will not shrink below its content and overflow is inevitable. */}
+        <div className={`relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-row md:items-center md:h-9 md:flex-nowrap md:min-w-0 max-md:pr-24 ${isOptionPane ? 'md:hidden' : ''}`}>
+          {/* Row 1 — title and clock. shrink allowed, so the title gives up width
+              before any badge is squeezed. */}
+          <div className="flex items-center gap-2 md:gap-3 min-w-0 md:shrink">
           <h1 className="text-base md:text-sm font-semibold text-foreground tracking-tight whitespace-nowrap md:truncate">
             {isFocusedChart && selectedInstrument
               ? prettyOptionName(selectedInstrument.tradingsymbol,
@@ -9726,9 +9727,12 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           </div>
           {/* Row 2 — live tick, trend and signal badges. Hidden on desktop while
               the search is expanded, so the field has the width to itself. */}
-          <div className={`${showBiases ? 'flex' : 'hidden'} ${searchExpanded ? 'md:hidden' : 'md:flex'} absolute md:static top-full left-0 mt-1 md:mt-0 z-[80] md:z-auto flex-col md:flex-row items-start md:items-center gap-1.5 md:gap-4 bg-card md:bg-transparent border border-white/10 md:border-0 rounded-lg md:rounded-none p-2 md:p-0 shadow-xl md:shadow-none max-h-[60vh] md:max-h-none overflow-y-auto md:overflow-visible ${isPane ? 'md:flex-nowrap md:min-w-0 md:overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden' : 'md:flex-wrap'}`}>
+          <div className={`${showBiases ? 'flex' : 'hidden'} ${searchExpanded ? 'md:hidden' : 'md:flex'} absolute md:static top-full left-0 mt-1 md:mt-0 z-[80] md:z-auto flex-col md:flex-row items-start md:items-center gap-1.5 md:gap-4 bg-card md:bg-transparent border border-white/10 md:border-0 rounded-lg md:rounded-none p-2 md:p-0 shadow-xl md:shadow-none max-h-[60vh] md:max-h-none overflow-y-auto md:overflow-visible md:flex-nowrap md:min-w-0 md:shrink md:overflow-hidden`}>
           {lastTickMessage && !isOptionPane && (
-             <span className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-md text-xs font-mono font-bold animate-pulse whitespace-nowrap">
+             <span
+               /* The longest badge by far, so it is the one that gives way: it
+                  truncates instead of forcing the badges after it off the edge. */
+               className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-md text-xs font-mono font-bold animate-pulse whitespace-nowrap md:min-w-0 md:truncate md:shrink">
               LIVE TICK: {lastTickMessage}
              </span>
           )}
