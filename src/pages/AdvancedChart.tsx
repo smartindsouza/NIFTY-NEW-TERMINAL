@@ -4178,6 +4178,31 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   trailTpRef.current = trailTpOn;
   useEffect(() => { try { localStorage.setItem('trailTpOn', String(trailTpOn)); } catch (e) {} }, [trailTpOn]);
 
+  // Outside-tap dismissal for the diagnostics panel and the strike box.
+  //
+  // The previous attempt put a transparent catcher behind each one and listened
+  // on it. Both catchers deployed and neither worked, because a React handler
+  // on an overlay only fires if that overlay is what the browser hit-tests —
+  // and this page has a dozen stacking contexts plus a chart that takes pointer
+  // capture. A DOCUMENT listener has no such dependency: it sees every
+  // pointerdown wherever it lands. Same reason it fixed the line drags.
+  //
+  // Capture phase, so it runs before anything calls stopPropagation on the way
+  // up — the chart's own handlers do exactly that during a drag.
+  const diagPanelRef = useRef<HTMLDivElement>(null);
+  const triggerBoxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showDiagnostic && !triggerBox) return;
+    const onDown = (ev: PointerEvent) => {
+      const t = ev.target as Node | null;
+      if (!t) return;
+      if (showDiagnostic && diagPanelRef.current && !diagPanelRef.current.contains(t)) setShowDiagnostic(false);
+      if (triggerBox && triggerBoxRef.current && !triggerBoxRef.current.contains(t)) setTriggerBox(null);
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => document.removeEventListener('pointerdown', onDown, true);
+  }, [showDiagnostic, triggerBox]);
+
   const [rrMenuOpen, setRrMenuOpen] = useState(false);
   const rrMenuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -9528,14 +9553,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           chart consumes pointer events for drags before they become clicks. */}
       {showDiagnostic && (
         <div
-          className="fixed inset-0 z-40"
-          onPointerDown={() => setShowDiagnostic(false)}
-          aria-hidden="true"
-        />
-      )}
-      {showDiagnostic && (
-        <div
-          onPointerDown={(e) => e.stopPropagation()}
+          ref={diagPanelRef}
           className="fixed bottom-6 right-6 z-50 bg-card/95 backdrop-blur-md border border-0 p-4 rounded-lg text-xs font-mono w-[340px] max-h-[80vh] overflow-y-auto">
           <div className="flex items-center justify-between border-b border-0 pb-2 mb-2">
             <span className="text-muted-foreground font-semibold uppercase">Diagnostic Panel</span>
@@ -11307,9 +11325,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           onClick={() => setTriggerBox(null)}
         >
           <div
+            ref={triggerBoxRef}
             className="bg-card border border-border rounded-xl p-4 w-full max-w-[300px]"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
           >
             <div className="text-sm font-bold">{prettyOptionName(triggerBox.contract.tradingsymbol, triggerBox.contract.expiry)}</div>
             <div className="text-[11px] text-muted-foreground mb-3">
