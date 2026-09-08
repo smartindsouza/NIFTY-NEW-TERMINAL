@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search, ChartNoAxesCombined } from "lucide-react";
+import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search, ChartNoAxesCombined, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { getDivergences } from "../lib/divergence";
@@ -4167,6 +4167,17 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     return () => window.removeEventListener('pointerdown', close);
   }, [indexMenuOpen, optionMenuOpen]);
 
+  // Trailing TP switch, beside Quick Trade. ON: after the half books at TP1 the
+  // target climbs 20% a rung and the stop follows one rung behind. OFF: the
+  // remaining half simply exits at TP2. Persisted; ON by default because that is
+  // the behaviour Martin asked for.
+  const [trailTpOn, setTrailTpOn] = useState(() => {
+    try { return localStorage.getItem('trailTpOn') !== 'false'; } catch (e) { return true; }
+  });
+  const trailTpRef = useRef(trailTpOn);
+  trailTpRef.current = trailTpOn;
+  useEffect(() => { try { localStorage.setItem('trailTpOn', String(trailTpOn)); } catch (e) {} }, [trailTpOn]);
+
   const [rrMenuOpen, setRrMenuOpen] = useState(false);
   const rrMenuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -5018,6 +5029,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           tradingsymbol: pos.symbol, sl: +(+slPx).toFixed(2), tp: +(+tpPx).toFixed(2), entry: pos.entryPrice,
           // Trailing exit (pullback method) — the server builds the state at arm time.
           trail: !!tpSlDefaultsRef.current.trail,
+          trailTp: !!trailTpRef.current,
           optionType: pos.optionType || (String(pos.symbol).endsWith('PE') ? 'PE' : 'CE'),
         })
       });
@@ -5385,7 +5397,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       // rendered "T undefined", and it was the tag that made a moved target look
       // like a premature booking on Martin's chart.
       const tr = premRuleRef.current?.trail;
-      const stage = tr ? (tr.costMoved ? ' · SL AT COST' : '') + (tr.tp1Done ? ' · ½ booked' : '') : '';
+      const stage = tr
+        ? (tr.rung > 1 ? ` · R${tr.rung}` : tr.costMoved ? ' · SL AT COST' : '')
+          + (tr.tp1Done ? ' · ½ booked' : '')
+        : '';
       return `${label} ${sign(pct)}${Math.abs(pct).toFixed(1)}%${money}${stage}`;
     };
 
@@ -10334,6 +10349,16 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           </div>
           </div>
           <div className="flex items-center gap-2 flex-none max-w-[45%] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents md:min-w-0 md:basis-auto pr-1">
+          {/* Trailing TP, beside Quick Trade. Distinct icon and colour so the two
+              switches are not mistaken for each other at a glance. */}
+          <button
+            onClick={() => setTrailTpOn(v => !v)}
+            title={trailTpOn ? 'Trailing TP ON — target climbs 20% a rung, stop follows one rung behind' : 'Trailing TP OFF — remaining half exits at TP2'}
+            aria-label="Trailing TP"
+            className={`${isReferenceChart ? 'hidden' : 'flex'} items-center justify-center h-9 w-9 shrink-0 md:order-2 rounded-md border border-0 transition-colors ${trailTpOn ? 'bg-emerald-500/20 text-emerald-400' : 'bg-muted/40 text-muted-foreground'}`}
+          >
+            <TrendingUp size={17} />
+          </button>
           {(
           <div className={`ml-auto md:ml-0 ${isReferenceChart ? 'hidden' : 'flex'} items-center justify-center gap-2 h-9 w-9 shrink-0 md:order-2 cursor-pointer rounded-md border border-0 transition-colors ${quickTradeEnabled ? "bg-primary/20" : "bg-muted/40"}`} onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled' : 'Quick Trade disabled'); } catch (e) {} }} title="Quick Trade">
              {/* Icon on both platforms now; the desktop label and toggle are gone.

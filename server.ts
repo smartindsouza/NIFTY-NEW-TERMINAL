@@ -1213,7 +1213,7 @@ setInterval(() => {
   // set: validates the position live on Zerodha, then arms/updates the rule.
   app.post('/api/premium-exit/set', express.json(), async (req, res) => {
     try {
-      const { tradingsymbol, sl, tp, entry, trail, optionType: optTypeIn } = req.body || {};
+      const { tradingsymbol, sl, tp, entry, trail, trailTp, optionType: optTypeIn } = req.body || {};
       const slN = Number(sl), tpN = Number(tp);
       if (!tradingsymbol || !isFinite(slN) || !isFinite(tpN) || slN <= 0 || tpN <= 0) {
         return res.status(400).json({ success: false, error: 'Missing tradingsymbol / sl / tp' });
@@ -1272,6 +1272,9 @@ setInterval(() => {
             side, optionType, entry: entryPx, sl: slN, tp: tpN,
             qty: Math.abs(pos.quantity), lotSize, minPullbackSpot,
             spotNow: isNifty && latestSpot > 0 ? latestSpot : null,
+            // Absent means ON, so an older client cannot silently disable the
+            // ladder; the switch has to be turned off deliberately.
+            trailTp: trailTp !== false && trailTp !== 'false',
           });
           if (prev && prev.entry === entryPx) {
             // A DRAG DEFINES THE LEVELS. The dragged SL and TP become SL1 and TP1
@@ -1288,6 +1291,9 @@ setInterval(() => {
             // never un-book quantity that has actually been sold.
             st.tp1Done = prev.tp1Done; st.costMoved = prev.costMoved;
             st.qtyRemaining = prev.qtyRemaining; st.lastPrem = prev.lastPrem;
+            // Ladder progress carries too, so a drag mid-ladder does not send the
+            // runner back to rung 1 and re-book a half that is already sold.
+            st.rung = prev.rung; st.prevTp = prev.prevTp;
             // st.tp1 / origRisk / origReward come from THIS arm, i.e. the dragged
             // levels — createTrailState already set them from slN and tpN above.
           }
@@ -1325,7 +1331,7 @@ setInterval(() => {
       let trailSummary: any = null;
       const st = trailStates.get(sym);
       if (st) trailSummary = { tp1: st.tp1, tp1Done: st.tp1Done, costMoved: st.costMoved,
-        qtyRemaining: st.qtyRemaining };
+        qtyRemaining: st.qtyRemaining, rung: st.rung, trailTp: st.trailTp };
       return res.json({ rule: { ...row, trail: trailSummary } });
     } catch (e: any) { return res.status(500).json({ rule: null, error: e?.message || String(e) }); }
   });
