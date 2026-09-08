@@ -10442,16 +10442,23 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                 the button immediately to its left already uses that glyph for
                 "reload the chart", and two identical icons doing different things
                 is how a user ends up reloading the app when they meant to pull
-                their positions. Down-arrow-into-tray reads as "fetch", it is
-                tinted, and it carries a POS label. */}
+                their positions. Down-arrow-into-tray reads as "fetch" and it is
+                tinted green, which is what carries the meaning now that the text
+                label is gone. */}
             <button
               onClick={() => { try { window.dispatchEvent(new CustomEvent('sync_positions_request')); } catch (e) {} }}
-              className="md:hidden shrink-0 md:order-4 flex items-center justify-center gap-0.5 h-9 px-2 rounded-md bg-emerald-500/15 text-emerald-300"
+              /* Icon only, and on BOTH platforms. The "Sync" text made this the
+                 widest control in a bar that already scrolls on a phone, so it sat
+                 off the right edge — the label cost more than it explained, given
+                 the icon is tinted and unique. And md:hidden meant desktop never
+                 had it at all, which was not deliberate: the button is one of two
+                 ways to pull positions, and hiding it left only the other. Same
+                 square footprint as the reload button beside it. */
+              className="shrink-0 md:order-4 flex items-center justify-center h-9 w-9 rounded-md bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 transition-colors"
               title="Sync open positions from Zerodha"
               aria-label="Sync open positions from Zerodha"
             >
               <DownloadCloud size={18} />
-              <span className="text-[10px] font-bold tracking-wide">Sync</span>
             </button>
           {SHOW_BIAS_BADGES && (
           <div className="shrink-0 md:order-5 [&>button]:h-9"><BounceConviction taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} /></div>
