@@ -12,7 +12,7 @@ import { useGlobalWebSocket } from './hooks/useWebSocket';
 import { ActivePositions } from './components/ActivePositions';
 import { Toaster } from '@/components/ui/sonner';
 import { DiagnosticsPanel } from './components/DiagnosticsPanel';
-import { Cpu, RefreshCw } from 'lucide-react';
+import { Cpu } from 'lucide-react';
 import { useUserSettings } from './hooks/useUserSettings';
 
 // Lazy load all terminal pages & tabs to maximize performance & reduce bundle size
@@ -98,7 +98,6 @@ export default function App() {
   })();
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [location] = useLocation();
-  const [reloading, setReloading] = useState(false);
   // Reload button shows only on the chart page; it tells the chart (via a window
   // event the chart already listens for) to refetch history and snap to the latest candle.
   const onChart = location.startsWith('/advanced-chart');
@@ -109,13 +108,6 @@ export default function App() {
     window.addEventListener('toggle_diagnostics', f);
     return () => window.removeEventListener('toggle_diagnostics', f);
   }, []);
-  const reloadChart = () => {
-    setReloading(true);
-    try { window.dispatchEvent(new CustomEvent('chart_reload')); } catch (e) {}
-    // Also hard-refresh the whole app so the reload button reloads the page,
-    // not just the chart data. Small delay lets the snap-to-latest fire first.
-    setTimeout(() => { try { window.location.reload(); } catch (e) {} }, 150);
-  };
   const { settings } = useUserSettings();
 
   useEffect(() => {
@@ -237,16 +229,11 @@ export default function App() {
           <Cpu className={`w-5 h-5 ${showDiagnostics ? 'animate-pulse' : ''}`} />
         </button>
 
-        {/* Reload chart → refetch history and snap to the latest candle (chart page only) */}
-        {onChart && (
-          <button
-            onClick={reloadChart}
-            className="fixed bottom-36 max-md:hidden right-20 md:bottom-6 md:right-24 z-50 p-3.5 rounded-full border border-0 bg-card text-foreground/80 hover:text-foreground hover:bg-accent hover:text-accent-foreground transition-all duration-300 flex items-center justify-center cursor-pointer"
-            title="Reload chart to the latest candle"
-          >
-            <RefreshCw className={`w-5 h-5 ${reloading ? 'animate-spin' : ''}`} />
-          </button>
-        )}
+        {/* The floating reload button is gone: every chart already carries its own
+            refresh in its toolbar, and unlike this one that refreshes the chart
+            you are looking at rather than hard-reloading the whole app. Two
+            controls a few pixels apart, one of which silently reloaded the page,
+            was the wrong pair to leave next to the diagnostics toggle. */}
 
         {/* Floating live diagnostics view */}
         {showDiagnostics && (
