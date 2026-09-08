@@ -8,7 +8,6 @@ import { evaluateBreakout } from "../lib/breakoutQuality";
 import { calculateBollingerBands } from "../indicators/bollingerBands";
 import { format } from "date-fns";
 import { SymbolSearch } from "../components/SymbolSearch";
-import AiMarketRead from "../components/AiMarketRead";
 import MarketContext from "../components/MarketContext";
 import BounceConviction from "../components/BounceConviction";
 import { DownloadCloud } from 'lucide-react';
@@ -9847,7 +9846,6 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
              </span>
           )}
           </div>
-          <AiMarketRead taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} model="claude-sonnet-4-6" />
           <MarketContext />
         </div>
 
