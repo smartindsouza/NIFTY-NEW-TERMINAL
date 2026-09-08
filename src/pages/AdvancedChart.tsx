@@ -9885,7 +9885,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                 </button>
                 {optionMenuOpen && (
                   <div className="absolute left-0 top-full mt-1 z-[60] min-w-[190px] max-h-[50vh] overflow-y-auto bg-card border border-white/10 rounded-md shadow-2xl">
-                    {openCharts.map((c) => {
+                    {openCharts
+                      .filter((c, i, arr) => arr.findIndex(x => x.tradingsymbol === c.tradingsymbol) === i)
+                      .map((c) => {
                       const active = selectedInstrument?.tradingsymbol === c.tradingsymbol;
                       return (
                         <div key={c.tradingsymbol}
@@ -9944,7 +9946,12 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
           {/* Charts opened this session, kept after the index tabs. Tapping an index
               does not close them; the highlight simply moves. */}
-          {(isSpotPane ? [] : openCharts).map((c) => {
+          {/* Deduplicated by symbol: a contract opened by two different paths
+              (auto-open on a position, a search, a strike tap) must still be one
+              tab, not two competing ones. */}
+          {(isSpotPane ? [] : openCharts)
+            .filter((c, i, arr) => arr.findIndex(x => x.tradingsymbol === c.tradingsymbol) === i)
+            .map((c) => {
             const active = selectedInstrument?.tradingsymbol === c.tradingsymbol;
             return (
               <div key={c.tradingsymbol}
@@ -9980,21 +9987,12 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             );
           })}
 
-          {/* The traded position's tab. Two faults, both visible in Martin's
-              screenshot: it printed the RAW tradingsymbol (NIFTY2691523900CE)
-              instead of the readable name, and it rendered even when that exact
-              contract already had a tab from openCharts — so the same chart
-              appeared twice, once readable and once not. It now shows only when
-              the contract has no tab of its own, and uses the same formatter as
-              every other tab. */}
-          {tradeTabInstr && !isSpotPane
-            && !openCharts.some(c => c.tradingsymbol === tradeTabInstr.tradingsymbol) && (
-          <button onClick={() => setSelectedInstrument(tradeTabInstr)}
-            className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${selectedInstrument && String(selectedInstrument.instrument_token) === String(tradeTabInstr.instrument_token) ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
-            {prettyOptionName(tradeTabInstr.tradingsymbol,
-              contractExpiry?.symbol === tradeTabInstr.tradingsymbol ? contractExpiry.expiry : null)}
-          </button>
-          )}
+          {/* The traded position's tab is GONE. Opening a position already opens
+              its chart, so this only ever duplicated a tab that existed — and when
+              the two disagreed even slightly it showed the same chart twice, once
+              readable and once as a raw tradingsymbol. That is the third chip in
+              Martin's screenshot. tradeTabInstr is still used for the EXIT button
+              and the premium rule; only its tab is removed. */}
           <TradePnl sync={premSync} />
           </div>
         <div ref={bottomBarRef} className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-3 py-1.5 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-nowrap justify-end w-screen md:w-auto md:ml-auto md:mb-1 md:rounded-md md:border md:border-border/60 md:bg-muted/30 max-w-[100vw] overflow-x-hidden md:overflow-visible">
