@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { X, RefreshCw, Sparkles, TrendingUp, TrendingDown, Shield } from "lucide-react";
+import { X, RefreshCw, Sparkles, TrendingUp, TrendingDown, Shield, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { addWsMessageListener } from "../hooks/useWebSocket";
@@ -113,6 +113,15 @@ export function ActivePositions() {
   const [netPnl, setNetPnl] = useState<number | null>(null); // day net P&L: realized today + live unrealized
   const [pollError, setPollError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  // Collapsed = the header strip only: count, net P&L, a chevron. The full card
+  // with every position and its EXIT button opens on tap. Persisted, because a
+  // BTST holder does not want to re-collapse it every morning. Not hidden
+  // outright: the strip keeps the position count and P&L in view, so a trade
+  // cannot be forgotten just because its card is out of the way.
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem('activePositionsCollapsed') === 'true'; } catch (e) { return false; }
+  });
+  useEffect(() => { try { localStorage.setItem('activePositionsCollapsed', String(collapsed)); } catch (e) {} }, [collapsed]);
 
   // Fetch active positions from localStorage
   const loadPositions = () => {
@@ -560,8 +569,15 @@ export function ActivePositions() {
 
   return (
     <div className="w-full mb-1.5 border border-emerald-500/20 bg-emerald-950/10 rounded-xl overflow-hidden backdrop-blur-sm transition-all duration-300 animate-in slide-in-from-top-4">
-      {/* Ribbon Header */}
-      <div className="px-4 py-2 border-b border-emerald-500/15 bg-emerald-500/5 flex items-center justify-between">
+      {/* Ribbon Header — the whole row is the collapse toggle */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setCollapsed(c => !c)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCollapsed(c => !c); } }}
+        title={collapsed ? 'Show positions' : 'Hide positions'}
+        className={`px-4 py-2 bg-emerald-500/5 flex items-center justify-between cursor-pointer select-none hover:bg-emerald-500/10 transition-colors ${collapsed ? '' : 'border-b border-emerald-500/15'}`}
+      >
         <div className="flex items-center gap-2">
           <span className="flex h-2 w-2 relative">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -581,13 +597,17 @@ export function ActivePositions() {
               </span>
             </div>
           )}
-          <div className="text-[10px] text-emerald-400/60 font-mono hidden sm:block">
-            Click "Exit" to place instant reversing MARKET order
-          </div>
+          {!collapsed && (
+            <div className="text-[10px] text-emerald-400/60 font-mono hidden sm:block">
+              Click "Exit" to place instant reversing MARKET order
+            </div>
+          )}
+          <ChevronDown className={`w-4 h-4 text-emerald-400/70 transition-transform ${collapsed ? '' : 'rotate-180'}`} />
         </div>
       </div>
 
-      {/* Grid of Active Positions */}
+      {/* Grid of Active Positions — hidden while collapsed */}
+      {!collapsed && (
       <div className="divide-y divide-emerald-500/10 bg-card/65">
         {positions.map((pos) => {
           const ltpInfo = lastPrices[pos.id] || { price: pos.entryPrice, dir: "flat" };
@@ -781,6 +801,7 @@ export function ActivePositions() {
           );
         })}
       </div>
+      )}
     </div>
   );
 }
