@@ -9601,7 +9601,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           ref={diagPanelRef}
           className="fixed bottom-6 right-6 z-50 bg-card/95 backdrop-blur-md border border-0 p-4 rounded-lg text-xs font-mono w-[340px] max-h-[80vh] overflow-y-auto">
           <div className="flex items-center justify-between border-b border-0 pb-2 mb-2">
-            <span className="text-muted-foreground font-semibold uppercase">Diagnostic Panel</span>
+            {/* Named for what it reports: the Zerodha connection (request rate,
+                cache, 429s) and the contract this chart is bound to. Distinct
+                from App Diagnostics, which measures the app itself. */}
+            <span className="text-muted-foreground font-semibold uppercase">Broker Connection</span>
             <button onClick={() => setShowDiagnostic(false)} className="text-muted-foreground hover:text-foreground transition-colors">
               <X size={14} />
             </button>
@@ -10465,7 +10468,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     </button>
                   </div>
 
-                  {/* Diagnostic Panel */}
+                  {/* Broker Connection — Kite request rate and the bound contract */}
                   <button
                     onClick={() => setShowDiagnostic(!showDiagnostic)}
                     className="flex items-center gap-2 px-3 py-2 text-sm text-foreground/80 hover:bg-muted hover:text-foreground transition-colors text-left"
@@ -10473,7 +10476,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     <div className={`w-4 flex items-center justify-center ${(showDiagnostic) ? "order-1" : "order-2"}`}>
                       <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showDiagnostic) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showDiagnostic) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                     </div>
-                    <span className="truncate">Diagnostic Panel</span>
+                    <span className="truncate">Broker Connection</span>
                   </button>
                 </div>
               )}

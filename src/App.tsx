@@ -224,7 +224,7 @@ export default function App() {
               ? 'bg-emerald-500 text-black border-emerald-400 hover:bg-emerald-400' 
               : 'bg-card text-foreground/80 border-0 hover:text-foreground hover:bg-accent hover:text-accent-foreground'
           }`}
-          title="Toggle Terminal Diagnostics"
+          title="Toggle App Diagnostics"
         >
           <Cpu className={`w-5 h-5 ${showDiagnostics ? 'animate-pulse' : ''}`} />
         </button>

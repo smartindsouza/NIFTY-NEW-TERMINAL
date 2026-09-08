@@ -51,7 +51,7 @@ export function DiagnosticsPanel() {
       <CardHeader className="border-b border-0 pb-3">
         <CardTitle className="text-xs font-bold tracking-widest uppercase text-foreground/80 flex items-center justify-between">
           <span className="flex items-center gap-1.5">
-            <Activity className="w-4 h-4 text-emerald-400 animate-pulse" /> Live Terminal Diagnostics
+            <Activity className="w-4 h-4 text-emerald-400 animate-pulse" /> App Diagnostics
           </span>
           <span className="flex items-center gap-2">
             <span className="text-[9px] font-mono normal-case tracking-normal text-muted-foreground" title="Layout heights: viewport · main · chart page · chart container · chart canvas · document. If doc exceeds vp the page scrolls.">
