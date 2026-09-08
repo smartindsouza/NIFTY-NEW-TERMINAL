@@ -1274,13 +1274,22 @@ setInterval(() => {
             spotNow: isNifty && latestSpot > 0 ? latestSpot : null,
           });
           if (prev && prev.entry === entryPx) {
-            // carry progress across a re-arm (chart drag)
-            // Carry only what still exists: whether the half has booked and
-            // whether the stop has moved to cost. Re-arming must not un-book a
-            // half already taken or re-trigger the cost move.
+            // A DRAG DEFINES THE LEVELS. The dragged SL and TP become SL1 and TP1
+            // outright — the half books at the target now on the chart, and the
+            // 70% mark is measured to that target. This previously carried tp1
+            // and origReward from the ORIGINAL arm, so moving the lines changed
+            // what was drawn but not what the engine acted on: the half would
+            // still have booked at the old 1:2 target. That is the behaviour
+            // Martin hit mid-trade, and it is why st.tp1 is deliberately NOT
+            // carried over here.
+            //
+            // Only PROGRESS carries: a half already booked stays booked, and a
+            // stop already moved to cost is not re-triggered. Re-arming must
+            // never un-book quantity that has actually been sold.
             st.tp1Done = prev.tp1Done; st.costMoved = prev.costMoved;
             st.qtyRemaining = prev.qtyRemaining; st.lastPrem = prev.lastPrem;
-            st.tp1 = prev.tp1; st.origRisk = prev.origRisk; st.origReward = prev.origReward;
+            // st.tp1 / origRisk / origReward come from THIS arm, i.e. the dragged
+            // levels — createTrailState already set them from slN and tpN above.
           }
           trailJson = JSON.stringify(st);
           console.log(`[trail] ARMED ${tradingsymbol} ${optionType} lot=${lotSize} minPullback=${minPullbackSpot} delta=${delta.toFixed(2)} spotStructure=${isNifty ? 'on' : 'off (non-NIFTY)'}`);
