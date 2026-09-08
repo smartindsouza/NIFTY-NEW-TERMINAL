@@ -9507,8 +9507,24 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   return (
     <div ref={pageRootRef} data-layout="page" className="px-1 pt-0 pb-0 md:px-8 md:py-0 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto flex flex-col h-[calc(100dvh-124px-env(safe-area-inset-bottom))] md:h-full md:min-h-0 overflow-hidden relative">
       
+      {/* Tap anywhere outside to dismiss. The panel is a floating readout, not a
+          setting to leave switched on, so it should get out of the way the moment
+          attention moves — and it sits over the bottom-right of the chart, which
+          is exactly where the price action is. The indicator toggle is unchanged,
+          so turning it back on from the menu still works.
+          onPointerDownCapture is used rather than a click listener because the
+          chart consumes pointer events for drags before they become clicks. */}
       {showDiagnostic && (
-        <div className="fixed bottom-6 right-6 z-50 bg-card/95 backdrop-blur-md border border-0 p-4 rounded-lg text-xs font-mono w-[340px] max-h-[80vh] overflow-y-auto">
+        <div
+          className="fixed inset-0 z-40"
+          onPointerDown={() => setShowDiagnostic(false)}
+          aria-hidden="true"
+        />
+      )}
+      {showDiagnostic && (
+        <div
+          onPointerDown={(e) => e.stopPropagation()}
+          className="fixed bottom-6 right-6 z-50 bg-card/95 backdrop-blur-md border border-0 p-4 rounded-lg text-xs font-mono w-[340px] max-h-[80vh] overflow-y-auto">
           <div className="flex items-center justify-between border-b border-0 pb-2 mb-2">
             <span className="text-muted-foreground font-semibold uppercase">Diagnostic Panel</span>
             <button onClick={() => setShowDiagnostic(false)} className="text-muted-foreground hover:text-foreground transition-colors">
@@ -11229,8 +11245,19 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
       {/* Trigger box — minimal by request: side, product, lots, margin, confirm. */}
       {triggerBox && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setTriggerBox(null)}>
-          <div className="bg-card border border-border rounded-xl p-4 w-full max-w-[300px]" onClick={(e) => e.stopPropagation()}>
+        <div
+          /* Dismiss on pointerdown as well as click: on a touchscreen a tap that
+             drifts a couple of pixels never becomes a click, so an outside tap
+             could leave the box sitting there. pointerdown fires regardless. */
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+          onPointerDown={() => setTriggerBox(null)}
+          onClick={() => setTriggerBox(null)}
+        >
+          <div
+            className="bg-card border border-border rounded-xl p-4 w-full max-w-[300px]"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="text-sm font-bold">{prettyOptionName(triggerBox.contract.tradingsymbol, triggerBox.contract.expiry)}</div>
             <div className="text-[11px] text-muted-foreground mb-3">
               now {triggerBox.current.toFixed(2)} · fires on a{' '}
