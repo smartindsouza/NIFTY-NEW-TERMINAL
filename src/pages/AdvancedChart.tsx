@@ -9695,7 +9695,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             already shows them. Rendering them again over the option chart just
             costs it vertical space. Hidden on the option PANE only: mobile has no
             panes, so it is untouched, and the full-width desktop chart keeps them. */}
-        <div className={`relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-col md:items-start md:gap-1 md:flex-nowrap md:min-w-0 max-md:pr-24 ${isOptionPane ? 'md:hidden' : ''}`}>
+        {/* ONE ROW on desktop. It was md:flex-col, so the title/clock and the
+            badges stacked into two rows — and since the option pane does not render
+            this block at all, the spot pane ended up that much taller and the two
+            chart boxes never lined up. Mobile keeps its wrapping row. */}
+        <div className={`relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-row md:items-center md:h-9 md:flex-nowrap md:min-w-0 max-md:pr-24 ${isOptionPane ? 'md:hidden' : ''}`}>
           {/* Row 1 — title and clock */}
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
           <h1 className="text-base md:text-sm font-semibold text-foreground tracking-tight whitespace-nowrap md:truncate">
@@ -9824,9 +9828,19 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             OUTSIDE that scroller, because dropdowns opened from inside it would
             be clipped. */}
         <div className={`items-center gap-2 px-0 pb-0 shrink-0 border-b border-border/60 bg-background/40 ${isFocusedChart ? 'hidden' : 'flex'}`}>
-          {/* MOBILE: two dropdowns in place of the tab strip. */}
-          {!isOptionPane && (
-          <div className="md:hidden flex items-center gap-1.5 px-1.5 py-1 min-w-0" onPointerDown={(e) => e.stopPropagation()}>
+          {/* The option pane hides the header, so without this the spot pane would
+              be exactly one header taller and the two chart boxes would never line
+              up. Same reservation trick as the option-reality strip: identical
+              height on both sides, so alignment holds by construction rather than
+              by the two panes happening to contain the same things. */}
+          {isOptionPane && <div className="hidden md:block h-9 shrink-0" aria-hidden="true" />}
+
+          {/* Two dropdowns in place of the tab strip, on every size. Desktop had
+              a scrolling strip of index tabs plus one tab per opened option chart,
+              which is the same crowding the phone had. The index dropdown is
+              omitted on the option pane, exactly as the index tabs were. */}
+          <div className="flex items-center gap-1.5 px-1.5 py-1 min-w-0" onPointerDown={(e) => e.stopPropagation()}>
+            {!isOptionPane && (
             <div className="relative">
               <button
                 onClick={() => { setOptionMenuOpen(false); setIndexMenuOpen(o => !o); }}
@@ -9850,6 +9864,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                 </div>
               )}
             </div>
+            )}
 
             {/* Option charts. Hidden entirely when none are open rather than
                 showing an empty menu. */}
@@ -9905,9 +9920,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               </div>
             )}
           </div>
-          )}
 
-          <div className="hidden md:flex items-center gap-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden min-w-0">
+          {/* The old tab strip is retired — the dropdowns above replace it on every
+              size. Kept rendered but hidden rather than deleted in the same commit
+              as a layout change, so nothing that reads its refs breaks. */}
+          <div className="hidden items-center gap-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden min-w-0">
           {!isOptionPane && (<button onClick={() => { setUnderlying('NIFTY'); setSelectedInstrument(null); }}
             className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${!selectedInstrument && underlying === 'NIFTY' ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
             NIFTY 50
