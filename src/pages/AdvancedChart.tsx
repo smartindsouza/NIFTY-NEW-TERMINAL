@@ -5380,8 +5380,12 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       const money = qty > 0
         ? ` · ${sign(move)}₹${Math.abs(Math.round(move * qty)).toLocaleString('en-IN')}`
         : '';
+      // Only two states exist now: stop moved to cost, and half booked. The T1/T2
+      // trail stage is gone with the trailing rules — leaving it would have
+      // rendered "T undefined", and it was the tag that made a moved target look
+      // like a premature booking on Martin's chart.
       const tr = premRuleRef.current?.trail;
-      const stage = tr ? (tr.trailCount > 0 ? ` · T${tr.trailCount}` : tr.costMoved ? ' · COST' : '') + (tr.tp1Done ? ' · ½ booked' : '') : '';
+      const stage = tr ? (tr.costMoved ? ' · SL AT COST' : '') + (tr.tp1Done ? ' · ½ booked' : '') : '';
       return `${label} ${sign(pct)}${Math.abs(pct).toFixed(1)}%${money}${stage}`;
     };
 

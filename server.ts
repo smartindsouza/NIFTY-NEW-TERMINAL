@@ -118,7 +118,7 @@ async function getLiveFlow(): Promise<{ day: FlowDay | null; source: string; rea
 
 // Live TrailState per armed symbol. The DB copy is the durable one; this is the
 // one the tick path mutates. Written back on every ACTION (a trail, a booking,
-// the 70% move) — never per tick, since premLowSincePeak is the only per-tick
+// the 70% move) — never per tick, since lastPrem is the only per-tick
 // field and losing it across a restart just means one pullback's premium low
 // is measured from the restart rather than the peak.
 const trailStates = new Map<string, TrailState>();
@@ -1245,7 +1245,7 @@ setInterval(() => {
       try { ruleToken = await getOptionToken(pos.exchange || 'NFO', tradingsymbol); } catch (e) { ruleToken = null; }
       // TRAILING EXIT (Martin's pullback method). Built here, at arm time, from
       // the position's real quantity and lot size. Re-arming an already-trailing
-      // rule with new SL/TP keeps the trail's progress (tp1Done, trailCount) but
+      // rule with new SL/TP keeps its progress (tp1Done, costMoved) but
       // adopts the new levels — a drag on the chart must not reset the booking.
       let trailJson: string | null = null;
       if (trail === true || trail === 'true') {
@@ -1275,9 +1275,11 @@ setInterval(() => {
           });
           if (prev && prev.entry === entryPx) {
             // carry progress across a re-arm (chart drag)
-            st.tp1Done = prev.tp1Done; st.costMoved = prev.costMoved; st.trailCount = prev.trailCount;
-            st.qtyRemaining = prev.qtyRemaining; st.phase = prev.phase; st.swingHigh = prev.swingHigh;
-            st.pbLowSpot = prev.pbLowSpot; st.premLowSincePeak = prev.premLowSincePeak; st.lastPrem = prev.lastPrem;
+            // Carry only what still exists: whether the half has booked and
+            // whether the stop has moved to cost. Re-arming must not un-book a
+            // half already taken or re-trigger the cost move.
+            st.tp1Done = prev.tp1Done; st.costMoved = prev.costMoved;
+            st.qtyRemaining = prev.qtyRemaining; st.lastPrem = prev.lastPrem;
             st.tp1 = prev.tp1; st.origRisk = prev.origRisk; st.origReward = prev.origReward;
           }
           trailJson = JSON.stringify(st);
@@ -1313,8 +1315,8 @@ setInterval(() => {
       if (!row || row.status !== 'ACTIVE') return res.json({ rule: null });
       let trailSummary: any = null;
       const st = trailStates.get(sym);
-      if (st) trailSummary = { tp1: st.tp1, tp1Done: st.tp1Done, costMoved: st.costMoved, trailCount: st.trailCount,
-        qtyRemaining: st.qtyRemaining, phase: st.phase, swingHigh: st.swingHigh, minPullbackSpot: st.minPullbackSpot };
+      if (st) trailSummary = { tp1: st.tp1, tp1Done: st.tp1Done, costMoved: st.costMoved,
+        qtyRemaining: st.qtyRemaining };
       return res.json({ rule: { ...row, trail: trailSummary } });
     } catch (e: any) { return res.status(500).json({ rule: null, error: e?.message || String(e) }); }
   });

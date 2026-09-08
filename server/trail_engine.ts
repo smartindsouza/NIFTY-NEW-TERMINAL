@@ -7,23 +7,19 @@
 // Keeping it pure is what lets it be replayed against recorded sessions before
 // it is ever trusted with a live position.
 //
-// THE RULES, restated exactly as agreed (example: buy Call at 100, SL 90, TP 120):
-//   Booking     Half the quantity exits at TP1 (120). TP1 never moves.
-//   70% rule    Premium reaches 70% of the reward (114) → SL to entry (100).
-//               One time only; a pullback trail that already lifted the SL above
-//               entry is never lowered by it.
-//   Pullback    Judged on the SPOT chart. Swing high and pullback low come from
-//   trail       5-minute CLOSES; the break is confirmed by a 1-minute CLOSE above
-//               the swing high. A pullback must be at least a quarter of the
-//               original risk in spot terms to count, so noise cannot trail you.
-//               On the break, the SL moves to the PREMIUM's low during that
-//               pullback — except the first trail: if that premium low stayed
-//               above entry, the SL goes to entry (cost to cost) instead. Every
-//               later trail goes to the actual premium low, however high.
-//   Target      Multiplies by 1.2 on every trail (120 → 144 → 172.8). TP1 stays.
-//   Runner      The remaining half exits at the trailing SL or trailing TP.
-//   Sequence    One swing at a time: after a trail, the NEXT swing high is the
-//               one that must break. Earlier highs are done with.
+// THE RULES — reduced to two on Martin's instruction, 8 Sep, after the pullback
+// trailing moved a target mid-trade and cost him profit:
+//   1. Half the quantity exits at TP1. TP1 NEVER MOVES.
+//   2. When the premium reaches 70% of the way from entry to TP1, the stop moves
+//      to entry. Once only.
+// Nothing else. The pullback/structure trailing, the x1.2 target multiplication
+// and the trailing-TP exit are all GONE — not disabled behind a flag, removed,
+// so there is no path by which they can fire again.
+//
+// The runner therefore has no target: after the half books at TP1 it rides until
+// the stop is hit, which after the 70% move is entry. That is the direct
+// consequence of keeping only these two rules and is stated here so it is a
+// decision on the record rather than an omission.
 //
 // DIRECTIONS. Two independent signs make the same code serve every case:
 //   premDir  +1 when a rising premium is good for us (long option), −1 short.
@@ -48,11 +44,6 @@ export type TrailState = {
   lotSize: number;
   tp1Done: boolean;
   costMoved: boolean;
-  trailCount: number;
-  phase: 'rising' | 'pulling';
-  swingHigh: number | null;         // favourable spot extreme since the last trail
-  pbLowSpot: number | null;         // adverse spot extreme during the current pullback
-  premLowSincePeak: number | null;  // adverse PREMIUM extreme since swingHigh was set
   lastPrem: number | null;
 };
 
@@ -83,10 +74,7 @@ export function createTrailState(input: {
     origReward: Math.abs(input.tp - input.entry),
     minPullbackSpot: Math.max(0, input.minPullbackSpot),
     qtyTotal: input.qty, qtyRemaining: input.qty, lotSize: Math.max(1, input.lotSize),
-    tp1Done: false, costMoved: false, trailCount: 0,
-    phase: 'rising',
-    swingHigh: input.spotNow ?? null,
-    pbLowSpot: null, premLowSincePeak: null, lastPrem: null,
+    tp1Done: false, costMoved: false, lastPrem: null,
   };
 }
 
@@ -109,47 +97,33 @@ export function onPremiumTick(s: TrailState, ltp: number): TrailAction[] {
   const out: TrailAction[] = [];
   if (!(ltp > 0)) return out;
   s.lastPrem = ltp;
-  if (s.premLowSincePeak === null || fav(s.premDir, ltp, s.premLowSincePeak) < 0) s.premLowSincePeak = ltp;
 
-  // 1. Stop.
+  // 1. Stop first — protection before anything else.
   if (fav(s.premDir, ltp, s.sl) <= 0) {
-    out.push({ type: 'EXIT_ALL', reason: s.trailCount > 0 || s.costMoved ? 'TRAIL_SL' : 'SL' });
+    out.push({ type: 'EXIT_ALL', reason: s.costMoved ? 'SL_AT_COST' : 'SL' });
     return out;
   }
 
-  // 2. TP1 — book half, exactly once.
+  // 2. TP1 — book half, exactly once. TP1 never moves, so this fires at the
+  //    level that was armed and shown on the chart, not at a moved one.
   if (!s.tp1Done && fav(s.premDir, ltp, s.tp1) >= 0) {
     s.tp1Done = true;
     const half = halfQty(s);
     if (half <= 0) {
-      // One lot cannot be halved: TP1 is a full exit. Stated to the user.
-      out.push({ type: 'EXIT_ALL', reason: 'TARGET' });
+      out.push({ type: 'EXIT_ALL', reason: 'TARGET' });   // one lot cannot be halved
       return out;
     }
     s.qtyRemaining = s.qtyTotal - half;
     out.push({ type: 'EXIT_PARTIAL', qty: half, reason: 'TP1_HALF' });
-    // If nothing has trailed yet the runner's target is still TP1 itself, and
-    // the very next tick would close the runner at the same price — defeating
-    // the point of a runner. Lift it by the same 1.2 a trail would apply.
-    if (fav(s.premDir, s.tp, s.tp1) <= 0) {
-      s.tp = r2(s.premDir === 1 ? s.tp * 1.2 : s.tp * 0.8);
-      out.push({ type: 'SET_TP', tp: s.tp, reason: 'TP1_RUNNER_LIFT' });
-    }
     return out;
   }
 
-  // 3. Trailing target for the runner.
-  if (s.tp1Done && fav(s.premDir, ltp, s.tp) >= 0) {
-    out.push({ type: 'EXIT_ALL', reason: 'TRAIL_TP' });
-    return out;
-  }
-
-  // 4. 70% rule — once.
+  // 3. 70% of the way from entry to TP1 -> stop to entry. Once.
   if (!s.costMoved) {
     const threshold = s.entry + s.premDir * 0.7 * s.origReward;
     if (fav(s.premDir, ltp, threshold) >= 0) {
       s.costMoved = true;
-      if (fav(s.premDir, s.entry, s.sl) > 0) {          // never lower a trailed SL
+      if (fav(s.premDir, s.entry, s.sl) > 0) {          // never loosen a stop
         s.sl = r2(s.entry);
         out.push({ type: 'SET_SL', sl: s.sl, reason: 'COST_70PCT' });
       }
@@ -158,54 +132,8 @@ export function onPremiumTick(s: TrailState, ltp: number): TrailAction[] {
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// 5-minute spot close: identifies the swing high and the pullback low.
-// ---------------------------------------------------------------------------
-export function onSpotClose5m(s: TrailState, close: number): TrailAction[] {
-  if (!(close > 0)) return [];
-  if (s.swingHigh === null) { s.swingHigh = close; s.phase = 'rising'; s.premLowSincePeak = s.lastPrem; return []; }
-  if (s.phase === 'rising') {
-    if (fav(s.spotDir, close, s.swingHigh) > 0) {
-      s.swingHigh = close;
-      s.premLowSincePeak = s.lastPrem;   // the pullback's premium low is measured from the peak
-    } else if (fav(s.spotDir, s.swingHigh, close) >= s.minPullbackSpot) {
-      s.phase = 'pulling';
-      s.pbLowSpot = close;
-    }
-    return [];
-  }
-  // pulling: deepen the low if it goes further
-  if (s.pbLowSpot === null || fav(s.spotDir, s.pbLowSpot, close) > 0) s.pbLowSpot = close;
-  return [];
-}
-
-// ---------------------------------------------------------------------------
-// 1-minute spot close: confirms the break of the swing high and trails.
-// ---------------------------------------------------------------------------
-export function onSpotClose1m(s: TrailState, close: number): TrailAction[] {
-  const out: TrailAction[] = [];
-  if (!(close > 0) || s.phase !== 'pulling' || s.swingHigh === null) return out;
-  if (fav(s.spotDir, close, s.swingHigh) <= 0) return out;
-
-  // Break confirmed. Where did the premium bottom during this pullback?
-  const low = s.premLowSincePeak ?? s.lastPrem;
-  if (low !== null) {
-    let newSl = low;
-    if (s.trailCount === 0 && fav(s.premDir, low, s.entry) > 0) newSl = s.entry;   // first trail: cost to cost
-    newSl = r2(newSl);
-    if (fav(s.premDir, newSl, s.sl) > 0) {                                        // only ever tighten
-      s.sl = newSl;
-      out.push({ type: 'SET_SL', sl: s.sl, reason: `TRAIL_${s.trailCount + 1}` });
-    }
-  }
-  s.tp = r2(s.premDir === 1 ? s.tp * 1.2 : s.tp * 0.8);
-  out.push({ type: 'SET_TP', tp: s.tp, reason: `TRAIL_${s.trailCount + 1}` });
-  s.trailCount += 1;
-
-  // Next swing starts here.
-  s.phase = 'rising';
-  s.swingHigh = close;
-  s.pbLowSpot = null;
-  s.premLowSincePeak = s.lastPrem;
-  return out;
-}
+// Spot closes no longer affect anything: the structure rules are gone. Kept as
+// inert exports so the server's candle feed does not need unwinding in the same
+// commit as a money-affecting behaviour change — one thing at a time.
+export function onSpotClose5m(_s: TrailState, _close: number): TrailAction[] { return []; }
+export function onSpotClose1m(_s: TrailState, _close: number): TrailAction[] { return []; }
