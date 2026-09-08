@@ -9107,7 +9107,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               // canvas callback.
               const marketOpen = isReferenceChartRef.current
                 ? isGiftSessionOpen(istDay, istMinutes)
-                : (istDay !== 0 && istDay !== 6 && istMinutes >= 9 * 60 + 15 && istMinutes <= 15 * 60 + 40);
+                // Strict < on the close: <= treated every second of the 15:40
+                // minute as open, so the countdown ran on for a minute after the
+                // session had ended. Every other close gate in this file uses <.
+                : (istDay !== 0 && istDay !== 6 && istMinutes >= 9 * 60 + 15 && istMinutes < 15 * 60 + 40);
 
               // Countdown background matches spot price color slightly darker or same? 
               // User said "keep the market closed background and the countdown to close background to match the spot price background"
@@ -9123,9 +9126,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                 ctx.fillText('CLOSED', x + badgeWidth / 2, badgeY + badgeHeight / 2);
               } else {
                 const now = Math.floor(nowMs / 1000) + serverTimeOffsetRef.current;
-                const barDurationSeconds = parseInt(timeframe, 10) * 60;
-                const alignedBarStart = Math.floor(now / barDurationSeconds) * barDurationSeconds;
-                const remainingSec = Math.max(0, alignedBarStart + barDurationSeconds - now);
+                const tfMinNow = parseInt(timeframe, 10) || 5;
+                // Count to the bar's REAL close, which for NSE instruments is capped
+                // at the session end: a 15m bar that starts 15:30 closes at 15:40,
+                // not 15:45. A plain wall-clock grid showed 15:45 and kept counting
+                // past the bell. GIFT keeps the wall-clock grid, matching how its
+                // candles are bucketed.
+                const nextClose = getNextMarketAlignedClose(now, tfMinNow, !isReferenceChartRef.current);
+                const remainingSec = Math.max(0, nextClose - now);
                 ctx.fillStyle = '#ffffff';
                 ctx.fillText(formatCountdown(remainingSec), x + badgeWidth / 2, badgeY + badgeHeight / 2);
               }
