@@ -119,7 +119,10 @@ export function ActivePositions() {
   // outright: the strip keeps the position count and P&L in view, so a trade
   // cannot be forgotten just because its card is out of the way.
   const [collapsed, setCollapsed] = useState<boolean>(() => {
-    try { return localStorage.getItem('activePositionsCollapsed') === 'true'; } catch (e) { return false; }
+    // Collapsed by DEFAULT: absent means collapsed, and only an explicit 'false'
+    // (the user opened it) expands. The previous version defaulted open, which
+    // made a BTST holder collapse it again after every restart.
+    try { return localStorage.getItem('activePositionsCollapsed') !== 'false'; } catch (e) { return true; }
   });
   useEffect(() => { try { localStorage.setItem('activePositionsCollapsed', String(collapsed)); } catch (e) {} }, [collapsed]);
 
