@@ -4178,30 +4178,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   trailTpRef.current = trailTpOn;
   useEffect(() => { try { localStorage.setItem('trailTpOn', String(trailTpOn)); } catch (e) {} }, [trailTpOn]);
 
-  // Outside-tap dismissal for the diagnostics panel and the strike box.
-  //
-  // The previous attempt put a transparent catcher behind each one and listened
-  // on it. Both catchers deployed and neither worked, because a React handler
-  // on an overlay only fires if that overlay is what the browser hit-tests —
-  // and this page has a dozen stacking contexts plus a chart that takes pointer
-  // capture. A DOCUMENT listener has no such dependency: it sees every
-  // pointerdown wherever it lands. Same reason it fixed the line drags.
-  //
-  // Capture phase, so it runs before anything calls stopPropagation on the way
-  // up — the chart's own handlers do exactly that during a drag.
+  // Refs for the two overlays dismissed by the document listener below. Declared
+  // here because the JSX that uses them lives above the effect.
   const diagPanelRef = useRef<HTMLDivElement>(null);
   const triggerBoxRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!showDiagnostic && !triggerBox) return;
-    const onDown = (ev: PointerEvent) => {
-      const t = ev.target as Node | null;
-      if (!t) return;
-      if (showDiagnostic && diagPanelRef.current && !diagPanelRef.current.contains(t)) setShowDiagnostic(false);
-      if (triggerBox && triggerBoxRef.current && !triggerBoxRef.current.contains(t)) setTriggerBox(null);
-    };
-    document.addEventListener('pointerdown', onDown, true);
-    return () => document.removeEventListener('pointerdown', onDown, true);
-  }, [showDiagnostic, triggerBox]);
 
   const [rrMenuOpen, setRrMenuOpen] = useState(false);
   const rrMenuRef = useRef<HTMLDivElement | null>(null);
@@ -5834,6 +5814,28 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     side: 'BUY' | 'SELL'; product: 'MIS' | 'NRML'; lots: number;
     lotMode: 'AUTO' | 'MANUAL';
   }>(null);
+
+  // Outside-tap dismissal for the diagnostics panel and the strike box. A
+  // DOCUMENT listener rather than a catcher overlay: an overlay handler only
+  // fires if the browser hit-tests that overlay, and this page has many stacking
+  // contexts plus a chart that takes pointer capture, so the catcher never heard
+  // the tap. Capture phase, so the chart's own stopPropagation cannot block it.
+  //
+  // Placed HERE, after triggerBox exists. It first went in ~80k characters
+  // earlier, where naming triggerBox in the dependency array read the binding
+  // before its declaration — evaluated during render, so it threw and blanked
+  // the page.
+  useEffect(() => {
+    if (!showDiagnostic && !triggerBox) return;
+    const onDown = (ev: PointerEvent) => {
+      const t = ev.target as Node | null;
+      if (!t) return;
+      if (showDiagnostic && diagPanelRef.current && !diagPanelRef.current.contains(t)) setShowDiagnostic(false);
+      if (triggerBox && triggerBoxRef.current && !triggerBoxRef.current.contains(t)) setTriggerBox(null);
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => document.removeEventListener('pointerdown', onDown, true);
+  }, [showDiagnostic, triggerBox]);
   const [triggerMargin, setTriggerMargin] = useState<null | { total: number; source: string } | 'unavailable' | 'loading'>(null);
   // Per-lot margin, fixed per contract/side/product. See the loop note below.
   const marginBaseRef = useRef<{ key: string; perLot: number } | null>(null);
