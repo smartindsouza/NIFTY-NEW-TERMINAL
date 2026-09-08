@@ -6736,6 +6736,18 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // finding the strike again. These are kept as their own list — switching to an
   // index changes which chart is ACTIVE, it does not close anything. Session-scoped
   // like the selected contract itself, so a fresh open of the app starts clean.
+  // Guard against the same contract being listed twice — the option dropdown and
+  // the tab strip both render straight from this list.
+  const dedupeCharts = (list: any[]) => {
+    const seen = new Set<string>();
+    return (list || []).filter((c) => {
+      const k = String(c?.tradingsymbol || '');
+      if (!k || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  };
+
   const [openCharts, setOpenCharts] = useState<any[]>(() => {
     try {
       // The spot pane owns no option tabs. It must not even LOAD them: holding a
@@ -9951,10 +9963,19 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             );
           })}
 
-          {tradeTabInstr && !isSpotPane && (
+          {/* The traded position's tab. Two faults, both visible in Martin's
+              screenshot: it printed the RAW tradingsymbol (NIFTY2691523900CE)
+              instead of the readable name, and it rendered even when that exact
+              contract already had a tab from openCharts — so the same chart
+              appeared twice, once readable and once not. It now shows only when
+              the contract has no tab of its own, and uses the same formatter as
+              every other tab. */}
+          {tradeTabInstr && !isSpotPane
+            && !openCharts.some(c => c.tradingsymbol === tradeTabInstr.tradingsymbol) && (
           <button onClick={() => setSelectedInstrument(tradeTabInstr)}
             className={`px-3 h-8 rounded-none text-xs font-mono font-bold transition-colors border-b-2 border-r border-r-border/40 ${selectedInstrument && String(selectedInstrument.instrument_token) === String(tradeTabInstr.instrument_token) ? 'border-b-primary text-primary bg-primary/10' : 'border-b-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
-            {tradeTabInstr.tradingsymbol}
+            {prettyOptionName(tradeTabInstr.tradingsymbol,
+              contractExpiry?.symbol === tradeTabInstr.tradingsymbol ? contractExpiry.expiry : null)}
           </button>
           )}
           <TradePnl sync={premSync} />
