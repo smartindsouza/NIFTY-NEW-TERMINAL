@@ -9725,9 +9725,16 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             children refused to shrink, so the overflow simply went under the
             edge — the fix is min-w-0 on the flex children, without which a flex
             item will not shrink below its content and overflow is inevitable. */}
-        <div className={`relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-row md:items-center md:h-9 md:flex-nowrap md:min-w-0 max-md:pr-24 ${isOptionPane ? 'md:hidden' : ''}`}>
-          {/* Row 1 — title and clock. shrink allowed, so the title gives up width
-              before any badge is squeezed. */}
+        {/* In split view this header belongs to the SPOT pane, so it was half a
+            screen wide and the tick badge truncated while the right half of the
+            row sat empty — the option pane's own header is hidden, so that space
+            is unused. The row now spans both panes, which is what makes it one
+            unbroken title line instead of one clipped to a pane.
+            200% + the 1px divider between the panes. Only in the split; the
+            full-width chart and mobile are already as wide as they can be. */}
+        <div className={`relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-row md:items-center md:h-9 md:flex-nowrap md:min-w-0 max-md:pr-24 ${isPane && !isOptionPane ? 'md:w-[calc(200%+1px)]' : ''} ${isOptionPane ? 'md:hidden' : ''}`}>
+          {/* Row 1 — title and clock. Still allowed to shrink, but with the full
+              width available it should never need to. */}
           <div className="flex items-center gap-2 md:gap-3 min-w-0 md:shrink">
           <h1 className="text-base md:text-sm font-semibold text-foreground tracking-tight whitespace-nowrap md:truncate">
             {isFocusedChart && selectedInstrument
@@ -9750,9 +9757,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           <div className={`${showBiases ? 'flex' : 'hidden'} ${searchExpanded ? 'md:hidden' : 'md:flex'} absolute md:static top-full left-0 mt-1 md:mt-0 z-[80] md:z-auto flex-col md:flex-row items-start md:items-center gap-1.5 md:gap-4 bg-card md:bg-transparent border border-white/10 md:border-0 rounded-lg md:rounded-none p-2 md:p-0 shadow-xl md:shadow-none max-h-[60vh] md:max-h-none overflow-y-auto md:overflow-visible md:flex-nowrap md:min-w-0 md:shrink md:overflow-hidden`}>
           {lastTickMessage && !isOptionPane && (
              <span
-               /* The longest badge by far, so it is the one that gives way: it
-                  truncates instead of forcing the badges after it off the edge. */
-               className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-md text-xs font-mono font-bold animate-pulse whitespace-nowrap md:min-w-0 md:truncate md:shrink">
+               /* No longer truncated: the row spans both panes now, so the tick
+                  reads in full. shrink stays as the fallback for a narrow window
+                  — it gives way before anything is clipped. */
+               className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-md text-xs font-mono font-bold animate-pulse whitespace-nowrap md:min-w-0 md:shrink">
               LIVE TICK: {lastTickMessage}
              </span>
           )}
