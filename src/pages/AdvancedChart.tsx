@@ -9699,7 +9699,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             badges stacked into two rows — and since the option pane does not render
             this block at all, the spot pane ended up that much taller and the two
             chart boxes never lined up. Mobile keeps its wrapping row. */}
-        <div className={`relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-row md:items-center md:h-9 md:flex-nowrap md:min-w-0 max-md:pr-24 ${isOptionPane ? 'md:hidden' : ''}`}>
+        {/* md:h-9 + nowrap pins this to ONE row so the two split panes keep equal
+            chrome and their charts line up — but on the full-width chart it also
+            clipped whatever did not fit, which is how the futures-pressure badge
+            ended up half cut off at the right edge. That constraint is only
+            needed in a pane, so off the split the row is free to wrap and show
+            everything; the chart below flexes into whatever height is left. */}
+        <div className={`relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-row md:items-center md:min-w-0 max-md:pr-24 ${isPane ? 'md:h-9 md:flex-nowrap' : 'md:h-auto md:flex-wrap'} ${isOptionPane ? 'md:hidden' : ''}`}>
           {/* Row 1 — title and clock */}
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
           <h1 className="text-base md:text-sm font-semibold text-foreground tracking-tight whitespace-nowrap md:truncate">
