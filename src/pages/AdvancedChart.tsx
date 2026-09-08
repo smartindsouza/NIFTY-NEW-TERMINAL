@@ -9587,7 +9587,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // overflow hidden so nothing can push the page into a scroll. The chart grows
   // to fill whatever the toolbar, tabs and strips leave. Mobile classes unchanged.
   return (
-    <div ref={pageRootRef} data-layout="page" className="px-1 pt-0 pb-0 md:px-8 md:py-0 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto flex flex-col h-[calc(100dvh-124px-env(safe-area-inset-bottom))] md:h-full md:min-h-0 overflow-y-hidden md:overflow-x-visible max-md:overflow-x-hidden relative">
+    <div ref={pageRootRef} data-layout="page" className="px-1 pt-0 pb-0 md:px-8 md:py-0 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto flex flex-col h-[calc(100dvh-124px-env(safe-area-inset-bottom))] md:h-full md:min-h-0 max-md:overflow-hidden md:overflow-visible relative">
       
       {/* Tap anywhere outside to dismiss. The panel is a floating readout, not a
           setting to leave switched on, so it should get out of the way the moment
@@ -9778,7 +9778,19 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             unbroken title line instead of one clipped to a pane.
             200% + the 1px divider between the panes. Only in the split; the
             full-width chart and mobile are already as wide as they can be. */}
-        <div className={`relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-row md:items-center md:h-9 md:flex-nowrap md:min-w-0 max-md:pr-24 ${isPane && !isOptionPane ? 'md:w-[calc(200%_+_1px)]' : ''} ${isOptionPane ? 'md:hidden' : ''}`}>
+        {isOptionPane && (
+          <div
+            /* The option pane does not render the header, but it must RESERVE its
+               height. Hiding it outright started that pane's stack 36px higher, so
+               its chart, EXIT bar and strip all sat lower than the spot pane's and
+               the two never aligned. An empty row of the same height fixes both
+               panes' chrome to the same total, and the spot pane's header extends
+               across this space. Desktop only; mobile has no panes. */
+            className="hidden md:block md:h-9 shrink-0"
+            aria-hidden="true"
+          />
+        )}
+        <div className={`relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-row md:items-center md:h-9 md:flex-nowrap md:min-w-0 max-md:pr-24 ${isPane && !isOptionPane ? 'md:w-[calc(200%_+_1px)] md:z-30' : ''} ${isOptionPane ? 'md:hidden' : ''}`}>
           {/* Row 1 — title and clock. Still allowed to shrink, but with the full
               width available it should never need to. */}
           <div className="flex items-center gap-2 md:gap-3 min-w-0 md:shrink">
