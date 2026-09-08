@@ -4268,6 +4268,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // here because the JSX that uses them lives above the effect.
   const diagPanelRef = useRef<HTMLDivElement>(null);
   const triggerBoxRef = useRef<HTMLDivElement>(null);
+  // Is the card currently open? The chart's click handler is built once per
+  // chart rebuild, so it cannot read the triggerBox state directly.
+  const triggerBoxOpenRef = useRef(false);
 
   const [rrMenuOpen, setRrMenuOpen] = useState(false);
   const rrMenuRef = useRef<HTMLDivElement | null>(null);
@@ -5899,6 +5902,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     side: 'BUY' | 'SELL'; product: 'MIS' | 'NRML'; lots: number;
     lotMode: 'AUTO' | 'MANUAL';
   }>(null);
+
+  triggerBoxOpenRef.current = !!triggerBox;
 
   // Outside-tap dismissal for the diagnostics panel and the strike box. A
   // DOCUMENT listener rather than a catcher overlay: an overlay handler only
@@ -8224,6 +8229,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           }
 
           if (isReferenceChartRef.current) return;   // GIFT NIFTY: measure only
+
+          // TAP TOGGLES THE CARD. With the card open, a tap on the chart used to
+          // do two things at once: the document listener closed it, and this
+          // handler immediately opened a new one at the newly tapped price — so
+          // it looked as though it never closed. When it is open, a tap does
+          // nothing here and only the close runs. The next tap opens it again.
+          if (triggerBoxOpenRef.current) return;
 
           // OPTION CHART: tapping buys THE CONTRACT ON SCREEN, at market, via the
           // normal order ticket — which is the confirmation step. The strike menu
