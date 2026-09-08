@@ -996,6 +996,49 @@ async function fetchArmedRule(symbol: string, force = false): Promise<any> {
 /** Drop the cache so the next read is fresh — used right after arming. */
 function invalidateArmedRule() { ruleCache = null; }
 
+// FIRST-PAINT SNAPSHOT. A cold /api/ta call pulls ~100 days of candles from
+// Zerodha and recomputes every indicator — two to three seconds — and the
+// server's 60s cache is emptied by every deploy, so most first loads are cold.
+// The last good response for each (timeframe, token) is kept in localStorage,
+// trimmed to the most recent candles, and handed to react-query as placeholder
+// data: the chart paints from it immediately, the live fetch runs at once and
+// replaces it. Stale by whatever time has passed since the last visit, for the
+// second or two before the real data lands — visible on the price label, which
+// still shows the snapshot's last close until then.
+//
+// Trimmed to 1,500 candles (~100 KB) so eight cached charts stay well inside
+// localStorage's budget; the full history arrives with the live response. The
+// server-side computed fields (levels, bias, pressure) are kept as-is, since
+// they are small and just as useful a placeholder as the candles.
+const TA_SNAP_CANDLES = 1500;
+const TA_SNAP_MAX_KEYS = 8;
+const taSnapKey = (tf: string, token: string) => `ta-snap:${tf}:${token}`;
+function readTaSnapshot(tf: string, token: string): any | undefined {
+  try {
+    const raw = localStorage.getItem(taSnapKey(tf, token));
+    if (!raw) return undefined;
+    const d = JSON.parse(raw);
+    if (!d || !Array.isArray(d.candles) || d.candles.length < 20) return undefined;
+    return d;
+  } catch (e) { return undefined; }
+}
+function writeTaSnapshot(tf: string, token: string, data: any): void {
+  try {
+    if (!data || !Array.isArray(data.candles) || !data.candles.length) return;
+    const trimmed = { ...data, candles: data.candles.slice(-TA_SNAP_CANDLES), _snapAt: Date.now() };
+    const key = taSnapKey(tf, token);
+    localStorage.setItem(key, JSON.stringify(trimmed));
+    // Simple cap: drop the oldest snapshots beyond the limit.
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('ta-snap:')) keys.push(k); }
+    if (keys.length > TA_SNAP_MAX_KEYS) {
+      const aged = keys.map(k => { let at = 0; try { at = JSON.parse(localStorage.getItem(k) || '{}')._snapAt || 0; } catch (e) {} return { k, at }; })
+        .sort((a, b) => a.at - b.at);
+      for (const { k } of aged.slice(0, keys.length - TA_SNAP_MAX_KEYS)) localStorage.removeItem(k);
+    }
+  } catch (e) { /* quota or private mode: the chart just loads the slow way */ }
+}
+
 const hexToRgba = (hex: string, alpha: number) => {
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
@@ -6673,7 +6716,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         }
         throw new Error("Network error");
       }
-      return res.json();
+      const data = await res.json();
+      writeTaSnapshot(String(timeframe), String(instrumentToken), data);   // next first load paints from this
+      return data;
     },
     // NEVER refetch history on a timer. This query feeds chartData, chartData is a
     // dependency of the main chart effect, and that effect DESTROYS and rebuilds the
@@ -6705,7 +6750,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     placeholderData: (prev: any, prevQuery: any) => {
       const prevKey = prevQuery && prevQuery.queryKey;
       const prevToken = Array.isArray(prevKey) ? prevKey[prevKey.length - 1] : undefined;
-      return String(prevToken) === String(instrumentToken) ? prev : undefined;
+      if (String(prevToken) === String(instrumentToken) && prev) return prev;
+      // Nothing in memory for this instrument (first load, or a tab switch): paint
+      // from the last saved response for THIS (timeframe, token) so the chart
+      // appears at once, then let the live fetch replace it.
+      return readTaSnapshot(String(timeframe), String(instrumentToken));
     },
     enabled: Boolean(timeframe && instrumentToken)
   });
