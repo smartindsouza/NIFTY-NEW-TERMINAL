@@ -579,22 +579,27 @@ export function ActivePositions() {
         onClick={() => setCollapsed(c => !c)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCollapsed(c => !c); } }}
         title={collapsed ? 'Show positions' : 'Hide positions'}
-        className={`px-4 py-2 bg-emerald-500/5 flex items-center justify-between cursor-pointer select-none hover:bg-emerald-500/10 transition-colors ${collapsed ? '' : 'border-b border-emerald-500/15'}`}
+        className={`px-3 sm:px-4 py-2 bg-emerald-500/5 flex flex-nowrap items-center justify-between gap-2 cursor-pointer select-none hover:bg-emerald-500/10 transition-colors ${collapsed ? '' : 'border-b border-emerald-500/15'}`}
       >
-        <div className="flex items-center gap-2">
-          <span className="flex h-2 w-2 relative">
+        {/* One line at every width. The label shortens on a phone rather than
+            wrapping, and the pulsing dot and sparkle are dropped there — they
+            were decoration competing for the room the P&L needs. */}
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="hidden sm:flex h-2 w-2 relative shrink-0">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
           </span>
-          <span className="text-xs uppercase font-bold text-emerald-400 tracking-wider flex items-center gap-1.5 font-sans">
-            Active Option Positions ({positions.length})
-            <Sparkles className="w-3.5 h-3.5 animate-pulse text-primary" />
+          <span className="text-xs uppercase font-bold text-emerald-400 tracking-wider flex items-center gap-1.5 font-sans whitespace-nowrap truncate">
+            <span className="sm:hidden">Positions ({positions.length})</span>
+            <span className="hidden sm:inline">Active Option Positions ({positions.length})</span>
+            <Sparkles className="w-3.5 h-3.5 animate-pulse text-primary hidden sm:inline shrink-0" />
           </span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           {netPnl !== null && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-sans">Net P&amp;L (today)</span>
+            <div className="flex items-center gap-1.5 whitespace-nowrap">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-sans hidden sm:inline">Net P&amp;L (today)</span>
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-sans sm:hidden">P&amp;L</span>
               <span className={`text-sm font-bold font-mono ${netPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                 {netPnl >= 0 ? '+' : ''}{new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(netPnl)}
               </span>
@@ -605,7 +610,7 @@ export function ActivePositions() {
               Click "Exit" to place instant reversing MARKET order
             </div>
           )}
-          <ChevronDown className={`w-4 h-4 text-emerald-400/70 transition-transform ${collapsed ? '' : 'rotate-180'}`} />
+          <ChevronDown className={`w-4 h-4 text-emerald-400/70 transition-transform shrink-0 ${collapsed ? '' : 'rotate-180'}`} />
         </div>
       </div>
 
