@@ -4076,6 +4076,50 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     return null;
   });
 
+  // PER-CHART TIMEFRAME. One global 'timeframe' key meant every chart shared it:
+  // switching the option chart to 1m dragged NIFTY, GIFT and everything else to
+  // 1m too. Each chart now remembers its own, keyed by what it is showing — an
+  // option by its contract, an index by its name — so NIFTY can sit on 5m while
+  // the option you are working runs on 1m.
+  //
+  // Placed HERE rather than beside the timeframe state, which is declared some
+  // 30k characters earlier: naming selectedInstrument or underlying up there
+  // would read them before their declaration and blank the page, which is
+  // exactly the fault that took the app down this morning.
+  const chartKey = selectedInstrument
+    ? `opt:${selectedInstrument.tradingsymbol}`
+    : `idx:${underlying}`;
+
+  const readTfMap = (): Record<string, string> => {
+    try { const raw = localStorage.getItem('timeframeByChart'); const m = raw ? JSON.parse(raw) : {}; return m && typeof m === 'object' ? m : {}; }
+    catch (e) { return {}; }
+  };
+
+  // Load this chart's own timeframe when the chart changes. The legacy global
+  // key is the fallback, so a chart seen for the first time opens on whatever
+  // was last used rather than jumping to a default.
+  const tfLoadedForRef = useRef<string>('');
+  useEffect(() => {
+    if (tfLoadedForRef.current === chartKey) return;
+    tfLoadedForRef.current = chartKey;
+    const saved = readTfMap()[chartKey];
+    let next = saved;
+    if (!next) { try { next = localStorage.getItem('timeframe') || undefined; } catch (e) {} }
+    if (next && next !== timeframe) setTimeframe(next);
+  }, [chartKey]);
+
+  // Save under THIS chart's key. The global key is kept in step purely as the
+  // fallback above; it no longer drives any chart.
+  useEffect(() => {
+    if (!timeframe || tfLoadedForRef.current !== chartKey) return;
+    try {
+      const m = readTfMap();
+      if (m[chartKey] === timeframe) return;
+      m[chartKey] = timeframe;
+      localStorage.setItem('timeframeByChart', JSON.stringify(m));
+    } catch (e) {}
+  }, [timeframe, chartKey]);
+
   // Which INDEX the chart's index view shows (the tab-strip switcher). Options
   // open on top of either; switching back to index mode lands on this one.
 
