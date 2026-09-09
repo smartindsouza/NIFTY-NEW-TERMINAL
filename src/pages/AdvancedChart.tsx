@@ -1039,6 +1039,34 @@ function writeTaSnapshot(tf: string, token: string, data: any): void {
   } catch (e) { /* quota or private mode: the chart just loads the slow way */ }
 }
 
+// Contract info (lot size, strike, expiry, exchange) is fetched by three
+// separate paths — opening the trade card, the buy ticket, and the expiry label —
+// and after the tap-toggle every open of the card was a fresh request for the
+// same contract, which is what tripped the frequency warning. A contract's lot
+// size does not change during the day, so it is fetched ONCE per symbol and
+// shared: module scope, so both split panes and all three callers use one copy.
+// Cached for the session; a failed lookup is not cached, so a transient error
+// does not stick.
+const contractInfoCache = new Map<string, any>();
+const contractInfoInFlight = new Map<string, Promise<any>>();
+async function fetchContractInfo(tradingsymbol: string): Promise<any> {
+  const key = String(tradingsymbol || '').toUpperCase();
+  if (!key) throw new Error('tradingsymbol required');
+  if (contractInfoCache.has(key)) return contractInfoCache.get(key);
+  if (contractInfoInFlight.has(key)) return contractInfoInFlight.get(key)!;
+  const p = (async () => {
+    try {
+      const res = await fetch(`/api/contract-info?tradingsymbol=${encodeURIComponent(key)}`);
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e?.error || `contract lookup failed (${res.status})`); }
+      const info = await res.json();
+      contractInfoCache.set(key, info);
+      return info;
+    } finally { contractInfoInFlight.delete(key); }
+  })();
+  contractInfoInFlight.set(key, p);
+  return p;
+}
+
 const hexToRgba = (hex: string, alpha: number) => {
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
@@ -5948,10 +5976,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     if (!instr?.tradingsymbol) return;
     setIsProcessingStrikeAction(true);
     try {
-      const res = await fetch(`/api/contract-info?tradingsymbol=${encodeURIComponent(instr.tradingsymbol)}`);
-      if (!res.ok) { toast.error('Could not identify this contract — nothing armed'); return; }
-      const c = await res.json();
-      if (!c.lot_size) { toast.error('No lot size for this contract — refusing to arm'); return; }
+      let c: any;
+      try { c = await fetchContractInfo(instr.tradingsymbol); }
+      catch (e) { toast.error('Could not identify this contract — nothing armed'); return; }
+      if (!c?.lot_size) { toast.error('No lot size for this contract — refusing to arm'); return; }
       const current = lastCandleDataRef.current?.close
         ?? chartDataRef.current?.candles?.[chartDataRef.current.candles.length - 1]?.close ?? 0;
       if (!(current > 0)) { toast.error('No live premium yet — wait for a tick before arming'); return; }
@@ -6179,13 +6207,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     if (!instr?.tradingsymbol) return;
     setIsProcessingStrikeAction(true);
     try {
-      const res = await fetch(`/api/contract-info?tradingsymbol=${encodeURIComponent(instr.tradingsymbol)}`);
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        toast.error(err?.error || 'Could not identify this contract — no order prepared');
-        return;
-      }
-      const c = await res.json();
+      let c: any;
+      try { c = await fetchContractInfo(instr.tradingsymbol); }
+      catch (e: any) { toast.error(e?.message || 'Could not identify this contract — no order prepared'); return; }
       if (!c.lot_size) { toast.error('No lot size for this contract — refusing to prepare an order'); return; }
       // Live premium if we have one, else the last close the chart drew.
       const live = lastCandleDataRef.current?.close
@@ -6813,8 +6837,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     if (!sym || !isOptionView) { setContractExpiry(null); return; }
     if (contractExpiry?.symbol === sym) return;
     let cancelled = false;
-    fetch(`/api/contract-info?tradingsymbol=${encodeURIComponent(sym)}`)
-      .then(r => r.ok ? r.json() : null)
+    fetchContractInfo(sym)
       .then(c => { if (!cancelled) setContractExpiry({ symbol: sym, expiry: c?.expiry || null }); })
       .catch(() => { if (!cancelled) setContractExpiry({ symbol: sym, expiry: null }); });
     return () => { cancelled = true; };

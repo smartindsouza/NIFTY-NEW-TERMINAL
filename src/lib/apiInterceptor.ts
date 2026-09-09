@@ -37,6 +37,11 @@ const SERVER_CACHED_ENDPOINTS = new Map<string, string>([
   // Client side it is behind a 3s shared cache with in-flight dedupe, shared
   // across both split-view panes (fetchArmedRule in AdvancedChart.tsx).
   ['/api/premium-exit/get', 'local SQLite read; 3s shared client cache + in-flight dedupe, no broker call'],
+  // Looks a contract up in the NFO/BFO instrument master, which the server
+  // refreshes once every 24h. No broker call per request, so a 429 cannot come
+  // from it. Client side it is cached once per symbol for the session
+  // (fetchContractInfo in AdvancedChart.tsx), shared by all three callers.
+  ['/api/contract-info', 'instrument-master lookup, 24h server cache; once-per-symbol client cache, no broker call'],
 ]);
 
 function showTooFrequentWarning(endpoint: string, rate: number) {
