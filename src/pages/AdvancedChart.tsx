@@ -4271,6 +4271,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // Is the card currently open? The chart's click handler is built once per
   // chart rebuild, so it cannot read the triggerBox state directly.
   const triggerBoxOpenRef = useRef(false);
+  // When the document listener closes the card on pointerdown, React re-renders
+  // BEFORE the same tap's click event reaches the chart — so by then the ref
+  // already reads closed and the handler opened a fresh card. The open/closed
+  // flag alone cannot tell the two apart; the timestamp of the dismissal can.
+  const triggerBoxClosedAtRef = useRef(0);
 
   const [rrMenuOpen, setRrMenuOpen] = useState(false);
   const rrMenuRef = useRef<HTMLDivElement | null>(null);
@@ -5921,7 +5926,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       const t = ev.target as Node | null;
       if (!t) return;
       if (showDiagnostic && diagPanelRef.current && !diagPanelRef.current.contains(t)) setShowDiagnostic(false);
-      if (triggerBox && triggerBoxRef.current && !triggerBoxRef.current.contains(t)) setTriggerBox(null);
+      if (triggerBox && triggerBoxRef.current && !triggerBoxRef.current.contains(t)) {
+        triggerBoxClosedAtRef.current = Date.now();
+        setTriggerBox(null);
+      }
     };
     document.addEventListener('pointerdown', onDown, true);
     return () => document.removeEventListener('pointerdown', onDown, true);
@@ -8230,12 +8238,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
           if (isReferenceChartRef.current) return;   // GIFT NIFTY: measure only
 
-          // TAP TOGGLES THE CARD. With the card open, a tap on the chart used to
-          // do two things at once: the document listener closed it, and this
-          // handler immediately opened a new one at the newly tapped price — so
-          // it looked as though it never closed. When it is open, a tap does
-          // nothing here and only the close runs. The next tap opens it again.
+          // TAP TOGGLES THE CARD. The close runs on pointerdown and this handler
+          // on click, and React re-renders in between — so an open/closed check
+          // here always saw "closed" and re-opened it. Instead: if a dismissal
+          // happened within the last half-second, THIS is the tap that closed
+          // it, and its job is done. The next tap, outside that window, opens.
           if (triggerBoxOpenRef.current) return;
+          if (Date.now() - triggerBoxClosedAtRef.current < 500) return;
 
           // OPTION CHART: tapping buys THE CONTRACT ON SCREEN, at market, via the
           // normal order ticket — which is the confirmation step. The strike menu
