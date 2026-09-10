@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronDown, TrendingUp, TrendingDown, Globe, X } from "lucide-react";
 
@@ -163,7 +164,18 @@ export default function MarketContext() {
   const globalAsOf = globalMkts.find((m) => m.available && m.asOf)?.asOf;
   const status: { indian?: boolean; us?: boolean; uk?: boolean } = data?.status || {};
 
-  return (
+  // PORTALLED TO document.body. The pull tab and drawer are position:fixed with
+  // z-9999, yet the chart's toolbar icons still painted over them — because
+  // z-index only ranks siblings WITHIN a stacking context, and this component is
+  // rendered inside the chart header, which carries z-30. Everything inside that
+  // header is therefore capped at 30 relative to the rest of the page, however
+  // large its own z-index. (The header's z-30 is mine, added so the full-width
+  // title row paints over the option pane — so this is a regression I introduced.)
+  //
+  // A portal moves the markup to the end of body, outside every one of those
+  // contexts, which is the only fix that does not involve trading one overlap
+  // for another.
+  return createPortal(
     <>
       {/* Pull tab — always visible on the right edge of the chart */}
       {!open && (
@@ -286,6 +298,7 @@ export default function MarketContext() {
           Indian: live via Kite. US, UK, global &amp; commodities: via a free third-party feed (may lag or drop out) — context only, confirm before trading. Open/Closed reflects regular session hours; exchange holidays aren't tracked.
         </div>
       </div>
-    </>
+    </>,
+    document.body
   );
 }
