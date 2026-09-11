@@ -10162,14 +10162,15 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                Nothing is lost: closing the search brings it straight back, and
                the search itself names the instrument being chosen. */
             data-layout="selector"
-            /* flex-1 + min-w-0: the selector owns the space the icon bar leaves
-               and truncates inside it. The bar is shrink-0 with justify-start
-               on desktop, so it can neither be squeezed nor spill its leading
-               icons leftward over this element — which is what the screenshots
-               showed: search and scales over the selector, the trailing icons
-               pinned right. A right-aligned row that runs out of room overflows
-               at its START edge. */
-            className={`${searchExpanded ? 'hidden' : 'flex'} items-center gap-1.5 px-1.5 py-1 min-w-0 flex-1`}
+            /* min-w-[150px]: measured at 12px wide on Martin's screen — the
+               selector had been allowed to give way completely, so the chart name
+               vanished instead of overlapping. It now keeps enough room to read,
+               and the icon bar, rather than being fixed-width and either spilling
+               over this element (the earlier overlap) or crushing it (the 12px),
+               wraps onto a second line when the row is too narrow for both. Flex
+               items never overlap; a minimum width never crushes; wrapping never
+               clips the bar's dropdown menus the way a scroller would. */
+            className={`${searchExpanded ? 'hidden' : 'flex'} items-center gap-1.5 px-1.5 py-1 min-w-[150px] flex-1`}
             onPointerDown={(e) => e.stopPropagation()}>
             {!isOptionPane && (
             <div className="relative min-w-0 shrink">
@@ -10331,7 +10332,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               and the premium rule; only its tab is removed. */}
           <TradePnl sync={premSync} />
           </div>
-        <div ref={bottomBarRef} className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-3 py-1.5 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-nowrap justify-end md:justify-start md:shrink-0 w-screen md:w-auto md:ml-auto md:mb-1 md:rounded-md md:border md:border-border/60 md:bg-muted/30 max-w-[100vw] overflow-x-hidden md:overflow-visible">
+        <div ref={bottomBarRef} className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-3 py-1.5 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-nowrap md:flex-wrap justify-end md:shrink md:min-w-0 w-screen md:w-auto md:ml-auto md:mb-1 md:rounded-md md:border md:border-border/60 md:bg-muted/30 max-w-[100vw] overflow-x-hidden md:overflow-visible">
           <div className="flex flex-1 items-center gap-1.5 sm:gap-2 justify-end min-w-0 md:contents">
           {/* Desktop: an icon until clicked. Mobile: unchanged — the field is
               always shown, which is what the bottom toolbar was built around. */}

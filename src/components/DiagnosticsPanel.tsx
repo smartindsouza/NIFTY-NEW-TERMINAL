@@ -135,7 +135,6 @@ export function DiagnosticsPanel() {
             a count is useful information and a warning about it is not. */}
         {(() => {
           const risky = metrics.warnings.filter((w) => !isFrequencyExempt(w.endpoint));
-          const cached = metrics.warnings.filter((w) => isFrequencyExempt(w.endpoint));
           return (
             <>
               {risky.length > 0 && (
@@ -153,17 +152,9 @@ export function DiagnosticsPanel() {
                   </div>
                 </div>
               )}
-              {cached.length > 0 && (
-                <div className="bg-card/40 border border-border/40 rounded-xl p-3 space-y-1">
-                  <p className="text-[10px] text-muted-foreground font-medium">Busy endpoints (server-cached — no broker risk)</p>
-                  {cached.map((w, idx) => (
-                    <div key={idx} className="flex justify-between items-center text-[10px] font-mono text-muted-foreground p-1 rounded">
-                      <span className="truncate max-w-[200px]">{w.endpoint}</span>
-                      <span>{w.ratePer15s} / 15s</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {/* Harmless endpoints get NO box. The neutral "busy endpoints" list
+                  read to Martin as the same warning by another name, and a count
+                  of a cached endpoint is not actionable. */}
             </>
           );
         })()}
