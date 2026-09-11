@@ -10153,6 +10153,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                on the spot chart and the option one, which share this control.
                Nothing is lost: closing the search brings it straight back, and
                the search itself names the instrument being chosen. */
+            data-layout="selector"
             className={`${searchExpanded ? 'hidden' : 'flex'} items-center gap-1.5 px-1.5 py-1 min-w-0`}
             onPointerDown={(e) => e.stopPropagation()}>
             {!isOptionPane && (
@@ -10724,6 +10725,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           {/* Trailing TP, beside Quick Trade. Distinct icon and colour so the two
               switches are not mistaken for each other at a glance. */}
           <button
+            data-layout="icons"
             onClick={() => setTrailTpOn(v => !v)}
             title={trailTpOn ? 'Trailing TP ON — target climbs 20% a rung, stop follows one rung behind' : 'Trailing TP OFF — remaining half exits at TP2'}
             aria-label="Trailing TP"

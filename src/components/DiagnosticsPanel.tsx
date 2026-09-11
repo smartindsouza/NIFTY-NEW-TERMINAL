@@ -24,6 +24,16 @@ function useLayoutReadout() {
           `chart ${h('[data-layout="chart"]') ?? '-'}`,
           `canvas ${canvas ? Math.round(canvas.getBoundingClientRect().height) : '-'}`,
           `doc ${document.documentElement.scrollHeight}${document.documentElement.scrollHeight > window.innerHeight ? ' SCROLLS' : ''}`,
+          // Horizontal geometry of the two elements that overlap in the toolbar.
+          // Source reading has failed twice on this; the rects say plainly whether
+          // the selector runs past the icons, and which one is where.
+          (() => {
+            const r = (sel: string) => { const e = document.querySelector(sel) as HTMLElement | null; if (!e) return null; const b = e.getBoundingClientRect(); return { l: Math.round(b.left), r: Math.round(b.right), w: Math.round(b.width) }; };
+            const s1 = r('[data-layout="selector"]'); const s2 = r('[data-layout="icons"]');
+            if (!s1 || !s2) return `sel ${s1 ? s1.l + '-' + s1.r : '-'} icons ${s2 ? s2.l : '-'}`;
+            const over = s1.r > s2.l;
+            return `sel ${s1.l}-${s1.r} (w${s1.w}) · icon@${s2.l}${over ? ' OVERLAP ' + (s1.r - s2.l) + 'px' : ' ok'}`;
+          })(),
         ];
         setTxt(parts.join(' · '));
       } catch (e) {}
