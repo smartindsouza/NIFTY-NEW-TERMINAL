@@ -6734,6 +6734,24 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // mean nothing on that instrument.
   const intradayLevelsAllowed = tfMinutes > 0 && tfMinutes <= 15 && !isReferenceChart;
 
+  // Ticks once a minute so clock-dependent memos re-evaluate without waiting for
+  // new data — PDH/PDL has to roll forward at 15:40 even though no candle arrives
+  // to trigger it. One state update a minute; nothing re-renders on its own.
+  const [marketClockTick, setMarketClockTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setMarketClockTick(t => (t + 1) % 100000), 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Is the NSE session open right now? A ref because the canvas draw callback is
+  // built once per chart rebuild and cannot read state directly.
+  const marketIsOpenRef = useRef(false);
+  {
+    const ist = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+    const d = ist.getUTCDay(), mins = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+    marketIsOpenRef.current = d !== 0 && d !== 6 && mins >= 9 * 60 + 15 && mins < 15 * 60 + 40;
+  }
+
   const isOptionViewRef = useRef(isOptionView);
   isOptionViewRef.current = isOptionView;
   // Same reason as isOptionViewRef: the spot-mirror helpers are defined far above
@@ -7615,7 +7633,35 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     }
     const candles = chartData.candles;
     const currentCandle = candles[candles.length - 1];
-    const currentDateStr = new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit'}).format(new Date(currentCandle.time * 1000));
+    const istDayOf = (unixSec: number) => new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit'}).format(new Date(unixSec * 1000));
+    const lastCandleDay = istDayOf(currentCandle.time);
+
+    // "Previous day" is anchored to the last CANDLE, which is right during the
+    // session but wrong the moment it ends: after 15:40 today is a completed day,
+    // so the levels that matter for the next session are TODAY's high and low.
+    // The old code kept pointing at yesterday until the next open, which is the
+    // staleness Martin saw. Once today's session has closed, today is treated as
+    // the completed day and its own candles become PDH/PDL.
+    const nowIst = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+    const nowDay = new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit'}).format(new Date());
+    const nowMins = nowIst.getUTCHours() * 60 + nowIst.getUTCMinutes();
+    const todaysSessionOver = nowMins >= 15 * 60 + 40;
+    // Only roll forward when the last candle IS today's — on a weekend or holiday
+    // the last candle is already a completed day and the normal rule is correct.
+    const useLastDayAsPrev = todaysSessionOver && lastCandleDay === nowDay;
+
+    if (useLastDayAsPrev) {
+      let hi = -Infinity, lo = Infinity, startT: number | null = null;
+      for (const c of candles) {
+        if (istDayOf(c.time) !== lastCandleDay) continue;
+        if (c.high > hi) hi = c.high;
+        if (c.low < lo) lo = c.low;
+        if (startT === null) startT = c.time;
+      }
+      if (hi !== -Infinity) return { pdhPrice: hi, pdlPrice: lo, pStartTime: startT };
+    }
+
+    const currentDateStr = lastCandleDay;
     
     let prevDayStr: string | null = null;
     let pHigh = -Infinity;
@@ -7645,7 +7691,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       return { pdhPrice: pHigh, pdlPrice: pLow, pStartTime };
     }
     return { pdhPrice: null, pdlPrice: null, pStartTime: null };
-  }, [chartData, showPdhPdl]);
+  }, [chartData, showPdhPdl, marketClockTick]);
 
   // Rebuild the alert level list whenever any level source changes. Only levels
   // whose indicator is currently visible are alerted — what you see is what alerts.
@@ -7674,8 +7720,15 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       add('res', 'Resistance', localAnalytics?.resistanceZone?.strikePrice);
     }
     if (showOpeningRange && !isReferenceChart) {
-      add('orh', '15m High', (taInfo as any)?.openingRange?.high);
-      add('orl', '15m Low', (taInfo as any)?.openingRange?.low);
+      // Same rule as the drawing: a range from a finished session is history, so
+      // it must not announce touches either — otherwise the chart would be clear
+      // while alerts still fired on yesterday's levels.
+      const orAlert = (taInfo as any)?.openingRange;
+      const orAlertCurrent = !!orAlert && (!orAlert.date || orAlert.date === new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10));
+      if (orAlertCurrent) {
+        add('orh', '15m High', orAlert.high);
+        add('orl', '15m Low', orAlert.low);
+      }
     }
     if (showDsZones && !isOptionView) {
       const dz = (taInfo as any)?.dsZones;
@@ -9442,7 +9495,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               // 15m Opening Range (first 15 min high/low) — centered labels, no Y-axis value
               {
                 const or = (taInfo as any)?.openingRange;
-                if (showOpeningRange && !isOptionView && !isReferenceChart && or) {
+                // The range describes the session it was formed in, so once that
+                // session ends it is history, not a level for the next day. Shown
+                // only while the market is open AND the range belongs to today —
+                // so between the close and the next 09:30 (when the new range is
+                // published) nothing is drawn, rather than yesterday's lingering.
+                const orIsCurrent = !!or && (!or.date || or.date === new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10));
+                if (showOpeningRange && !isOptionView && !isReferenceChart && or && orIsCurrent && marketIsOpenRef.current) {
                   if (typeof or.high === 'number') {
                     const y = mainSeriesRef.current.priceToCoordinate(or.high);
                     if (y !== null) linesToDraw.push({ text: `15M HIGH`, y, color: '#ffffff', dash: [], lineWidth: 1 });
