@@ -55,15 +55,27 @@ const SERVER_CACHED_ENDPOINTS = new Map<string, string>([
  * prefixes. Same safety rule as the exact entries: an endpoint only goes on the
  * list if it cannot reach the broker, and the reason is recorded beside it.
  */
-function isExempt(endpoint: string): boolean {
-  if (LOCAL_ONLY_ENDPOINTS.has(endpoint) || SERVER_CACHED_ENDPOINTS.has(endpoint)) return true;
-  for (const key of SERVER_CACHED_ENDPOINTS.keys()) {
-    if (key.endsWith('/') && endpoint.startsWith(key)) return true;
+// The last decision this function made, surfaced in App Diagnostics. Martin's
+// 14:00 build provably exempts /api/settings/h_levels — the logic was executed
+// against that exact string — and the toast still appeared, which cannot be
+// explained from the source. Recording the decision alongside the endpoint
+// string actually seen ends the argument between the code and the screen.
+export const lastFrequencyDecision = { endpoint: '', exempt: false, at: 0 };
+
+function isExempt(rawEndpoint: string): boolean {
+  // Normalise: an absolute URL (some wrappers rewrite fetch to one), a trailing
+  // slash, or letter case must not defeat the match.
+  const endpoint = String(rawEndpoint || '').toLowerCase().replace(/^https?:\/\/[^/]+/, '').replace(/\/+$/, '');
+  let exempt = false;
+  if (LOCAL_ONLY_ENDPOINTS.has(endpoint) || SERVER_CACHED_ENDPOINTS.has(endpoint)) exempt = true;
+  if (!exempt) for (const key of SERVER_CACHED_ENDPOINTS.keys()) {
+    if (key.endsWith('/') ? endpoint.includes(key) : endpoint === key) { exempt = true; break; }
   }
-  for (const key of LOCAL_ONLY_ENDPOINTS) {
-    if (typeof key === 'string' && key.endsWith('/') && endpoint.startsWith(key)) return true;
+  if (!exempt) for (const key of LOCAL_ONLY_ENDPOINTS) {
+    if (typeof key === 'string' && key.endsWith('/') && endpoint.includes(key)) { exempt = true; break; }
   }
-  return false;
+  lastFrequencyDecision.endpoint = rawEndpoint; lastFrequencyDecision.exempt = exempt; lastFrequencyDecision.at = Date.now();
+  return exempt;
 }
 
 function showTooFrequentWarning(endpoint: string, rate: number) {

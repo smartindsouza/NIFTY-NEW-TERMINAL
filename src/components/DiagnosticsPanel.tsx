@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 
 // Injected by the `define` block in vite.config.ts at build time.
 declare const __BUILD_TIME__: string;
+import { lastFrequencyDecision } from '../lib/apiInterceptor';
 
 // Live layout readout. Every height in the chain from viewport to chart canvas,
 // so a "gap under the chart" or "page scrolls" report can be read off a Diag
@@ -35,7 +36,16 @@ function useLayoutReadout() {
             return `sel ${s1.l}-${s1.r} (w${s1.w}) · icon@${s2.l}${over ? ' OVERLAP ' + (s1.r - s2.l) + 'px' : ' ok'}`;
           })(),
         ];
-        setTxt(parts.join(' · '));
+        // Three lines: heights, toolbar geometry, and the frequency-warning
+        // decision. The geometry and the decision are the two facts the source
+        // could not settle; putting them on screen is what settles them.
+        const heights = parts.slice(0, parts.length - 1).join(' · ');
+        const geometry = String(parts[parts.length - 1]);
+        const d = lastFrequencyDecision;
+        const decision = d.at
+          ? `last warned: ${d.endpoint} → ${d.exempt ? 'EXEMPT (toast suppressed)' : 'NOT exempt'} ${Math.round((Date.now() - d.at) / 1000)}s ago`
+          : 'freq check: none yet';
+        setTxt(`${heights}\n${geometry}\n${decision}`);
       } catch (e) {}
     };
     read();
@@ -64,7 +74,7 @@ export function DiagnosticsPanel() {
             <Activity className="w-4 h-4 text-emerald-400 animate-pulse" /> App Diagnostics
           </span>
           <span className="flex items-center gap-2">
-            <span className="text-[9px] font-mono normal-case tracking-normal text-muted-foreground" title="Layout heights: viewport · main · chart page · chart container · chart canvas · document. If doc exceeds vp the page scrolls.">
+            <span className="text-[9px] font-mono normal-case tracking-normal text-muted-foreground whitespace-pre-line" title="Line 1: heights (viewport · main · page · chart · canvas · document). Line 2: toolbar geometry — selector edges vs the icon strip, with OVERLAP in px if they collide. Line 3: what the frequency check decided about the last warned endpoint.">
               {useLayoutReadoutValue}
             </span>
             <span className="text-[9px] font-mono normal-case tracking-normal text-muted-foreground" title="When this UI bundle was built (IST). If this is older than the latest deploy, the phone is still on a cached bundle — hard-refresh.">
