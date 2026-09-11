@@ -1090,6 +1090,10 @@ const formatCountdown = (totalSeconds: number) => {
 
 const IST_OFFSET_SECONDS = 5.5 * 60 * 60;
 const MARKET_OPEN_SECONDS_IST = (9 * 60 + 15) * 60;
+// NSE pre-open: order collection from 09:00, the index publishes through it, and
+// continuous trading starts at 09:15. Candles are built from 09:00; TRADING gates
+// stay on MARKET_OPEN_SECONDS_IST, so nothing can be armed or alerted pre-bell.
+const PRE_OPEN_SECONDS_IST = 9 * 60 * 60;
 // NSE equity DERIVATIVES session ends 15:40 IST since 3 Aug 2026 (SEBI CAS:
 // F&O cash stocks stop at 15:15 and auction until 15:35; index/stock F&O got
 // a 10-minute extension to 15:40). This terminal trades NIFTY options, so
@@ -1692,6 +1696,19 @@ const getMarketAlignedCandleStart = (unixSeconds: number, timeframeMinutes: numb
 
   const istSeconds = unixSeconds + IST_OFFSET_SECONDS;
   const istMidnight = Math.floor(istSeconds / 86400) * 86400;
+  // PRE-OPEN (09:00-09:15) gets its own anchor. The regular grid starts at 09:15
+  // and clamps anything earlier to zero elapsed, which would stack every pre-open
+  // tick onto a single 09:15 bar — a candle in the future that then fought with
+  // the real one. Anchoring at 09:00 keeps those bars on the same :00/:05/:15
+  // boundaries the session grid uses, so nothing shifts at the bell.
+  if (istSeconds - istMidnight < MARKET_OPEN_SECONDS_IST) {
+    const preStart = istMidnight + PRE_OPEN_SECONDS_IST;
+    if (istSeconds >= preStart) {
+      const bucket = preStart + Math.floor((istSeconds - preStart) / duration) * duration;
+      return Math.floor(bucket - IST_OFFSET_SECONDS);
+    }
+  }
+
   const sessionStart = istMidnight + MARKET_OPEN_SECONDS_IST;
   const elapsedFromOpen = Math.max(0, istSeconds - sessionStart);
   const bucketStartIst = sessionStart + Math.floor(elapsedFromOpen / duration) * duration;
@@ -7232,10 +7249,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           const rawTickTime = msg.timestamp || nowServerSec;
           const tickTime = Math.min(rawTickTime, nowServerSec + 2);
           
-          // Ignore incoming ticks when the market is closed (with 2-minute settlement buffer)
+          // Ignore incoming ticks when the market is closed (with 2-minute settlement buffer).
+          // The floor is 09:00, not 09:15: NSE's pre-open session runs 09:00-09:15
+          // and the index publishes through it. Rejecting those ticks meant the
+          // chart sat frozen until the bell even though real prices were arriving.
           const ist = getIstDateTime(tickTime);
           const isWeekend = ist.dayOfWeek === 0 || ist.dayOfWeek === 6;
-          const isStaleAfterHours = ist.timeOfDaySec >= MARKET_CLOSE_SECONDS_IST + 120 || ist.timeOfDaySec < MARKET_OPEN_SECONDS_IST;
+          const isStaleAfterHours = ist.timeOfDaySec >= MARKET_CLOSE_SECONDS_IST + 120 || ist.timeOfDaySec < PRE_OPEN_SECONDS_IST;
           
           if (isWeekend || isStaleAfterHours) {
             return;
