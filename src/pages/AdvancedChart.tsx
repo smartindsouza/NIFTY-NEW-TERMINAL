@@ -10126,14 +10126,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             className={`${searchExpanded ? 'hidden' : 'flex'} items-center gap-1.5 px-1.5 py-1 min-w-0`}
             onPointerDown={(e) => e.stopPropagation()}>
             {!isOptionPane && (
-            <div className="relative">
+            <div className="relative min-w-0 shrink">
               <button
                 onClick={() => { setOptionMenuOpen(false); setIndexMenuOpen(o => !o); }}
-                className={`flex items-center gap-1 px-2.5 h-8 rounded-md text-xs font-mono font-bold border transition-colors ${
+                className={`flex items-center gap-1 px-2.5 h-8 rounded-md text-xs font-mono font-bold border transition-colors min-w-0 shrink ${
                   !selectedInstrument ? 'border-primary/50 bg-primary/15 text-primary' : 'border-border/60 bg-card text-muted-foreground'}`}
               >
-                <span className="truncate max-w-[110px]">{indexLabel}</span>
-                <ChevronDown size={13} className={indexMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                <span className="truncate min-w-0 max-w-[110px]">{indexLabel}</span>
+                <ChevronDown size={13} className={`shrink-0 ${indexMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'}`} />
               </button>
               {indexMenuOpen && (
                 <div className="absolute left-0 top-full mt-1 z-[60] min-w-[150px] bg-card border border-white/10 rounded-md shadow-2xl overflow-hidden">
@@ -10154,19 +10154,24 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             {/* Option charts. Hidden entirely when none are open rather than
                 showing an empty menu. */}
             {openCharts.length > 0 && (
-              <div className="relative">
+              <div className="relative min-w-0 shrink">
                 <button
                   onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(o => !o); }}
-                  className={`flex items-center gap-1 px-2.5 h-8 rounded-md text-xs font-mono font-bold border transition-colors ${
+                  /* min-w-0 so the button may shrink below its text, and the label
+                     truncates inside it. Without that a flex item keeps its content
+                     width and the overflow spills over whatever sits beside it —
+                     which is the contract name printed across the search icon on a
+                     narrow window. */
+                  className={`flex items-center gap-1 px-2.5 h-8 rounded-md text-xs font-mono font-bold border transition-colors min-w-0 shrink ${
                     selectedInstrument ? 'border-primary/50 bg-primary/15 text-primary' : 'border-border/60 bg-card text-muted-foreground'}`}
                 >
-                  <span className="truncate max-w-[130px]">
+                  <span className="truncate min-w-0 max-w-[130px]">
                     {selectedInstrument
                       ? prettyOptionName(selectedInstrument.tradingsymbol,
                           contractExpiry?.symbol === selectedInstrument.tradingsymbol ? contractExpiry.expiry : null)
                       : `Options (${openCharts.length})`}
                   </span>
-                  <ChevronDown size={13} className={optionMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                  <ChevronDown size={13} className={`shrink-0 ${optionMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'}`} />
                 </button>
                 {optionMenuOpen && (
                   <div className="absolute left-0 top-full mt-1 z-[60] min-w-[190px] max-h-[50vh] overflow-y-auto bg-card border border-white/10 rounded-md shadow-2xl">
