@@ -10117,7 +10117,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               a scrolling strip of index tabs plus one tab per opened option chart,
               which is the same crowding the phone had. The index dropdown is
               omitted on the option pane, exactly as the index tabs were. */}
-          <div className="flex items-center gap-1.5 px-1.5 py-1 min-w-0" onPointerDown={(e) => e.stopPropagation()}>
+          <div
+            /* Hidden while the search field is open. The field expands into the
+               same row, so the chart selector and the search overlapped — both
+               on the spot chart and the option one, which share this control.
+               Nothing is lost: closing the search brings it straight back, and
+               the search itself names the instrument being chosen. */
+            className={`${searchExpanded ? 'hidden' : 'flex'} items-center gap-1.5 px-1.5 py-1 min-w-0`}
+            onPointerDown={(e) => e.stopPropagation()}>
             {!isOptionPane && (
             <div className="relative">
               <button
