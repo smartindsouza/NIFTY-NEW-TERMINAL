@@ -10160,7 +10160,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             <div className="relative min-w-0 shrink">
               <button
                 onClick={() => { setOptionMenuOpen(false); setIndexMenuOpen(o => !o); }}
-                className={`flex items-center gap-1 px-2.5 h-8 rounded-md text-xs font-mono font-bold border transition-colors min-w-0 shrink ${
+                className={`flex items-center gap-1 px-2.5 h-8 rounded-md text-xs font-mono font-bold border transition-colors min-w-0 shrink overflow-hidden ${
                   !selectedInstrument ? 'border-primary/50 bg-primary/15 text-primary' : 'border-border/60 bg-card text-muted-foreground'}`}
               >
                 <span className="truncate min-w-0 max-w-[110px]">{indexLabel}</span>
@@ -10193,7 +10193,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                      width and the overflow spills over whatever sits beside it —
                      which is the contract name printed across the search icon on a
                      narrow window. */
-                  className={`flex items-center gap-1 px-2.5 h-8 rounded-md text-xs font-mono font-bold border transition-colors min-w-0 shrink ${
+                  className={`flex items-center gap-1 px-2.5 h-8 rounded-md text-xs font-mono font-bold border transition-colors min-w-0 shrink overflow-hidden ${
                     selectedInstrument ? 'border-primary/50 bg-primary/15 text-primary' : 'border-border/60 bg-card text-muted-foreground'}`}
                 >
                   <span className="truncate min-w-0 max-w-[130px]">

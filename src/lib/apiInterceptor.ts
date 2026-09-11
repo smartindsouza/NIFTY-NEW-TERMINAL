@@ -62,6 +62,16 @@ const SERVER_CACHED_ENDPOINTS = new Map<string, string>([
 // string actually seen ends the argument between the code and the screen.
 export const lastFrequencyDecision = { endpoint: '', exempt: false, at: 0 };
 
+/** Exported so App Diagnostics can label endpoints the same way the toast does.
+ *  Read-only: it does not record a decision. */
+export function isFrequencyExempt(rawEndpoint: string): boolean {
+  const endpoint = String(rawEndpoint || '').toLowerCase().replace(/^https?:\/\/[^/]+/, '').replace(/\/+$/, '');
+  if (LOCAL_ONLY_ENDPOINTS.has(endpoint) || SERVER_CACHED_ENDPOINTS.has(endpoint)) return true;
+  for (const key of SERVER_CACHED_ENDPOINTS.keys()) if (key.endsWith('/') ? endpoint.includes(key) : endpoint === key) return true;
+  for (const key of LOCAL_ONLY_ENDPOINTS) if (typeof key === 'string' && key.endsWith('/') && endpoint.includes(key)) return true;
+  return false;
+}
+
 function isExempt(rawEndpoint: string): boolean {
   // Normalise: an absolute URL (some wrappers rewrite fetch to one), a trailing
   // slash, or letter case must not defeat the match.

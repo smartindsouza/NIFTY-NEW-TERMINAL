@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 
 // Injected by the `define` block in vite.config.ts at build time.
 declare const __BUILD_TIME__: string;
-import { lastFrequencyDecision } from '../lib/apiInterceptor';
+import { lastFrequencyDecision, isFrequencyExempt } from '../lib/apiInterceptor';
 
 // Live layout readout. Every height in the chain from viewport to chart canvas,
 // so a "gap under the chart" or "page scrolls" report can be read off a Diag
@@ -126,22 +126,47 @@ export function DiagnosticsPanel() {
           </div>
         </div>
 
-        {/* Telemetry warnings alert */}
-        {metrics.warnings.length > 0 && (
-          <div className="bg-primary/5 border border-primary/20 rounded-xl p-3 space-y-2">
-            <p className="text-[11px] font-bold text-primary flex items-center gap-1">
-              <ShieldAlert className="w-3.5 h-3.5" /> THROTTLE API ADVISORY Warning
-            </p>
-            <div className="space-y-1">
-              {metrics.warnings.map((w, idx) => (
-                <div key={idx} className="flex justify-between items-center text-[10px] font-mono text-foreground/80 bg-card/60 p-1.5 rounded">
-                  <span className="truncate max-w-[200px]">{w.endpoint}</span>
-                  <span className="text-primary font-bold">{w.ratePer15s} hits / 15s</span>
+        {/* Telemetry warnings. THIS panel — not the toast — was the warning
+            Martin kept seeing: it listed raw hit counts with no exemption, so an
+            endpoint the interceptor had already judged harmless (a server-cached
+            /api/ta refetching on a window resize) still read as a throttle
+            advisory here. The same exemption now applies. Exempt endpoints are
+            still listed, but as a plain count under a neutral heading, because
+            a count is useful information and a warning about it is not. */}
+        {(() => {
+          const risky = metrics.warnings.filter((w) => !isFrequencyExempt(w.endpoint));
+          const cached = metrics.warnings.filter((w) => isFrequencyExempt(w.endpoint));
+          return (
+            <>
+              {risky.length > 0 && (
+                <div className="bg-primary/5 border border-primary/20 rounded-xl p-3 space-y-2">
+                  <p className="text-[11px] font-bold text-primary flex items-center gap-1">
+                    <ShieldAlert className="w-3.5 h-3.5" /> THROTTLE API ADVISORY Warning
+                  </p>
+                  <div className="space-y-1">
+                    {risky.map((w, idx) => (
+                      <div key={idx} className="flex justify-between items-center text-[10px] font-mono text-foreground/80 bg-card/60 p-1.5 rounded">
+                        <span className="truncate max-w-[200px]">{w.endpoint}</span>
+                        <span className="text-primary font-bold">{w.ratePer15s} hits / 15s</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
+              )}
+              {cached.length > 0 && (
+                <div className="bg-card/40 border border-border/40 rounded-xl p-3 space-y-1">
+                  <p className="text-[10px] text-muted-foreground font-medium">Busy endpoints (server-cached — no broker risk)</p>
+                  {cached.map((w, idx) => (
+                    <div key={idx} className="flex justify-between items-center text-[10px] font-mono text-muted-foreground p-1 rounded">
+                      <span className="truncate max-w-[200px]">{w.endpoint}</span>
+                      <span>{w.ratePer15s} / 15s</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         {/* Slowest components performance profiles */}
         <div className="space-y-2">
