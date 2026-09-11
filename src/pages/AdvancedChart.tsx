@@ -3930,6 +3930,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // local copy so existing levels aren't lost. hLevelsHydratedRef gates the
   // write-back effect so we don't clobber the server before the pull resolves.
   const hLevelsHydratedRef = useRef(false);
+  const lastServerLevelsRef = useRef<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     // Re-runs when the index changes: the levels belong to the index, so switching
@@ -3940,6 +3941,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         const serverVal = await fetchSetting(hlSettingKey);
         if (!cancelled && Array.isArray(serverVal) && serverVal.length === 6) {
           const norm = serverVal.map((v: any) => Math.round(Number(v) || 0));
+          lastServerLevelsRef.current = JSON.stringify(norm);   // what we got, so we never echo it back
           setHLevels(norm);
           try { localStorage.setItem(hlKey, JSON.stringify(norm)); } catch {}
         } else if (!cancelled) {
@@ -3974,6 +3976,12 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     // Gated on hydration so the initial local value can't overwrite a freshly
     // pulled server copy. Debounced to coalesce rapid edits.
     if (!hLevelsHydratedRef.current) return;
+    // Only write back what the USER changed. Hydration sets hLevels to the
+    // server's own value, and writing that back is a pointless PUT plus a
+    // journal POST — and with the chart remounting on every window resize
+    // across the split breakpoint, those pointless writes were the
+    // /api/h-levels frequency warning.
+    if (lastServerLevelsRef.current && JSON.stringify(hLevels) === lastServerLevelsRef.current) return;
     const t = setTimeout(() => {
       // Drop the cached copy first: the value is changing, and a pane that reads
       // within the TTL must not be handed the pre-edit levels.
@@ -10154,7 +10162,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                Nothing is lost: closing the search brings it straight back, and
                the search itself names the instrument being chosen. */
             data-layout="selector"
-            className={`${searchExpanded ? 'hidden' : 'flex'} items-center gap-1.5 px-1.5 py-1 min-w-0`}
+            /* flex-1 + min-w-0: the selector owns the space the icon bar leaves
+               and truncates inside it. The bar is shrink-0 with justify-start
+               on desktop, so it can neither be squeezed nor spill its leading
+               icons leftward over this element — which is what the screenshots
+               showed: search and scales over the selector, the trailing icons
+               pinned right. A right-aligned row that runs out of room overflows
+               at its START edge. */
+            className={`${searchExpanded ? 'hidden' : 'flex'} items-center gap-1.5 px-1.5 py-1 min-w-0 flex-1`}
             onPointerDown={(e) => e.stopPropagation()}>
             {!isOptionPane && (
             <div className="relative min-w-0 shrink">
@@ -10316,7 +10331,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               and the premium rule; only its tab is removed. */}
           <TradePnl sync={premSync} />
           </div>
-        <div ref={bottomBarRef} className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-3 py-1.5 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-nowrap justify-end w-screen md:w-auto md:ml-auto md:mb-1 md:rounded-md md:border md:border-border/60 md:bg-muted/30 max-w-[100vw] overflow-x-hidden md:overflow-visible">
+        <div ref={bottomBarRef} className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-3 py-1.5 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-nowrap justify-end md:justify-start md:shrink-0 w-screen md:w-auto md:ml-auto md:mb-1 md:rounded-md md:border md:border-border/60 md:bg-muted/30 max-w-[100vw] overflow-x-hidden md:overflow-visible">
           <div className="flex flex-1 items-center gap-1.5 sm:gap-2 justify-end min-w-0 md:contents">
           {/* Desktop: an icon until clicked. Mobile: unchanged — the field is
               always shown, which is what the bottom toolbar was built around. */}

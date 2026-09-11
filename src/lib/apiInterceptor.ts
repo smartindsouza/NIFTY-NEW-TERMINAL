@@ -46,6 +46,9 @@ const SERVER_CACHED_ENDPOINTS = new Map<string, string>([
   // not a possible outcome. Client side it is behind a 5s shared cache with
   // in-flight dedupe (fetchSetting in AdvancedChart.tsx), shared by both panes.
   ['/api/settings/', 'local SQLite settings read; 5s shared client cache + dedupe, no broker call'],
+  // The dated H-levels journal: a local SQLite upsert, no broker call. Written
+  // only on a real edit now (hydration no longer echoes the server's value back).
+  ['/api/h-levels', 'local SQLite journal upsert, no broker call'],
 ]);
 
 /**
