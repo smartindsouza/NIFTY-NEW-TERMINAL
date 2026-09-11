@@ -1047,6 +1047,34 @@ function writeTaSnapshot(tf: string, token: string, data: any): void {
 // shared: module scope, so both split panes and all three callers use one copy.
 // Cached for the session; a failed lookup is not cached, so a transient error
 // does not stick.
+// App settings (h-levels and friends) are pulled per index, by BOTH split panes,
+// and again on every index switch — six calls in fifteen seconds with a little
+// flicking between charts, which tripped the frequency warning. A short shared
+// cache with in-flight dedupe collapses that: one request per key per few
+// seconds however many callers ask. Module scope so the two panes share it.
+// Invalidated on write, so saving levels is reflected immediately.
+const SETTING_TTL_MS = 5000;
+const settingCache = new Map<string, { at: number; value: any }>();
+const settingInFlight = new Map<string, Promise<any>>();
+async function fetchSetting(key: string): Promise<any> {
+  const hit = settingCache.get(key);
+  if (hit && Date.now() - hit.at < SETTING_TTL_MS) return hit.value;
+  const flying = settingInFlight.get(key);
+  if (flying) return flying;
+  const p = (async () => {
+    try {
+      const r = await fetch(`/api/settings/${key}`);
+      const d = await r.json();
+      const value = d?.value ?? null;
+      settingCache.set(key, { at: Date.now(), value });
+      return value;
+    } finally { settingInFlight.delete(key); }
+  })();
+  settingInFlight.set(key, p);
+  return p;
+}
+function invalidateSetting(key: string) { settingCache.delete(key); }
+
 const contractInfoCache = new Map<string, any>();
 const contractInfoInFlight = new Map<string, Promise<any>>();
 async function fetchContractInfo(tradingsymbol: string): Promise<any> {
@@ -3909,9 +3937,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     hLevelsHydratedRef.current = false;
     (async () => {
       try {
-        const r = await fetch(`/api/settings/${hlSettingKey}`);
-        const d = await r.json();
-        const serverVal = d?.value;
+        const serverVal = await fetchSetting(hlSettingKey);
         if (!cancelled && Array.isArray(serverVal) && serverVal.length === 6) {
           const norm = serverVal.map((v: any) => Math.round(Number(v) || 0));
           setHLevels(norm);
@@ -3921,6 +3947,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           let local: number[] = [];
           try { local = JSON.parse(localStorage.getItem(hlKey) || '[]'); } catch {}
           if (Array.isArray(local) && local.length === 6 && local.some(v => v > 0)) {
+            invalidateSetting(hlSettingKey);   // the cached null is about to be wrong
             fetch(`/api/settings/${hlSettingKey}`, {
               method: 'PUT', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ value: local }),
@@ -3948,6 +3975,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     // pulled server copy. Debounced to coalesce rapid edits.
     if (!hLevelsHydratedRef.current) return;
     const t = setTimeout(() => {
+      // Drop the cached copy first: the value is changing, and a pane that reads
+      // within the TTL must not be handed the pre-edit levels.
+      invalidateSetting(hlSettingKeyRef.current);
       fetch(`/api/settings/${hlSettingKeyRef.current}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ value: hLevels }),

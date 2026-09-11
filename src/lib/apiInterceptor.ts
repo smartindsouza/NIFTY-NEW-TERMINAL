@@ -42,7 +42,29 @@ const SERVER_CACHED_ENDPOINTS = new Map<string, string>([
   // from it. Client side it is cached once per symbol for the session
   // (fetchContractInfo in AdvancedChart.tsx), shared by all three callers.
   ['/api/contract-info', 'instrument-master lookup, 24h server cache; once-per-symbol client cache, no broker call'],
+  // Reads one row from the local app_settings table. No broker call, so a 429 is
+  // not a possible outcome. Client side it is behind a 5s shared cache with
+  // in-flight dedupe (fetchSetting in AdvancedChart.tsx), shared by both panes.
+  ['/api/settings/', 'local SQLite settings read; 5s shared client cache + dedupe, no broker call'],
 ]);
+
+/**
+ * Exact-match lists cannot cover endpoints whose PATH carries a parameter:
+ * /api/settings/h_levels, /api/settings/h_levels_BANKNIFTY and so on are one
+ * endpoint with many paths. Entries ending in '/' are therefore treated as
+ * prefixes. Same safety rule as the exact entries: an endpoint only goes on the
+ * list if it cannot reach the broker, and the reason is recorded beside it.
+ */
+function isExempt(endpoint: string): boolean {
+  if (LOCAL_ONLY_ENDPOINTS.has(endpoint) || SERVER_CACHED_ENDPOINTS.has(endpoint)) return true;
+  for (const key of SERVER_CACHED_ENDPOINTS.keys()) {
+    if (key.endsWith('/') && endpoint.startsWith(key)) return true;
+  }
+  for (const key of LOCAL_ONLY_ENDPOINTS) {
+    if (typeof key === 'string' && key.endsWith('/') && endpoint.startsWith(key)) return true;
+  }
+  return false;
+}
 
 function showTooFrequentWarning(endpoint: string, rate: number) {
   if (isAlertActive) return;
@@ -82,7 +104,7 @@ export function initializeInterceptor() {
         // Check for high-frequency warnings
         const warnings = performanceTracker.getEndpointFrequencyWarnings();
         const warning = warnings.find(w => w.endpoint === url.split('?')[0]);
-        if (warning && !LOCAL_ONLY_ENDPOINTS.has(warning.endpoint) && !SERVER_CACHED_ENDPOINTS.has(warning.endpoint)) {
+        if (warning && !isExempt(warning.endpoint)) {
           showTooFrequentWarning(warning.endpoint, warning.ratePer15s);
         }
 
@@ -130,7 +152,7 @@ export function initializeInterceptor() {
         // Check frequency
         const warnings = performanceTracker.getEndpointFrequencyWarnings();
         const warning = warnings.find(w => w.endpoint === url.split('?')[0]);
-        if (warning && !LOCAL_ONLY_ENDPOINTS.has(warning.endpoint) && !SERVER_CACHED_ENDPOINTS.has(warning.endpoint)) {
+        if (warning && !isExempt(warning.endpoint)) {
           showTooFrequentWarning(warning.endpoint, warning.ratePer15s);
         }
       }
