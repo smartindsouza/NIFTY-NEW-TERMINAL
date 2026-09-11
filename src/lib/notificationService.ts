@@ -44,6 +44,23 @@ const SESSION_SCOPED: SavedNotification["type"][] = ["oi_alert", "divergence"];
  */
 const EPHEMERAL_TTL_MS = 10 * 60 * 1000;
 
+/**
+ * When THIS app instance opened. Module scope, never persisted, so every launch
+ * or reload gets a fresh value.
+ *
+ * Age-based expiry was not enough. A level touched nine minutes before Martin
+ * opened the app was still inside its TTL, so it greeted him as an unread alert
+ * for something he had no chance of acting on — "Trap upper touched", "Green
+ * inner touched", all of it from before he was looking. Observations are only
+ * useful as they happen, so anything that fired before the app was opened is
+ * dropped outright, regardless of age.
+ *
+ * Orders and system messages are exempt: those are a RECORD, and a fill from
+ * this morning must still be visible when the app is reopened this afternoon.
+ */
+const APP_OPENED_AT = Date.now();
+const OBSERVATION_TYPES: SavedNotification["type"][] = ["oi_alert", "divergence"];
+
 /** Start of the session currently in play: 09:15 IST today, or yesterday's if
  *  the day's session has not opened yet. IST is UTC+5:30 with no DST, so
  *  09:15 IST is exactly 03:45 UTC and fixed arithmetic is safe. */
@@ -60,6 +77,9 @@ function pruneExpired(list: SavedNotification[], now: number = Date.now()) {
   const cutoff = currentSessionStartMs(now);
   const kept = list.filter((n) => {
     const t0 = Date.parse(n.timestamp);
+    // Fired before this app instance opened -> not a live alert. Applies to
+    // observations only; orders and system messages survive by type.
+    if (OBSERVATION_TYPES.includes(n.type) && Number.isFinite(t0) && t0 < APP_OPENED_AT) return false;
     if (n.metadata?.ephemeral && Number.isFinite(t0) && now - t0 > EPHEMERAL_TTL_MS) return false;
     if (!SESSION_SCOPED.includes(n.type)) return true;
     const t = Date.parse(n.timestamp);
