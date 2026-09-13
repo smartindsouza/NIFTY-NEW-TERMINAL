@@ -2371,7 +2371,13 @@ setInterval(() => {
         } },
         { key: 'GOLD', label: 'Gold', sym: 'GC=F', tz: 'America/New_York', sched: CME_GLOBEX },
         { key: 'SILVER', label: 'Silver', sym: 'SI=F', tz: 'America/New_York', sched: CME_GLOBEX },
-        { key: 'OIL', label: 'Crude Oil', sym: 'CL=F', tz: 'America/New_York', sched: CME_GLOBEX },
+        // Two crude benchmarks, labelled so they cannot be confused. WTI is the
+        // NYMEX contract; Brent is the international benchmark India's import
+        // basket tracks, so it is the one that moves domestic fuel and the
+        // rupee. BZ=F is Yahoo's NYMEX-listed Brent contract, hence the same
+        // CME schedule.
+        { key: 'OIL', label: 'WTI Crude', sym: 'CL=F', tz: 'America/New_York', sched: CME_GLOBEX },
+        { key: 'BRENT', label: 'Brent Crude', sym: 'BZ=F', tz: 'America/New_York', sched: CME_GLOBEX },
       ];
       await Promise.all(GLOBAL.map(async (g) => {
         // Session status comes from the clock, so it's still honest even if the
