@@ -4360,6 +4360,20 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // flag alone cannot tell the two apart; the timestamp of the dismissal can.
   const triggerBoxClosedAtRef = useRef(0);
 
+  // Capital deployed at the R:R entry, in rupees. When set, the SL and TP tags
+  // also show the rupee loss and profit: P&L at a price P on capital C entered
+  // at E is C × (P − E) / E, so the tags are C × risk% and C × reward%. That is
+  // the honest figure for "if I put this much in": no lot rounding, because the
+  // amount is what Martin types, not a lot count. Persisted, since the number he
+  // trades with changes rarely; read through a ref because the canvas draw loop
+  // is built once and cannot see state.
+  const [rrCapital, setRrCapital] = useState<number>(() => {
+    try { const v = Number(localStorage.getItem('rrCapital')); return Number.isFinite(v) && v > 0 ? v : 0; } catch (e) { return 0; }
+  });
+  const rrCapitalRef = useRef(rrCapital);
+  rrCapitalRef.current = rrCapital;
+  useEffect(() => { try { localStorage.setItem('rrCapital', String(rrCapital || 0)); } catch (e) {} }, [rrCapital]);
+
   const [rrMenuOpen, setRrMenuOpen] = useState(false);
   const rrMenuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -9020,6 +9034,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         const reward = Math.abs(rrB.target - rrB.entry);
         const ratio = risk > 0 ? reward / risk : 0;
         const pct = (d: number) => (rrB.entry > 0 ? ` (${(d / rrB.entry * 100).toFixed(1)}%)` : '');
+        // Rupee P&L on the deployed capital, when one has been entered.
+        const cap = rrCapitalRef.current;
+        const inr = (d: number) => {
+          if (!(cap > 0) || !(rrB.entry > 0)) return '';
+          const amt = cap * d / rrB.entry;
+          return `  ${amt < 0 ? '−' : ''}₹${Math.abs(Math.round(amt)).toLocaleString('en-IN')}`;
+        };
         const tag = (yy: number, text: string, bg: string) => {
           ctx.font = 'bold 10px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
           const w = ctx.measureText(text).width + 10;
@@ -9027,8 +9048,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           ctx.fillStyle = '#0b0f14'; ctx.fillText(text, 11, yy);
         };
         tag(yE, `${rrB.kind === 'long' ? 'LONG' : 'SHORT'} ${rrB.entry.toFixed(2)}`, 'rgba(226,232,240,0.95)');
-        tag(yS, `SL ${rrB.stop.toFixed(2)}  −${risk.toFixed(2)}${pct(risk)}`, 'rgba(244,63,94,0.95)');
-        tag(yT, `TP ${rrB.target.toFixed(2)}  +${reward.toFixed(2)}${pct(reward)}`, 'rgba(16,185,129,0.95)');
+        tag(yS, `SL ${rrB.stop.toFixed(2)}  −${risk.toFixed(2)}${pct(risk)}${inr(-risk)}`, 'rgba(244,63,94,0.95)');
+        tag(yT, `TP ${rrB.target.toFixed(2)}  +${reward.toFixed(2)}${pct(reward)}${inr(reward)}`, 'rgba(16,185,129,0.95)');
         const rrText = `R:R  1 : ${ratio.toFixed(2)}`;
         ctx.font = 'bold 11px monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
         const rw = ctx.measureText(rrText).width + 12;
@@ -10374,7 +10395,24 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               <Scale size={17} />
             </button>
             {rrMenuOpen && !rrBox && (
-              <div className="fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)] md:bottom-full md:mb-2 md:right-0 z-[90] md:w-40 bg-card border border-white/10 rounded-lg shadow-2xl md:shadow-xl overflow-hidden">
+              <div className="fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)] md:bottom-full md:mb-2 md:right-0 z-[90] md:w-48 bg-card border border-white/10 rounded-lg shadow-2xl md:shadow-xl overflow-hidden">
+                {/* Capital: optional. Leave it at 0 and the tags show points and
+                    percent as before; set it and they add the rupee loss at SL
+                    and profit at TP for that amount. */}
+                <div className="px-3 pt-2 pb-1.5 border-b border-white/10">
+                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Capital (₹)</div>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    step={1000}
+                    value={rrCapital || ''}
+                    placeholder="e.g. 50000"
+                    onChange={(e) => setRrCapital(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="w-full h-8 px-2 rounded-md bg-muted/40 border border-white/10 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
                 <button
                   onClick={() => { setRrArm('long'); setRrMenuOpen(false); }}
                   className="w-full text-left px-3 py-2 text-xs font-medium text-emerald-300 hover:bg-muted transition-colors">
