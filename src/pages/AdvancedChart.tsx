@@ -11635,9 +11635,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           /* Dismiss on pointerdown as well as click: on a touchscreen a tap that
              drifts a couple of pixels never becomes a click, so an outside tap
              could leave the box sitting there. pointerdown fires regardless. */
+          /* No handlers here. Outside taps are handled by the document listener,
+             which also stamps the suppression timer. These handlers closed the
+             card on ANY pointerdown that bubbled to them — including one on the
+             Cancel button inside it — so the card vanished before the tap
+             finished, the click fell through to the chart, and the chart opened
+             a fresh box at whatever price was under the finger. */
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
-          onPointerDown={() => setTriggerBox(null)}
-          onClick={() => setTriggerBox(null)}
         >
           <div
             ref={triggerBoxRef}
@@ -11757,7 +11761,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               className={`w-full text-sm font-bold py-2.5 rounded-lg transition-colors disabled:opacity-50 ${triggerBox.side === 'BUY' ? 'bg-emerald-500/25 text-emerald-300 hover:bg-emerald-500/35' : 'bg-rose-500/25 text-rose-300 hover:bg-rose-500/35'}`}>
               {armingTrigger ? 'Arming…' : `Arm ${triggerBox.side} at ${triggerBox.level.toFixed(2)}`}
             </button>
-            <button onClick={() => setTriggerBox(null)}
+            <button
+              onClick={() => { triggerBoxClosedAtRef.current = Date.now(); setTriggerBox(null); }}
               className="w-full mt-2 text-xs py-2 rounded-lg bg-muted/40 text-muted-foreground hover:text-foreground">
               Cancel
             </button>
