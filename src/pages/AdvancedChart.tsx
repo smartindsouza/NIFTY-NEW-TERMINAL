@@ -4212,7 +4212,6 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // 30k characters earlier: naming selectedInstrument or underlying up there
   // would read them before their declaration and blank the page, which is
   // exactly the fault that took the app down this morning.
-
   const chartKey = selectedInstrument
     ? `opt:${selectedInstrument.tradingsymbol}`
     : `idx:${underlying}`;
@@ -6997,26 +6996,6 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       // pane's persist effect write the old list back and resurrect a closed tab.
       if (paneRole === 'spot') return [];
       const saved = sessionStorage.getItem('openOptionCharts');
-
-  // The option pane tells the workspace when its last chart closes, so the split
-  // collapses back to a full-width spot chart. This lives in an EFFECT rather
-  // than in a close handler: the only handler that fired it was the desktop tab
-  // strip's, which no longer renders — the dropdown replaced it — so closing the
-  // last chart left the pane mounted with nothing to show, and it fell back to
-  // rendering spot. A second spot chart, side by side with the first.
-  //
-  // Watching the count instead means every close path reports it: the dropdown,
-  // the old strip, a programmatic removal, anything added later.
-  const hadOptionsRef = useRef(false);
-  useEffect(() => {
-    if (!isOptionPane) return;
-    if (openCharts.length > 0) { hadOptionsRef.current = true; return; }
-    // Only on a transition from some to none. Firing on the initial empty render
-    // would collapse the pane before its charts have loaded.
-    if (!hadOptionsRef.current) return;
-    hadOptionsRef.current = false;
-    try { window.dispatchEvent(new CustomEvent('terminal:options-empty')); } catch (e) {}
-  }, [isOptionPane, openCharts.length]);
       const arr = saved ? JSON.parse(saved) : [];
       return Array.isArray(arr) ? arr : [];
     } catch (e) { return []; }
