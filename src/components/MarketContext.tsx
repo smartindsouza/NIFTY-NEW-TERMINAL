@@ -1,7 +1,61 @@
-import { useState, type ReactNode } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronDown, TrendingUp, TrendingDown, Globe, X } from "lucide-react";
+import { notificationService } from "../lib/notificationService";
+import { toast } from "sonner";
+
+// ============================================================================
+// SUDDEN-MOVE ALERTS on global indices, commodities and India VIX.
+//
+// This component polls every 5s whether or not the drawer is open, so it is the
+// natural place to watch. "Sudden" means a move over a SHORT WINDOW (60s), not
+// the day's change: a market that drifts 1% over six hours is not news, one that
+// moves 0.5% in a minute is.
+//
+// Thresholds differ by instrument because their normal volatility does. India
+// VIX routinely moves several percent in a day, so it needs a wider bar than an
+// index, or it would alert constantly; commodities sit between the two. These
+// are starting points, chosen to fire on the moves worth looking up for and stay
+// quiet otherwise — they may need tuning once Martin sees them in practice.
+const MOVE_WINDOW_MS = 60 * 1000;
+const COOLDOWN_MS = 5 * 60 * 1000;      // one alert per instrument per 5 min
+const MAX_SAMPLE_AGE_MS = 3 * 60 * 1000; // a gap this long means the app was idle
+function moveThresholdPct(key: string): number {
+  if (key === 'VIX') return 3.0;                                   // India VIX
+  if (['GOLD', 'SILVER', 'OIL', 'BRENT'].includes(key)) return 0.8;
+  return 0.4;                                                       // indices
+}
+type Sample = { price: number; at: number };
+const moveHistory = new Map<string, Sample[]>();
+const lastAlertAt = new Map<string, number>();
+
+/** Returns the alert text when a market has moved sharply, else null. */
+export function detectSuddenMove(
+  key: string, label: string, price: number, isOpen: boolean, now: number
+): { pct: number; from: number } | null {
+  if (!(price > 0)) return null;
+  const hist = moveHistory.get(key) || [];
+  hist.push({ price, at: now });
+  // keep a little more than the window so there is always a baseline to compare
+  while (hist.length > 2 && hist[0].at < now - MOVE_WINDOW_MS * 2) hist.shift();
+  moveHistory.set(key, hist);
+
+  // A closed market's print is a settlement, not a move.
+  if (!isOpen) return null;
+  // The oldest sample still inside the window is the baseline.
+  const baseline = hist.find((h) => h.at >= now - MOVE_WINDOW_MS && h.at <= now - 15000);
+  if (!baseline || !(baseline.price > 0)) return null;
+  // A stale baseline means the tab was backgrounded; the "jump" spans that gap.
+  if (now - baseline.at > MAX_SAMPLE_AGE_MS) return null;
+
+  const pct = (price - baseline.price) / baseline.price * 100;
+  if (Math.abs(pct) < moveThresholdPct(key)) return null;
+  const last = lastAlertAt.get(key) || 0;
+  if (now - last < COOLDOWN_MS) return null;
+  lastAlertAt.set(key, now);
+  return { pct, from: baseline.price };
+}
 
 interface Market {
   key: string; label: string; price?: number; change?: number; changePct?: number;
@@ -163,6 +217,34 @@ export default function MarketContext() {
   const ukAsOf = uk.find((m) => m.available && m.asOf)?.asOf;
   const globalAsOf = globalMkts.find((m) => m.available && m.asOf)?.asOf;
   const status: { indian?: boolean; us?: boolean; uk?: boolean } = data?.status || {};
+
+  // Watch every row each poll and alert on a sharp move. Runs whether or not the
+  // drawer is open, which is the point: these are markets Martin is not looking
+  // at. India VIX is in the Indian list, so its session status is the Indian one;
+  // global and commodity rows carry their own.
+  useEffect(() => {
+    if (!data) return;
+    const now = Date.now();
+    const rows: Array<{ m: Market; isOpen: boolean }> = [
+      ...indian.map((m) => ({ m, isOpen: status.indian !== false })),
+      ...us.map((m) => ({ m, isOpen: status.us !== false })),
+      ...uk.map((m) => ({ m, isOpen: status.uk !== false })),
+      ...globalMkts.map((m) => ({ m, isOpen: (m as any).open !== false })),
+    ];
+    for (const { m, isOpen } of rows) {
+      if (!m.available || !(m.price! > 0)) continue;
+      const hit = detectSuddenMove(m.key, m.label, m.price!, isOpen, now);
+      if (!hit) continue;
+      const dir = hit.pct >= 0 ? 'jumped' : 'dropped';
+      const arrow = hit.pct >= 0 ? '▲' : '▼';
+      const title = `${arrow} ${m.label} ${dir} ${Math.abs(hit.pct).toFixed(2)}%`;
+      const body = `${hit.from.toFixed(2)} → ${m.price!.toFixed(2)} in under a minute`;
+      // 'divergence' + ephemeral: same class as the chart's level alerts, so it
+      // expires with the session and never greets him as stale on a later launch.
+      notificationService.add('divergence', title, body, { ephemeral: true, source: 'market-move', key: m.key });
+      toast(title, { description: body });
+    }
+  }, [data]);
 
   // PORTALLED TO document.body. The pull tab and drawer are position:fixed with
   // z-9999, yet the chart's toolbar icons still painted over them — because
