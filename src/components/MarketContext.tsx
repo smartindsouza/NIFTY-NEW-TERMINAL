@@ -30,6 +30,48 @@ type Sample = { price: number; at: number };
 const moveHistory = new Map<string, Sample[]>();
 const lastAlertAt = new Map<string, number>();
 
+// ---------------------------------------------------------------------------
+// DAY-MOVE ALERTS. The 60-second rule above catches a spike, and that is the
+// wrong shape for India VIX: its meaningful moves build over hours, so it can
+// finish a day 8% up without ever jumping 3% inside one minute. Martin saw no
+// VIX alert for exactly that reason — the threshold was effectively unreachable,
+// not merely wide.
+//
+// So a second trigger on the DAY's change, which the feed already provides:
+// alert the first time it crosses a level, and again at each further step, so a
+// VIX grinding from +5% to +10% reports twice rather than once or forty times.
+// Steps rather than a single threshold, because the second leg of a VIX move is
+// usually the one that matters.
+const DAY_STEPS: Record<string, number> = {
+  VIX: 5,        // India VIX: +/-5%, then 10, 15 ...
+  _index: 1,     // indices: 1%, 2% ... a 1% day in an index is a real session
+  _commodity: 2, // gold/oil: 2%, 4% ...
+};
+const dayStepReported = new Map<string, number>();
+function dayStepFor(key: string): number {
+  if (key === 'VIX') return DAY_STEPS.VIX;
+  if (['GOLD', 'SILVER', 'OIL', 'BRENT'].includes(key)) return DAY_STEPS._commodity;
+  return DAY_STEPS._index;
+}
+
+/** Returns the step just crossed (signed) when the DAY's move reaches a new
+ *  multiple of the instrument's step, else null. */
+export function detectDayMove(key: string, changePct: number | undefined, isOpen: boolean): number | null {
+  if (!isOpen || typeof changePct !== 'number' || !Number.isFinite(changePct)) return null;
+  const step = dayStepFor(key);
+  const reached = Math.trunc(Math.abs(changePct) / step) * step * (changePct < 0 ? -1 : 1);
+  if (reached === 0) { dayStepReported.set(key, 0); return null; }
+  const last = dayStepReported.get(key) ?? 0;
+  // Only on a NEW, larger step in the same direction. A retreat resets the mark
+  // so a move that comes back and pushes on reports again.
+  if (Math.sign(reached) !== Math.sign(last) || Math.abs(reached) > Math.abs(last)) {
+    dayStepReported.set(key, reached);
+    return reached;
+  }
+  if (Math.abs(reached) < Math.abs(last)) dayStepReported.set(key, reached);
+  return null;
+}
+
 /** Returns the alert text when a market has moved sharply, else null. */
 export function detectSuddenMove(
   key: string, label: string, price: number, isOpen: boolean, now: number
@@ -233,12 +275,18 @@ export default function MarketContext() {
     ];
     for (const { m, isOpen } of rows) {
       if (!m.available || !(m.price! > 0)) continue;
+      // Two shapes of move: a spike inside a minute, and the day's total. VIX
+      // needs the second; an index spike needs the first.
       const hit = detectSuddenMove(m.key, m.label, m.price!, isOpen, now);
-      if (!hit) continue;
-      const dir = hit.pct >= 0 ? 'jumped' : 'dropped';
-      const arrow = hit.pct >= 0 ? '▲' : '▼';
-      const title = `${arrow} ${m.label} ${dir} ${Math.abs(hit.pct).toFixed(2)}%`;
-      const body = `${hit.from.toFixed(2)} → ${m.price!.toFixed(2)} in under a minute`;
+      const dayHit = hit ? null : detectDayMove(m.key, m.changePct, isOpen);
+      if (!hit && dayHit === null) continue;
+      const pctMoved = hit ? hit.pct : (m.changePct as number);
+      const dir = pctMoved >= 0 ? 'jumped' : 'dropped';
+      const arrow = pctMoved >= 0 ? '▲' : '▼';
+      const title = `${arrow} ${m.label} ${dir} ${Math.abs(pctMoved).toFixed(2)}%${hit ? '' : ' today'}`;
+      const body = hit
+        ? `${hit.from.toFixed(2)} → ${m.price!.toFixed(2)} in under a minute`
+        : `now ${m.price!.toFixed(2)} · ${pctMoved >= 0 ? '+' : ''}${pctMoved.toFixed(2)}% on the day`;
       // 'divergence' + ephemeral: same class as the chart's level alerts, so it
       // expires with the session and never greets him as stale on a later launch.
       notificationService.add('divergence', title, body, { ephemeral: true, source: 'market-move', key: m.key });
