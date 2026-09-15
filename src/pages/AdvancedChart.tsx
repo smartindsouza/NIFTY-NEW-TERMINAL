@@ -7000,6 +7000,23 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       return Array.isArray(arr) ? arr : [];
     } catch (e) { return []; }
   });
+
+  // The option pane tells the workspace when its last chart closes, so the split
+  // collapses back to a full-width spot chart. An EFFECT rather than a close
+  // handler: the only handler that fired it was the desktop tab strip's, which
+  // no longer renders — the dropdown replaced it — so closing the last chart
+  // left the pane mounted with nothing to show and it fell back to rendering
+  // spot. Watching the count covers every close path.
+  const hadOptionsRef = useRef(false);
+  useEffect(() => {
+    if (!isOptionPane) return;
+    if (openCharts.length > 0) { hadOptionsRef.current = true; return; }
+    // Only on a transition from some to none: an empty pane on first render must
+    // not report, or the split collapses before its charts finish loading.
+    if (!hadOptionsRef.current) return;
+    hadOptionsRef.current = false;
+    try { window.dispatchEvent(new CustomEvent('terminal:options-empty')); } catch (e) {}
+  }, [isOptionPane, openCharts.length]);
   useEffect(() => {
     if (isSpotPane) return;                  // single writer: the option pane
     try { sessionStorage.setItem('openOptionCharts', JSON.stringify(openCharts)); } catch (e) {}
