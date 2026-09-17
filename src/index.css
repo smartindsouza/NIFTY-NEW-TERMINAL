@@ -50,7 +50,7 @@
 }
 
 :root {
-    --background: #f4f5f9;
+    --background: #ffffff;
     --foreground: #101828;
     --card: #ffffff;
     --card-foreground: #101828;
@@ -140,3 +140,27 @@
     bottom: calc(4rem + env(safe-area-inset-bottom) + 12px) !important;
   }
 }
+
+
+/* LIGHT MODE: no shadows anywhere. Text shadows and glows were tuned for the
+   dark surface — a black halo behind pale text — and on white they read as a
+   smear. Rather than hunting each one, none are drawn in light mode at all. */
+.light *, .light *::before, .light *::after {
+  text-shadow: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+}
+
+/* LIGHT MODE: the pale -300/-400 tints were chosen for dark surfaces and land
+   at 1.5-3:1 against white — the sync icon and the FLAT badge in Martin's
+   screenshot. Remapped to the -700 shades app-wide, which clear AA (4.5:1) on
+   white. Dark mode is untouched. */
+.light .text-emerald-300, .light .text-emerald-400 { color: #047857 !important; }
+.light .text-rose-300,    .light .text-rose-400    { color: #be123c !important; }
+.light .text-red-300,     .light .text-red-400     { color: #b91c1c !important; }
+.light .text-slate-300,   .light .text-slate-400   { color: #334155 !important; }
+.light .text-indigo-200,  .light .text-indigo-300  { color: #3730a3 !important; }
+.light .text-cyan-300,    .light .text-cyan-400    { color: #0e7490 !important; }
+.light .text-amber-300,   .light .text-amber-400   { color: #b45309 !important; }
+.light .text-yellow-300,  .light .text-yellow-400  { color: #a16207 !important; }
+.light .text-purple-300,  .light .text-purple-400  { color: #6b21a8 !important; }

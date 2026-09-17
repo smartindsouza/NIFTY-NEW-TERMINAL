@@ -2818,17 +2818,23 @@ const updateOHLCInfoPanel = (panel: HTMLDivElement, candle: any, volume: any) =>
   const { open, high, low, close } = candle;
   const changeInfo = formatChange(open, close);
 
-  panel.style.textShadow = '0 1px 3px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.9)';
+  // The legend was hard-wired for the dark surface: near-white values with a
+  // black halo. On a white chart that is a pale smear. Colours and the shadow
+  // now follow the theme on <html>, which is the resolved theme.
+  const light = typeof document !== 'undefined' && document.documentElement.classList.contains('light');
+  const labelC = light ? '#64748b' : '#64748b';
+  const valueC = light ? '#0f172a' : '#cbd5e1';
+  panel.style.textShadow = light ? 'none' : '0 1px 3px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.9)';
   panel.innerHTML = `
     <div style="display:flex; flex-wrap:nowrap; align-items:center; gap:0 10px; white-space:nowrap;">
-      <span style="color: #64748b;">O <span style="color: #cbd5e1;">${formatPrice(open)}</span></span>
-      <span style="color: #64748b;">H <span style="color: #cbd5e1;">${formatPrice(high)}</span></span>
-      <span style="color: #64748b;">L <span style="color: #cbd5e1;">${formatPrice(low)}</span></span>
-      <span style="color: #64748b;">C <span style="color: #cbd5e1;">${formatPrice(close)}</span></span>
+      <span style="color: ${labelC};">O <span style="color: ${valueC};">${formatPrice(open)}</span></span>
+      <span style="color: ${labelC};">H <span style="color: ${valueC};">${formatPrice(high)}</span></span>
+      <span style="color: ${labelC};">L <span style="color: ${valueC};">${formatPrice(low)}</span></span>
+      <span style="color: ${labelC};">C <span style="color: ${valueC};">${formatPrice(close)}</span></span>
       <span style="color: ${changeInfo.color}; font-weight: 500;">${changeInfo.text}</span>
     </div>
     <div style="white-space:nowrap;">
-      <span style="color: #64748b;">Vol <span style="color: #cbd5e1;">${formatVolume(volume)}</span></span>
+      <span style="color: ${labelC};">Vol <span style="color: ${valueC};">${formatVolume(volume)}</span></span>
     </div>
   `;
 };
@@ -10301,7 +10307,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           })()}
           {deltaInfo && (() => {
             const p = deltaInfo.pressure;
-            const color = p >= 0.15 ? 'bg-emerald-500/20 text-emerald-400' : p <= -0.15 ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-500/20 text-slate-300';
+            // Light mode gets the -700 shades: the -300/-400 tints that read on a dark
+            // surface are almost invisible on white, which is how FLAT and the sync
+            // icon vanished in Martin's screenshot.
+            const lightMode = resolvedTheme === 'light';
+            const color = p >= 0.15 ? (lightMode ? 'bg-emerald-600/15 text-emerald-700' : 'bg-emerald-500/20 text-emerald-400')
+              : p <= -0.15 ? (lightMode ? 'bg-rose-600/15 text-rose-700' : 'bg-rose-500/20 text-rose-400')
+              : (lightMode ? 'bg-slate-500/15 text-slate-700' : 'bg-slate-500/20 text-slate-300');
             const word = p >= 0.15 ? 'BUY' : p <= -0.15 ? 'SELL' : 'FLAT';
             return (
               <span className={`px-3 py-1 rounded-md text-xs font-mono font-bold whitespace-nowrap ${color}`}
@@ -11010,7 +11022,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                  had it at all, which was not deliberate: the button is one of two
                  ways to pull positions, and hiding it left only the other. Same
                  square footprint as the reload button beside it. */
-              className="shrink-0 md:order-4 flex items-center justify-center h-9 w-9 rounded-md bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 transition-colors"
+              className={`shrink-0 md:order-4 flex items-center justify-center h-9 w-9 rounded-md transition-colors ${
+                resolvedTheme === 'light' ? 'bg-emerald-600/15 text-emerald-700 hover:bg-emerald-600/25' : 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25'}`}
               title="Sync open positions from Zerodha"
               aria-label="Sync open positions from Zerodha"
             >
