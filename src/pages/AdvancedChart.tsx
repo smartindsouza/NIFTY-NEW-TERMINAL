@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search, ChartNoAxesCombined, TrendingUp } from "lucide-react";
+import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search, ChartNoAxesCombined, TrendingUp, Star } from "lucide-react";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { useUserSettings, useResolvedTheme } from "../hooks/useUserSettings";
@@ -1336,8 +1336,16 @@ function computeFvgZones(candles: any[]): any[] {
 // a decision. Lookahead-free — a swing is only confirmed once the two candles after
 // it exist, and nothing is drawn before its breaking candle has closed.
 const STRUCT_LOOKBACK = 2;   // candles either side that define a swing
-const STRUCT_MAX = 6;        // most recent events kept on the chart
-function computeMarketStructure(candles: any[]): any[] {
+const STRUCT_MAX = 6;        // events kept PER DAY (see computeMarketStructure)
+
+/** IST calendar day of a candle. Structure events are grouped by it so the cap
+ *  applies per day rather than to the whole history — the old single cap kept
+ *  only the newest events, which is why nothing before today ever appeared. */
+function istDayKey(unixSec: number): string {
+  const d = new Date((unixSec + 19800) * 1000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+function computeMarketStructure(candles: any[], days: number = 1): any[] {
   if (!candles || candles.length < STRUCT_LOOKBACK * 2 + 3) return [];
   const n = STRUCT_LOOKBACK;
 
@@ -1385,7 +1393,16 @@ function computeMarketStructure(candles: any[]): any[] {
       lastLow = null;
     }
   }
-  return events.slice(-STRUCT_MAX);
+  const byDay = new Map<string, any[]>();
+  for (const ev of events) {
+    const k = istDayKey(ev.toTime);
+    if (!byDay.has(k)) byDay.set(k, []);
+    byDay.get(k)!.push(ev);
+  }
+  const keepDays = [...byDay.keys()].sort().slice(-Math.max(1, Math.min(7, days)));
+  const out: any[] = [];
+  for (const k of keepDays) out.push(...byDay.get(k)!.slice(-STRUCT_MAX));
+  return out;
 }
 
 // ============================================================================
@@ -3446,6 +3463,25 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     try { return localStorage.getItem('showConfSignals') === 'true'; } catch (e) { return false; }
   });
   // Market structure — index charts only, like the other index studies.
+  // Days of structure to draw. 1 is today only, the previous behaviour.
+  const [structDays, setStructDays] = useState<number>(() => {
+    try { const v = parseInt(localStorage.getItem('structDays') || '1', 10); return v >= 1 && v <= 7 ? v : 1; } catch (e) { return 1; }
+  });
+  useEffect(() => { try { localStorage.setItem('structDays', String(structDays)); } catch (e) {} }, [structDays]);
+  const [isEditingStruct, setIsEditingStruct] = useState(false);
+  const structDaysRef = useRef(structDays);   // the canvas loop is built once
+  structDaysRef.current = structDays;
+
+  // Favourite indicators. Favourites sort above everything, then active, then
+  // the rest — so a starred indicator stays put whether it is on or off.
+  const [favIndicators, setFavIndicators] = useState<string[]>(() => {
+    try { const v = JSON.parse(localStorage.getItem('favIndicators') || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+  });
+  useEffect(() => { try { localStorage.setItem('favIndicators', JSON.stringify(favIndicators)); } catch (e) {} }, [favIndicators]);
+  const isFav = (id: string) => favIndicators.includes(id);
+  const toggleFav = (id: string) => setFavIndicators(f => f.includes(id) ? f.filter(x => x !== id) : [...f, id]);
+  const rowOrder = (id: string, active: boolean) => isFav(id) ? 'order-0' : (active ? 'order-1' : 'order-2');
+
   const [showStructure, setShowStructure] = useState(() => {
     try { const v = localStorage.getItem('showStructure'); return v === null ? true : v === 'true'; } catch (e) { return true; }
   });
@@ -9620,10 +9656,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                 // previous one's zones: both indices return the same number of candles at
                 // the same timeframe, so the key matched, nothing recomputed, and levels
                 // from the old index were drawn far off the new chart's scale — invisible.
-                const sig = `${instrumentToken}|${timeframe}|${baseC.length}|${closedSince.length}|${closedSince.length ? closedSince[closedSince.length - 1].time : 0}`;
+                const sig = `${instrumentToken}|${timeframe}|${baseC.length}|${closedSince.length}|${closedSince.length ? closedSince[closedSince.length - 1].time : 0}|${structDaysRef.current}`;
                 if (sig !== structSigRef.current) {
                   structSigRef.current = sig;
-                  structRef.current = computeMarketStructure(closedSince.length ? [...baseC, ...closedSince] : baseC);
+                  structRef.current = computeMarketStructure(closedSince.length ? [...baseC, ...closedSince] : baseC, structDaysRef.current);
                 }
                 for (const ev of structRef.current) {
                   const y = mainSeriesRef.current.priceToCoordinate(ev.level);
@@ -10639,7 +10675,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   <div className="order-0 px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase">Available Indicators</div>
                   
                   {/* Previous Day High/Low */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showPdhPdl) ? "order-1" : "order-2"}`}>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('PdhPdl', showPdhPdl)}`}>
                     <button
                       onClick={() => setShowPdhPdl(!showPdhPdl)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
@@ -10648,6 +10684,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                         <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showPdhPdl) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showPdhPdl) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">Previous Day High/Low</span>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('PreviousDayHighLow'); }}
+                      title={isFav('PreviousDayHighLow') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('PreviousDayHighLow') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('PreviousDayHighLow') ? 'currentColor' : 'none'} />
                     </button>
                     <button
                       onClick={(e) => {
@@ -10663,7 +10707,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* 15m Opening Range (first-15-min high/low lines) */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showOpeningRange) ? "order-1" : "order-2"}`}>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('OpeningRange', showOpeningRange)}`}>
                     <button
                       onClick={() => setShowOpeningRange(!showOpeningRange)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
@@ -10673,12 +10717,20 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       </div>
                       <span className="truncate">15 min High-Low</span>
                     </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('15minHighLow'); }}
+                      title={isFav('15minHighLow') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('15minHighLow') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('15minHighLow') ? 'currentColor' : 'none'} />
+                    </button>
                     <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
                   </div>
 
                   {/* Market Structure (BOS / CHoCH) — an index study */}
                   {!isOptionView && (
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showStructure) ? "order-1" : "order-2"}`}>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('Structure', showStructure)}`}>
                     <button
                       onClick={() => setShowStructure(!showStructure)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
@@ -10688,12 +10740,41 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       </div>
                       <span className="truncate">BOS-CHoCH</span>
                     </button>
-                    <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('BOSCHoCH'); }}
+                      title={isFav('BOSCHoCH') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('BOSCHoCH') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('BOSCHoCH') ? 'currentColor' : 'none'} />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setIsEditingStruct(v => !v); }}
+                      title="Structure settings"
+                      className="p-1 text-muted-foreground/60 hover:text-foreground transition-colors"
+                    >
+                      <Settings size={14} />
+                    </button>
                   </div>
+                  )}
+                  {isEditingStruct && (
+                    <div className={`px-3 pb-2 ${rowOrder('Structure', showStructure)}`}>
+                      <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Show structure for</label>
+                      <select
+                        value={structDays}
+                        onChange={(e) => setStructDays(Math.max(1, Math.min(7, parseInt(e.target.value, 10) || 1)))}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        className="w-full h-8 px-2 rounded-md bg-muted/40 border border-white/10 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                      >
+                        {[1, 2, 3, 4, 5, 6, 7].map((d) => (
+                          <option key={d} value={d}>{d === 1 ? 'Today only' : `Last ${d} days`}</option>
+                        ))}
+                      </select>
+                    </div>
                   )}
 
                   {/* Directional Zones (ported TradingView indicator; replaced Order Blocks) */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showOrderBlocks) ? "order-1" : "order-2"}`}>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('OrderBlocks', showOrderBlocks)}`}>
                     <button
                       onClick={() => setShowOrderBlocks(!showOrderBlocks)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
@@ -10702,6 +10783,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                         <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showOrderBlocks) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showOrderBlocks) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">Directional Zones</span>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('DirectionalZones'); }}
+                      title={isFav('DirectionalZones') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('DirectionalZones') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('DirectionalZones') ? 'currentColor' : 'none'} />
                     </button>
                     {/* Same gear affordance as OI Bars / RSI: settings on tap
                         rather than an always-open panel cluttering the menu. */}
@@ -10738,7 +10827,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* Fair Value Gaps */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showFvg) ? "order-1" : "order-2"}`}>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('Fvg', showFvg)}`}>
                     <button
                       onClick={() => setShowFvg(!showFvg)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
@@ -10748,11 +10837,19 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       </div>
                       <span className="truncate">Fair Value Gaps</span>
                     </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('FairValueGaps'); }}
+                      title={isFav('FairValueGaps') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('FairValueGaps') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('FairValueGaps') ? 'currentColor' : 'none'} />
+                    </button>
                     <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
                   </div>
 
                   {/* Demand / Supply Zones */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showDsZones) ? "order-1" : "order-2"}`}>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('DsZones', showDsZones)}`}>
                     <button
                       onClick={() => setShowDsZones(!showDsZones)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
@@ -10761,6 +10858,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                         <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showDsZones) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showDsZones) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">Demand/Supply Zones</span>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('DemandSupplyZones'); }}
+                      title={isFav('DemandSupplyZones') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('DemandSupplyZones') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('DemandSupplyZones') ? 'currentColor' : 'none'} />
                     </button>
                     <div className="flex items-center gap-1 pr-1" onClick={(e) => e.stopPropagation()}>
                       <input
@@ -10786,6 +10891,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       </div>
                       <span className="truncate">Level Touch Alerts</span>
                     </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('LevelTouchAlerts'); }}
+                      title={isFav('LevelTouchAlerts') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('LevelTouchAlerts') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('LevelTouchAlerts') ? 'currentColor' : 'none'} />
+                    </button>
                     <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
                   </div>
 
@@ -10799,6 +10912,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                         <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(zoneTapAlertsOn) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(zoneTapAlertsOn) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">Zone Tap Alerts</span>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('ZoneTapAlerts'); }}
+                      title={isFav('ZoneTapAlerts') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('ZoneTapAlerts') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('ZoneTapAlerts') ? 'currentColor' : 'none'} />
                     </button>
                     <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
                   </div>
@@ -10814,11 +10935,19 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       </div>
                       <span className="truncate">Breakout-Fakeouts</span>
                     </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('BreakoutFakeouts'); }}
+                      title={isFav('BreakoutFakeouts') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('BreakoutFakeouts') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('BreakoutFakeouts') ? 'currentColor' : 'none'} />
+                    </button>
                     <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
                   </div>
 
                   {/* Support/Resistance Lines */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showVolume) ? "order-1" : "order-2"}`}>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('Volume', showVolume)}`}>
                     <button
                       onClick={() => setShowVolume(!showVolume)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
@@ -10828,8 +10957,16 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       </div>
                       <span className="truncate">Volume</span>
                     </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('Volume'); }}
+                      title={isFav('Volume') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('Volume') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('Volume') ? 'currentColor' : 'none'} />
+                    </button>
                   </div>
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showSnR) ? "order-1" : "order-2"}`}>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('SnR', showSnR)}`}>
                     <button
                       onClick={() => setShowSnR(!showSnR)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
@@ -10838,6 +10975,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                         <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showSnR) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showSnR) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">Support-Resistance Lines</span>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('SupportResistanceLines'); }}
+                      title={isFav('SupportResistanceLines') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('SupportResistanceLines') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('SupportResistanceLines') ? 'currentColor' : 'none'} />
                     </button>
                     <button
                       onClick={(e) => {
@@ -10856,7 +11001,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       option chart, but leaving the switch visible invited turning on
                       something that could never draw. */}
                   {!isOptionView && (
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showOiBars) ? "order-1" : "order-2"}`}>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('OiBars', showOiBars)}`}>
                     <button
                       onClick={() => setShowOiBars(!showOiBars)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
@@ -10865,6 +11010,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                         <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showOiBars) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showOiBars) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">OI Bars</span>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('OIBars'); }}
+                      title={isFav('OIBars') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('OIBars') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('OIBars') ? 'currentColor' : 'none'} />
                     </button>
                     <button
                       onClick={(e) => {
@@ -10881,7 +11034,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   )}
 
                   {/* RSI */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showRsi) ? "order-1" : "order-2"}`}>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('Rsi', showRsi)}`}>
                     <button
                       onClick={() => setShowRsi(!showRsi)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
@@ -10890,6 +11043,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                         <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showRsi) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showRsi) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">RSI</span>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('RSI'); }}
+                      title={isFav('RSI') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('RSI') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('RSI') ? 'currentColor' : 'none'} />
                     </button>
                     <button
                       onClick={(e) => {
@@ -10905,7 +11066,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* Bollinger Bands */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showBB) ? "order-1" : "order-2"}`}>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('BB', showBB)}`}>
                     <button
                       onClick={() => setShowBB(!showBB)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
@@ -10914,6 +11075,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                         <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showBB) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showBB) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">Bollinger Bands</span>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('BollingerBands'); }}
+                      title={isFav('BollingerBands') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('BollingerBands') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('BollingerBands') ? 'currentColor' : 'none'} />
                     </button>
                     <button
                       onClick={(e) => {
@@ -10929,7 +11098,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* H Levels */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showHLevels) ? "order-1" : "order-2"}`}>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('HLevels', showHLevels)}`}>
                     <button
                       onClick={() => setShowHLevels(!showHLevels)}
                       className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
@@ -10938,6 +11107,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                         <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showHLevels) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showHLevels) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                       </div>
                       <span className="truncate">H Levels</span>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('HLevels'); }}
+                      title={isFav('HLevels') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('HLevels') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('HLevels') ? 'currentColor' : 'none'} />
                     </button>
                     <button
                       onClick={(e) => {
@@ -10957,7 +11134,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     onClick={() => setShowDiagnostic(!showDiagnostic)}
                     className="flex items-center gap-2 px-3 py-2 text-sm text-foreground/80 hover:bg-muted hover:text-foreground transition-colors text-left"
                   >
-                    <div className={`w-4 flex items-center justify-center ${(showDiagnostic) ? "order-1" : "order-2"}`}>
+                    <div className={`w-4 flex items-center justify-center ${rowOrder('Diagnostic', showDiagnostic)}`}>
                       <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showDiagnostic) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showDiagnostic) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                     </div>
                     <span className="truncate">Broker Connection</span>
