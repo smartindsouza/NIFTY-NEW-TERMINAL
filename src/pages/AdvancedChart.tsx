@@ -4641,6 +4641,17 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const dzStyleSnapshotRef = useRef(dzStyle);
   const [isEditingRsi, setIsEditingRsi] = useState(false);
 
+  // Anything sitting over the chart: menus, indicator settings modals, the two
+  // diagnostics panels and the Market Context slide-out. The floating controls
+  // (jump-to-latest, Market Context pull tab) step aside while it is true —
+  // they float above everything, so otherwise they land on top of the panel.
+  const chartOverlayOpen = (
+    isIndicatorsOpen || showDiagnostic || externalOverlayOpen ||
+    indexMenuOpen || optionMenuOpen || rrMenuOpen || searchExpanded ||
+    isEditingPdhPdl || isEditingSnR || isEditingBB || isEditingOiBars ||
+    isEditingDz || isEditingTpSl || isEditingRsi || isEditingHLevels
+  );
+
   const logicalRangeRef = useRef<any>(null);
   // Bar count at the moment the visible range was last captured. Needed to tell
   // "the user is pinned to the live edge" from "the user scrolled back to look at
@@ -10498,7 +10509,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
              </span>
           )}
           </div>
-          <MarketContext />
+          <MarketContext tabHidden={chartOverlayOpen} />
         </div>
 
       </div>
@@ -11680,15 +11691,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               onPointerLeave={handlePointerUp}
               className="border border-0 rounded-none md:bg-background stretch-self flex-grow relative w-full overflow-hidden z-20"
             />
-            {showJumpToLatest && !(
-              // The jump-to-latest bubble floats above everything, so it used to
-              // sit on top of whatever panel was open. If anything covers the
-              // chart, there is nothing to jump on and the bubble is in the way.
-              isIndicatorsOpen || showDiagnostic || externalOverlayOpen ||
-              indexMenuOpen || optionMenuOpen || rrMenuOpen || searchExpanded ||
-              isEditingPdhPdl || isEditingSnR || isEditingBB || isEditingOiBars ||
-              isEditingDz || isEditingTpSl || isEditingRsi || isEditingHLevels
-            ) && (
+            {showJumpToLatest && !chartOverlayOpen && (
               <button
                 onClick={() => {
                   try {

@@ -227,7 +227,7 @@ function StatusPill({ open }: { open?: boolean }) {
   );
 }
 
-export default function MarketContext() {
+export default function MarketContext({ tabHidden = false }: { tabHidden?: boolean }) {
   const [open, setOpen] = useState(false);
   // The slide-out covers the chart; tell the chart page so its jump-to-latest
   // bubble steps aside instead of floating over this panel.
@@ -313,7 +313,7 @@ export default function MarketContext() {
   return createPortal(
     <>
       {/* Pull tab — always visible on the right edge of the chart */}
-      {!open && (
+      {!open && !tabHidden && (
         <button
           onClick={() => setOpen(true)}
           title="Market context"
