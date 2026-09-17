@@ -10694,7 +10694,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   <div className="order-0 px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase">Available Indicators</div>
                   
                   {/* Previous Day High/Low */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('PreviousDayHighLow', showPdhPdl)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('PreviousDayHighLow', showPdhPdl)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -10729,7 +10729,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* 15m Opening Range (first-15-min high/low lines) */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('15minHighLow', showOpeningRange)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('15minHighLow', showOpeningRange)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -10755,7 +10755,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
                   {/* Market Structure (BOS / CHoCH) — an index study */}
                   {!isOptionView && (
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('BOSCHoCH', showStructure)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BOSCHoCH', showStructure)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -10802,7 +10802,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   )}
 
                   {/* Directional Zones (ported TradingView indicator; replaced Order Blocks) */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('DirectionalZones', showOrderBlocks)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('DirectionalZones', showOrderBlocks)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -10840,7 +10840,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* TP & SL — settings only; there is nothing to draw, so no toggle. */}
-                  <div className="order-3 flex items-center justify-between px-3 hover:bg-muted transition-colors group">
+                  <div className="order-3 flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group">
                     <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 text-left flex-grow">
                       <div className="w-4" />
                       {/* The percentages were printed here as well as inside the
@@ -10858,7 +10858,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* Fair Value Gaps */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('FairValueGaps', showFvg)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('FairValueGaps', showFvg)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -10883,7 +10883,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* Demand / Supply Zones */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('DemandSupplyZones', showDsZones)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('DemandSupplyZones', showDsZones)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -10930,7 +10930,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   )}
 
                   {/* Level Touch Alerts */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(levelAlertsOn) ? "order-1" : "order-2"}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${(levelAlertsOn) ? "order-1" : "order-2"}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -10955,7 +10955,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* Zone Tap Alerts — the ported Pine script's own alert */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(zoneTapAlertsOn) ? "order-1" : "order-2"}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${(zoneTapAlertsOn) ? "order-1" : "order-2"}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -10980,7 +10980,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* Breakout Authenticity Alerts */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(breakoutAlertsOn) ? "order-1" : "order-2"}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${(breakoutAlertsOn) ? "order-1" : "order-2"}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -11005,7 +11005,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* Support/Resistance Lines */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('Volume', showVolume)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('Volume', showVolume)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -11059,7 +11059,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       <p className="text-[9px] text-muted-foreground/70 mt-1">Shared with candle colours</p>
                     </div>
                   )}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('SupportResistanceLines', showSnR)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('SupportResistanceLines', showSnR)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -11097,7 +11097,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       option chart, but leaving the switch visible invited turning on
                       something that could never draw. */}
                   {!isOptionView && (
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('OIBars', showOiBars)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('OIBars', showOiBars)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -11133,7 +11133,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   )}
 
                   {/* RSI */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('RSI', showRsi)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('RSI', showRsi)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -11168,7 +11168,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* Bollinger Bands */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('BollingerBands', showBB)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BollingerBands', showBB)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -11203,7 +11203,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* H Levels */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('HLevels', showHLevels)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('HLevels', showHLevels)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -11368,7 +11368,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               onPointerLeave={handlePointerUp}
               className="border border-0 rounded-none md:bg-background stretch-self flex-grow relative w-full overflow-hidden z-20"
             />
-            {showJumpToLatest && (
+            {showJumpToLatest && !isIndicatorsOpen && (
               <button
                 onClick={() => {
                   try {
