@@ -9933,7 +9933,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // overflow hidden so nothing can push the page into a scroll. The chart grows
   // to fill whatever the toolbar, tabs and strips leave. Mobile classes unchanged.
   return (
-    <div ref={pageRootRef} data-layout="page" className="px-1 pt-0 pb-0 md:px-8 md:py-0 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto flex flex-col h-[calc(100dvh-124px-env(safe-area-inset-bottom))] md:h-full md:min-h-0 max-md:overflow-hidden md:overflow-visible relative">
+    <div ref={pageRootRef} data-layout="page" className="px-1 pt-0 pb-0 md:px-0 md:py-0 animate-in fade-in duration-500 max-w-none w-full mx-auto flex flex-col h-[calc(100dvh-124px-env(safe-area-inset-bottom))] md:h-full md:min-h-0 max-md:overflow-hidden md:overflow-visible relative">
       
       {/* Tap anywhere outside to dismiss. The panel is a floating readout, not a
           setting to leave switched on, so it should get out of the way the moment
@@ -10132,11 +10132,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                the two never aligned. An empty row of the same height fixes both
                panes' chrome to the same total, and the spot pane's header extends
                across this space. Desktop only; mobile has no panes. */
-            className="hidden md:block md:h-9 shrink-0"
+            className="hidden md:block md:h-9 shrink-0 md:bg-[#131722]"
             aria-hidden="true"
           />
         )}
-        <div className={`relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-row md:items-center md:h-9 md:flex-nowrap md:min-w-0 max-md:pr-24 ${isPane && !isOptionPane ? 'md:w-[calc(200%_+_1px)] md:z-30' : ''} ${isOptionPane ? 'md:hidden' : ''}`}>
+        <div className={`relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-row md:items-center md:h-9 md:flex-nowrap md:min-w-0 max-md:pr-24 md:px-3 md:bg-[#131722] ${isPane && !isOptionPane ? 'md:w-[calc(200%_+_1px)] md:z-30' : ''} ${isOptionPane ? 'md:hidden' : ''}`}>
           {/* Row 1 — title and clock. shrink-0 and no truncate: the title was
               still ending in an ellipsis after the row was widened, because the
               flex algorithm shrinks every shrinkable child proportionally and
@@ -10272,7 +10272,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             tabs keep their own overflow-x so they still scroll; the controls sit
             OUTSIDE that scroller, because dropdowns opened from inside it would
             be clipped. */}
-        <div className={`items-center gap-2 px-0 pb-0 shrink-0 border-b border-border/60 bg-background/40 ${isFocusedChart ? 'hidden' : 'flex'}`}>
+        <div className={`items-center gap-2 px-0 pb-0 shrink-0 border-b border-white/10 bg-[#131722] md:px-2 ${isFocusedChart ? 'hidden' : 'flex'}`}>
           {/* The option pane hides the header, so without this the spot pane would
               be exactly one header taller and the two chart boxes would never line
               up. Same reservation trick as the option-reality strip: identical
@@ -10461,7 +10461,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               and the premium rule; only its tab is removed. */}
           <TradePnl sync={premSync} />
           </div>
-        <div ref={bottomBarRef} className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-3 py-1.5 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-nowrap md:flex-wrap justify-end md:shrink md:min-w-0 w-screen md:w-auto md:ml-auto md:mb-1 md:rounded-md md:border md:border-border/60 md:bg-muted/30 max-w-[100vw] overflow-x-hidden md:overflow-visible">
+        <div ref={bottomBarRef} className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-3 py-1.5 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-nowrap md:flex-wrap justify-end md:shrink md:min-w-0 w-screen md:w-auto md:ml-auto md:mb-0 md:rounded-none md:border-0 md:bg-transparent max-w-[100vw] overflow-x-hidden md:overflow-visible">
           <div className="flex flex-1 items-center gap-1.5 sm:gap-2 justify-end min-w-0 md:contents">
           {/* Desktop: an icon until clicked. Mobile: unchanged — the field is
               always shown, which is what the bottom toolbar was built around. */}
@@ -11002,7 +11002,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               onPointerMoveCapture={handlePointerMove}
               onPointerUpCapture={handlePointerUp}
               onPointerLeave={handlePointerUp}
-              className="border border-0 rounded-none stretch-self flex-grow relative w-full overflow-hidden z-20"
+              className="border border-0 rounded-none md:bg-[#131722] stretch-self flex-grow relative w-full overflow-hidden z-20"
             />
             {showJumpToLatest && (
               <button

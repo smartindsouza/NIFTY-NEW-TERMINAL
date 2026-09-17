@@ -178,7 +178,7 @@ export default function App() {
             while sitting BELOW the banner, so the banner's height overflowed the
             screen — that is the vertical scroll. md:pt-4 (was pt-8) buys the
             banner most of its space back. */}
-        <main className={`flex-1 w-full relative bg-transparent pl-0 ${isFocusedChart ? '' : 'md:pl-[80px]'} pt-[max(env(safe-area-inset-top),12px)] ${onChart ? 'md:pt-4 md:pb-0 md:h-screen md:flex md:flex-col md:overflow-hidden' : 'md:pt-8 md:pb-12 overflow-y-auto'} pr-0 md:pr-6 lg:pr-8 ${onChart ? 'max-md:overflow-hidden max-md:overscroll-none pb-24 max-md:pb-0' : 'pb-24'}`}>
+        <main className={`flex-1 w-full relative bg-transparent pl-0 ${isFocusedChart ? '' : 'md:pl-[80px]'} pt-[max(env(safe-area-inset-top),12px)] ${onChart ? 'md:pt-0 md:pb-0 md:h-screen md:flex md:flex-col md:overflow-hidden' : 'md:pt-8 md:pb-12 overflow-y-auto'} pr-0 ${onChart ? '' : 'md:pr-6 lg:pr-8'} ${onChart ? 'max-md:overflow-hidden max-md:overscroll-none pb-24 max-md:pb-0' : 'pb-24'}`}>
           <ActivePositions />
           <Suspense fallback={<TerminalLoader />}>
             <Switch>

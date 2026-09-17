@@ -92,7 +92,7 @@ export function ChartWorkspace() {
       {/* LEFT — spot only. Keyed so it is never remounted when the right pane
           appears or disappears: a remount would rebuild the chart, drop the
           drawings and re-run every query. */}
-      <div className={`${split ? 'w-1/2 border-r border-border/60' : 'w-full'} h-full min-w-0 min-h-0`}>
+      <div className={`${split ? 'w-1/2 border-r border-white/10' : 'w-full'} h-full min-w-0 min-h-0`}>
         <AdvancedChart key="pane-spot" paneRole="spot" />
       </div>
 
