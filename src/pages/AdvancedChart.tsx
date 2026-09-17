@@ -10863,7 +10863,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     </button>
                   </div>
                   {isEditingOpeningRange && showOpeningRange && (
-                    <div className={`px-3 pb-2 ${rowOrder('15minHighLow', showOpeningRange)}`}>
+                    <div className={`pl-3 pr-9 md:pr-3 pb-2 ${rowOrder('15minHighLow', showOpeningRange)}`}>
                       <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Opening range colours</label>
                       <div className="flex items-center gap-3">
                           <label className="flex items-center gap-1.5 cursor-pointer">
@@ -10925,7 +10925,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
                   )}
                   {isEditingStruct && showStructure && (
-                    <div className={`px-3 pb-2 ${rowOrder('BOSCHoCH', showStructure)}`}>
+                    <div className={`pl-3 pr-9 md:pr-3 pb-2 ${rowOrder('BOSCHoCH', showStructure)}`}>
                       <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Show structure for</label>
                       <select
                         value={structDays}
@@ -11041,7 +11041,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     </button>
                   </div>
                   {isEditingFvg && showFvg && (
-                    <div className={`px-3 pb-2 ${rowOrder('FairValueGaps', showFvg)}`}>
+                    <div className={`pl-3 pr-9 md:pr-3 pb-2 ${rowOrder('FairValueGaps', showFvg)}`}>
                       <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Gap colours</label>
                       <div className="flex items-center gap-3">
                           <label className="flex items-center gap-1.5 cursor-pointer">
@@ -11113,7 +11113,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     </button>
                   </div>
                   {isEditingDsZones && showDsZones && (
-                    <div className={`px-3 pb-2 ${rowOrder('DemandSupplyZones', showDsZones)}`}>
+                    <div className={`pl-3 pr-9 md:pr-3 pb-2 ${rowOrder('DemandSupplyZones', showDsZones)}`}>
                       <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Zone darkness (%)</label>
                       <div className="flex items-center gap-2">
                         <input
@@ -11162,7 +11162,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     </button>
                   </div>
                   {isEditingLevelAlerts && levelAlertsOn && (
-                    <div className={`px-3 pb-2 ${rowOrder('LevelTouchAlerts', levelAlertsOn)}`}>
+                    <div className={`pl-3 pr-9 md:pr-3 pb-2 ${rowOrder('LevelTouchAlerts', levelAlertsOn)}`}>
                       <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Repeat cooldown</label>
                       <div className="flex items-center gap-2">
                         <input
@@ -11223,7 +11223,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     </button>
                   </div>
                   {isEditingZoneTapAlerts && zoneTapAlertsOn && (
-                    <div className={`px-3 pb-2 ${rowOrder('ZoneTapAlerts', zoneTapAlertsOn)}`}>
+                    <div className={`pl-3 pr-9 md:pr-3 pb-2 ${rowOrder('ZoneTapAlerts', zoneTapAlertsOn)}`}>
                       <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Ignore zones thinner than</label>
                       <div className="flex items-center gap-2">
                         <input
@@ -11272,7 +11272,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     </button>
                   </div>
                   {isEditingBreakoutAlerts && breakoutAlertsOn && (
-                    <div className={`px-3 pb-2 ${rowOrder('BreakoutFakeouts', breakoutAlertsOn)}`}>
+                    <div className={`pl-3 pr-9 md:pr-3 pb-2 ${rowOrder('BreakoutFakeouts', breakoutAlertsOn)}`}>
                       <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Alert on</label>
                       <div className="flex items-center gap-1.5">
                         {([
@@ -11322,7 +11322,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     </button>
                   </div>
                   {isEditingVolume && showVolume && (
-                    <div className={`px-3 pb-2 ${rowOrder('Volume', showVolume)}`}>
+                    <div className={`pl-3 pr-9 md:pr-3 pb-2 ${rowOrder('Volume', showVolume)}`}>
                       <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Volume colours</label>
                       <div className="flex items-center gap-3">
                         {([
