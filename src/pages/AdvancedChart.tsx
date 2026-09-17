@@ -3,7 +3,7 @@ import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-quer
 import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search, ChartNoAxesCombined, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
-import { useUserSettings } from "../hooks/useUserSettings";
+import { useUserSettings, useResolvedTheme } from "../hooks/useUserSettings";
 import { zoomDiag } from "../lib/zoomDiag";
 import { getDivergences } from "../lib/divergence";
 import { evaluateBreakout } from "../lib/breakoutQuality";
@@ -1101,6 +1101,14 @@ async function fetchContractInfo(tradingsymbol: string): Promise<any> {
 // reaches it: canvas text is drawn with the family the chart is told to use.
 // Passing the custom family here is what makes axis labels and the crosshair
 // match the rest of the app. Falls back to the system stack when no font is set.
+// Canvas colours per theme. The rest of the app switches through CSS
+// variables the canvas cannot see, so the chart is handed a palette explicitly.
+// Dark values are exactly what the chart drew before; light is a conventional
+// pale surface with the same contrast relationships.
+const chartPalette = (theme: 'dark' | 'light') => theme === 'light'
+  ? { text: '#475569', grid: 'rgba(15, 23, 42, 0.06)', border: 'rgba(15, 23, 42, 0.12)', crosshair: '#94a3b8' }
+  : { text: '#64748b', grid: 'rgba(255, 255, 255, 0.05)', border: 'rgba(255, 255, 255, 0.10)', crosshair: '#758696' };
+
 const chartFontFamily = (customFontUrl: string) =>
   (customFontUrl ? "'UserCustomFont', " : '') +
   "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
@@ -4122,6 +4130,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const { settings } = useUserSettings();
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+  const resolvedTheme = useResolvedTheme();
+  const palette = chartPalette(resolvedTheme);
 
   const [showVolume, setShowVolume] = useState(() => {
     try { return localStorage.getItem('showVolume') !== 'false'; } catch (e) { return true; }
@@ -8233,18 +8243,18 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     const commonOptions = {
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: '#64748b',
+        textColor: palette.text,
         fontFamily: chartFontFamily(settings.customFontUrl),
       },
       grid: {
-        vertLines: { color: 'rgba(255, 255, 255, 0.05)' },
-        horzLines: { color: 'rgba(255, 255, 255, 0.05)' },
+        vertLines: { color: palette.grid },
+        horzLines: { color: palette.grid },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
       },
       timeScale: {
-        borderColor: 'rgba(255, 255, 255, 0.1)',
+        borderColor: palette.border,
         timeVisible: true,
         secondsVisible: false,
         // barSpacing is the DEFAULT zoom and is deliberately unchanged — every
@@ -8358,7 +8368,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         visible: true,
       },
       rightPriceScale: {
-        borderColor: 'rgba(255, 255, 255, 0.1)',
+        borderColor: palette.border,
         autoScale: false,
       },
     });
@@ -9123,7 +9133,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     };
     // Re-run if chartData structure changes drastically, but memo keeps it stable
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chartData, divergences, showRsi, showBB, bbData, bbColor, rsiColor, rsiLineWidth, rsiLineStyle, rsiSmaLineWidth, rsiSmaLineStyle, rsiOverbought1, rsiOverbought2, rsiOversold1, rsiOversold2, rsiSmaColor, rsiOverboughtColor, rsiOversoldColor, showHLevels, hLevels, hLevelsStyle, hLevelsWidth, selectedStrikeOnChart, showVolume, settings.candleUpColor, settings.candleDownColor, settings.customFontUrl]);
+  }, [chartData, divergences, showRsi, showBB, bbData, bbColor, rsiColor, rsiLineWidth, rsiLineStyle, rsiSmaLineWidth, rsiSmaLineStyle, rsiOverbought1, rsiOverbought2, rsiOversold1, rsiOversold2, rsiSmaColor, rsiOverboughtColor, rsiOversoldColor, showHLevels, hLevels, hLevelsStyle, hLevelsWidth, selectedStrikeOnChart, showVolume, settings.candleUpColor, settings.candleDownColor, settings.customFontUrl, resolvedTheme]);
 
   // Dedicated R:R renderer. Mounted ONCE with no dependencies and reading only
   // refs, so it never rebuilds and never waits on the heavy overlay loop. Its
@@ -10183,11 +10193,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                the two never aligned. An empty row of the same height fixes both
                panes' chrome to the same total, and the spot pane's header extends
                across this space. Desktop only; mobile has no panes. */
-            className="hidden md:block md:h-9 shrink-0 md:bg-[#131722]"
+            className="hidden md:block md:h-9 shrink-0 md:bg-background"
             aria-hidden="true"
           />
         )}
-        <div className={`relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-row md:items-center md:h-9 md:flex-nowrap md:min-w-0 max-md:pr-24 md:px-3 md:bg-[#131722] ${isPane && !isOptionPane ? 'md:w-[calc(200%_+_1px)] md:z-30' : ''} ${isOptionPane ? 'md:hidden' : ''}`}>
+        <div className={`relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-row md:items-center md:h-9 md:flex-nowrap md:min-w-0 max-md:pr-24 md:px-3 md:bg-background ${isPane && !isOptionPane ? 'md:w-[calc(200%_+_1px)] md:z-30' : ''} ${isOptionPane ? 'md:hidden' : ''}`}>
           {/* Row 1 — title and clock. shrink-0 and no truncate: the title was
               still ending in an ellipsis after the row was widened, because the
               flex algorithm shrinks every shrinkable child proportionally and
@@ -10323,7 +10333,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             tabs keep their own overflow-x so they still scroll; the controls sit
             OUTSIDE that scroller, because dropdowns opened from inside it would
             be clipped. */}
-        <div className={`items-center gap-2 px-0 pb-0 shrink-0 border-b border-white/10 bg-[#131722] md:px-2 ${isFocusedChart ? 'hidden' : 'flex'}`}>
+        <div className={`items-center gap-2 px-0 pb-0 shrink-0 border-b border-white/10 bg-background md:px-2 ${isFocusedChart ? 'hidden' : 'flex'}`}>
           {/* The option pane hides the header, so without this the spot pane would
               be exactly one header taller and the two chart boxes would never line
               up. Same reservation trick as the option-reality strip: identical
@@ -11064,7 +11074,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               onPointerMoveCapture={handlePointerMove}
               onPointerUpCapture={handlePointerUp}
               onPointerLeave={handlePointerUp}
-              className="border border-0 rounded-none md:bg-[#131722] stretch-self flex-grow relative w-full overflow-hidden z-20"
+              className="border border-0 rounded-none md:bg-background stretch-self flex-grow relative w-full overflow-hidden z-20"
             />
             {showJumpToLatest && (
               <button

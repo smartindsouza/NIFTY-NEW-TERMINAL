@@ -5,7 +5,7 @@ export interface UserSettings {
   desktopNotifications: boolean;
   refreshInterval: number;
   chartTheme: 'cosmic' | 'neon' | 'monochrome';
-  appTheme: 'dark' | 'light';
+  appTheme: 'dark' | 'light' | 'auto';
   accentColor: string;
   customFontUrl: string;
   strikeBuffer: number;
@@ -83,4 +83,33 @@ export function useUserSettings() {
     updateSetting,
     resetSettings,
   };
+}
+
+
+// ---------------------------------------------------------------------------
+// Resolved theme: what is actually on screen, after 'auto' has been settled
+// against the OS. Components that paint outside the CSS-variable system (the
+// chart canvas) need a plain 'dark' | 'light', and they need it to change when
+// the OS flips at sunset without a reload — hence a subscription rather than a
+// one-off read.
+// ---------------------------------------------------------------------------
+export type ResolvedTheme = 'dark' | 'light';
+export function resolveTheme(pref: UserSettings['appTheme']): ResolvedTheme {
+  if (pref === 'dark' || pref === 'light') return pref;
+  try {
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  } catch (e) { return 'dark'; }
+}
+export function useResolvedTheme(): ResolvedTheme {
+  const { settings } = useUserSettings();
+  const [theme, setTheme] = useState<ResolvedTheme>(() => resolveTheme(settings.appTheme));
+  useEffect(() => {
+    setTheme(resolveTheme(settings.appTheme));
+    if (settings.appTheme !== 'auto' || !window.matchMedia) return;
+    const mq = window.matchMedia('(prefers-color-scheme: light)');
+    const onChange = () => setTheme(resolveTheme('auto'));
+    mq.addEventListener ? mq.addEventListener('change', onChange) : mq.addListener(onChange);
+    return () => { mq.removeEventListener ? mq.removeEventListener('change', onChange) : mq.removeListener(onChange); };
+  }, [settings.appTheme]);
+  return theme;
 }

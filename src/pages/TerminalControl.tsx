@@ -377,6 +377,7 @@ export default function TerminalControl() {
                   >
                     <option value="dark">Dark Theme (Default)</option>
                     <option value="light">Light Theme</option>
+                    <option value="auto">Auto (follow system)</option>
                   </select>
                 </div>
 

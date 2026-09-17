@@ -13,7 +13,7 @@ import { ActivePositions } from './components/ActivePositions';
 import { Toaster } from '@/components/ui/sonner';
 import { DiagnosticsPanel } from './components/DiagnosticsPanel';
 import { Cpu } from 'lucide-react';
-import { useUserSettings } from './hooks/useUserSettings';
+import { useUserSettings, useResolvedTheme } from './hooks/useUserSettings';
 
 // Lazy load all terminal pages & tabs to maximize performance & reduce bundle size
 const Dashboard = lazy(() => import('./pages/Dashboard').then(module => ({ default: module.Dashboard })));
@@ -110,10 +110,13 @@ export default function App() {
   }, []);
   const { settings } = useUserSettings();
 
+  // The class on <html> is the RESOLVED theme, so 'auto' becomes whichever the
+  // OS is using — and follows it when the OS changes.
+  const resolvedTheme = useResolvedTheme();
   useEffect(() => {
     document.documentElement.classList.remove('dark', 'light');
-    document.documentElement.classList.add(settings.appTheme);
-  }, [settings.appTheme]);
+    document.documentElement.classList.add(resolvedTheme);
+  }, [resolvedTheme]);
 
   useEffect(() => {
     if (settings.customFontUrl) {
