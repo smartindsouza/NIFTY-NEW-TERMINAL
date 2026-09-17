@@ -1708,6 +1708,20 @@ export function prettyExpiry(iso: string): string | null {
 /** The expiry DAY is not in a monthly tradingsymbol — BANKNIFTY27MAR58500CE only
  *  says March 2027 — so when the real date is known (from Kite's contract master)
  *  it is passed in and used. Without it we fall back to what the symbol can prove. */
+/** Strike + side only — "24500CE". The tab has room for that and nothing more,
+ *  and the underlying and expiry are already on screen elsewhere. */
+export function shortOptionName(tradingsymbol: string): string {
+  const ts = String(tradingsymbol || '').trim().toUpperCase();
+  const m = ts.match(/^([A-Z]+?)(\d.*)(CE|PE)$/);
+  if (!m) return tradingsymbol;
+  const [, , middle, type] = m;
+  const monthly = middle.match(/^(\d{2})([A-Z]{3})(\d+)$/);
+  if (monthly && MONTH_ABBR.includes(monthly[2])) return `${monthly[3]}${type}`;
+  const weekly = middle.match(/^(\d{2})([1-9OND])(\d{2})(\d+)$/);
+  if (weekly) return `${weekly[4]}${type}`;
+  return tradingsymbol;
+}
+
 export function prettyOptionName(tradingsymbol: string, expiryIso?: string | null): string {
   const ts = String(tradingsymbol || '').trim().toUpperCase();
   if (!ts) return tradingsymbol;
@@ -4533,6 +4547,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // has the width for tabs and keeps them.
   const [indexMenuOpen, setIndexMenuOpen] = useState(false);
   const [optionMenuOpen, setOptionMenuOpen] = useState(false);
+  // The option tab jumps straight to whatever contract was last viewed, so
+  // switching back and forth does not go through the list every time.
+  const [lastOption, setLastOption] = useState<Instrument | null>(null);
+  useEffect(() => { if (selectedInstrument) setLastOption(selectedInstrument); }, [selectedInstrument]);
   useEffect(() => {
     if (!indexMenuOpen && !optionMenuOpen) return;
     const close = () => { setIndexMenuOpen(false); setOptionMenuOpen(false); };
@@ -10556,15 +10574,31 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             className={`${searchExpanded ? 'hidden' : 'flex'} items-center gap-1.5 px-1.5 py-1 min-w-[150px] flex-1`}
             onPointerDown={(e) => e.stopPropagation()}>
             {!isOptionPane && (
-            <div className="relative min-w-0 shrink">
-              <button
-                onClick={() => { setOptionMenuOpen(false); setIndexMenuOpen(o => !o); }}
-                className={`flex items-center gap-1 px-2.5 h-8 rounded-md text-xs font-mono font-bold border transition-colors min-w-0 shrink overflow-hidden ${
-                  !selectedInstrument ? 'border-primary/50 bg-primary/15 text-primary' : 'border-border/60 bg-card text-muted-foreground'}`}
-              >
-                <span className="truncate min-w-0 max-w-[110px]">{indexLabel}</span>
-                <ChevronDown size={13} className={`shrink-0 ${indexMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'}`} />
-              </button>
+            /* flex-1 basis-0 on a phone: the two tabs split the row down the
+               middle. Desktop has room, so they keep their natural width. */
+            <div className="relative min-w-0 flex-1 basis-0 md:flex-none md:basis-auto">
+              {/* The NAME switches straight to this chart; only the chevron opens
+                  the list. Going back to the spot chart used to mean opening a
+                  menu and picking the index that was already selected. */}
+              <div className={`flex items-stretch rounded-md border overflow-hidden transition-colors ${
+                  !selectedInstrument ? 'border-primary/50 bg-primary/15' : 'border-border/60 bg-card'}`}>
+                <button
+                  onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(false); setSelectedInstrument(null); }}
+                  title={`Show ${indexLabel}`}
+                  className={`flex-1 min-w-0 truncate text-left px-2.5 h-8 text-xs font-mono font-bold transition-colors ${
+                    !selectedInstrument ? 'text-primary' : 'text-muted-foreground'}`}
+                >
+                  {indexLabel}
+                </button>
+                <button
+                  onClick={() => { setOptionMenuOpen(false); setIndexMenuOpen(o => !o); }}
+                  aria-label="Choose index"
+                  className={`shrink-0 px-1.5 h-8 flex items-center transition-colors ${
+                    !selectedInstrument ? 'text-primary' : 'text-muted-foreground'}`}
+                >
+                  <ChevronDown size={13} className={indexMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                </button>
+              </div>
               {indexMenuOpen && (
                 <div className="absolute left-0 top-full mt-1 z-[60] min-w-[150px] bg-card border border-white/10 rounded-md shadow-2xl overflow-hidden">
                   {[{ k: 'NIFTY', label: 'NIFTY 50' }, { k: 'GIFT', label: 'GIFT NIFTY' },
@@ -10583,26 +10617,35 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
             {/* Option charts. Hidden entirely when none are open rather than
                 showing an empty menu. */}
-            {openCharts.length > 0 && (
-              <div className="relative min-w-0 shrink">
-                <button
-                  onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(o => !o); }}
-                  /* min-w-0 so the button may shrink below its text, and the label
-                     truncates inside it. Without that a flex item keeps its content
-                     width and the overflow spills over whatever sits beside it —
-                     which is the contract name printed across the search icon on a
-                     narrow window. */
-                  className={`flex items-center gap-1 px-2.5 h-8 rounded-md text-xs font-mono font-bold border transition-colors min-w-0 shrink overflow-hidden ${
-                    selectedInstrument ? 'border-primary/50 bg-primary/15 text-primary' : 'border-border/60 bg-card text-muted-foreground'}`}
-                >
-                  <span className="truncate min-w-0 max-w-[130px]">
-                    {selectedInstrument
-                      ? prettyOptionName(selectedInstrument.tradingsymbol,
-                          contractExpiry?.symbol === selectedInstrument.tradingsymbol ? contractExpiry.expiry : null)
-                      : `Options (${openCharts.length})`}
-                  </span>
-                  <ChevronDown size={13} className={`shrink-0 ${optionMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'}`} />
-                </button>
+            {openCharts.length > 0 && (() => {
+              // What the tab jumps to: the contract on screen, else the one last
+              // viewed if it is still open, else the most recently opened.
+              const stillOpen = lastOption && openCharts.some(c => c.tradingsymbol === lastOption.tradingsymbol) ? lastOption : null;
+              const optionTarget = selectedInstrument || stillOpen || openCharts[openCharts.length - 1];
+              return (
+              <div className="relative min-w-0 flex-1 basis-0 md:flex-none md:basis-auto">
+                <div className={`flex items-stretch rounded-md border overflow-hidden transition-colors ${
+                    selectedInstrument ? 'border-primary/50 bg-primary/15' : 'border-border/60 bg-card'}`}>
+                  {/* Strike and side only — "24500CE". The full contract name never
+                      fitted, and the underlying and expiry are on screen anyway. */}
+                  <button
+                    onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(false); if (optionTarget) setSelectedInstrument(optionTarget); }}
+                    title={optionTarget ? prettyOptionName(optionTarget.tradingsymbol,
+                      contractExpiry?.symbol === optionTarget.tradingsymbol ? contractExpiry.expiry : null) : 'Option charts'}
+                    className={`flex-1 min-w-0 truncate text-left px-2.5 h-8 text-xs font-mono font-bold transition-colors ${
+                      selectedInstrument ? 'text-primary' : 'text-muted-foreground'}`}
+                  >
+                    {optionTarget ? shortOptionName(optionTarget.tradingsymbol) : `Options (${openCharts.length})`}
+                  </button>
+                  <button
+                    onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(o => !o); }}
+                    aria-label="Choose option chart"
+                    className={`shrink-0 px-1.5 h-8 flex items-center transition-colors ${
+                      selectedInstrument ? 'text-primary' : 'text-muted-foreground'}`}
+                  >
+                    <ChevronDown size={13} className={optionMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                  </button>
+                </div>
                 {optionMenuOpen && (
                   <div className="absolute left-0 top-full mt-1 z-[60] min-w-[190px] max-h-[50vh] overflow-y-auto bg-card border border-white/10 rounded-md shadow-2xl">
                     {openCharts
@@ -10640,7 +10683,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
                 )}
               </div>
-            )}
+              );
+            })()}
           </div>
 
           {/* The old tab strip is retired — the dropdowns above replace it on every
