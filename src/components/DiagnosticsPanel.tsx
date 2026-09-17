@@ -73,15 +73,16 @@ export function DiagnosticsPanel() {
   return (
     <Card className="bg-card border-0 backdrop-blur-xl relative overflow-hidden">
       <CardHeader className="border-b border-0 pb-3">
-        <CardTitle className="text-xs font-bold tracking-widest uppercase text-foreground/80 flex items-center justify-between">
-          <span className="flex items-center gap-1.5">
-            <Activity className="w-4 h-4 text-emerald-400 animate-pulse" /> App Diagnostics
+        {/* Heading row: title, build stamp, status. The multi-line readout used
+            to sit in here too, squeezed between the title and the badge — on a
+            phone that left it a ~150px column and it wrapped into the jumble in
+            Martin's screenshot. It now has its own full-width block below. */}
+        <CardTitle className="text-xs font-bold tracking-widest uppercase text-foreground/80 flex items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5 min-w-0">
+            <Activity className="w-4 h-4 text-emerald-400 animate-pulse shrink-0" /> App Diagnostics
           </span>
-          <span className="flex items-center gap-2">
-            <span className="text-[9px] font-mono normal-case tracking-normal text-muted-foreground whitespace-pre-line" title="Line 1: heights (viewport · main · page · chart · canvas · document). Line 2: toolbar geometry — selector edges vs the icon strip, with OVERLAP in px if they collide. Line 3: what the frequency check decided about the last warned endpoint.">
-              {useLayoutReadoutValue}
-            </span>
-            <span className="text-[9px] font-mono normal-case tracking-normal text-muted-foreground" title="When this UI bundle was built (IST). If this is older than the latest deploy, the phone is still on a cached bundle — hard-refresh.">
+          <span className="flex items-center gap-2 shrink-0">
+            <span className="text-[9px] font-mono normal-case tracking-normal text-muted-foreground whitespace-nowrap" title="When this UI bundle was built (IST). If this is older than the latest deploy, the phone is still on a cached bundle — hard-refresh.">
               UI {new Date(__BUILD_TIME__).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })} IST
             </span>
             <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-400 border-emerald-500/20 font-mono">
@@ -89,6 +90,13 @@ export function DiagnosticsPanel() {
             </Badge>
           </span>
         </CardTitle>
+
+        {/* The readout, full width under the heading. One line per fact, each
+            label on its own row rather than a run-on paragraph — these are read
+            at a glance when something looks wrong. */}
+        <div className="mt-2 rounded-md bg-muted/30 px-2.5 py-2 text-[9px] leading-relaxed font-mono text-muted-foreground whitespace-pre-line break-words">
+          {useLayoutReadoutValue}
+        </div>
       </CardHeader>
       
       <CardContent className="p-4 space-y-4">
