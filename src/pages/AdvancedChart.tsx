@@ -3469,6 +3469,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   });
   useEffect(() => { try { localStorage.setItem('structDays', String(structDays)); } catch (e) {} }, [structDays]);
   const [isEditingStruct, setIsEditingStruct] = useState(false);
+  const [isEditingDsZones, setIsEditingDsZones] = useState(false);
   const structDaysRef = useRef(structDays);   // the canvas loop is built once
   structDaysRef.current = structDays;
 
@@ -9193,7 +9194,16 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       try {
         const rect = canvas.parentElement.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
-        const cw = Math.floor(rect.width), ch = Math.floor(rect.height);
+        // Stop at the price plot, above the time axis — the same reason as the
+        // main overlay. This canvas was missed when that was fixed, which is why
+        // the overlap survived on mobile: the R:R canvas draws the SL/TP and
+        // level badges, and it still spanned the full container height.
+        let axisH = 0;
+        try {
+          const h = mainChartRef.current?.timeScale?.()?.height?.();
+          if (Number.isFinite(h) && h > 0 && h < rect.height) axisH = h;
+        } catch (e) { /* no axis height: keep the full height */ }
+        const cw = Math.floor(rect.width), ch = Math.max(1, Math.floor(rect.height - axisH));
         const bw = Math.floor(cw * dpr), bh = Math.floor(ch * dpr);
         if (canvas.width !== bw) canvas.width = bw;
         if (canvas.height !== bh) canvas.height = bh;
@@ -10867,18 +10877,30 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     >
                       <Star size={14} fill={isFav('DemandSupplyZones') ? 'currentColor' : 'none'} />
                     </button>
-                    <div className="flex items-center gap-1 pr-1" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        value={dsZoneOpacity}
-                        onChange={e => setDsZoneOpacity(e.target.value)}
-                        inputMode="numeric"
-                        title="Zone darkness (% opacity, 1–100)"
-                        className="w-11 bg-muted rounded px-1.5 py-0.5 text-xs text-foreground text-center"
-                      />
-                      <span className="text-[10px] text-muted-foreground">%</span>
-                    </div>
-                    <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setIsEditingDsZones(v => !v); }}
+                      title="Zone settings"
+                      className="p-1 text-muted-foreground/60 hover:text-foreground transition-colors"
+                    >
+                      <Settings size={14} />
+                    </button>
                   </div>
+                  {isEditingDsZones && (
+                    <div className={`px-3 pb-2 ${rowOrder('DemandSupplyZones', showDsZones)}`}>
+                      <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Zone darkness (%)</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          value={dsZoneOpacity}
+                          onChange={(e) => setDsZoneOpacity(e.target.value)}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          inputMode="numeric"
+                          title="Zone darkness (% opacity, 1-100)"
+                          className="w-16 h-8 bg-muted/40 border border-border rounded-md px-2 text-xs text-foreground text-center focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                        <span className="text-[10px] text-muted-foreground">% opacity (1-100)</span>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Level Touch Alerts */}
                   <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(levelAlertsOn) ? "order-1" : "order-2"}`}>
@@ -10965,6 +10987,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     >
                       <Star size={14} fill={isFav('Volume') ? 'currentColor' : 'none'} />
                     </button>
+                    <span className="p-1 w-[22px] shrink-0" aria-hidden="true" />
                   </div>
                   <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('SnR', showSnR)}`}>
                     <button
