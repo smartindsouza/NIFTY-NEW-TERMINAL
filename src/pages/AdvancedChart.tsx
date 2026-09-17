@@ -3471,6 +3471,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const [isEditingStruct, setIsEditingStruct] = useState(false);
   const [isEditingDsZones, setIsEditingDsZones] = useState(false);
   const [isEditingVolume, setIsEditingVolume] = useState(false);
+  const [isEditingFvg, setIsEditingFvg] = useState(false);
+  const [isEditingOpeningRange, setIsEditingOpeningRange] = useState(false);
+  const [isEditingLevelAlerts, setIsEditingLevelAlerts] = useState(false);
+  const [isEditingZoneTapAlerts, setIsEditingZoneTapAlerts] = useState(false);
+  const [isEditingBreakoutAlerts, setIsEditingBreakoutAlerts] = useState(false);
   const structDaysRef = useRef(structDays);   // the canvas loop is built once
   structDaysRef.current = structDays;
 
@@ -3607,6 +3612,55 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     } catch(e) {}
     return '#ef4444';
   });
+
+  // Fair Value Gap colours. The boxes were painted in a fixed cyan/magenta with
+  // no way to change them, so the gear on that row had nothing behind it. Same
+  // treatment as every other drawn study now: two colours and a darkness.
+  const [fvgBullColor, setFvgBullColor] = useState(() => {
+    try { return localStorage.getItem('fvgBullColor') || '#22d3ee'; } catch(e) {}
+    return '#22d3ee';
+  });
+  const [fvgBearColor, setFvgBearColor] = useState(() => {
+    try { return localStorage.getItem('fvgBearColor') || '#d946ef'; } catch(e) {}
+    return '#d946ef';
+  });
+  // FVG darkness used to borrow the Demand/Supply zone value, so changing one
+  // silently moved the other. It gets its own now.
+  const [fvgOpacity, setFvgOpacity] = useState<string>(() => {
+    try { return localStorage.getItem('fvgOpacity') || '8'; } catch(e) {}
+    return '8';
+  });
+  // 15-minute opening-range lines were hard-coded white.
+  const [orHighColor, setOrHighColor] = useState(() => {
+    try { return localStorage.getItem('orHighColor') || '#ffffff'; } catch(e) {}
+    return '#ffffff';
+  });
+  const [orLowColor, setOrLowColor] = useState(() => {
+    try { return localStorage.getItem('orLowColor') || '#ffffff'; } catch(e) {}
+    return '#ffffff';
+  });
+  // Alert tuning, previously fixed constants inside the detectors.
+  const [levelAlertCooldown, setLevelAlertCooldown] = useState<string>(() => {
+    try { return localStorage.getItem('levelAlertCooldown') || '3'; } catch(e) {}
+    return '3';
+  });
+  const [levelAlertRearm, setLevelAlertRearm] = useState<string>(() => {
+    try { return localStorage.getItem('levelAlertRearm') || '0.05'; } catch(e) {}
+    return '0.05';
+  });
+  const [zoneTapMinSize, setZoneTapMinSize] = useState<string>(() => {
+    try { return localStorage.getItem('zoneTapMinSize') || '0'; } catch(e) {}
+    return '0';
+  });
+  const zoneTapMinSizeRef = useRef(zoneTapMinSize);
+  useEffect(() => { zoneTapMinSizeRef.current = zoneTapMinSize; }, [zoneTapMinSize]);
+  // 'both' = strong breakouts AND fakeout warnings; 'strong' = only the strong ones.
+  const [breakoutAlertMode, setBreakoutAlertMode] = useState<string>(() => {
+    try { return localStorage.getItem('breakoutAlertMode') || 'both'; } catch(e) {}
+    return 'both';
+  });
+  const breakoutAlertModeRef = useRef(breakoutAlertMode);
+  useEffect(() => { breakoutAlertModeRef.current = breakoutAlertMode; }, [breakoutAlertMode]);
   const [pdhPdlWidth, setPdhPdlWidth] = useState(() => {
     try {
       const saved = localStorage.getItem('pdhPdlWidth');
@@ -3755,6 +3809,16 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       localStorage.setItem('pdlColor', pdlColor);
     } catch(e) {}
   }, [pdlColor]);
+
+  useEffect(() => { try { localStorage.setItem('fvgBullColor', fvgBullColor); } catch(e) {} }, [fvgBullColor]);
+  useEffect(() => { try { localStorage.setItem('fvgBearColor', fvgBearColor); } catch(e) {} }, [fvgBearColor]);
+  useEffect(() => { try { localStorage.setItem('fvgOpacity', fvgOpacity); } catch(e) {} }, [fvgOpacity]);
+  useEffect(() => { try { localStorage.setItem('orHighColor', orHighColor); } catch(e) {} }, [orHighColor]);
+  useEffect(() => { try { localStorage.setItem('orLowColor', orLowColor); } catch(e) {} }, [orLowColor]);
+  useEffect(() => { try { localStorage.setItem('levelAlertCooldown', levelAlertCooldown); } catch(e) {} }, [levelAlertCooldown]);
+  useEffect(() => { try { localStorage.setItem('levelAlertRearm', levelAlertRearm); } catch(e) {} }, [levelAlertRearm]);
+  useEffect(() => { try { localStorage.setItem('zoneTapMinSize', zoneTapMinSize); } catch(e) {} }, [zoneTapMinSize]);
+  useEffect(() => { try { localStorage.setItem('breakoutAlertMode', breakoutAlertMode); } catch(e) {} }, [breakoutAlertMode]);
 
   useEffect(() => {
     try {
@@ -8059,7 +8123,12 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     }
     if (seen.size > 400) dzTapSeenRef.current = new Set(Array.from(seen).slice(-200));
     if (!zoneTapAlertsOnRef.current) return;
-    for (const z of fire) fireZoneTapAlert(z);
+    // Skip taps on hair-thin zones if a minimum height is set (gear on the row).
+    const minH = Math.max(0, parseFloat(zoneTapMinSizeRef.current) || 0);
+    for (const z of fire) {
+      if (minH > 0 && Math.abs((z.top ?? 0) - (z.bottom ?? 0)) < minH) continue;
+      fireZoneTapAlert(z);
+    }
   };
 
   // Crossing detector, called from the live tick handler. Fires when price crosses
@@ -8071,14 +8140,18 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     alertPrevSpotRef.current = spot;
     if (prev === null || prev === spot) return;
     const now = Date.now();
-    const rearmDist = spot * 0.0005; // 0.05% ≈ ~12 pts on NIFTY
+    // Re-arm distance and cooldown are now settings (gear on the Level Touch
+    // Alerts row); the defaults are the constants that used to be hard-coded.
+    const rearmPct = Math.min(5, Math.max(0.005, parseFloat(levelAlertRearm) || 0.05));
+    const rearmDist = spot * (rearmPct / 100); // 0.05% ≈ ~12 pts on NIFTY
+    const coolMs = Math.min(60, Math.max(0, parseFloat(levelAlertCooldown) || 3)) * 60000;
     for (const { key, label, price } of alertLevelsRef.current) {
       let st = alertStateRef.current.get(key);
       if (!st) { st = { lastFired: 0, armed: true }; alertStateRef.current.set(key, st); }
       if (!st.armed && Math.abs(spot - price) > rearmDist) st.armed = true;
       const crossedUp = prev < price && spot >= price;
       const crossedDown = prev > price && spot <= price;
-      if ((crossedUp || crossedDown) && st.armed && now - st.lastFired > 180000) {
+      if ((crossedUp || crossedDown) && st.armed && now - st.lastFired > coolMs) {
         st.lastFired = now; st.armed = false;
         fireLevelAlert(label, price, spot, crossedUp);
       }
@@ -8142,7 +8215,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     if (res) {
       setBreakoutInfo(res);
       // Alert only on decisive verdicts, if enabled.
-      if (breakoutAlertsOnRef.current && (res.verdict === 'STRONG' || res.verdict === 'FAKEOUT_RISK')) {
+      const wantFakeouts = breakoutAlertModeRef.current !== 'strong';
+      if (breakoutAlertsOnRef.current && (res.verdict === 'STRONG' || (wantFakeouts && res.verdict === 'FAKEOUT_RISK'))) {
         fireBreakoutAlert(res);
       }
     }
@@ -9595,7 +9669,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     return live.high > z.bottom ? { ...z, bottom: live.high } : z;
                   })
                   .filter((z: any) => z && z.top - z.bottom > 0.5);
-                const pctF = Math.min(100, Math.max(1, parseFloat(dsZoneOpacity) || 8)) / 100;
+                const pctF = Math.min(100, Math.max(1, parseFloat(fvgOpacity) || 8)) / 100;
                 for (const z of zonesNow) {
                   const yTop = mainSeriesRef.current.priceToCoordinate(z.top);
                   const yBot = mainSeriesRef.current.priceToCoordinate(z.bottom);
@@ -9604,16 +9678,16 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   const zx = (x0 === null || x0 === undefined) ? 0 : Math.max(0, x0);
                   const zw = Math.max(0, textAlignX - zx);
                   if (zw <= 0) continue;
-                  const rgb = z.type === 'bull' ? '34,211,238' : '217,70,239';
-                  ctx.fillStyle = `rgba(${rgb},${Math.min(0.35, pctF + 0.04)})`;
+                  const fvgHex = z.type === 'bull' ? fvgBullColor : fvgBearColor;
+                  ctx.fillStyle = hexToRgba(fvgHex, Math.min(0.35, pctF + 0.04));
                   ctx.fillRect(zx, Math.min(yTop, yBot), zw, Math.abs(yBot - yTop));
-                  ctx.strokeStyle = `rgba(${rgb},0.5)`;
+                  ctx.strokeStyle = hexToRgba(fvgHex, 0.5);
                   ctx.lineWidth = 1;
                   ctx.strokeRect(zx, Math.min(yTop, yBot), zw, Math.abs(yBot - yTop));
                   ctx.font = 'bold 9px monospace';
                   ctx.textAlign = 'left';
                   ctx.textBaseline = 'middle';
-                  ctx.fillStyle = `rgba(${rgb},0.85)`;
+                  ctx.fillStyle = hexToRgba(fvgHex, 0.85);
                   ctx.fillText(z.type === 'bull' ? 'FVG▲' : 'FVG▼', zx + 6, (yTop + yBot) / 2);
                 }
               }
@@ -9813,11 +9887,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                 if (showOpeningRange && !isOptionView && !isReferenceChart && or && orIsCurrent && marketIsOpenRef.current) {
                   if (typeof or.high === 'number') {
                     const y = mainSeriesRef.current.priceToCoordinate(or.high);
-                    if (y !== null) linesToDraw.push({ text: `15M HIGH`, y, color: '#ffffff', dash: [], lineWidth: 1 });
+                    if (y !== null) linesToDraw.push({ text: `15M HIGH`, y, color: orHighColor, dash: [], lineWidth: 1 });
                   }
                   if (typeof or.low === 'number') {
                     const y = mainSeriesRef.current.priceToCoordinate(or.low);
-                    if (y !== null) linesToDraw.push({ text: `15M LOW`, y, color: '#ffffff', dash: [], lineWidth: 1 });
+                    if (y !== null) linesToDraw.push({ text: `15M LOW`, y, color: orLowColor, dash: [], lineWidth: 1 });
                   }
                 }
               }
@@ -10035,7 +10109,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     draw();
     
     return () => cancelAnimationFrame(animationFrameId);
-  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth, taInfo, showOpeningRange, showDsZones, dsZoneOpacity, showFvg, showOrderBlocks, showStructure, showConfSignals, confData]);
+  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth, taInfo, showOpeningRange, orHighColor, orLowColor, showDsZones, dsZoneOpacity, showFvg, fvgBullColor, fvgBearColor, fvgOpacity, showOrderBlocks, showStructure, showConfSignals, confData]);
 
   const { data: serverStats } = useQuery({
     queryKey: ["server-diagnostics"],
@@ -10750,8 +10824,41 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     >
                       <Star size={14} fill={isFav('15minHighLow') ? 'currentColor' : 'none'} />
                     </button>
-                    <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setIsEditingOpeningRange(v => !v); }}
+                      title="15 min High-Low colours"
+                      className="p-1 text-muted-foreground/60 hover:text-foreground transition-colors"
+                    >
+                      <Settings size={14} />
+                    </button>
                   </div>
+                  {isEditingOpeningRange && (
+                    <div className={`px-3 pb-2 ${rowOrder('15minHighLow', showOpeningRange)}`}>
+                      <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Opening range colours</label>
+                      <div className="flex items-center gap-3">
+                          <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="color"
+                              value={orHighColor}
+                              onChange={(e) => setOrHighColor(e.target.value)}
+                              onPointerDown={(e) => e.stopPropagation()}
+                              className="w-6 h-6 rounded border border-border bg-transparent p-0 cursor-pointer"
+                            />
+                            <span className="text-[10px] text-muted-foreground">High</span>
+                          </label>
+                          <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="color"
+                              value={orLowColor}
+                              onChange={(e) => setOrLowColor(e.target.value)}
+                              onPointerDown={(e) => e.stopPropagation()}
+                              className="w-6 h-6 rounded border border-border bg-transparent p-0 cursor-pointer"
+                            />
+                            <span className="text-[10px] text-muted-foreground">Low</span>
+                          </label>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Market Structure (BOS / CHoCH) — an index study */}
                   {!isOptionView && (
@@ -10879,8 +10986,53 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     >
                       <Star size={14} fill={isFav('FairValueGaps') ? 'currentColor' : 'none'} />
                     </button>
-                    <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setIsEditingFvg(v => !v); }}
+                      title="Fair Value Gap colours"
+                      className="p-1 text-muted-foreground/60 hover:text-foreground transition-colors"
+                    >
+                      <Settings size={14} />
+                    </button>
                   </div>
+                  {isEditingFvg && (
+                    <div className={`px-3 pb-2 ${rowOrder('FairValueGaps', showFvg)}`}>
+                      <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Gap colours</label>
+                      <div className="flex items-center gap-3">
+                          <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="color"
+                              value={fvgBullColor}
+                              onChange={(e) => setFvgBullColor(e.target.value)}
+                              onPointerDown={(e) => e.stopPropagation()}
+                              className="w-6 h-6 rounded border border-border bg-transparent p-0 cursor-pointer"
+                            />
+                            <span className="text-[10px] text-muted-foreground">Bullish</span>
+                          </label>
+                          <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="color"
+                              value={fvgBearColor}
+                              onChange={(e) => setFvgBearColor(e.target.value)}
+                              onPointerDown={(e) => e.stopPropagation()}
+                              className="w-6 h-6 rounded border border-border bg-transparent p-0 cursor-pointer"
+                            />
+                            <span className="text-[10px] text-muted-foreground">Bearish</span>
+                          </label>
+                      </div>
+                      <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mt-2 mb-1">Gap darkness (%)</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          value={fvgOpacity}
+                          onChange={(e) => setFvgOpacity(e.target.value)}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          inputMode="decimal"
+                          title="Fair Value Gap darkness (% opacity, 1-100)"
+                          className="w-16 h-8 bg-muted/40 border border-border rounded-md px-2 text-xs text-foreground text-center focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                        <span className="text-[10px] text-muted-foreground">% opacity (1-100)</span>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Demand / Supply Zones */}
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('DemandSupplyZones', showDsZones)}`}>
@@ -10951,8 +11103,42 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     >
                       <Star size={14} fill={isFav('LevelTouchAlerts') ? 'currentColor' : 'none'} />
                     </button>
-                    <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setIsEditingLevelAlerts(v => !v); }}
+                      title="Level touch alert settings"
+                      className="p-1 text-muted-foreground/60 hover:text-foreground transition-colors"
+                    >
+                      <Settings size={14} />
+                    </button>
                   </div>
+                  {isEditingLevelAlerts && (
+                    <div className={`px-3 pb-2 ${(levelAlertsOn) ? "order-1" : "order-2"}`}>
+                      <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Repeat cooldown</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          value={levelAlertCooldown}
+                          onChange={(e) => setLevelAlertCooldown(e.target.value)}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          inputMode="decimal"
+                          title="Minutes before the same level can alert again"
+                          className="w-16 h-8 bg-muted/40 border border-border rounded-md px-2 text-xs text-foreground text-center focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                        <span className="text-[10px] text-muted-foreground">minutes between repeats</span>
+                      </div>
+                      <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mt-2 mb-1">Re-arm distance</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          value={levelAlertRearm}
+                          onChange={(e) => setLevelAlertRearm(e.target.value)}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          inputMode="decimal"
+                          title="How far price must move away before the level can alert again"
+                          className="w-16 h-8 bg-muted/40 border border-border rounded-md px-2 text-xs text-foreground text-center focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                        <span className="text-[10px] text-muted-foreground">% away before re-arming</span>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Zone Tap Alerts — the ported Pine script's own alert */}
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${(zoneTapAlertsOn) ? "order-1" : "order-2"}`}>
@@ -10976,8 +11162,30 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     >
                       <Star size={14} fill={isFav('ZoneTapAlerts') ? 'currentColor' : 'none'} />
                     </button>
-                    <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setIsEditingZoneTapAlerts(v => !v); }}
+                      title="Zone tap alert settings"
+                      className="p-1 text-muted-foreground/60 hover:text-foreground transition-colors"
+                    >
+                      <Settings size={14} />
+                    </button>
                   </div>
+                  {isEditingZoneTapAlerts && (
+                    <div className={`px-3 pb-2 ${(zoneTapAlertsOn) ? "order-1" : "order-2"}`}>
+                      <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Ignore zones thinner than</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          value={zoneTapMinSize}
+                          onChange={(e) => setZoneTapMinSize(e.target.value)}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          inputMode="decimal"
+                          title="Skip taps on zones narrower than this many points"
+                          className="w-16 h-8 bg-muted/40 border border-border rounded-md px-2 text-xs text-foreground text-center focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                        <span className="text-[10px] text-muted-foreground">points (0 = alert on all)</span>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Breakout Authenticity Alerts */}
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${(breakoutAlertsOn) ? "order-1" : "order-2"}`}>
@@ -11001,8 +11209,31 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     >
                       <Star size={14} fill={isFav('BreakoutFakeouts') ? 'currentColor' : 'none'} />
                     </button>
-                    <span className="p-1 text-muted-foreground/25 cursor-default" title="No settings for this indicator"><Settings size={14} /></span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setIsEditingBreakoutAlerts(v => !v); }}
+                      title="Breakout alert settings"
+                      className="p-1 text-muted-foreground/60 hover:text-foreground transition-colors"
+                    >
+                      <Settings size={14} />
+                    </button>
                   </div>
+                  {isEditingBreakoutAlerts && (
+                    <div className={`px-3 pb-2 ${(breakoutAlertsOn) ? "order-1" : "order-2"}`}>
+                      <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Alert on</label>
+                      <div className="flex items-center gap-1.5">
+                        {([
+                          { v: 'both', label: 'Strong + fakeout risk' },
+                          { v: 'strong', label: 'Strong only' },
+                        ]).map((o) => (
+                          <button
+                            key={o.v}
+                            onClick={(e) => { e.stopPropagation(); setBreakoutAlertMode(o.v); }}
+                            className={`px-2 h-7 rounded-md text-[10px] border transition-colors ${breakoutAlertMode === o.v ? 'bg-primary/20 text-primary border-primary/40' : 'bg-muted/40 text-muted-foreground border-border'}`}
+                          >{o.label}</button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Support/Resistance Lines */}
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('Volume', showVolume)}`}>
