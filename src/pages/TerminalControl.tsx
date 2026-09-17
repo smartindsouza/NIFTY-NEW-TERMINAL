@@ -469,6 +469,23 @@ export default function TerminalControl() {
                       </div>
                     ))}
                   </div>
+                  {/* Live preview: two candles and their volume bars, drawn from
+                      the current settings. Colour pickers are hard to judge as
+                      hex — this shows the thing itself, updating as you drag. */}
+                  <div className="mt-2 rounded-lg border border-border bg-card p-3">
+                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-2">Preview</div>
+                    <svg viewBox="0 0 120 74" className="w-full h-24" role="img" aria-label="Candlestick colour preview">
+                      {/* up candle: wick then body */}
+                      <line x1="30" y1="6" x2="30" y2="52" stroke={settings.candleUpColor} strokeWidth="1.5" />
+                      <rect x="23" y="16" width="14" height="28" rx="1" fill={settings.candleUpColor} />
+                      {/* down candle */}
+                      <line x1="74" y1="10" x2="74" y2="56" stroke={settings.candleDownColor} strokeWidth="1.5" />
+                      <rect x="67" y="20" width="14" height="30" rx="1" fill={settings.candleDownColor} />
+                      {/* volume bars at 40% — exactly what the chart draws */}
+                      <rect x="23" y="62" width="14" height="10" rx="1" fill={settings.candleUpColor} opacity="0.4" />
+                      <rect x="67" y="58" width="14" height="14" rx="1" fill={settings.candleDownColor} opacity="0.4" />
+                    </svg>
+                  </div>
                   <p className="text-[10px] text-muted-foreground/80">
                     Applies to candles, wicks and the volume histogram on every chart.
                   </p>

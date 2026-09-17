@@ -312,7 +312,7 @@ export default function MarketContext() {
         <button
           onClick={() => setOpen(true)}
           title="Market context"
-          className="fixed top-1/2 -translate-y-1/2 right-0 z-[9997] bg-[#1a1c1e] border border-white/10 border-r-0 rounded-l-lg px-1.5 py-3 text-slate-300 hover:text-white hover:bg-white/5 transition-colors flex flex-col items-center gap-1"
+          className="fixed top-1/2 -translate-y-1/2 right-0 z-[9997] bg-card border border-border border-r-0 rounded-l-lg px-1.5 py-3 text-slate-300 hover:text-white hover:bg-white/5 transition-colors flex flex-col items-center gap-1"
         >
           <ChevronLeft className="w-4 h-4" />
           <Globe className="w-4 h-4" />
@@ -330,9 +330,9 @@ export default function MarketContext() {
 
       {/* Slide-out panel */}
       <div
-        className={`fixed top-0 right-0 h-full z-[9999] w-[290px] max-w-[85vw] bg-[#141618] border-l border-white/10 shadow-2xl transition-transform duration-300 flex flex-col ${open ? "translate-x-0" : "translate-x-full"}`}
+        className={`fixed top-0 right-0 h-full z-[9999] w-[290px] max-w-[85vw] bg-card border-l border-border shadow-2xl transition-transform duration-300 flex flex-col ${open ? "translate-x-0" : "translate-x-full"}`}
       >
-        <div className="flex items-center justify-between px-3 py-3 border-b border-white/10 bg-app-base">
+        <div className="flex items-center justify-between px-3 py-3 border-b border-border bg-app-base">
           <div className="flex items-center gap-2">
             <Globe className="w-4 h-4 text-primary" />
             <span className="font-bold text-white text-sm">Market Context</span>
@@ -424,7 +424,7 @@ export default function MarketContext() {
           )}
         </div>
 
-        <div className="px-3 py-2 border-t border-white/10 text-[9px] text-slate-500 leading-tight">
+        <div className="px-3 py-2 border-t border-border text-[9px] text-slate-500 leading-tight">
           Indian: live via Kite. US, UK, global &amp; commodities: via a free third-party feed (may lag or drop out) — context only, confirm before trading. Open/Closed reflects regular session hours; exchange holidays aren't tracked.
         </div>
       </div>
