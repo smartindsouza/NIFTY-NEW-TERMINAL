@@ -1708,17 +1708,18 @@ export function prettyExpiry(iso: string): string | null {
 /** The expiry DAY is not in a monthly tradingsymbol — BANKNIFTY27MAR58500CE only
  *  says March 2027 — so when the real date is known (from Kite's contract master)
  *  it is passed in and used. Without it we fall back to what the symbol can prove. */
-/** Strike + side only — "24500CE". The tab has room for that and nothing more,
- *  and the underlying and expiry are already on screen elsewhere. */
+/** Tab label: underlying, strike and side — "NIFTY 24600 CE". No expiry; the
+ *  dropdown list carries that, and the tab has to fit half a phone screen. */
 export function shortOptionName(tradingsymbol: string): string {
   const ts = String(tradingsymbol || '').trim().toUpperCase();
   const m = ts.match(/^([A-Z]+?)(\d.*)(CE|PE)$/);
   if (!m) return tradingsymbol;
-  const [, , middle, type] = m;
+  const [, rawUnder, middle, type] = m;
+  const under = UNDERLYING_LABEL[rawUnder] || rawUnder;
   const monthly = middle.match(/^(\d{2})([A-Z]{3})(\d+)$/);
-  if (monthly && MONTH_ABBR.includes(monthly[2])) return `${monthly[3]}${type}`;
+  if (monthly && MONTH_ABBR.includes(monthly[2])) return `${under} ${monthly[3]} ${type}`;
   const weekly = middle.match(/^(\d{2})([1-9OND])(\d{2})(\d+)$/);
-  if (weekly) return `${weekly[4]}${type}`;
+  if (weekly) return `${under} ${weekly[4]} ${type}`;
   return tradingsymbol;
 }
 
@@ -1733,21 +1734,23 @@ export function prettyOptionName(tradingsymbol: string, expiryIso?: string | nul
   // MONTHLY: the two digits are the YEAR, not a day — BANKNIFTY27MAR58500CE is
   // March 2027. Printing "27 MAR" would read as the 27th and mislead on a
   // trading screen, so monthlies show the month and year instead.
-  const pretty = expiryIso ? prettyExpiry(expiryIso) : null;
+  //
+  // The expiry is always read off the SYMBOL, never from the fetched expiry date.
+  // The fetched date was only ever available for the contract on screen, so one
+  // row in the list printed "(22nd Sep)" and its neighbour printed "22 SEP" —
+  // the same fact in two formats, side by side. expiryIso is kept in the
+  // signature so the call sites do not all have to change.
+  void expiryIso;
 
   const monthly = middle.match(/^(\d{2})([A-Z]{3})(\d+)$/);
   if (monthly && MONTH_ABBR.includes(monthly[2])) {
-    return pretty
-      ? `${under} ${monthly[3]} ${type} (${pretty})`
-      : `${under} ${monthly[3]} ${type} ${monthly[2]} 20${monthly[1]}`;
+    return `${under} ${monthly[3]} ${type} ${monthly[2]} 20${monthly[1]}`;
   }
   const weekly = middle.match(/^(\d{2})([1-9OND])(\d{2})(\d+)$/);
   if (weekly) {
     const mon = WEEKLY_MONTH[weekly[2]];
     const day = weekly[3];
-    if (mon) return pretty
-      ? `${under} ${weekly[4]} ${type} (${pretty})`
-      : `${under} ${weekly[4]} ${type} ${day} ${MONTH_ABBR[mon - 1]}`;
+    if (mon) return `${under} ${weekly[4]} ${type} ${day} ${MONTH_ABBR[mon - 1]}`;
   }
   return tradingsymbol;
 }
