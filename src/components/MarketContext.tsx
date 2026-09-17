@@ -151,7 +151,7 @@ function Row({ m }: { m: Market }) {
   return (
     <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-white/5">
       <div className="min-w-0">
-        <div className="text-sm text-white flex items-center gap-1.5 min-w-0">
+        <div className="text-sm text-foreground flex items-center gap-1.5 min-w-0">
           <span className="truncate">{m.label}</span>
           <MiniStatus open={m.open} />
           {m.prevSrc === 'price' && (
@@ -312,7 +312,7 @@ export default function MarketContext() {
         <button
           onClick={() => setOpen(true)}
           title="Market context"
-          className="fixed top-1/2 -translate-y-1/2 right-0 z-[9997] bg-card border border-border border-r-0 rounded-l-lg px-1.5 py-3 text-slate-300 hover:text-white hover:bg-white/5 transition-colors flex flex-col items-center gap-1"
+          className="fixed top-1/2 -translate-y-1/2 right-0 z-[9997] bg-card border border-border border-r-0 rounded-l-lg px-1.5 py-3 text-slate-300 hover:text-foreground hover:bg-white/5 transition-colors flex flex-col items-center gap-1"
         >
           <ChevronLeft className="w-4 h-4" />
           <Globe className="w-4 h-4" />
@@ -335,11 +335,11 @@ export default function MarketContext() {
         <div className="flex items-center justify-between px-3 py-3 border-b border-border bg-app-base">
           <div className="flex items-center gap-2">
             <Globe className="w-4 h-4 text-primary" />
-            <span className="font-bold text-white text-sm">Market Context</span>
+            <span className="font-bold text-foreground text-sm">Market Context</span>
           </div>
           <button
             onClick={() => setOpen(false)}
-            className="flex items-center gap-1 px-2 py-1.5 rounded-md bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors"
+            className="flex items-center gap-1 px-2 py-1.5 rounded-md bg-white/5 hover:bg-white/10 text-slate-300 hover:text-foreground transition-colors"
             aria-label="Close"
           >
             <X className="w-4 h-4" />
