@@ -4483,6 +4483,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   }, [isOptionPane]);
 
   const cacheKey = `${selectedInstrument?.instrument_token}_${timeframe}`;
+  // The range subscriptions are created once per chart build and capture these
+  // in a closure, so an instrument that resolves a moment later had its range
+  // filed under the previous key and never read back. Refs are read at fire time.
+  const cacheKeyRef = useRef(cacheKey);
+  cacheKeyRef.current = cacheKey;
 
   // Y-lock removed: always clear any previously-saved lock and keep autoscale on,
   // so a stale near-zero locked range can never hide the candles again.
@@ -8488,10 +8493,25 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         // a handful of bars stretched across the whole pane. Only reuse a saved
         // range when it still describes a sane window over THIS data; otherwise
         // fall back to the same default view every timeframe starts from.
-        const sane = span >= 5 && span <= Math.max(VISIBLE_BARS * 6, nextCount * 2)
-                     && to > 0 && from < nextCount;
-        if (sane) mainChart.timeScale().setVisibleLogicalRange({ from, to });
-        else focusRecentCandles(mainChart, chartData.candles);
+        // CLAMP, don't discard. This check used to reject anything under 5 bars
+        // or over ~510 and fall back to the default window — so a hard zoom-in,
+        // or a wide zoom-out on a short dataset, silently threw the user's view
+        // away on the next rebuild. That is the zoom "resetting after a few
+        // minutes": the range was saved correctly and then refused on restore.
+        //
+        // A range is only unusable if it is not finite, inverted, or entirely
+        // off the data. Anything else is brought back into bounds and kept, so
+        // the view the user set survives even when it is extreme.
+        const finite = Number.isFinite(from) && Number.isFinite(to) && to > from;
+        const overlaps = to > 0 && from < nextCount + RIGHT_OFFSET;
+        if (finite && overlaps) {
+          const maxSpan = Math.max(nextCount + RIGHT_OFFSET, 10);
+          const cFrom = Math.max(-RIGHT_OFFSET, Math.min(from, nextCount - 1));
+          const cTo = Math.min(cFrom + Math.min(span, maxSpan), nextCount + RIGHT_OFFSET);
+          mainChart.timeScale().setVisibleLogicalRange({ from: cFrom, to: Math.max(cFrom + 2, cTo) });
+        } else {
+          focusRecentCandles(mainChart, chartData.candles);
+        }
       } catch (e) {}
     } else {
       // First mount of the session (or no saved range): show the latest candles.
@@ -8713,7 +8733,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         try {
           timeScale2.setVisibleLogicalRange(range);
           logicalRangeRef.current = range;
-          globalLogicalRangeCache[`${selectedInstrument?.instrument_token}_${timeframe}`] = range;
+          globalLogicalRangeCache[cacheKeyRef.current] = range;
           persistLogicalRanges();
         } catch(e) {}
         isSyncing = false;
@@ -8725,7 +8745,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         try {
           timeScale1.setVisibleLogicalRange(range);
           logicalRangeRef.current = range;
-          globalLogicalRangeCache[`${selectedInstrument?.instrument_token}_${timeframe}`] = range;
+          globalLogicalRangeCache[cacheKeyRef.current] = range;
           persistLogicalRanges();
         } catch(e) {}
         isSyncing = false;
