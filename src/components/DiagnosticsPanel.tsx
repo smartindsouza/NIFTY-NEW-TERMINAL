@@ -130,6 +130,16 @@ export function DiagnosticsPanel() {
           </div>
         </div>
 
+        {/* Broker Connection lives on the chart page (it reads Kite counters
+            there) but is reached from here, where app health belongs. */}
+        <button
+          onClick={() => { try { window.dispatchEvent(new CustomEvent('toggle_broker_connection')); } catch (e) {} }}
+          className="w-full flex items-center justify-between rounded-xl border border-border/60 bg-card/60 px-3 py-2 text-left hover:bg-card transition-colors"
+        >
+          <span className="text-[11px] font-medium text-foreground/90">Broker Connection</span>
+          <span className="text-[10px] text-muted-foreground">Kite request rate · bound contract</span>
+        </button>
+
         {/* Telemetry warnings. THIS panel — not the toast — was the warning
             Martin kept seeing: it listed raw hit counts with no exemption, so an
             endpoint the interceptor had already judged harmless (a server-cached

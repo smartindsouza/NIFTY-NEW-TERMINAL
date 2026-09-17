@@ -4278,6 +4278,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       localStorage.setItem('showDiagnostic', String(showDiagnostic));
     } catch(e) {}
   }, [showDiagnostic]);
+
+  // App Diagnostics opens this panel — it lives here because it reads chart-side
+  // Kite counters, but it is reached from there now, not from the indicators menu.
+  useEffect(() => {
+    const f = () => setShowDiagnostic(v => !v);
+    window.addEventListener('toggle_broker_connection', f);
+    return () => window.removeEventListener('toggle_broker_connection', f);
+  }, []);
   const [rsiHoverValue, setRsiHoverValue] = useState<string | null>(null);
   const [selectedInstrument, setSelectedInstrument] = useState<Instrument | null>(() => {
     // A Strike Click tab carries its contract in the URL, and it MUST be applied
@@ -10685,16 +10693,19 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   <div className="order-0 px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase">Available Indicators</div>
                   
                   {/* Previous Day High/Low */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('PdhPdl', showPdhPdl)}`}>
-                    <button
-                      onClick={() => setShowPdhPdl(!showPdhPdl)}
-                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
-                    >
-                      <div className="w-4 flex items-center justify-center">
-                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showPdhPdl) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showPdhPdl) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('PreviousDayHighLow', showPdhPdl)}`}>
+                    {/* Only the checkbox toggles. The label used to be part of the button, so
+                          reading down the list and brushing a name switched an indicator on. */}
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowPdhPdl(!showPdhPdl); }}
+                          aria-label={`Toggle Previous Day High/Low`}
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showPdhPdl) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showPdhPdl) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none">Previous Day High/Low</span>
                       </div>
-                      <span className="truncate">Previous Day High/Low</span>
-                    </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleFav('PreviousDayHighLow'); }}
                       title={isFav('PreviousDayHighLow') ? 'Remove from favourites' : 'Mark as favourite'}
@@ -10717,16 +10728,19 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* 15m Opening Range (first-15-min high/low lines) */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('OpeningRange', showOpeningRange)}`}>
-                    <button
-                      onClick={() => setShowOpeningRange(!showOpeningRange)}
-                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
-                    >
-                      <div className="w-4 flex items-center justify-center">
-                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showOpeningRange) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showOpeningRange) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('15minHighLow', showOpeningRange)}`}>
+                    {/* Only the checkbox toggles. The label used to be part of the button, so
+                          reading down the list and brushing a name switched an indicator on. */}
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowOpeningRange(!showOpeningRange); }}
+                          aria-label={`Toggle 15 min High-Low`}
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showOpeningRange) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showOpeningRange) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none">15 min High-Low</span>
                       </div>
-                      <span className="truncate">15 min High-Low</span>
-                    </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleFav('15minHighLow'); }}
                       title={isFav('15minHighLow') ? 'Remove from favourites' : 'Mark as favourite'}
@@ -10740,16 +10754,19 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
                   {/* Market Structure (BOS / CHoCH) — an index study */}
                   {!isOptionView && (
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('Structure', showStructure)}`}>
-                    <button
-                      onClick={() => setShowStructure(!showStructure)}
-                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
-                    >
-                      <div className="w-4 flex items-center justify-center">
-                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showStructure) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showStructure) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('BOSCHoCH', showStructure)}`}>
+                    {/* Only the checkbox toggles. The label used to be part of the button, so
+                          reading down the list and brushing a name switched an indicator on. */}
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowStructure(!showStructure); }}
+                          aria-label={`Toggle BOS-CHoCH`}
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showStructure) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showStructure) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none">BOS-CHoCH</span>
                       </div>
-                      <span className="truncate">BOS-CHoCH</span>
-                    </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleFav('BOSCHoCH'); }}
                       title={isFav('BOSCHoCH') ? 'Remove from favourites' : 'Mark as favourite'}
@@ -10768,7 +10785,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
                   )}
                   {isEditingStruct && (
-                    <div className={`px-3 pb-2 ${rowOrder('Structure', showStructure)}`}>
+                    <div className={`px-3 pb-2 ${rowOrder('DirectionalZones', showStructure)}`}>
                       <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Show structure for</label>
                       <select
                         value={structDays}
@@ -10784,16 +10801,19 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   )}
 
                   {/* Directional Zones (ported TradingView indicator; replaced Order Blocks) */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('OrderBlocks', showOrderBlocks)}`}>
-                    <button
-                      onClick={() => setShowOrderBlocks(!showOrderBlocks)}
-                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
-                    >
-                      <div className="w-4 flex items-center justify-center">
-                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showOrderBlocks) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showOrderBlocks) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('DirectionalZones', showOrderBlocks)}`}>
+                    {/* Only the checkbox toggles. The label used to be part of the button, so
+                          reading down the list and brushing a name switched an indicator on. */}
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowOrderBlocks(!showOrderBlocks); }}
+                          aria-label={`Toggle Directional Zones`}
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showOrderBlocks) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showOrderBlocks) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none">Directional Zones</span>
                       </div>
-                      <span className="truncate">Directional Zones</span>
-                    </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleFav('DirectionalZones'); }}
                       title={isFav('DirectionalZones') ? 'Remove from favourites' : 'Mark as favourite'}
@@ -10837,16 +10857,19 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* Fair Value Gaps */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('Fvg', showFvg)}`}>
-                    <button
-                      onClick={() => setShowFvg(!showFvg)}
-                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
-                    >
-                      <div className="w-4 flex items-center justify-center">
-                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showFvg) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showFvg) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('FairValueGaps', showFvg)}`}>
+                    {/* Only the checkbox toggles. The label used to be part of the button, so
+                          reading down the list and brushing a name switched an indicator on. */}
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowFvg(!showFvg); }}
+                          aria-label={`Toggle Fair Value Gaps`}
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showFvg) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showFvg) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none">Fair Value Gaps</span>
                       </div>
-                      <span className="truncate">Fair Value Gaps</span>
-                    </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleFav('FairValueGaps'); }}
                       title={isFav('FairValueGaps') ? 'Remove from favourites' : 'Mark as favourite'}
@@ -10859,16 +10882,19 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* Demand / Supply Zones */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('DsZones', showDsZones)}`}>
-                    <button
-                      onClick={() => setShowDsZones(!showDsZones)}
-                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
-                    >
-                      <div className="w-4 flex items-center justify-center">
-                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showDsZones) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showDsZones) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('DemandSupplyZones', showDsZones)}`}>
+                    {/* Only the checkbox toggles. The label used to be part of the button, so
+                          reading down the list and brushing a name switched an indicator on. */}
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowDsZones(!showDsZones); }}
+                          aria-label={`Toggle Demand/Supply Zones`}
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showDsZones) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showDsZones) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none">Demand/Supply Zones</span>
                       </div>
-                      <span className="truncate">Demand/Supply Zones</span>
-                    </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleFav('DemandSupplyZones'); }}
                       title={isFav('DemandSupplyZones') ? 'Remove from favourites' : 'Mark as favourite'}
@@ -10886,7 +10912,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     </button>
                   </div>
                   {isEditingDsZones && (
-                    <div className={`px-3 pb-2 ${rowOrder('DemandSupplyZones', showDsZones)}`}>
+                    <div className={`px-3 pb-2 ${rowOrder('LevelTouchAlerts', showDsZones)}`}>
                       <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Zone darkness (%)</label>
                       <div className="flex items-center gap-2">
                         <input
@@ -10904,15 +10930,18 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
                   {/* Level Touch Alerts */}
                   <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(levelAlertsOn) ? "order-1" : "order-2"}`}>
-                    <button
-                      onClick={() => setLevelAlertsOn(!levelAlertsOn)}
-                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
-                    >
-                      <div className="w-4 flex items-center justify-center">
-                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(levelAlertsOn) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(levelAlertsOn) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                    {/* Only the checkbox toggles. The label used to be part of the button, so
+                          reading down the list and brushing a name switched an indicator on. */}
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setLevelAlertsOn(!levelAlertsOn); }}
+                          aria-label={`Toggle Level Touch Alerts`}
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(levelAlertsOn) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(levelAlertsOn) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none">Level Touch Alerts</span>
                       </div>
-                      <span className="truncate">Level Touch Alerts</span>
-                    </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleFav('LevelTouchAlerts'); }}
                       title={isFav('LevelTouchAlerts') ? 'Remove from favourites' : 'Mark as favourite'}
@@ -10926,15 +10955,18 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
                   {/* Zone Tap Alerts — the ported Pine script's own alert */}
                   <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(zoneTapAlertsOn) ? "order-1" : "order-2"}`}>
-                    <button
-                      onClick={() => setZoneTapAlertsOn(!zoneTapAlertsOn)}
-                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
-                    >
-                      <div className="w-4 flex items-center justify-center">
-                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(zoneTapAlertsOn) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(zoneTapAlertsOn) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                    {/* Only the checkbox toggles. The label used to be part of the button, so
+                          reading down the list and brushing a name switched an indicator on. */}
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setZoneTapAlertsOn(!zoneTapAlertsOn); }}
+                          aria-label={`Toggle Zone Tap Alerts`}
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(zoneTapAlertsOn) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(zoneTapAlertsOn) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none">Zone Tap Alerts</span>
                       </div>
-                      <span className="truncate">Zone Tap Alerts</span>
-                    </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleFav('ZoneTapAlerts'); }}
                       title={isFav('ZoneTapAlerts') ? 'Remove from favourites' : 'Mark as favourite'}
@@ -10948,15 +10980,18 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
                   {/* Breakout Authenticity Alerts */}
                   <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(breakoutAlertsOn) ? "order-1" : "order-2"}`}>
-                    <button
-                      onClick={() => setBreakoutAlertsOn(!breakoutAlertsOn)}
-                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
-                    >
-                      <div className="w-4 flex items-center justify-center">
-                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(breakoutAlertsOn) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(breakoutAlertsOn) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                    {/* Only the checkbox toggles. The label used to be part of the button, so
+                          reading down the list and brushing a name switched an indicator on. */}
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setBreakoutAlertsOn(!breakoutAlertsOn); }}
+                          aria-label={`Toggle Breakout-Fakeouts`}
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(breakoutAlertsOn) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(breakoutAlertsOn) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none">Breakout-Fakeouts</span>
                       </div>
-                      <span className="truncate">Breakout-Fakeouts</span>
-                    </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleFav('BreakoutFakeouts'); }}
                       title={isFav('BreakoutFakeouts') ? 'Remove from favourites' : 'Mark as favourite'}
@@ -10970,15 +11005,18 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
                   {/* Support/Resistance Lines */}
                   <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('Volume', showVolume)}`}>
-                    <button
-                      onClick={() => setShowVolume(!showVolume)}
-                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
-                    >
-                      <div className="w-4 flex items-center justify-center">
-                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showVolume) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showVolume) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                    {/* Only the checkbox toggles. The label used to be part of the button, so
+                          reading down the list and brushing a name switched an indicator on. */}
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowVolume(!showVolume); }}
+                          aria-label={`Toggle Volume`}
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showVolume) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showVolume) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none">Volume</span>
                       </div>
-                      <span className="truncate">Volume</span>
-                    </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleFav('Volume'); }}
                       title={isFav('Volume') ? 'Remove from favourites' : 'Mark as favourite'}
@@ -10989,16 +11027,19 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     </button>
                     <span className="p-1 w-[22px] shrink-0" aria-hidden="true" />
                   </div>
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('SnR', showSnR)}`}>
-                    <button
-                      onClick={() => setShowSnR(!showSnR)}
-                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
-                    >
-                      <div className="w-4 flex items-center justify-center">
-                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showSnR) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showSnR) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('SupportResistanceLines', showSnR)}`}>
+                    {/* Only the checkbox toggles. The label used to be part of the button, so
+                          reading down the list and brushing a name switched an indicator on. */}
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowSnR(!showSnR); }}
+                          aria-label={`Toggle Support-Resistance Lines`}
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showSnR) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showSnR) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none">Support-Resistance Lines</span>
                       </div>
-                      <span className="truncate">Support-Resistance Lines</span>
-                    </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleFav('SupportResistanceLines'); }}
                       title={isFav('SupportResistanceLines') ? 'Remove from favourites' : 'Mark as favourite'}
@@ -11024,16 +11065,19 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       option chart, but leaving the switch visible invited turning on
                       something that could never draw. */}
                   {!isOptionView && (
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('OiBars', showOiBars)}`}>
-                    <button
-                      onClick={() => setShowOiBars(!showOiBars)}
-                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
-                    >
-                      <div className="w-4 flex items-center justify-center">
-                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showOiBars) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showOiBars) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('OIBars', showOiBars)}`}>
+                    {/* Only the checkbox toggles. The label used to be part of the button, so
+                          reading down the list and brushing a name switched an indicator on. */}
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowOiBars(!showOiBars); }}
+                          aria-label={`Toggle OI Bars`}
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showOiBars) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showOiBars) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none">OI Bars</span>
                       </div>
-                      <span className="truncate">OI Bars</span>
-                    </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleFav('OIBars'); }}
                       title={isFav('OIBars') ? 'Remove from favourites' : 'Mark as favourite'}
@@ -11057,16 +11101,19 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   )}
 
                   {/* RSI */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('Rsi', showRsi)}`}>
-                    <button
-                      onClick={() => setShowRsi(!showRsi)}
-                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
-                    >
-                      <div className="w-4 flex items-center justify-center">
-                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showRsi) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showRsi) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('RSI', showRsi)}`}>
+                    {/* Only the checkbox toggles. The label used to be part of the button, so
+                          reading down the list and brushing a name switched an indicator on. */}
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowRsi(!showRsi); }}
+                          aria-label={`Toggle RSI`}
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showRsi) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showRsi) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none">RSI</span>
                       </div>
-                      <span className="truncate">RSI</span>
-                    </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleFav('RSI'); }}
                       title={isFav('RSI') ? 'Remove from favourites' : 'Mark as favourite'}
@@ -11089,16 +11136,19 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* Bollinger Bands */}
-                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('BB', showBB)}`}>
-                    <button
-                      onClick={() => setShowBB(!showBB)}
-                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
-                    >
-                      <div className="w-4 flex items-center justify-center">
-                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showBB) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showBB) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('BollingerBands', showBB)}`}>
+                    {/* Only the checkbox toggles. The label used to be part of the button, so
+                          reading down the list and brushing a name switched an indicator on. */}
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowBB(!showBB); }}
+                          aria-label={`Toggle Bollinger Bands`}
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showBB) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showBB) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none">Bollinger Bands</span>
                       </div>
-                      <span className="truncate">Bollinger Bands</span>
-                    </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleFav('BollingerBands'); }}
                       title={isFav('BollingerBands') ? 'Remove from favourites' : 'Mark as favourite'}
@@ -11122,15 +11172,18 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
                   {/* H Levels */}
                   <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('HLevels', showHLevels)}`}>
-                    <button
-                      onClick={() => setShowHLevels(!showHLevels)}
-                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
-                    >
-                      <div className="w-4 flex items-center justify-center">
-                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showHLevels) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showHLevels) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                    {/* Only the checkbox toggles. The label used to be part of the button, so
+                          reading down the list and brushing a name switched an indicator on. */}
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowHLevels(!showHLevels); }}
+                          aria-label={`Toggle H Levels`}
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showHLevels) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showHLevels) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none">H Levels</span>
                       </div>
-                      <span className="truncate">H Levels</span>
-                    </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleFav('HLevels'); }}
                       title={isFav('HLevels') ? 'Remove from favourites' : 'Mark as favourite'}
@@ -11152,16 +11205,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     </button>
                   </div>
 
-                  {/* Broker Connection — Kite request rate and the bound contract */}
-                  <button
-                    onClick={() => setShowDiagnostic(!showDiagnostic)}
-                    className="flex items-center gap-2 px-3 py-2 text-sm text-foreground/80 hover:bg-muted hover:text-foreground transition-colors text-left"
-                  >
-                    <div className={`w-4 flex items-center justify-center ${rowOrder('Diagnostic', showDiagnostic)}`}>
-                      <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showDiagnostic) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showDiagnostic) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
-                    </div>
-                    <span className="truncate">Broker Connection</span>
-                  </button>
+                  {/* Broker Connection has moved to App Diagnostics: it reports the
+                      Kite request rate and the bound contract, which is app health
+                      rather than something drawn on the chart. It never belonged in
+                      a list of indicators. */}
                 </div>
               )}
             </div>
