@@ -229,6 +229,11 @@ function StatusPill({ open }: { open?: boolean }) {
 
 export default function MarketContext() {
   const [open, setOpen] = useState(false);
+  // The slide-out covers the chart; tell the chart page so its jump-to-latest
+  // bubble steps aside instead of floating over this panel.
+  useEffect(() => {
+    try { window.dispatchEvent(new CustomEvent('chart_overlay', { detail: { id: 'market-context', open } })); } catch (e) {}
+  }, [open]);
   // Which categories are hidden. Persisted so the sidebar opens how you left it.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
     try { return JSON.parse(localStorage.getItem("mc_collapsed") || "{}"); } catch { return {}; }

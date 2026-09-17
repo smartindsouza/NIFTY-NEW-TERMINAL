@@ -4579,6 +4579,21 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   useEffect(() => { try { localStorage.setItem('rrCapital', String(rrCapital || 0)); } catch (e) {} }, [rrCapital]);
 
   const [rrMenuOpen, setRrMenuOpen] = useState(false);
+  // Panels rendered outside this page still cover the chart. Each one announces
+  // itself by id, so two open at once cannot cancel each other out on close.
+  const externalOverlaysRef = useRef<Set<string>>(new Set());
+  const [externalOverlayOpen, setExternalOverlayOpen] = useState(false);
+  useEffect(() => {
+    const f = (e: any) => {
+      const id = String(e?.detail?.id || '');
+      if (!id) return;
+      if (e?.detail?.open) externalOverlaysRef.current.add(id);
+      else externalOverlaysRef.current.delete(id);
+      setExternalOverlayOpen(externalOverlaysRef.current.size > 0);
+    };
+    window.addEventListener('chart_overlay', f);
+    return () => window.removeEventListener('chart_overlay', f);
+  }, []);
   const rrMenuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!rrMenuOpen) return;
@@ -11665,7 +11680,15 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               onPointerLeave={handlePointerUp}
               className="border border-0 rounded-none md:bg-background stretch-self flex-grow relative w-full overflow-hidden z-20"
             />
-            {showJumpToLatest && !isIndicatorsOpen && (
+            {showJumpToLatest && !(
+              // The jump-to-latest bubble floats above everything, so it used to
+              // sit on top of whatever panel was open. If anything covers the
+              // chart, there is nothing to jump on and the bubble is in the way.
+              isIndicatorsOpen || showDiagnostic || externalOverlayOpen ||
+              indexMenuOpen || optionMenuOpen || rrMenuOpen || searchExpanded ||
+              isEditingPdhPdl || isEditingSnR || isEditingBB || isEditingOiBars ||
+              isEditingDz || isEditingTpSl || isEditingRsi || isEditingHLevels
+            ) && (
               <button
                 onClick={() => {
                   try {

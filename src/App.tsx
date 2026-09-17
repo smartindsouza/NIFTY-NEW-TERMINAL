@@ -97,6 +97,11 @@ export default function App() {
     catch (e) { return false; }
   })();
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  // Tell the chart page it is covered, so the jump-to-latest bubble gets out of
+  // the way instead of floating on top of this panel.
+  useEffect(() => {
+    try { window.dispatchEvent(new CustomEvent('chart_overlay', { detail: { id: 'app-diagnostics', open: showDiagnostics } })); } catch (e) {}
+  }, [showDiagnostics]);
   const [location] = useLocation();
   // Reload button shows only on the chart page; it tells the chart (via a window
   // event the chart already listens for) to refetch history and snap to the latest candle.
