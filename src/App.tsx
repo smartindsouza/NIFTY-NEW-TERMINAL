@@ -256,11 +256,11 @@ export default function App() {
         visibleToasts={1}
         duration={2500}
         gap={4}
-        offset="72px"
-        mobileOffset="72px"
+        offset={{ top: '72px' }}
+        mobileOffset={{ top: '72px', left: '12px', right: '12px' }}
         toastOptions={{
           classNames: { toast: "cn-toast" },
-          style: { fontSize: '12px', padding: '7px 12px', minHeight: '0', width: 'fit-content', maxWidth: '92vw', margin: '0 auto', borderRadius: '9999px' },
+          style: { fontSize: '12px', padding: '7px 12px', minHeight: '0', width: 'fit-content', maxWidth: 'calc(100vw - 24px)', margin: '0 auto', borderRadius: '9999px' },
         }}
       />
     </QueryClientProvider>

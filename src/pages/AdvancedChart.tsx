@@ -769,9 +769,10 @@ function TVStylePicker({
                   <button 
                     key={`lw-${lw}`}
                     onClick={() => onThicknessChange(lw)}
-                    className={`flex-[1] flex items-center justify-center border-r border-0 last:border-r-0 hover:bg-white/10 transition-colors ${thickness === lw ? 'bg-muted/50' : 'bg-transparent'}`}
+                    className={`flex-[1] flex items-center justify-center border-r border-0 last:border-r-0 hover:bg-muted transition-colors text-foreground ${thickness === lw ? 'bg-muted/50' : 'bg-transparent'}`}
                   >
-                    <div className="w-5" style={{ height: `${lw}px`, backgroundColor: '#fff' }} />
+                    {/* currentColor, not #fff — a white rule is invisible on the light theme. */}
+                    <div className="w-5" style={{ height: `${lw}px`, backgroundColor: 'currentColor' }} />
                   </button>
                 ))}
               </div>
@@ -791,9 +792,9 @@ function TVStylePicker({
                   <button 
                     key={`ls-${ls.val}`}
                     onClick={() => onLineStyleChange(ls.val)}
-                    className={`flex-[1] flex items-center justify-center border-r border-0 last:border-r-0 hover:bg-white/10 transition-colors ${lineStyle === ls.val ? 'bg-muted/50' : 'bg-transparent'}`}
+                    className={`flex-[1] flex items-center justify-center border-r border-0 last:border-r-0 hover:bg-muted transition-colors text-foreground ${lineStyle === ls.val ? 'bg-muted/50' : 'bg-transparent'}`}
                   >
-                    <div className="w-5 border-t-[1.5px]" style={{ borderColor: '#fff', borderTopStyle: ls.style as any }} />
+                    <div className="w-5 border-t-[1.5px]" style={{ borderColor: 'currentColor', borderTopStyle: ls.style as any }} />
                   </button>
                 ))}
               </div>
@@ -2562,13 +2563,13 @@ function HLevelsEditorModal({
                   <div 
                     key={`lw-${width}`}
                     onClick={() => setLineWidth(width)}
-                    className={`flex-[1] h-8 flex items-center justify-center cursor-pointer border-r border-0 last:border-r-0 hover:bg-white/10 ${lineWidth === width ? 'bg-white text-black' : 'bg-muted/50 text-foreground'}`}
+                    className={`flex-[1] h-8 flex items-center justify-center cursor-pointer border-r border-0 last:border-r-0 hover:bg-muted ${lineWidth === width ? 'bg-primary text-primary-foreground' : 'bg-muted/50 text-foreground'}`}
                   >
                     <div 
                       className={`w-6 border-t-${width === 1 ? '' : width}`} 
                       style={{ 
                          borderTopWidth: `${width}px`,
-                         borderColor: lineWidth === width ? '#000' : '#fff'
+                         borderColor: 'currentColor'
                       }} 
                     />
                   </div>
@@ -2588,13 +2589,13 @@ function HLevelsEditorModal({
                   <div 
                     key={`ls-${ls.val}`}
                     onClick={() => setLineStyle(ls.val)}
-                    className={`flex-[1] h-8 flex items-center justify-center cursor-pointer border-r border-0 last:border-r-0 hover:bg-white/10 ${lineStyle === ls.val ? 'bg-white text-black font-semibold' : 'bg-muted/50 text-foreground'}`}
+                    className={`flex-[1] h-8 flex items-center justify-center cursor-pointer border-r border-0 last:border-r-0 hover:bg-muted ${lineStyle === ls.val ? 'bg-primary text-primary-foreground font-semibold' : 'bg-muted/50 text-foreground'}`}
                   >
                     <div 
                       className="w-6 border-t-2" 
                       style={{ 
                          borderStyle: ls.dash as any, 
-                         borderColor: lineStyle === ls.val ? '#000' : '#fff'
+                         borderColor: 'currentColor'
                       }} 
                     />
                   </div>
@@ -3633,13 +3634,15 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     return '8';
   });
   // 15-minute opening-range lines were hard-coded white.
+  // Slate rather than white: the old hard-coded white disappeared on the light
+  // theme. A stored '#ffffff' is treated as the old default and migrated.
   const [orHighColor, setOrHighColor] = useState(() => {
-    try { return localStorage.getItem('orHighColor') || '#ffffff'; } catch(e) {}
-    return '#ffffff';
+    try { const v = localStorage.getItem('orHighColor'); if (v && v !== '#ffffff') return v; } catch(e) {}
+    return '#64748b';
   });
   const [orLowColor, setOrLowColor] = useState(() => {
-    try { return localStorage.getItem('orLowColor') || '#ffffff'; } catch(e) {}
-    return '#ffffff';
+    try { const v = localStorage.getItem('orLowColor'); if (v && v !== '#ffffff') return v; } catch(e) {}
+    return '#64748b';
   });
   // Alert tuning, previously fixed constants inside the detectors.
   const [levelAlertCooldown, setLevelAlertCooldown] = useState<string>(() => {
@@ -10776,7 +10779,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                 <ChartNoAxesCombined size={18} />
               </button>
               {isIndicatorsOpen && (
-                <div className="fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto md:overflow-hidden bg-card border border-white/10 md:border-0 rounded-md py-1.5 z-[45] shadow-2xl flex flex-col">
+                <div className="fixed md:absolute inset-x-0 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto md:overflow-hidden bg-card border-y border-white/10 md:border-0 rounded-none md:rounded-md py-1.5 z-[45] shadow-2xl flex flex-col">
                   <div className="order-0 px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase">Available Indicators</div>
                   
                   {/* Previous Day High/Low */}

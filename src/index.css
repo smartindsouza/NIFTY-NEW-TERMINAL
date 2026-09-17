@@ -164,3 +164,21 @@
 .light .text-amber-300,   .light .text-amber-400   { color: #b45309 !important; }
 .light .text-yellow-300,  .light .text-yellow-400  { color: #a16207 !important; }
 .light .text-purple-300,  .light .text-purple-400  { color: #6b21a8 !important; }
+
+/* MOBILE TOASTS: sonner applies a single `mobileOffset` value to left and right
+   as well as top, so the 72px meant for the top inset the container by 72px on
+   each side too; a fit-content toast then started inside that box and ran off
+   the right edge of the screen. The offsets are now per-side (App.tsx), and
+   below sonner's own 600px breakpoint the toast fills that box and centres its
+   content, so it can never be cropped or sit off-centre. */
+@media (max-width: 600px) {
+  .cn-toast {
+    left: 0 !important;
+    right: 0 !important;
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+    margin: 0 !important;
+    justify-content: center !important;
+    text-align: center !important;
+  }
+}
