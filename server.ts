@@ -2136,6 +2136,88 @@ setInterval(() => {
     }
   });
 
+  // ==========================================================================
+  // CAS PROBE. Discovery, not the feature. During the closing auction (15:15 to
+  // 15:36 IST) this samples two candidate sources every 5s and records exactly
+  // what each returns, so the indicative-close strip can be built on facts:
+  //   (a) Kite Connect getQuote for NIFTY 50 and its five heaviest constituents
+  //       — does the API carry the indicative/imbalance fields Kite web shows?
+  //   (b) zerodha.com/cas — a public page; does it expose a JSON source?
+  // Nothing here is displayed to the user beyond a summary line; the raw
+  // samples sit behind /api/cas-probe for one session's inspection.
+  // ==========================================================================
+  const casProbe: { samples: any[]; summary: any; startedAt: number | null } = { samples: [], summary: null, startedAt: null };
+  const CAS_PROBE_SYMS = ['NSE:NIFTY 50', 'NSE:RELIANCE', 'NSE:HDFCBANK', 'NSE:ICICIBANK', 'NSE:INFY', 'NSE:TCS'];
+  function inCasWindow(): boolean {
+    const ist = new Date(Date.now() + 5.5 * 3600000);
+    const d = ist.getUTCDay(), m = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+    return d >= 1 && d <= 5 && m >= 15 * 60 + 15 && m < 15 * 60 + 36;
+  }
+  function summariseCasProbe() {
+    const keySet = new Set<string>();
+    const interesting = new Set<string>();
+    let quoteOk = 0, quoteFail = 0, pageOk = 0, pageJson = 0, pageFail = 0;
+    const urls = new Set<string>();
+    for (const smp of casProbe.samples) {
+      if (smp.quote?.error) quoteFail++; else if (smp.quote) {
+        quoteOk++;
+        for (const sym of Object.keys(smp.quote)) {
+          const walk = (o: any, prefix: string) => {
+            if (!o || typeof o !== 'object') return;
+            for (const k of Object.keys(o)) {
+              const path = prefix ? `${prefix}.${k}` : k;
+              keySet.add(path);
+              if (/indic|imbal|refer|auction|cas|equilib/i.test(k)) interesting.add(path);
+              if (typeof o[k] === 'object' && !Array.isArray(o[k])) walk(o[k], path);
+            }
+          };
+          walk(smp.quote[sym], '');
+        }
+      }
+      if (smp.page) {
+        if (smp.page.error) pageFail++; else {
+          pageOk++;
+          if (smp.page.isJson) pageJson++;
+          for (const u of (smp.page.urls || [])) urls.add(u);
+        }
+      }
+    }
+    return {
+      samples: casProbe.samples.length,
+      quote: { ok: quoteOk, fail: quoteFail, keys: [...keySet].sort(), interestingKeys: [...interesting] },
+      page: { ok: pageOk, json: pageJson, fail: pageFail, candidateUrls: [...urls].slice(0, 20) },
+    };
+  }
+  async function casProbeTick() {
+    if (!inCasWindow()) return;
+    if (casProbe.samples.length >= 300) return;
+    if (!casProbe.startedAt) casProbe.startedAt = Date.now();
+    const smp: any = { at: Date.now() };
+    try {
+      const kc = getKiteClient();
+      // @ts-ignore
+      smp.quote = (kc && kc.access_token) ? await kc.getQuote(CAS_PROBE_SYMS) : { error: 'no_kite_session' };
+    } catch (e: any) { smp.quote = { error: e?.message || String(e) }; }
+    try {
+      const r = await axios.get('https://zerodha.com/cas', { timeout: 8000, headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json, text/html' } });
+      const ct = String(r.headers?.['content-type'] || '');
+      const body = typeof r.data === 'string' ? r.data : JSON.stringify(r.data);
+      // any API-looking URLs the page references are the leads for the real source
+      const urls = Array.from(new Set((body.match(/https?:\/\/[^"'\s<>]+(?:api|cas|json)[^"'\s<>]*/gi) || []))).slice(0, 20);
+      smp.page = { status: r.status, contentType: ct, isJson: ct.includes('json'), length: body.length, urls,
+                   head: body.slice(0, 400) };
+    } catch (e: any) { smp.page = { error: e?.response?.status || e?.code || e?.message }; }
+    casProbe.samples.push(smp);
+    casProbe.summary = summariseCasProbe();
+  }
+  setInterval(() => { casProbeTick().catch(() => {}); }, 5000);
+
+  app.get('/api/cas-probe', (_req, res) => {
+    res.json({ startedAt: casProbe.startedAt, summary: casProbe.summary || summariseCasProbe(),
+               // last three raw samples are enough to read the shapes; the rest is the summary
+               lastSamples: casProbe.samples.slice(-3) });
+  });
+
   app.get('/api/market-context', async (_req, res) => {
     try {
       if (marketContextCache && Date.now() - marketContextCache.at < 5000) {
