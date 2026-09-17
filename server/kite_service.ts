@@ -16,6 +16,17 @@ db.prepare(`
   )
 `).run();
 
+/** The Zerodha user id of the session currently in use, or null. Read from the
+ *  same newest-row-for-today rule getKiteClient uses, so the two can never
+ *  disagree about whose account is active. */
+export function getKiteUserId(): string | null {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const row = db.prepare('SELECT kite_user_id FROM kite_tokens WHERE token_date = ? ORDER BY id DESC LIMIT 1').get(today) as any;
+    return row?.kite_user_id || null;
+  } catch (e) { return null; }
+}
+
 export function getKiteClient() {
   const apiKey = process.env.KITE_API_KEY;
   if (!apiKey) return null;
@@ -57,7 +68,13 @@ export async function generateSession(requestToken: string) {
     
     if (response && response.access_token) {
       const today = new Date().toISOString().split('T')[0];
-      db.prepare('INSERT INTO kite_tokens (access_token, token_date) VALUES (?, ?)').run(response.access_token, today);
+      // Store the Zerodha user the token belongs to. Tokens are keyed only by
+      // date and read newest-first, so whoever logs in last owns the session —
+      // fine for handing the terminal over, but nothing downstream could tell
+      // WHOSE account it was acting on. This is what makes that knowable.
+      try { db.exec('ALTER TABLE kite_tokens ADD COLUMN kite_user_id TEXT'); } catch (e) { /* column exists */ }
+      db.prepare('INSERT INTO kite_tokens (access_token, token_date, kite_user_id) VALUES (?, ?, ?)')
+        .run(response.access_token, today, response.user_id || null);
       return response.access_token;
     }
     throw new Error("No access token was returned by Zerodha Kite Connect.");

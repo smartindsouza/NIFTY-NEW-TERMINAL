@@ -10,7 +10,7 @@ import Database from 'better-sqlite3';
 import { generateSimulatedChain } from './server/simulate_data';
 import { computeAnalytics } from './server/analytics_engine';
 import { getTechnicalAnalysis, kiteDiagnostics, taFreshness } from './server/technical_analysis';
-import { getKiteClient, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData, getIndexFuturesTokens, getBseIndexToken, getOptionToken, getContractInfo, getOrderMargin, resolveOptionContract, getGiftNiftyInstrument } from './server/kite_service';
+import { getKiteClient, getKiteUserId, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData, getIndexFuturesTokens, getBseIndexToken, getOptionToken, getContractInfo, getOrderMargin, resolveOptionContract, getGiftNiftyInstrument } from './server/kite_service';
 import { getHistoricalAnalytics } from './server/analytics_service';
 import { runRsiBacktest } from './server/rsi_backtest';
 import { getLiveSignal, runOptionConfirmBacktest, getAlertSignal } from './server/option_rsi';
@@ -80,6 +80,17 @@ try { db.exec(`ALTER TABLE premium_exit_rules ADD COLUMN instrument_token INTEGE
 // Trailing-exit state (JSON) for rules armed with Martin's pullback method. NULL
 // means the rule is a plain SL/TP and is evaluated exactly as before.
 try { db.exec(`ALTER TABLE premium_exit_rules ADD COLUMN trail_state TEXT`); } catch (e) { /* column exists */ }
+
+// WHOSE ACCOUNT. The app holds one Kite session at a time — the newest login
+// wins — which is fine for handing the terminal to someone else, but until now
+// nothing recorded which account a journal row or an exit rule belonged to. A
+// second person's trades landed in the same journal, and worse, an exit rule
+// armed on one account would have been acted on while another was logged in.
+// Both are now stamped, rows are read back per account, and the watchers skip
+// any rule that belongs to a different one.
+try { db.exec(`ALTER TABLE trade_journal ADD COLUMN kite_user_id TEXT`); } catch (e) { /* column exists */ }
+try { db.exec(`ALTER TABLE premium_exit_rules ADD COLUMN kite_user_id TEXT`); } catch (e) { /* column exists */ }
+try { db.exec(`ALTER TABLE exit_rules ADD COLUMN kite_user_id TEXT`); } catch (e) { /* column exists */ }
 
 // Institutional flow is LIVE ONLY, per Martin: no table, no stored snapshots.
 // Each request fetches the latest published day; if no source answers, the
@@ -154,7 +165,13 @@ function loadActivePremiumRules() {
   premiumRulesByToken.clear();
   trailStates.clear();
   try {
-    const rows: any[] = db.prepare("SELECT * FROM premium_exit_rules WHERE status='ACTIVE'").all() as any[];
+    // THE SAFEGUARD. A rule armed on one account must never be acted on while
+    // another is logged in — that would place exits on the wrong person's
+    // positions. Rules with no account (armed before this column existed) are
+    // still honoured, since they belong to whoever was using the app then.
+    const activeUid = getKiteUserId();
+    const rows: any[] = (db.prepare("SELECT * FROM premium_exit_rules WHERE status='ACTIVE'").all() as any[])
+      .filter((r) => !r.kite_user_id || !activeUid || r.kite_user_id === activeUid);
     for (const r of rows) { syncPremiumRuleInMemory(r); loadTrailState(r); }
   } catch (e) { console.error('[premium-exit] load ACTIVE rules failed', e); }
 }
@@ -314,13 +331,16 @@ function journalOpenTrade(o: {
 }) {
   try {
     const now = Date.now();
+    // Stamp the Zerodha account this trade belongs to, so a second person
+    // logging in gets their own journal rather than adding rows to Martin's.
     db.prepare(`INSERT INTO trade_journal
-      (tradingsymbol, exchange, option_type, strike, side, qty, product, entry_price, entry_time, entry_spot, context, test_mode, simulated, status, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'OPEN', ?, ?)`)
+      (tradingsymbol, exchange, option_type, strike, side, qty, product, entry_price, entry_time, entry_spot, context, test_mode, simulated, status, created_at, updated_at, kite_user_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'OPEN', ?, ?, ?)`)
       .run(
         o.tradingsymbol, o.exchange || 'NFO', o.optionType || null, (o.strike ?? null) as any,
         o.side, o.qty, o.product || 'MIS', (o.entryPrice ?? null) as any, now, (o.entrySpot ?? null) as any,
-        o.context ? JSON.stringify(o.context) : null, o.testMode ? 1 : 0, o.simulated ? 1 : 0, now, now
+        o.context ? JSON.stringify(o.context) : null, o.testMode ? 1 : 0, o.simulated ? 1 : 0, now, now,
+        getKiteUserId()
       );
   } catch (e) { console.error('[Journal] open insert failed', e); }
 }
@@ -920,7 +940,9 @@ setInterval(() => {
       if (!isNSEMarketOpen()) return; // only act during live market hours
       if (!latestSpot || latestSpot <= 0) return;
       if (Date.now() - lastRealSpotTickAt > 30000) return; // require a fresh real tick (no stale/sim spot)
-      const rules = db.prepare("SELECT * FROM exit_rules WHERE status='ACTIVE'").all() as any[];
+      const activeUid2 = getKiteUserId();
+      const rules = (db.prepare("SELECT * FROM exit_rules WHERE status='ACTIVE'").all() as any[])
+        .filter((r) => !r.kite_user_id || !activeUid2 || r.kite_user_id === activeUid2);
       for (const r of rules) {
         let hit = '';
         const dir = r.trail_dir as ('LONG' | 'SHORT' | null);
@@ -966,7 +988,9 @@ setInterval(() => {
   setInterval(async () => {
     try {
       if (!isNSEMarketOpen()) return; // only act during live market hours
-      const rules = db.prepare("SELECT * FROM exit_rules WHERE status='ACTIVE'").all() as any[];
+      const activeUid2 = getKiteUserId();
+      const rules = (db.prepare("SELECT * FROM exit_rules WHERE status='ACTIVE'").all() as any[])
+        .filter((r) => !r.kite_user_id || !activeUid2 || r.kite_user_id === activeUid2);
       if (!rules.length) return;
       const timeframes = Array.from(new Set(rules.map(r => String(r.timeframe || '5'))));
       for (const tf of timeframes) {
@@ -1304,12 +1328,15 @@ setInterval(() => {
           trailJson = null;
         }
       }
-      db.prepare(`INSERT INTO premium_exit_rules (tradingsymbol, exchange, side, qty, entry, sl, tp, status, attempts, last_ltp, detail, instrument_token, trail_state, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 0, NULL, '', ?, ?, ?, ?)
+      // The rule records the account it was armed on; the watchers refuse to act
+      // on it while a different account is logged in.
+      db.prepare(`INSERT INTO premium_exit_rules (tradingsymbol, exchange, side, qty, entry, sl, tp, status, attempts, last_ltp, detail, instrument_token, trail_state, created_at, updated_at, kite_user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 0, NULL, '', ?, ?, ?, ?, ?)
         ON CONFLICT(tradingsymbol) DO UPDATE SET exchange=excluded.exchange, side=excluded.side, qty=excluded.qty,
           entry=excluded.entry, sl=excluded.sl, tp=excluded.tp, status='ACTIVE', attempts=0, detail='',
-          instrument_token=excluded.instrument_token, trail_state=excluded.trail_state, updated_at=excluded.updated_at`)
-        .run(tradingsymbol, pos.exchange || 'NFO', side, Math.abs(pos.quantity), entryPx, slN, tpN, ruleToken, trailJson, Date.now(), Date.now());
+          instrument_token=excluded.instrument_token, trail_state=excluded.trail_state, updated_at=excluded.updated_at,
+          kite_user_id=excluded.kite_user_id`)
+        .run(tradingsymbol, pos.exchange || 'NFO', side, Math.abs(pos.quantity), entryPx, slN, tpN, ruleToken, trailJson, Date.now(), Date.now(), getKiteUserId());
       const armedRow: any = db.prepare("SELECT * FROM premium_exit_rules WHERE tradingsymbol=?").get(tradingsymbol);
       syncPremiumRuleInMemory(armedRow);
       loadTrailState(armedRow);
@@ -1558,6 +1585,12 @@ setInterval(() => {
     }
   });
 
+  // Who is logged in. The app holds one Kite session at a time, so this is the
+  // account every order, rule and journal row currently belongs to.
+  app.get('/api/kite-user', (_req, res) => {
+    res.json({ success: true, userId: getKiteUserId() });
+  });
+
   app.get('/api/journal', async (req, res) => {
     try {
       // Correct the book before reading it, so opening the screen is what fixes a
@@ -1565,9 +1598,16 @@ setInterval(() => {
       try { await reconcileJournalWithBroker(String(req.query.reconcile || '') === '1'); } catch (e) {}
       const status = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : null;
       const limit = Math.min(parseInt(String(req.query.limit || '500'), 10) || 500, 2000);
+      // Per-account. Rows written before this column existed have NULL and are
+      // shown to whoever is the first account to log in after the upgrade —
+      // they are Martin's history, and hiding them entirely would be worse than
+      // showing them to him.
+      const uid = getKiteUserId();
+      const firstUid = (db.prepare('SELECT kite_user_id AS u FROM trade_journal WHERE kite_user_id IS NOT NULL ORDER BY id ASC LIMIT 1').get() as any)?.u || uid;
+      const legacyMine = uid && firstUid && uid === firstUid;
       const rows = (status === 'OPEN' || status === 'CLOSED')
-        ? db.prepare(`SELECT * FROM trade_journal WHERE status = ? ORDER BY entry_time DESC LIMIT ?`).all(status, limit)
-        : db.prepare(`SELECT * FROM trade_journal ORDER BY entry_time DESC LIMIT ?`).all(limit);
+        ? db.prepare(`SELECT * FROM trade_journal WHERE status = ? AND (kite_user_id = ? ${legacyMine ? 'OR kite_user_id IS NULL' : ''}) ORDER BY entry_time DESC LIMIT ?`).all(status, uid, limit)
+        : db.prepare(`SELECT * FROM trade_journal WHERE (kite_user_id = ? ${legacyMine ? 'OR kite_user_id IS NULL' : ''}) ORDER BY entry_time DESC LIMIT ?`).all(uid, limit);
       const trades = (rows as any[]).map((r) => ({ ...r, context: r.context ? JSON.parse(r.context) : null }));
       return res.json({ success: true, trades });
     } catch (e: any) {
