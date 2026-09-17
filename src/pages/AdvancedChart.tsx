@@ -1182,6 +1182,24 @@ const isMarketOpen = (unixSeconds: number): boolean => {
 // it. The tail to 15:45 covers the last CAS prints settling after the 15:40
 // close. isMarketOpen is left alone and still governs alerts and every
 // order-related path — this window must never be used to decide those.
+// GIFT NIFTY (NSE IX) trades its own ~21-hour day in two sessions, the second
+// running past midnight. Every live gate below was written against NSE's
+// 09:00-15:45, so outside those hours GIFT ticks were thrown away and the
+// background poll stopped — the chart sat frozen while the future was trading.
+export const isGiftSessionOpenAt = (istDay: number, mins: number): boolean => {
+  const weekday = istDay >= 1 && istDay <= 5;
+  if (weekday && mins >= 6 * 60 + 30 && mins < 15 * 60 + 40) return true;   // session 1
+  if (weekday && mins >= 16 * 60 + 35) return true;                          // session 2, pre-midnight
+  // session 2 after midnight belongs to the PREVIOUS day, so Tue-Sat qualify
+  if (mins < 2 * 60 + 45 && istDay >= 2 && istDay <= 6) return true;
+  return false;
+};
+
+const isGiftDataWindow = (unixSeconds: number): boolean => {
+  const ist = new Date(unixSeconds * 1000 + 5.5 * 60 * 60 * 1000);
+  return isGiftSessionOpenAt(ist.getUTCDay(), ist.getUTCHours() * 60 + ist.getUTCMinutes());
+};
+
 const isDataWindow = (unixSeconds: number): boolean => {
   const ist = new Date(unixSeconds * 1000 + 5.5 * 60 * 60 * 1000);
   const day = ist.getUTCDay();
@@ -7042,14 +7060,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // midnight, which is why the late-night window is tested against the NEXT
   // calendar day: 01:00 on a Saturday belongs to Friday's session, while 01:00
   // on a Monday does not, because Sunday evening has no session to continue.
-  const isGiftSessionOpen = (istDay: number, mins: number): boolean => {
-    const weekdayNow = istDay >= 1 && istDay <= 5;
-    if (weekdayNow && mins >= 6 * 60 + 30 && mins < 15 * 60 + 40) return true;   // session 1
-    if (weekdayNow && mins >= 16 * 60 + 35) return true;                          // session 2, pre-midnight
-    // session 2 after midnight belongs to the PREVIOUS day, so Tue–Sat qualify
-    if (mins < 2 * 60 + 45 && istDay >= 2 && istDay <= 6) return true;
-    return false;
-  };
+  const isGiftSessionOpen = isGiftSessionOpenAt;
 
   const tfMinutes = parseInt(String(timeframe), 10) || 0;
   // Also off on GIFT NIFTY. These levels are computed from the NIFTY session —
@@ -7150,7 +7161,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     // behind the /api/ta frequency toast. The mount fetch still runs when closed,
     // so the master signal keeps its data; the inject poll below already carries
     // this same gate, and a morning focus/remount restarts the interval.
-    refetchInterval: () => isDataWindow(Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current) ? 15000 : false,
+    refetchInterval: () => {
+      const now = Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current;
+      return (isReferenceChartRef.current ? isGiftDataWindow(now) : isDataWindow(now)) ? 15000 : false;
+    },
     staleTime: 8000,
     enabled: Boolean(timeframe && instrumentToken)
   });
@@ -7579,10 +7593,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           // and the index publishes through it. Rejecting those ticks meant the
           // chart sat frozen until the bell even though real prices were arriving.
           const ist = getIstDateTime(tickTime);
-          const isWeekend = ist.dayOfWeek === 0 || ist.dayOfWeek === 6;
-          const isStaleAfterHours = ist.timeOfDaySec >= MARKET_CLOSE_SECONDS_IST + 120 || ist.timeOfDaySec < PRE_OPEN_SECONDS_IST;
-          
-          if (isWeekend || isStaleAfterHours) {
+          const outsideSession = isReferenceChartRef.current
+            ? !isGiftSessionOpenAt(ist.dayOfWeek, Math.floor(ist.timeOfDaySec / 60))
+            : (ist.dayOfWeek === 0 || ist.dayOfWeek === 6
+               || ist.timeOfDaySec >= MARKET_CLOSE_SECONDS_IST + 120
+               || ist.timeOfDaySec < PRE_OPEN_SECONDS_IST);
+
+          if (outsideSession) {
             return;
           }
 
@@ -7716,7 +7733,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     const interval = setInterval(async () => {
       // Skip background polling if market is closed
       const now = Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current;
-      if (!isDataWindow(now)) {
+      if (!(isReferenceChartRef.current ? isGiftDataWindow(now) : isDataWindow(now))) {
         return;
       }
 
