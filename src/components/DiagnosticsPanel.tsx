@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 // Injected by the `define` block in vite.config.ts at build time.
 declare const __BUILD_TIME__: string;
 import { lastFrequencyDecision, isFrequencyExempt } from '../lib/apiInterceptor';
+import { zoomDiag } from '../lib/zoomDiag';
 
 // Live layout readout. Every height in the chain from viewport to chart canvas,
 // so a "gap under the chart" or "page scrolls" report can be read off a Diag
@@ -45,7 +46,10 @@ function useLayoutReadout() {
         const decision = d.at
           ? `last warned: ${d.endpoint} → ${d.exempt ? 'EXEMPT (toast suppressed)' : 'NOT exempt'} ${Math.round((Date.now() - d.at) / 1000)}s ago`
           : 'freq check: none yet';
-        setTxt(`${heights}\n${geometry}\n${decision}`);
+        const z = zoomDiag.at
+          ? `zoom: ${zoomDiag.decision} (${zoomDiag.reason}) saved ${zoomDiag.saved}${zoomDiag.applied ? ' → ' + zoomDiag.applied : ''} · ${zoomDiag.rebuilds} rebuilds`
+          : 'zoom: no rebuild yet';
+        setTxt(`${heights}\n${geometry}\n${decision}\n${z}`);
       } catch (e) {}
     };
     read();

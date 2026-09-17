@@ -3,6 +3,7 @@ import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-quer
 import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search, ChartNoAxesCombined, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
+import { zoomDiag } from "../lib/zoomDiag";
 import { getDivergences } from "../lib/divergence";
 import { evaluateBreakout } from "../lib/breakoutQuality";
 import { calculateBollingerBands } from "../indicators/bollingerBands";
@@ -3211,6 +3212,7 @@ const globalLogicalRangeCache: Record<string, any> = {};
 // would otherwise drop the user in the past. Restored ranges still apply on later
 // in-session rebuilds (timeframe/symbol switches).
 let chartFirstLoadDone = false;
+
 // Persist the X-axis (time zoom) across refreshes: hydrate the in-memory cache
 // from localStorage at load, and write it back (debounced) whenever it changes.
 try {
@@ -8464,6 +8466,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     }
     
     const isFirstChartLoad = !chartFirstLoadDone;
+    zoomDiag.rebuilds += 1;
+    zoomDiag.at = Date.now();
+    zoomDiag.saved = logicalRangeRef.current
+      ? `${logicalRangeRef.current.from.toFixed(0)}..${logicalRangeRef.current.to.toFixed(0)}` : 'null';
     // While a timeframe switch is in flight, the query keeps the PREVIOUS
     // timeframe's candles on screen so the chart does not go blank. That
     // intermediate frame used to get a restored zoom applied to it, and then the
@@ -8474,6 +8480,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     const tfNow = parseInt(timeframe, 10) || 5;
     const dataMatchesTf = typeof (chartData as any).timeframe !== 'number'
       || (chartData as any).timeframe === tfNow;
+    if (!logicalRangeRef.current) { zoomDiag.decision = 'DEFAULT'; zoomDiag.reason = 'no saved range'; }
+    else if (isFirstChartLoad) { zoomDiag.decision = 'DEFAULT'; zoomDiag.reason = 'first load'; }
+    else if (!dataMatchesTf) { zoomDiag.decision = 'DEFAULT'; zoomDiag.reason = 'tf mismatch'; }
     if (logicalRangeRef.current && !isFirstChartLoad && dataMatchesTf) {
       try {
         // If the user was pinned to the live edge when the range was captured,
@@ -8509,8 +8518,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           const cFrom = Math.max(-RIGHT_OFFSET, Math.min(from, nextCount - 1));
           const cTo = Math.min(cFrom + Math.min(span, maxSpan), nextCount + RIGHT_OFFSET);
           mainChart.timeScale().setVisibleLogicalRange({ from: cFrom, to: Math.max(cFrom + 2, cTo) });
+          zoomDiag.decision = (cFrom === from && cTo === to) ? 'KEPT' : 'CLAMPED';
+          zoomDiag.reason = `shift ${shift}`;
+          zoomDiag.applied = `${cFrom.toFixed(0)}..${Math.max(cFrom + 2, cTo).toFixed(0)}`;
         } else {
           focusRecentCandles(mainChart, chartData.candles);
+          zoomDiag.decision = 'DEFAULT';
+          zoomDiag.reason = !finite ? 'not finite' : 'off data';
         }
       } catch (e) {}
     } else {
