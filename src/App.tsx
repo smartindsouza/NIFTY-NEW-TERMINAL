@@ -238,9 +238,14 @@ export default function App() {
             controls a few pixels apart, one of which silently reloaded the page,
             was the wrong pair to leave next to the diagnostics toggle. */}
 
-        {/* Floating live diagnostics view */}
+        {/* Floating live diagnostics view.
+            Phone: fill the chart area, from under the app header down to just
+            above the chart toolbar and the bottom nav. The old 320px card at
+            the bottom-right corner clipped its own heading (build stamp + SYS
+            badge) and left the readout in a narrow column. Desktop keeps the
+            floating card. */}
         {showDiagnostics && (
-          <div className={`fixed ${onChart ? 'bottom-52' : 'bottom-36'} right-3 md:bottom-20 md:right-6 z-50 w-80 md:w-96 max-h-[70vh] overflow-y-auto animate-in slide-in-from-bottom-5 duration-300 rounded-2xl `}>
+          <div className={`fixed inset-x-2 top-[60px] ${onChart ? 'bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)]' : 'bottom-[calc(4rem+env(safe-area-inset-bottom)+0.5rem)]'} md:inset-x-auto md:top-auto md:bottom-20 md:right-6 z-50 md:w-96 max-h-none md:max-h-[70vh] overflow-y-auto overflow-x-hidden animate-in slide-in-from-bottom-5 duration-300 rounded-2xl`}>
             <DiagnosticsPanel />
           </div>
         )}

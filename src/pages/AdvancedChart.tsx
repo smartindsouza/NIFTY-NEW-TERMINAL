@@ -4351,7 +4351,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   useEffect(() => {
     const f = () => setShowDiagnostic(v => !v);
     window.addEventListener('toggle_broker_connection', f);
-    return () => window.removeEventListener('toggle_broker_connection', f);
+    // Tapping App Diagnostics in the bottom bar clears this one away, whether
+    // that tap is opening or closing the diagnostics panel.
+    const g = () => setShowDiagnostic(false);
+    window.addEventListener('toggle_diagnostics', g);
+    return () => {
+      window.removeEventListener('toggle_broker_connection', f);
+      window.removeEventListener('toggle_diagnostics', g);
+    };
   }, []);
   const [rsiHoverValue, setRsiHoverValue] = useState<string | null>(null);
   const [selectedInstrument, setSelectedInstrument] = useState<Instrument | null>(() => {
@@ -10139,11 +10146,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           is exactly where the price action is. The indicator toggle is unchanged,
           so turning it back on from the menu still works.
           onPointerDownCapture is used rather than a click listener because the
-          chart consumes pointer events for drags before they become clicks. */}
+          chart consumes pointer events for drags before they become clicks.
+          z-[60] puts this IN FRONT of App Diagnostics (z-50), which is what opens
+          it — it used to render behind the panel it was launched from. Same full
+          chart-area box on a phone; desktop keeps the corner card. */}
       {showDiagnostic && (
         <div
           ref={diagPanelRef}
-          className="fixed bottom-6 right-6 z-50 bg-card/95 backdrop-blur-md border border-0 p-4 rounded-lg text-xs font-mono w-[340px] max-h-[80vh] overflow-y-auto">
+          className="fixed inset-x-2 top-[60px] bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)] z-[60] md:inset-x-auto md:top-auto md:bottom-6 md:right-6 md:w-[340px] md:max-h-[80vh] bg-card/95 backdrop-blur-md border border-0 p-4 rounded-lg text-xs font-mono overflow-y-auto">
           <div className="flex items-center justify-between border-b border-0 pb-2 mb-2">
             {/* Named for what it reports: the Zerodha connection (request rate,
                 cache, 429s) and the contract this chart is bound to. Distinct

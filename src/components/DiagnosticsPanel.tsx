@@ -77,11 +77,11 @@ export function DiagnosticsPanel() {
             to sit in here too, squeezed between the title and the badge — on a
             phone that left it a ~150px column and it wrapped into the jumble in
             Martin's screenshot. It now has its own full-width block below. */}
-        <CardTitle className="text-xs font-bold tracking-widest uppercase text-foreground/80 flex items-center justify-between gap-2">
+        <CardTitle className="text-xs font-bold tracking-widest uppercase text-foreground/80 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
           <span className="flex items-center gap-1.5 min-w-0">
             <Activity className="w-4 h-4 text-emerald-400 animate-pulse shrink-0" /> App Diagnostics
           </span>
-          <span className="flex items-center gap-2 shrink-0">
+          <span className="flex items-center gap-2 min-w-0">
             <span className="text-[9px] font-mono normal-case tracking-normal text-muted-foreground whitespace-nowrap" title="When this UI bundle was built (IST). If this is older than the latest deploy, the phone is still on a cached bundle — hard-refresh.">
               UI {new Date(__BUILD_TIME__).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })} IST
             </span>
