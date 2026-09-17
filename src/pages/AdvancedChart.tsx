@@ -3206,6 +3206,40 @@ function MarginDiagnosticsPanel({ ticketData, kiteDiagnosticsData }: { ticketDat
 // Global cache to remember the chart position across tab switches and unmounts
 const globalLogicalRangeCache: Record<string, any> = {};
 
+// A logical range is a pair of BAR INDICES, and the server's candle window
+// SLIDES: every refetch drops old bars off the front and appends new ones at the
+// back, so index 4106 stops pointing at the bar it pointed at before. Restoring
+// the same indices then shows a later time window — the view walks forward —
+// and any clamp against the new bounds shaves the span. Martin's readout showed
+// exactly that: CLAMPED, 78 bars saved, 69 applied, 47 rebuilds.
+//
+// So the range is remembered by the TIME of its left edge plus its width in
+// bars, and on restore the left edge is found again by time in the new data.
+// The same candles stay in view however the array has shifted underneath.
+type SavedRange = { from: number; to: number; fromTime?: number; liveEdge?: boolean };
+function tagRangeWithTime(range: { from: number; to: number }, candles: any[]): SavedRange {
+  const n = candles?.length || 0;
+  if (!n) return { from: range.from, to: range.to };
+  const idx = Math.max(0, Math.min(n - 1, Math.floor(range.from)));
+  const t = candles[idx]?.time;
+  const fromTime = typeof t === 'number' ? t : (t ? Math.floor(new Date(t as any).getTime() / 1000) : undefined);
+  // Pinned to the live edge if the right edge is within a couple of bars of the
+  // newest candle: that view should follow new candles rather than a fixed time.
+  const liveEdge = range.to >= n - 2;
+  return { from: range.from, to: range.to, fromTime, liveEdge };
+}
+function indexOfTime(candles: any[], time: number): number {
+  // candles are time-ascending; binary search for the first bar at or after `time`
+  let lo = 0, hi = candles.length - 1, ans = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const t = candles[mid]?.time;
+    const ts = typeof t === 'number' ? t : Math.floor(new Date(t as any).getTime() / 1000);
+    if (ts >= time) { ans = mid; hi = mid - 1; } else lo = mid + 1;
+  }
+  return ans;
+}
+
 // True only until the chart mounts for the first time this session. On that first
 // mount we always jump to the latest candles (today) and ignore any persisted
 // logical range, which is a stale bar-index window from a previous session and
@@ -8489,13 +8523,28 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         // slide the window along by however many candles arrived, so the newest
         // candle stays in view. If they had scrolled back to study something,
         // leave the window exactly where they put it.
-        const saved = logicalRangeRef.current;
+        const saved: SavedRange = logicalRangeRef.current;
         const prevCount = rangeBarCountRef.current || 0;
         const nextCount = candleData.length;
-        const wasAtLiveEdge = prevCount > 0 && saved.to >= prevCount - 2;
-        const shift = (wasAtLiveEdge && nextCount > prevCount) ? (nextCount - prevCount) : 0;
-        const from = saved.from + shift, to = saved.to + shift;
-        const span = to - from;
+        const span = saved.to - saved.from;
+        let from: number, to: number, shift = 0;
+        const pinned = saved.liveEdge ?? (prevCount > 0 && saved.to >= prevCount - 2);
+        if (pinned) {
+          // Following the live edge: keep the same width, anchored to the NEWEST
+          // candle, so new bars stay in view whatever happened to the front.
+          to = nextCount + Math.max(0, saved.to - prevCount);
+          from = to - span;
+          shift = nextCount - prevCount;
+        } else if (typeof saved.fromTime === 'number') {
+          // Studying history: find the left edge again BY TIME in the new data.
+          const idx = indexOfTime(chartData.candles, saved.fromTime);
+          if (idx >= 0) {
+            const frac = saved.from - Math.floor(saved.from);
+            from = idx + frac; to = from + span; shift = idx - Math.floor(saved.from);
+          } else { from = saved.from; to = saved.to; }
+        } else {
+          from = saved.from; to = saved.to;
+        }
         // A logical range is a pair of BAR INDICES, and a bar means something
         // different on every timeframe. Restoring a 5-minute range onto an hourly
         // chart (or vice versa) produced the broken views Martin screenshotted:
@@ -8514,9 +8563,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         const finite = Number.isFinite(from) && Number.isFinite(to) && to > from;
         const overlaps = to > 0 && from < nextCount + RIGHT_OFFSET;
         if (finite && overlaps) {
-          const maxSpan = Math.max(nextCount + RIGHT_OFFSET, 10);
+          // The right bound allows the pad the user's view already had — up to a
+          // full screen of whitespace past the newest bar — instead of forcing it
+          // to RIGHT_OFFSET. Capping at 8 bars is what turned a 78-bar view into
+          // 69 on every rebuild in Martin's readout.
+          const rightBound = nextCount + Math.max(RIGHT_OFFSET, Math.min(span, to - nextCount));
+          const maxSpan = Math.max(rightBound, 10);
           const cFrom = Math.max(-RIGHT_OFFSET, Math.min(from, nextCount - 1));
-          const cTo = Math.min(cFrom + Math.min(span, maxSpan), nextCount + RIGHT_OFFSET);
+          const cTo = Math.min(cFrom + Math.min(span, maxSpan), rightBound);
           mainChart.timeScale().setVisibleLogicalRange({ from: cFrom, to: Math.max(cFrom + 2, cTo) });
           zoomDiag.decision = (cFrom === from && cTo === to) ? 'KEPT' : 'CLAMPED';
           zoomDiag.reason = `shift ${shift}`;
@@ -8746,8 +8800,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         isSyncing = true;
         try {
           timeScale2.setVisibleLogicalRange(range);
-          logicalRangeRef.current = range;
-          globalLogicalRangeCache[cacheKeyRef.current] = range;
+          const tagged = tagRangeWithTime(range, (chartDataRef.current?.candles) || chartData.candles);
+          logicalRangeRef.current = tagged;
+          globalLogicalRangeCache[cacheKeyRef.current] = tagged;
           persistLogicalRanges();
         } catch(e) {}
         isSyncing = false;
@@ -8758,8 +8813,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         isSyncing = true;
         try {
           timeScale1.setVisibleLogicalRange(range);
-          logicalRangeRef.current = range;
-          globalLogicalRangeCache[cacheKeyRef.current] = range;
+          const tagged = tagRangeWithTime(range, (chartDataRef.current?.candles) || chartData.candles);
+          logicalRangeRef.current = tagged;
+          globalLogicalRangeCache[cacheKeyRef.current] = tagged;
           persistLogicalRanges();
         } catch(e) {}
         isSyncing = false;
@@ -9016,8 +9072,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       try {
         const lr = mainChart.timeScale().getVisibleLogicalRange();
         if (lr && isFinite(lr.from) && isFinite(lr.to) && lr.to > lr.from) {
-          logicalRangeRef.current = { from: lr.from, to: lr.to };
-          rangeBarCountRef.current = (chartDataRef.current?.candles?.length) || chartData.candles.length;
+          const candlesNow = (chartDataRef.current?.candles) || chartData.candles;
+          logicalRangeRef.current = tagRangeWithTime({ from: lr.from, to: lr.to }, candlesNow);
+          rangeBarCountRef.current = candlesNow.length;
           // Deliberately NOT written to globalLogicalRangeCache here: cacheKey is not
           // a dependency of this effect, so the closure's key can belong to a
           // different instrument or timeframe than the one being torn down, and the
