@@ -10570,7 +10570,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               and the premium rule; only its tab is removed. */}
           <TradePnl sync={premSync} />
           </div>
-        <div ref={bottomBarRef} className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-[#141618] md:bg-transparent border-t border-white/10 md:border-0 px-3 py-1.5 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-nowrap md:flex-wrap justify-end md:shrink md:min-w-0 w-screen md:w-auto md:ml-auto md:mb-0 md:rounded-none md:border-0 md:bg-transparent max-w-[100vw] overflow-x-hidden md:overflow-visible">
+        <div ref={bottomBarRef} className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-card md:bg-transparent border-t border-border md:border-0 px-3 py-1.5 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-nowrap md:flex-wrap justify-end md:shrink md:min-w-0 w-screen md:w-auto md:ml-auto md:mb-0 md:rounded-none md:border-0 md:bg-transparent max-w-[100vw] overflow-x-hidden md:overflow-visible">
           <div className="flex flex-1 items-center gap-1.5 sm:gap-2 justify-end min-w-0 md:contents">
           {/* Desktop: an icon until clicked. Mobile: unchanged — the field is
               always shown, which is what the bottom toolbar was built around. */}
