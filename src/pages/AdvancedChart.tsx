@@ -10893,7 +10893,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
                   )}
                   {isEditingStruct && (
-                    <div className={`px-3 pb-2 ${rowOrder('DirectionalZones', showStructure)}`}>
+                    <div className={`px-3 pb-2 ${rowOrder('BOSCHoCH', showStructure)}`}>
                       <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Show structure for</label>
                       <select
                         value={structDays}
@@ -11065,7 +11065,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     </button>
                   </div>
                   {isEditingDsZones && (
-                    <div className={`px-3 pb-2 ${rowOrder('LevelTouchAlerts', showDsZones)}`}>
+                    <div className={`px-3 pb-2 ${rowOrder('DemandSupplyZones', showDsZones)}`}>
                       <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Zone darkness (%)</label>
                       <div className="flex items-center gap-2">
                         <input
