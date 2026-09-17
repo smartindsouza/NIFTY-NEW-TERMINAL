@@ -3470,6 +3470,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   useEffect(() => { try { localStorage.setItem('structDays', String(structDays)); } catch (e) {} }, [structDays]);
   const [isEditingStruct, setIsEditingStruct] = useState(false);
   const [isEditingDsZones, setIsEditingDsZones] = useState(false);
+  const [isEditingVolume, setIsEditingVolume] = useState(false);
   const structDaysRef = useRef(structDays);   // the canvas loop is built once
   structDaysRef.current = structDays;
 
@@ -4170,7 +4171,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // an absent setting keeps the existing look.
   // Candle/volume colours and the custom font come from user settings. The ref
   // is for the live-candle updater, which is built once and cannot read state.
-  const { settings } = useUserSettings();
+  const { settings, updateSetting } = useUserSettings();
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const resolvedTheme = useResolvedTheme();
@@ -10842,10 +10843,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   <div className="order-3 flex items-center justify-between px-3 hover:bg-muted transition-colors group">
                     <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 text-left flex-grow">
                       <div className="w-4" />
+                      {/* The percentages were printed here as well as inside the
+                          editor. They are settings, so they belong behind the
+                          gear like every other row's. */}
                       <span>TP &amp; SL</span>
-                      <span className="text-[10px] font-mono text-muted-foreground">
-                        {tpSlDefaults.slPct}% / {tpSlDefaults.tpPct}%{tpSlDefaults.trail ? ' · trail' : ''}
-                      </span>
                     </div>
                     <button
                       onClick={(e) => { e.stopPropagation(); setIsEditingTpSl(true); setIsIndicatorsOpen(false); }}
@@ -11025,8 +11026,39 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     >
                       <Star size={14} fill={isFav('Volume') ? 'currentColor' : 'none'} />
                     </button>
-                    <span className="p-1 w-[22px] shrink-0" aria-hidden="true" />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setIsEditingVolume(v => !v); }}
+                      title="Volume colours"
+                      className="p-1 text-muted-foreground/60 hover:text-foreground transition-colors"
+                    >
+                      <Settings size={14} />
+                    </button>
                   </div>
+                  {isEditingVolume && (
+                    <div className={`px-3 pb-2 ${rowOrder('Volume', showVolume)}`}>
+                      <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Volume colours</label>
+                      <div className="flex items-center gap-3">
+                        {([
+                          { key: 'candleUpColor' as const, label: 'Up' },
+                          { key: 'candleDownColor' as const, label: 'Down' },
+                        ]).map((c) => (
+                          <label key={c.key} className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="color"
+                              value={settings[c.key]}
+                              onChange={(e) => updateSetting(c.key, e.target.value)}
+                              onPointerDown={(e) => e.stopPropagation()}
+                              className="w-6 h-6 rounded border border-border bg-transparent p-0 cursor-pointer"
+                            />
+                            <span className="text-[10px] text-muted-foreground">{c.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                      {/* Shared with the candles by design: a green candle and its
+                          bar must never disagree. Same pair as Control Center. */}
+                      <p className="text-[9px] text-muted-foreground/70 mt-1">Shared with candle colours</p>
+                    </div>
+                  )}
                   <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${rowOrder('SupportResistanceLines', showSnR)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
