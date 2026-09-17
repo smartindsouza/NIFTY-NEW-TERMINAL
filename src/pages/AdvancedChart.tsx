@@ -8260,18 +8260,23 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             }
           }
 
-          // Intraday logic
+          // Intraday logic. Labels are 12-hour, which is how Martin reads the
+          // session; the 24-hour values above are kept only for the comparisons,
+          // since 9:15 and 15:40 are unambiguous in that form.
           const hrNum = parseInt(hour, 10);
           const minNum = parseInt(minute, 10);
+          const h12 = hrNum % 12 === 0 ? 12 : hrNum % 12;
+          const suffix = hrNum >= 12 ? 'pm' : 'am';
+          const label12 = `${h12}:${minute}${suffix}`;
 
           if (hrNum === 9 && minNum === 30) {
-            return "09:30";
+            return label12;
           }
           if (hrNum === 9 && (minNum === 15 || minNum === 0)) {
             return `${day} ${month}`;
           }
 
-          return `${hour}:${minute}`;
+          return label12;
         },
       },
       localization: {
@@ -9189,7 +9194,25 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         // Update canvas size to match CSS layout, scaled for high-DPI (retina) sharpness
         const dpr = window.devicePixelRatio || 1;
         const cw = Math.floor(rect.width);
-        const ch = Math.floor(rect.height);
+        // The overlay stops where the PRICE PLOT stops, above the time axis.
+        // This canvas used to span the whole container, so a level outside the
+        // visible price range mapped into the axis strip and its line and badge
+        // were painted over the times — the PDL running through 13:30 and 11:30
+        // in Martin's screenshot. Shortening the canvas makes that impossible by
+        // construction: there is no surface there to draw on. Preferred over a
+        // clip because the drawing code below has unbalanced save/restore pairs,
+        // and a stray restore would pop a clip early and let a badge through.
+        //
+        // The axis height is read from the chart rather than assumed, so it
+        // stays correct if the axis font or padding changes. Y-AXIS UNTOUCHED:
+        // the width is unchanged, so the price scale and its labels are exactly
+        // as before.
+        let axisH = 0;
+        try {
+          const h = mainChartRef.current?.timeScale?.()?.height?.();
+          if (Number.isFinite(h) && h > 0 && h < rect.height) axisH = h;
+        } catch (e) { /* no axis height available: keep the full height */ }
+        const ch = Math.max(1, Math.floor(rect.height - axisH));
         const bw = Math.floor(cw * dpr);
         const bh = Math.floor(ch * dpr);
         if (canvas.width !== bw) canvas.width = bw;
@@ -9200,7 +9223,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
         ctx.clearRect(0, 0, cw, ch);
-        
+
         // 1. Draw Bollinger Bands fill if active
         // Recompute the bands LIVE so they track the forming candle and advance with new candles,
         // instead of freezing at the last closed/server candle.
