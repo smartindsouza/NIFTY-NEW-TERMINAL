@@ -4,6 +4,16 @@ import { toast } from 'sonner';
 
 let isAlertActive = false;
 
+/** Pull the server's own processing time out of the Server-Timing header, so the
+ *  breakdown can separate "the server was slow" from "the wire was slow". */
+function readServerMs(h: string | null | undefined): number | undefined {
+  if (!h) return undefined;
+  const m = /app;dur=([0-9.]+)/.exec(h);
+  if (!m) return undefined;
+  const v = parseFloat(m[1]);
+  return Number.isFinite(v) ? v : undefined;
+}
+
 // Endpoints served entirely from OUR server's local state (no Kite/broker call
 // behind them). High frequency here cannot cause broker 429s, so they are
 // exempt from the broker-block warning (stats are still tracked).
@@ -123,8 +133,9 @@ export function initializeInterceptor() {
       try {
         const response = await originalFetch(input, init);
         const duration = performance.now() - start;
-        
-        performanceTracker.logApiCall(url.split('?')[0], duration, false);
+        const serverMs = readServerMs(response.headers?.get?.('Server-Timing'));
+
+        performanceTracker.logApiCall(url.split('?')[0], duration, false, serverMs);
         
         // Check for high-frequency warnings
         const warnings = performanceTracker.getEndpointFrequencyWarnings();
@@ -172,7 +183,7 @@ export function initializeInterceptor() {
         const duration = performance.now() - startTime;
         const url = response.config.url || 'axios-api';
         
-        performanceTracker.logApiCall(url.split('?')[0], duration, false);
+        performanceTracker.logApiCall(url.split('?')[0], duration, false, readServerMs((response.headers as any)?.['server-timing']));
 
         // Check frequency
         const warnings = performanceTracker.getEndpointFrequencyWarnings();

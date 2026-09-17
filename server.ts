@@ -575,6 +575,25 @@ function feedSpotForTrails(ltp: number, tsSec: number): void {
 async function startServer() {
   const app = express();
 
+  // Server-Timing on every /api response: how many milliseconds the request spent
+  // INSIDE this server (which includes the Kite round trip through the Bangalore
+  // proxy). The browser subtracts it from its own measured duration to get the
+  // pure network time between the phone and Railway. Without this split, a slow
+  // call cannot be blamed on the right leg.
+  app.use('/api', (req, res, next) => {
+    const t0 = process.hrtime.bigint();
+    let stamped = false;
+    const stamp = () => {
+      if (stamped || res.headersSent) return;
+      stamped = true;
+      const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+      try { res.setHeader('Server-Timing', `app;dur=${ms.toFixed(1)}`); } catch (e) {}
+    };
+    const origWriteHead = res.writeHead.bind(res);
+    (res as any).writeHead = (...args: any[]) => { stamp(); return (origWriteHead as any)(...args); };
+    next();
+  });
+
   // GZIP JSON RESPONSES. The chart's /api/ta payload is thousands of candles plus
   // indicator arrays — hundreds of KB of highly repetitive JSON — and it crosses
   // the link on every reload and every index or timeframe switch. Text like this

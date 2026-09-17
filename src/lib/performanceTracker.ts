@@ -8,6 +8,9 @@ export interface ApiCallMetric {
   timestamp: number;
   durationMs: number;
   fromCache: boolean;
+  // Milliseconds the request spent inside our server (Server-Timing header).
+  // durationMs minus this is the phone <-> server network time.
+  serverMs?: number;
 }
 
 let activeCalls = 0;
@@ -98,14 +101,17 @@ export const performanceTracker = {
   },
 
   // API Call Logging & Response Times
-  logApiCall(endpoint: string, durationMs: number, fromCache: boolean) {
+  logApiCall(endpoint: string, durationMs: number, fromCache: boolean, serverMs?: number) {
     apiMetricsList.push({
       endpoint,
       timestamp: Date.now(),
       durationMs,
       fromCache,
+      serverMs,
     });
-    if (apiMetricsList.length > 100) {
+    // 300, not 100: the breakdown below is only useful with a few minutes of
+    // history behind it, and these are tiny objects.
+    if (apiMetricsList.length > 300) {
       apiMetricsList.shift();
     }
 
@@ -137,6 +143,37 @@ export const performanceTracker = {
     return Math.round(sum / nonCachedCalls.length);
   },
 
+  // Per-endpoint latency, median rather than mean so one cold chart load does
+  // not colour the whole picture. Slowest first.
+  getEndpointBreakdown() {
+    const byEndpoint = new Map<string, ApiCallMetric[]>();
+    for (const m of apiMetricsList) {
+      if (m.fromCache) continue;
+      const list = byEndpoint.get(m.endpoint) || [];
+      list.push(m);
+      byEndpoint.set(m.endpoint, list);
+    }
+    const med = (xs: number[]) => {
+      if (!xs.length) return null;
+      const s = [...xs].sort((a, b) => a - b);
+      return Math.round(s[Math.floor(s.length / 2)]);
+    };
+    const rows = Array.from(byEndpoint.entries()).map(([endpoint, list]) => {
+      const total = med(list.map((m) => m.durationMs))!;
+      const server = med(list.filter((m) => typeof m.serverMs === 'number').map((m) => m.serverMs as number));
+      return {
+        endpoint,
+        calls: list.length,
+        totalMs: total,
+        serverMs: server,
+        // What is left is time on the wire between the phone and the server.
+        networkMs: server === null ? null : Math.max(0, total - server),
+      };
+    });
+    rows.sort((a, b) => b.totalMs - a.totalMs);
+    return rows.slice(0, 8);
+  },
+
   getMetrics() {
     const indicatorCache = this.getIndicatorCacheMetrics();
     const queryCache = this.getQueryCacheMetrics();
@@ -151,6 +188,7 @@ export const performanceTracker = {
       cacheHitRate: total === 0 ? 100 : Math.round((totalHits / total) * 100),
       slowestComponents: this.getSlowestComponents(),
       averageResponseTime: this.getAverageResponseTime(),
+      endpointBreakdown: this.getEndpointBreakdown(),
       warnings: this.getEndpointFrequencyWarnings(),
     };
   }

@@ -181,6 +181,38 @@ export function DiagnosticsPanel() {
           );
         })()}
 
+        {/* Where the latency actually goes. "srv" is time inside our server
+            (which includes the Kite round trip through the Bangalore proxy) and
+            "net" is the wire between this phone and Railway. Medians, so a
+            single cold chart load does not colour the whole picture. */}
+        <div className="space-y-2">
+          <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest flex items-center gap-1.5">
+            <HardDrive className="w-3.5 h-3.5 text-sky-400" /> Latency by endpoint
+          </p>
+          {(metrics as any).endpointBreakdown?.length ? (
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-[9px] font-mono text-muted-foreground/70 uppercase">
+                <span className="flex-1">endpoint</span>
+                <span className="w-8 text-right">n</span>
+                <span className="w-12 text-right">total</span>
+                <span className="w-12 text-right">srv</span>
+                <span className="w-12 text-right">net</span>
+              </div>
+              {(metrics as any).endpointBreakdown.map((r: any, idx: number) => (
+                <div key={idx} className="flex items-center gap-2 text-[10px] font-mono bg-card/60 px-1.5 py-1 rounded">
+                  <span className="flex-1 truncate text-muted-foreground">{r.endpoint.replace('/api/', '')}</span>
+                  <span className="w-8 text-right text-muted-foreground/70">{r.calls}</span>
+                  <span className={`w-12 text-right font-bold ${r.totalMs > 800 ? 'text-primary' : 'text-foreground/80'}`}>{r.totalMs}</span>
+                  <span className="w-12 text-right text-amber-400">{r.serverMs === null ? '–' : r.serverMs}</span>
+                  <span className="w-12 text-right text-sky-400">{r.networkMs === null ? '–' : r.networkMs}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[10px] text-muted-foreground italic">No calls measured yet.</p>
+          )}
+        </div>
+
         {/* Slowest components performance profiles */}
         <div className="space-y-2">
           <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest flex items-center gap-1.5">

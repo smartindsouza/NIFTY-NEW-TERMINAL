@@ -3470,6 +3470,12 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   });
   useEffect(() => { try { localStorage.setItem('structDays', String(structDays)); } catch (e) {} }, [structDays]);
   const [isEditingStruct, setIsEditingStruct] = useState(false);
+  // BOS is the ordinary, frequent event; CHoCH is the interesting one. Being able
+  // to drop BOS and keep CHoCH is the whole point of the toggle.
+  const [showBos, setShowBos] = useState(() => {
+    try { const v = localStorage.getItem('showBos'); return v === null ? true : v === 'true'; } catch (e) { return true; }
+  });
+  useEffect(() => { try { localStorage.setItem('showBos', String(showBos)); } catch (e) {} }, [showBos]);
   const [isEditingDsZones, setIsEditingDsZones] = useState(false);
   const [isEditingVolume, setIsEditingVolume] = useState(false);
   const [isEditingFvg, setIsEditingFvg] = useState(false);
@@ -9776,20 +9782,25 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   // one that stands out: solid and brighter. BOS is continuation and
                   // stays quiet — the chart should not shout the ordinary event.
                   const isChoch = ev.type === 'CHOCH';
+                  if (!isChoch && !showBos) continue;
+                  // An event whose candle is scrolled off to the LEFT used to be
+                  // clamped to x=0, stacking old labels down the left edge of a
+                  // day they do not belong to. If it is off-screen, it is not drawn.
+                  if (x1 < 0) continue;
                   const rgb = ev.dir === 'bull' ? '56,189,248' : '244,114,182';
                   ctx.beginPath();
                   ctx.setLineDash(isChoch ? [] : [4, 3]);
                   ctx.strokeStyle = `rgba(${rgb},${isChoch ? 0.95 : 0.55})`;
                   ctx.lineWidth = isChoch ? 1.6 : 1;
-                  ctx.moveTo(Math.max(0, x0), y);
-                  ctx.lineTo(Math.max(0, x1), y);
+                  ctx.moveTo(x0, y);
+                  ctx.lineTo(x1, y);
                   ctx.stroke();
                   ctx.setLineDash([]);
                   ctx.font = `bold ${isChoch ? 10 : 9}px monospace`;
                   ctx.textAlign = 'left';
                   ctx.textBaseline = 'bottom';
                   ctx.fillStyle = `rgba(${rgb},${isChoch ? 1 : 0.8})`;
-                  ctx.fillText(isChoch ? 'CHoCH' : 'BOS', Math.max(0, x1) + 4, y - 2);
+                  ctx.fillText(isChoch ? 'CHoCH' : 'BOS', x1 + 4, y - 2);
                 }
               }
 
@@ -10121,7 +10132,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     draw();
     
     return () => cancelAnimationFrame(animationFrameId);
-  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth, taInfo, showOpeningRange, orHighColor, orLowColor, showDsZones, dsZoneOpacity, showFvg, fvgBullColor, fvgBearColor, fvgOpacity, showOrderBlocks, showStructure, showConfSignals, confData]);
+  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth, taInfo, showOpeningRange, orHighColor, orLowColor, showDsZones, dsZoneOpacity, showFvg, fvgBullColor, fvgBearColor, fvgOpacity, showOrderBlocks, showStructure, showBos, showConfSignals, confData]);
 
   const { data: serverStats } = useQuery({
     queryKey: ["server-diagnostics"],
@@ -10926,6 +10937,16 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                           <option key={d} value={d}>{d === 1 ? 'Today only' : `Last ${d} days`}</option>
                         ))}
                       </select>
+                      <div className="flex items-center justify-between mt-2">
+                        <span className="text-[11px] text-foreground/80">Show BOS labels</span>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowBos(v => !v); }}
+                          title={showBos ? 'Hide BOS — keep CHoCH only' : 'Show BOS as well as CHoCH'}
+                          className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ${showBos ? 'bg-emerald-500' : 'bg-muted-foreground/30'}`}
+                        >
+                          <span className={`block w-4 h-4 bg-white rounded-full absolute top-0.5 transition-transform ${showBos ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                        </button>
+                      </div>
                     </div>
                   )}
 
