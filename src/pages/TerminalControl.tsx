@@ -441,6 +441,38 @@ export default function TerminalControl() {
                   </div>
                 </div>
 
+                {/* Candle & volume colours. One pair drives both: the volume
+                    histogram uses the same hues at 40% opacity, so a green
+                    candle and its bar can never disagree. */}
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground font-medium">Candle &amp; Volume Colors</label>
+                  <div className="flex items-center gap-4">
+                    {([
+                      { key: "candleUpColor" as const, label: "Up" },
+                      { key: "candleDownColor" as const, label: "Down" },
+                    ]).map((c) => (
+                      <div key={c.key} className="flex items-center gap-2">
+                        <div className="relative w-9 h-9 rounded-full overflow-hidden border border-muted-foreground/15 cursor-pointer shrink-0">
+                          <input
+                            type="color"
+                            value={settings[c.key]}
+                            onChange={(e) => updateSetting(c.key, e.target.value)}
+                            className="absolute inset-0 w-[200%] h-[200%] -translate-x-1/4 -translate-y-1/4 cursor-pointer p-0 border-0 outline-none bg-transparent"
+                            style={{ appearance: "none", WebkitAppearance: "none" }}
+                          />
+                        </div>
+                        <div className="leading-tight">
+                          <div className="text-xs text-foreground/90">{c.label}</div>
+                          <div className="text-[10px] font-mono text-muted-foreground">{settings[c.key]}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/80">
+                    Applies to candles, wicks and the volume histogram on every chart.
+                  </p>
+                </div>
+
                 {/* Custom Font Upload */}
                 <div className="space-y-1.5 sm:col-span-2">
                   <label className="text-xs text-muted-foreground font-medium">Custom Font (.ttf / .woff2)</label>

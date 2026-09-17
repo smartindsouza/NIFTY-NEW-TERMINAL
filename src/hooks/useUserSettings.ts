@@ -10,6 +10,10 @@ export interface UserSettings {
   customFontUrl: string;
   strikeBuffer: number;
   highFpsMode: boolean;
+  // Candle and volume colours. One pair drives both: the volume histogram uses
+  // the same hues at lower opacity, so a green candle and its bar always agree.
+  candleUpColor: string;
+  candleDownColor: string;
 }
 
 const DEFAULT_SETTINGS: UserSettings = {
@@ -22,6 +26,8 @@ const DEFAULT_SETTINGS: UserSettings = {
   customFontUrl: '',
   strikeBuffer: 5,
   highFpsMode: true,
+  candleUpColor: '#22c55e',
+  candleDownColor: '#ef4444',
 };
 
 // Global state mechanism

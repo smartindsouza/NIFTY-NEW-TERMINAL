@@ -3,6 +3,7 @@ import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-quer
 import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search, ChartNoAxesCombined, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
+import { useUserSettings } from "../hooks/useUserSettings";
 import { zoomDiag } from "../lib/zoomDiag";
 import { getDivergences } from "../lib/divergence";
 import { evaluateBreakout } from "../lib/breakoutQuality";
@@ -1095,6 +1096,14 @@ async function fetchContractInfo(tradingsymbol: string): Promise<any> {
   contractInfoInFlight.set(key, p);
   return p;
 }
+
+// The chart is a canvas, so the @font-face the app applies to DOM text never
+// reaches it: canvas text is drawn with the family the chart is told to use.
+// Passing the custom family here is what makes axis labels and the crosshair
+// match the rest of the app. Falls back to the system stack when no font is set.
+const chartFontFamily = (customFontUrl: string) =>
+  (customFontUrl ? "'UserCustomFont', " : '') +
+  "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
 
 const hexToRgba = (hex: string, alpha: number) => {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -4105,6 +4114,21 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       localStorage.setItem('fiftyPercentColor', fiftyPercentColor);
     } catch(e) {}
   }, [fiftyPercentColor]);
+
+  // Volume histogram. Default ON, which is how the chart has always drawn, so
+  // an absent setting keeps the existing look.
+  // Candle/volume colours and the custom font come from user settings. The ref
+  // is for the live-candle updater, which is built once and cannot read state.
+  const { settings } = useUserSettings();
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+
+  const [showVolume, setShowVolume] = useState(() => {
+    try { return localStorage.getItem('showVolume') !== 'false'; } catch (e) { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('showVolume', String(showVolume)); } catch (e) {}
+  }, [showVolume]);
 
   const [showBB, setShowBB] = useState(() => {
     try {
@@ -7588,7 +7612,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
              volumeSeriesRef.current.update({
                time: updateTime,
                value: vol,
-               color: latestCandle.close >= latestCandle.open ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)'
+               color: latestCandle.close >= latestCandle.open ? hexToRgba(settingsRef.current.candleUpColor, 0.4) : hexToRgba(settingsRef.current.candleDownColor, 0.4)
              });
            }
 
@@ -8210,6 +8234,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
         textColor: '#64748b',
+        fontFamily: chartFontFamily(settings.customFontUrl),
       },
       grid: {
         vertLines: { color: 'rgba(255, 255, 255, 0.05)' },
@@ -8342,11 +8367,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
     // Candlestick Series
     const mainSeries = mainChart.addSeries(CandlestickSeries, {
-      upColor: '#22c55e',
-      downColor: '#ef4444',
+      upColor: settings.candleUpColor,
+      downColor: settings.candleDownColor,
       borderVisible: false,
-      wickUpColor: '#22c55e',
-      wickDownColor: '#ef4444',
+      wickUpColor: settings.candleUpColor,
+      wickDownColor: settings.candleDownColor,
       lastValueVisible: false,
       priceLineVisible: false,
       // Candle price scale ALWAYS auto-fits to the data. (A previous "Y-lock"
@@ -8661,11 +8686,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     volumeSeries.priceScale().applyOptions({
       scaleMargins: { top: 0.8, bottom: 0 },
     });
+    // The toggle hides the bars without removing the series, so nothing that
+    // writes to it later (the live-candle path) has to know about the setting.
+    volumeSeries.applyOptions({ visible: showVolume });
 
     const volumeData = chartData.candles.map((c: any) => ({
       time: c.time as any,
       value: c.volume,
-      color: c.close >= c.open ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)'
+      color: c.close >= c.open ? hexToRgba(settings.candleUpColor, 0.4) : hexToRgba(settings.candleDownColor, 0.4)
     }));
     volumeSeries.setData(volumeData);
     volumeSeriesRef.current = volumeSeries;
@@ -9095,7 +9123,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     };
     // Re-run if chartData structure changes drastically, but memo keeps it stable
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chartData, divergences, showRsi, showBB, bbData, bbColor, rsiColor, rsiLineWidth, rsiLineStyle, rsiSmaLineWidth, rsiSmaLineStyle, rsiOverbought1, rsiOverbought2, rsiOversold1, rsiOversold2, rsiSmaColor, rsiOverboughtColor, rsiOversoldColor, showHLevels, hLevels, hLevelsStyle, hLevelsWidth, selectedStrikeOnChart]);
+  }, [chartData, divergences, showRsi, showBB, bbData, bbColor, rsiColor, rsiLineWidth, rsiLineStyle, rsiSmaLineWidth, rsiSmaLineStyle, rsiOverbought1, rsiOverbought2, rsiOversold1, rsiOversold2, rsiSmaColor, rsiOverboughtColor, rsiOversoldColor, showHLevels, hLevels, hLevelsStyle, hLevelsWidth, selectedStrikeOnChart, showVolume, settings.candleUpColor, settings.candleDownColor, settings.customFontUrl]);
 
   // Dedicated R:R renderer. Mounted ONCE with no dependencies and reading only
   // refs, so it never rebuilds and never waits on the heavy overlay loop. Its
@@ -10768,6 +10796,17 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   </div>
 
                   {/* Support/Resistance Lines */}
+                  <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showVolume) ? "order-1" : "order-2"}`}>
+                    <button
+                      onClick={() => setShowVolume(!showVolume)}
+                      className="flex items-center gap-2 py-2 text-sm text-foreground/80 hover:text-foreground transition-colors text-left flex-grow"
+                    >
+                      <div className="w-4 flex items-center justify-center">
+                        <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showVolume) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showVolume) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                      </div>
+                      <span className="truncate">Volume</span>
+                    </button>
+                  </div>
                   <div className={`flex items-center justify-between px-3 hover:bg-muted transition-colors group ${(showSnR) ? "order-1" : "order-2"}`}>
                     <button
                       onClick={() => setShowSnR(!showSnR)}
