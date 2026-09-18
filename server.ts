@@ -1784,7 +1784,16 @@ setInterval(() => {
         aggs.set(k, a);
       }
 
-      const parse = (sym: string) => { const m = /(\d+)(CE|PE)$/.exec(sym || ''); return m ? { strike: Number(m[1]), optionType: m[2] } : { strike: null, optionType: null }; };
+      // /(\d+)(CE|PE)$/ is GREEDY: on NIFTY2692223300CE it swallowed the expiry
+      // too and stored 2692223300 as the strike. parseContractSymbol splits the
+      // expiry from the strike properly; the old regex stays as the fallback for
+      // a symbol shaped in some way it does not recognise.
+      const parse = (sym: string) => {
+        const p = parseContractSymbol(sym);
+        if (p && p.strike != null) return { strike: p.strike, optionType: p.optionType };
+        const m = /(\d{4,6})(CE|PE)$/.exec(sym || '');
+        return m ? { strike: Number(m[1]), optionType: m[2] } : { strike: null, optionType: null };
+      };
 
       // REBUILD, don't accumulate. Kite's trade list is the full truth for the day,
       // so previously imported rows for today are cleared and rewritten. The first
@@ -2022,7 +2031,9 @@ setInterval(() => {
         ws.addRow({
           date: ist(r.entry_time).slice(0, 10),
           sym: contractName(r.tradingsymbol),
-          strike: r.strike ?? parsed?.strike ?? null,
+          // Parsed first: rows imported before the greedy-regex fix hold the
+          // expiry digits glued onto the strike (2692223300 for a 23300 strike).
+          strike: parsed?.strike ?? r.strike ?? null,
           otype: r.option_type || parsed?.optionType || null,
           expiry: parsed?.expiryLabel || null,
           raw: r.tradingsymbol,
