@@ -6037,8 +6037,12 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       const EXIT_TP_COLOR = '#10b981';
       const upColor = upLabel === 'SL' ? EXIT_SL_COLOR : EXIT_TP_COLOR;
       const loColor = loLabel === 'SL' ? EXIT_SL_COLOR : EXIT_TP_COLOR;
-      const uInst = s.createPriceLine({ price: upper, color: upColor, lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: pctTitle(upLabel, upper) });
-      const lInst = s.createPriceLine({ price: lower, color: loColor, lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: pctTitle(loLabel, lower) });
+      // title: '' — the detail now rides on the line's own pill. Leaving it here
+      // as well printed the same string twice, once mid-chart and once crammed
+      // against the price scale. axisLabelVisible stays true so the price still
+      // shows on the scale, which is what the axis is for.
+      const uInst = s.createPriceLine({ price: upper, color: upColor, lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: '' });
+      const lInst = s.createPriceLine({ price: lower, color: loColor, lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: '' });
       slLinesRef.current = [
         { kind: 'upper', price: upper, instance: uInst, label: upLabel, color: upColor, title: pctTitle(upLabel, upper) },
         { kind: 'lower', price: lower, instance: lInst, label: loLabel, color: loColor, title: pctTitle(loLabel, lower) },
@@ -6051,7 +6055,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         try {
           slEntryLineRef.current = s.createPriceLine({
             price: slEntryRef.current, color: '#94a3b8', lineWidth: 1, lineStyle: 0,
-            axisLabelVisible: true, title: `ENTRY ${slEntryRef.current.toFixed(2)}`
+            axisLabelVisible: true, title: ''
           });
         } catch (e) {}
       }
@@ -10183,14 +10187,27 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                  ctx.textAlign = 'center';
                  ctx.textBaseline = 'middle';
                  // sort by y so stacking is stable
-                 const slSorted = [...slLinesRef.current]
+                 // The ENTRY line joins the same pass so it gets a pill on the
+                 // line like SL and TARGET. It had only an axis tag, and that has
+                 // been removed with the others — without this it would be an
+                 // unlabelled grey line.
+                 const entryPx = slEntryRef.current;
+                 const withEntry = entryPx
+                   ? [...slLinesRef.current, { kind: 'entry' as const, price: entryPx, label: 'ENTRY', color: '#94a3b8', title: `ENTRY ${entryPx.toFixed(2)}` }]
+                   : [...slLinesRef.current];
+                 const slSorted = withEntry
                    .map(sl => ({ sl, y: mainSeriesRef.current!.priceToCoordinate(sl.price) }))
                    .filter(o => o.y !== null && (o.y as number) >= 0 && (o.y as number) <= ch)
                    .sort((a, b) => (a.y as number) - (b.y as number));
                  slSorted.forEach(({ sl, y }) => {
                     const yy = y as number;
-                    const txt = sl.label || (sl.kind === 'upper' ? 'TARGET' : 'SL');
-                    const lineColor = sl.color || (txt === 'SL' ? '#f43f5e' : '#10b981');
+                    // The pill on the LINE now carries the detail — "SL 99.90
+                    // -0.9% · -₹910" — instead of the bare word, with the same
+                    // text removed from the price axis below. Reading the level
+                    // meant looking away from the line to the axis and back.
+                    const kindWord = sl.label || (sl.kind === 'upper' ? 'TARGET' : 'SL');
+                    const txt = sl.title || kindWord;
+                    const lineColor = sl.color || (kindWord === 'SL' ? '#f43f5e' : '#10b981');
                     ctx.font = 'bold 10px sans-serif';
                     const tw = ctx.measureText(txt).width;
 
