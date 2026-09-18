@@ -5236,6 +5236,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           if (!r.ok || !Number.isFinite(px) || px <= 0) { setPremSync('ERROR'); refreshSpotMap(); return; }
           const nextSl = d.kind === 'sl' ? +px.toFixed(2) : rule.sl;
           const nextTp = d.kind === 'tp' ? +px.toFixed(2) : rule.tp;
+          // Stamp the map with the premium about to be armed, so the next solve
+          // sees the SAME rule and keeps the dropped level exactly. Otherwise it
+          // counted as a new rule and re-solved from the round-tripped premium,
+          // which lands a point or two off the drop and looked like a hop.
+          if (spotMapRef.current) { spotMapRef.current.sl = nextSl; spotMapRef.current.tp = nextTp; }
           await pushPremiumRule(nextSl, nextTp);
           refreshSpotMap();
         } catch { setPremSync('ERROR'); refreshSpotMap(); }
@@ -5362,28 +5367,21 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       const rule = premRuleRef.current;
       if (!rule || rule.symbol !== pos.symbol) { spotMapRef.current = null; return; }
 
-      // LIVE MAPPING, SMOOTHED. The level is re-solved every cycle, so it keeps
-      // tracking the truth as theta bleeds and vol moves — that slow creep is
-      // wanted. What was NOT wanted is the twitch: each solve backs the implied
-      // vol out of the option's own live premium, and a couple of ticks of noise
-      // in that premium swings the implied index level a few points either way,
-      // so the line jittered every cycle instead of drifting.
-      //
-      // So the target is followed rather than jumped to: the drawn level eases
-      // toward each new solve, which averages the noise out while leaving a real
-      // trend to arrive intact. Sub-tick differences are ignored outright, and a
-      // genuinely NEW rule snaps immediately — easing there would look like the
-      // line sliding to a level the user did not ask for.
+      // SOLVED ONCE PER RULE, THEN HELD. Each solve backs the implied vol out of
+      // the option's live premium, so the implied index level wanders as premium
+      // and vol move — the line crept a few points off wherever Martin had put
+      // it, every minute, for the life of the trade. An earlier version eased
+      // toward each new solve to hide the twitch; the creep it left behind is
+      // what he was seeing. Now a level is solved when the premium rule is armed
+      // or changed and does not move again until the rule does. The cost is that
+      // a held level drifts from the exact spot equivalent as theta bleeds; the
+      // premium rule underneath is unaffected and is what actually fires.
       const prev = spotMapRef.current;
       const sameRule = !!(prev && prev.symbol === pos.symbol && prev.sl === rule.sl && prev.tp === rule.tp);
-      const EASE = 0.25;          // per 4s cycle
-      const DEADBAND = 0.25;      // index points; below this, do not move at all
       const ease = (prevVal: number | null | undefined, target: number | null) => {
         if (target === null || !Number.isFinite(target)) return null;
         if (!sameRule || prevVal === null || prevVal === undefined || !Number.isFinite(prevVal)) return target;
-        const diff = target - prevVal;
-        if (Math.abs(diff) < DEADBAND) return prevVal;
-        return +(prevVal + diff * EASE).toFixed(2);
+        return prevVal;
       };
       const r = await fetch(`/api/premium-spot-map?tradingsymbol=${encodeURIComponent(pos.symbol)}&premium=${rule.sl},${rule.tp}`);
       const d = await r.json().catch(() => null);
