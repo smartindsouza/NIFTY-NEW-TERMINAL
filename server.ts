@@ -1622,20 +1622,58 @@ setInterval(() => {
       // is seeded with each carried quantity at Kite's previous close — the same
       // basis Kite uses for the day's P&L on that position — so the pairing and
       // the P&L line up with the Kite app.
+      //
+      // Where the journal already HOLDS the entry — a BTST bought through the app
+      // or imported yesterday sits as an OPEN row with its real price and time —
+      // that row IS the lot: the trade closes on that row, so it reads "entered
+      // Thursday 101.25, exited Friday 104.70" rather than a synthetic row dated
+      // today. Kite's previous close is only the fallback for a carried quantity
+      // the journal never saw (a trade placed in the Kite app on a day nothing
+      // was imported).
       const openLots: Record<string, any[]> = {};
+      const priorRowIds: number[] = [];   // rows re-issued below; deleted before the rewrite
       try {
         const posResp: any = await kc.getPositions();
         const net: any[] = Array.isArray(posResp?.net) ? posResp.net : [];
+        // Journal rows from earlier days that are still open — or that an earlier
+        // import TODAY already closed as carried (re-running the import must be
+        // able to rebuild them from the same starting point).
+        const prior = db.prepare(
+          `SELECT * FROM trade_journal
+            WHERE kite_user_id = ? AND entry_time < ? AND test_mode = 0 AND simulated = 0
+              AND (status = 'OPEN' OR (exit_time >= ? AND context LIKE '%"carried":true%'))
+            ORDER BY entry_time ASC`
+        ).all(owner, dayStart, dayStart) as any[];
         for (const p of net) {
           const oq = Number(p.overnight_quantity) || 0;
           if (!oq || !p.tradingsymbol) continue;
-          const basis = Number(p.close_price) > 0 ? Number(p.close_price) : Number(p.average_price) || 0;
-          if (!(basis > 0)) continue;
-          (openLots[p.tradingsymbol] = openLots[p.tradingsymbol] || []).push({
-            side: oq > 0 ? 'BUY' : 'SELL', qty: Math.abs(oq), price: basis,
-            when: dayStart + (9 * 60 + 15) * 60000, product: p.product || 'NRML',
-            orderId: 'OVERNIGHT', tradeId: null, carried: true,
-          });
+          const side = oq > 0 ? 'BUY' : 'SELL';
+          let remaining = Math.abs(oq);
+          const book = (openLots[p.tradingsymbol] = openLots[p.tradingsymbol] || []);
+          for (const r of prior) {
+            if (remaining <= 0) break;
+            if (r.tradingsymbol !== p.tradingsymbol || String(r.side).toUpperCase() !== side) continue;
+            if (!(Number(r.entry_price) > 0)) continue;
+            const take = Math.min(remaining, Number(r.qty) || 0);
+            if (take <= 0) continue;
+            let ctx: any = null; try { ctx = r.context ? JSON.parse(r.context) : null; } catch {}
+            book.push({
+              side, qty: take, price: Number(r.entry_price), when: Number(r.entry_time),
+              product: r.product || p.product || 'NRML',
+              orderId: `PRIOR:${r.id}`, tradeId: null, carried: true,
+              priorCtx: ctx, priorEntrySpot: r.entry_spot ?? null,
+            });
+            priorRowIds.push(r.id);
+            remaining -= take;
+          }
+          if (remaining > 0) {
+            const basis = Number(p.close_price) > 0 ? Number(p.close_price) : Number(p.average_price) || 0;
+            if (basis > 0) book.push({
+              side, qty: remaining, price: basis,
+              when: dayStart + (9 * 60 + 15) * 60000, product: p.product || 'NRML',
+              orderId: 'OVERNIGHT', tradeId: null, carried: true, basisIsClose: true,
+            });
+          }
         }
       } catch (e) { console.error('[journal import-kite] positions read failed (overnight seeding skipped)', e); }
 
@@ -1655,7 +1693,8 @@ setInterval(() => {
           const take = Math.min(qty, lot.qty);
           const pnl = lot.side === 'BUY' ? (price - lot.price) * take : (lot.price - price) * take;
           rows.push({ sym, side: lot.side, qty: take, entry: lot.price, entryTime: lot.when, exit: price, exitTime: when,
-                      product: lot.product, status: 'CLOSED', pnl, orderId: lot.orderId, carried: !!lot.carried });
+                      product: lot.product, status: 'CLOSED', pnl, orderId: lot.orderId, carried: !!lot.carried,
+                      priorCtx: lot.priorCtx || null, priorEntrySpot: lot.priorEntrySpot ?? null, basisIsClose: !!lot.basisIsClose });
           lot.qty -= take; qty -= take;
           if (lot.qty <= 0) book.shift();
         }
@@ -1665,7 +1704,8 @@ setInterval(() => {
       for (const key of Object.keys(openLots)) {
         for (const lot of openLots[key]) {
           rows.push({ sym: key, side: lot.side, qty: lot.qty, entry: lot.price, entryTime: lot.when,
-                      exit: null, exitTime: null, product: lot.product, status: 'OPEN', pnl: null, orderId: lot.orderId, carried: !!lot.carried });
+                      exit: null, exitTime: null, product: lot.product, status: 'OPEN', pnl: null, orderId: lot.orderId, carried: !!lot.carried,
+                      priorCtx: lot.priorCtx || null, priorEntrySpot: lot.priorEntrySpot ?? null, basisIsClose: !!lot.basisIsClose });
         }
       }
 
@@ -1675,14 +1715,15 @@ setInterval(() => {
       // single "BUY 1755" that was never placed, with blended prices nobody paid.
       type Agg = { sym: string; side: string; qty: number; entryQP: number; exitQP: number;
                    entryTime: number; exitTime: number | null; product: string; status: string; pnl: number;
-                   orderId: string; carried: boolean };
+                   orderId: string; carried: boolean; priorCtx: any; priorEntrySpot: number | null; basisIsClose: boolean };
       const aggs = new Map<string, Agg>();
       for (const r of rows) {
         const oid = String(r.orderId || 'NA');
         const k = `${r.sym}|${r.status}|${r.side}|${oid}`;
         const a = aggs.get(k) || { sym: r.sym, side: r.side, qty: 0, entryQP: 0, exitQP: 0,
                                    entryTime: r.entryTime, exitTime: null, product: r.product, status: r.status, pnl: 0,
-                                   orderId: oid, carried: !!r.carried };
+                                   orderId: oid, carried: !!r.carried, priorCtx: r.priorCtx || null,
+                                   priorEntrySpot: r.priorEntrySpot ?? null, basisIsClose: !!r.basisIsClose };
         a.qty += r.qty;
         a.entryQP += r.entry * r.qty;                       // quantity-weighted, so the
         if (r.exit != null) a.exitQP += r.exit * r.qty;     // average price is the real one
@@ -1706,6 +1747,12 @@ setInterval(() => {
       const wipe = db.prepare(
         `DELETE FROM trade_journal WHERE kite_key IS NOT NULL AND entry_time >= ? AND kite_user_id = ?`
       ).run(dayStart, owner);
+      // Carried-in rows are re-issued from their lots below, with their original
+      // entry date and price and today's exit.
+      if (priorRowIds.length) {
+        const delPrior = db.prepare(`DELETE FROM trade_journal WHERE id = ? AND kite_user_id = ?`);
+        for (const id of priorRowIds) delPrior.run(id, owner);
+      }
 
       // Rows this app wrote itself when it placed the order describe the SAME
       // trades the broker is now reporting, at the price the app expected rather
@@ -1730,15 +1777,19 @@ setInterval(() => {
       let imported = 0;
       const ins = db.prepare(`INSERT OR REPLACE INTO trade_journal
         (tradingsymbol, exchange, option_type, strike, side, qty, product, entry_price, entry_time, context,
-         test_mode, simulated, status, exit_price, exit_time, exit_reason, pnl, created_at, updated_at, kite_key, kite_user_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?)`);
+         test_mode, simulated, status, exit_price, exit_time, exit_reason, pnl, created_at, updated_at, kite_key, kite_user_id, entry_spot)
+        VALUES (?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?)`);
       for (const a of aggs.values()) {
         if (a.qty <= 0) continue;
         const { strike, optionType } = parse(a.sym);
         const entryAvg = Math.round((a.entryQP / a.qty) * 100) / 100;
         const exitAvg = a.status === 'CLOSED' ? Math.round((a.exitQP / a.qty) * 100) / 100 : null;
-        const appCtx = contextBySym.get(a.sym);
-        const ctx = { ...(appCtx || {}), source: 'KITE_IMPORT', ...(a.carried ? { carried: true } : {}) };
+        // A carried lot keeps the context captured when it was actually entered;
+        // basisIsClose flags the fallback where the entry is Kite's previous close
+        // rather than a price this account paid.
+        const appCtx = a.priorCtx || contextBySym.get(a.sym);
+        const ctx = { ...(appCtx || {}), source: a.priorCtx?.source || 'KITE_IMPORT',
+                      ...(a.carried ? { carried: true } : {}), ...(a.basisIsClose ? { basisIsClose: true } : {}) };
         ins.run(
           a.sym, 'NFO', optionType, strike, a.side, a.qty, a.product, entryAvg, a.entryTime,
           JSON.stringify(ctx), a.status, exitAvg, a.exitTime,
@@ -1748,8 +1799,9 @@ setInterval(() => {
           // trading the same strike on the same day produced the same key and
           // INSERT OR REPLACE silently overwrote one book with the other. The
           // entry order id keeps two round trips in one strike as two rows.
-          `${owner}|${dayStart}|${a.sym}|${a.status}|${a.side}|${a.orderId}`,
-          owner
+          `${owner}|${a.carried ? a.entryTime : dayStart}|${a.sym}|${a.status}|${a.side}|${a.orderId}`,
+          owner,
+          a.priorEntrySpot ?? null
         );
         imported++;
       }
