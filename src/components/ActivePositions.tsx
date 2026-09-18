@@ -571,7 +571,12 @@ export function ActivePositions() {
   }
 
   return (
-    <div className="w-full mb-1.5 border border-emerald-500/20 bg-emerald-950/10 rounded-xl overflow-hidden backdrop-blur-sm transition-all duration-300 animate-in slide-in-from-top-4">
+    <div
+        /* Flush with the chart below it. The card kept rounded corners and side
+           borders while the chart page went full-bleed, so it read as inset —
+           the "off centre" look. On desktop it squares off and drops its side
+           borders; mobile keeps the card shape, where nothing is full-bleed. */
+        className="w-full mb-1 border border-emerald-500/20 md:border-x-0 md:rounded-none bg-emerald-950/10 rounded-xl overflow-hidden backdrop-blur-sm transition-all duration-300 animate-in slide-in-from-top-4">
       {/* Ribbon Header — the whole row is the collapse toggle */}
       <div
         role="button"
@@ -579,7 +584,7 @@ export function ActivePositions() {
         onClick={() => setCollapsed(c => !c)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCollapsed(c => !c); } }}
         title={collapsed ? 'Show positions' : 'Hide positions'}
-        className={`px-3 sm:px-4 py-2 bg-emerald-500/5 flex flex-nowrap items-center justify-between gap-2 cursor-pointer select-none hover:bg-emerald-500/10 transition-colors ${collapsed ? '' : 'border-b border-emerald-500/15'}`}
+        className={`px-3 sm:px-4 py-1 bg-emerald-500/5 flex flex-nowrap items-center justify-between gap-2 cursor-pointer select-none hover:bg-emerald-500/10 transition-colors ${collapsed ? '' : 'border-b border-emerald-500/15'}`}
       >
         {/* One line at every width. The label shortens on a phone rather than
             wrapping, and the pulsing dot and sparkle are dropped there — they
@@ -609,6 +614,22 @@ export function ActivePositions() {
             <div className="text-[10px] text-emerald-400/60 font-mono hidden sm:block">
               Click "Exit" to place instant reversing MARKET order
             </div>
+          )}
+          {/* Exit stays reachable while collapsed. stopPropagation so it cannot
+              be swallowed by the row's collapse toggle, and it only appears when
+              there is exactly one position — with several, which to exit is a
+              real choice and the card must be opened to make it. */}
+          {collapsed && positions.length === 1 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); handleExitPosition(positions[0]); }}
+              disabled={exitingIds.has(positions[0].id)}
+              title={`Exit ${positions[0].symbol}`}
+              className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded-md border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500 hover:text-black font-semibold text-rose-400 text-[10px] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {exitingIds.has(positions[0].id)
+                ? <RefreshCw className="w-3 h-3 animate-spin" />
+                : <><X className="w-3 h-3" />Exit</>}
+            </button>
           )}
           <ChevronDown className={`w-4 h-4 text-emerald-400/70 transition-transform shrink-0 ${collapsed ? '' : 'rotate-180'}`} />
         </div>
@@ -651,7 +672,7 @@ export function ActivePositions() {
           return (
             <div key={pos.id}>
             <div 
-              className="flex flex-wrap items-center justify-between gap-4 p-3 md:px-5 md:py-3.5 hover:bg-emerald-500/[0.02] transition-colors"
+              className="flex flex-wrap items-center justify-between gap-3 p-2 md:px-4 md:py-2 hover:bg-emerald-500/[0.02] transition-colors"
             >
               {/* Left Column: Symbol & Side Tags */}
               <div className="flex items-center gap-3">
