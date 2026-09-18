@@ -1821,17 +1821,52 @@ setInterval(() => {
       // S/R, PDH/PDL) is the one thing only the app knows, so it is carried
       // over to the broker's row for that symbol.
       const appRows = db.prepare(
-        `SELECT id, tradingsymbol, context FROM trade_journal
+        `SELECT id, tradingsymbol, context, entry_spot FROM trade_journal
           WHERE kite_key IS NULL AND kite_user_id = ? AND entry_time >= ? AND test_mode = 0 AND simulated = 0`
       ).all(owner, dayStart) as any[];
       const contextBySym = new Map<string, any>();
+      const entrySpotBySym = new Map<string, number>();
       const importedSyms = new Set(Array.from(aggs.values()).map((a) => a.sym));
       const delApp = db.prepare(`DELETE FROM trade_journal WHERE id = ?`);
       for (const r of appRows) {
         if (!importedSyms.has(r.tradingsymbol)) continue;   // broker never saw it; leave it
         try { const c = r.context ? JSON.parse(r.context) : null; if (c && !contextBySym.has(r.tradingsymbol)) contextBySym.set(r.tradingsymbol, c); } catch {}
+        // The index level at entry is the app's own observation — the broker never
+        // reports it — so it must survive being replaced by the broker's row.
+        if (Number(r.entry_spot) > 0 && !entrySpotBySym.has(r.tradingsymbol)) entrySpotBySym.set(r.tradingsymbol, Number(r.entry_spot));
         delApp.run(r.id);
       }
+
+      // For trades taken in the Kite app the index level at entry was never
+      // recorded here, so it is read back from NIFTY's own 1-minute history: the
+      // candle covering each fill. One call for the whole day, then a lookup per
+      // trade. If history is unavailable the column simply stays empty.
+      const spotByMinute = new Map<number, number>();
+      try {
+        const first = Math.min(...Array.from(aggs.values()).map((a) => a.entryTime));
+        if (Number.isFinite(first)) {
+          const fromMs = Math.min(first, dayStart + (9 * 60 + 15) * 60000);
+          const toIST = (ms: number) => {
+            const x = new Date(ms + 5.5 * 3600000); const p = (n: number) => String(n).padStart(2, '0');
+            return `${x.getUTCFullYear()}-${p(x.getUTCMonth() + 1)}-${p(x.getUTCDate())} ${p(x.getUTCHours())}:${p(x.getUTCMinutes())}:${p(x.getUTCSeconds())}`;
+          };
+          const candles: any[] = (await kc.getHistoricalData(256265, 'minute', toIST(fromMs - 60000), toIST(now))) || [];
+          for (const c of candles) {
+            const t = new Date(c.date).getTime();
+            if (!isFinite(t)) continue;
+            spotByMinute.set(Math.floor(t / 60000), Number(c.close));
+          }
+        }
+      } catch (e) { console.error('[journal import-kite] spot history unavailable', e); }
+      const spotAt = (ms: number | null): number | null => {
+        if (!ms || !spotByMinute.size) return null;
+        const m0 = Math.floor(ms / 60000);
+        for (let d = 0; d <= 5; d++) {                 // nearest minute within five
+          if (spotByMinute.has(m0 - d)) return spotByMinute.get(m0 - d)!;
+          if (spotByMinute.has(m0 + d)) return spotByMinute.get(m0 + d)!;
+        }
+        return null;
+      };
 
       let imported = 0;
       const ins = db.prepare(`INSERT OR REPLACE INTO trade_journal
@@ -1862,7 +1897,7 @@ setInterval(() => {
           // entry order id keeps two round trips in one strike as two rows.
           key,
           owner,
-          a.priorEntrySpot ?? null
+          a.priorEntrySpot ?? entrySpotBySym.get(a.sym) ?? spotAt(a.entryTime) ?? null
         );
         imported++;
       }
@@ -1996,7 +2031,10 @@ setInterval(() => {
           entry: r.entry_price, etime: ist(r.entry_time),
           exit: r.exit_price, xtime: ist(r.exit_time),
           held, points: points == null ? null : Math.round(points * 100) / 100,
-          pnl: r.pnl, status: r.status, reason: r.exit_reason, espot: r.entry_spot,
+          pnl: r.pnl, status: r.status, reason: r.exit_reason,
+          // entry_spot is the column; ctx.spot is where the app's own capture
+          // landed on older rows. Either is the same observation.
+          espot: r.entry_spot ?? (typeof ctx?.spot === 'number' ? ctx.spot : null),
           source: r.simulated ? 'SIMULATED' : r.test_mode ? 'TEST' : (ctx?.source || 'APP'),
           acct: r.kite_user_id || '',
         });
