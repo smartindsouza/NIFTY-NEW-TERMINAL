@@ -3507,6 +3507,18 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const [isEditingStruct, setIsEditingStruct] = useState(false);
   // BOS is the ordinary, frequent event; CHoCH is the interesting one. Being able
   // to drop BOS and keep CHoCH is the whole point of the toggle.
+  // BOS/CHoCH colours. The events were painted in a fixed sky/pink pair keyed to
+  // DIRECTION, with nothing behind the gear to change them.
+  const [structBullColor, setStructBullColor] = useState(() => {
+    try { return localStorage.getItem('structBullColor') || '#38bdf8'; } catch (e) {}
+    return '#38bdf8';
+  });
+  const [structBearColor, setStructBearColor] = useState(() => {
+    try { return localStorage.getItem('structBearColor') || '#f472b6'; } catch (e) {}
+    return '#f472b6';
+  });
+  useEffect(() => { try { localStorage.setItem('structBullColor', structBullColor); } catch (e) {} }, [structBullColor]);
+  useEffect(() => { try { localStorage.setItem('structBearColor', structBearColor); } catch (e) {} }, [structBearColor]);
   const [showBos, setShowBos] = useState(() => {
     try { const v = localStorage.getItem('showBos'); return v === null ? true : v === 'true'; } catch (e) { return true; }
   });
@@ -4688,7 +4700,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     isIndicatorsOpen || showDiagnostic || externalOverlayOpen ||
     indexMenuOpen || optionMenuOpen || rrMenuOpen || searchExpanded ||
     isEditingPdhPdl || isEditingSnR || isEditingBB || isEditingOiBars ||
-    isEditingDz || isEditingTpSl || isEditingRsi || isEditingHLevels
+    isEditingDz || isEditingTpSl || isEditingRsi || isEditingHLevels ||
+    isEditingOpeningRange || isEditingStruct || isEditingFvg || isEditingDsZones ||
+    isEditingLevelAlerts || isEditingZoneTapAlerts || isEditingBreakoutAlerts || isEditingVolume
   );
 
   const logicalRangeRef = useRef<any>(null);
@@ -9853,14 +9867,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   // stays quiet — the chart should not shout the ordinary event.
                   const isChoch = ev.type === 'CHOCH';
                   if (!isChoch && !showBos) continue;
+                  const structHex = ev.dir === 'bull' ? structBullColor : structBearColor;
                   // An event whose candle is scrolled off to the LEFT used to be
                   // clamped to x=0, stacking old labels down the left edge of a
                   // day they do not belong to. If it is off-screen, it is not drawn.
                   if (x1 < 0) continue;
-                  const rgb = ev.dir === 'bull' ? '56,189,248' : '244,114,182';
                   ctx.beginPath();
                   ctx.setLineDash(isChoch ? [] : [4, 3]);
-                  ctx.strokeStyle = `rgba(${rgb},${isChoch ? 0.95 : 0.55})`;
+                  ctx.strokeStyle = hexToRgba(structHex, isChoch ? 0.95 : 0.55);
                   ctx.lineWidth = isChoch ? 1.6 : 1;
                   ctx.moveTo(x0, y);
                   ctx.lineTo(x1, y);
@@ -9869,7 +9883,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   ctx.font = `bold ${isChoch ? 10 : 9}px monospace`;
                   ctx.textAlign = 'left';
                   ctx.textBaseline = 'bottom';
-                  ctx.fillStyle = `rgba(${rgb},${isChoch ? 1 : 0.8})`;
+                  ctx.fillStyle = hexToRgba(structHex, isChoch ? 1 : 0.8);
                   ctx.fillText(isChoch ? 'CHoCH' : 'BOS', x1 + 4, y - 2);
                 }
               }
@@ -10202,7 +10216,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     draw();
     
     return () => cancelAnimationFrame(animationFrameId);
-  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth, taInfo, showOpeningRange, orHighColor, orLowColor, showDsZones, dsZoneOpacity, showFvg, fvgBullColor, fvgBearColor, fvgOpacity, showOrderBlocks, showStructure, showBos, showConfSignals, confData]);
+  }, [showOiBars, oiData, showBB, bbData, timeframe, chartData, bbColor, oiMaxBarWidth, oiCallColor, oiPutColor, oiBarGap, oiBarThickness, localAnalytics, showPdhPdl, pdhPdlData, pdhColor, pdlColor, pdhPdlStyle, pdhPdlWidth, showSnR, supportColor, resistanceColor, snrStyle, snrWidth, showFiftyPercentLevels, hLevels, fiftyPercentColor, showHLevels, hLevelsStyle, hLevelsWidth, taInfo, showOpeningRange, orHighColor, orLowColor, showDsZones, dsZoneOpacity, showFvg, fvgBullColor, fvgBearColor, fvgOpacity, showOrderBlocks, showStructure, showBos, structBullColor, structBearColor, showConfSignals, confData]);
 
   const { data: serverStats } = useQuery({
     queryKey: ["server-diagnostics"],
@@ -10942,7 +10956,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       </div>
                     {showOpeningRange && (
                       <button
-                        onClick={(e) => { e.stopPropagation(); setIsEditingOpeningRange(v => !v); }}
+                        onClick={(e) => { e.stopPropagation(); setIsIndicatorsOpen(false); setIsEditingOpeningRange(true); }}
                         title="15 min High-Low colours"
                         className="p-1 text-muted-foreground hover:text-foreground transition-colors"
                       >
@@ -10958,33 +10972,6 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       <Star size={14} fill={isFav('15minHighLow') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
-                  {isEditingOpeningRange && showOpeningRange && (
-                    <div className={`pl-3 pr-9 md:pr-3 pb-2 ${rowOrder('15minHighLow', showOpeningRange)}`}>
-                      <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Opening range colours</label>
-                      <div className="flex items-center gap-3">
-                          <label className="flex items-center gap-1.5 cursor-pointer">
-                            <input
-                              type="color"
-                              value={orHighColor}
-                              onChange={(e) => setOrHighColor(e.target.value)}
-                              onPointerDown={(e) => e.stopPropagation()}
-                              className="w-6 h-6 rounded border border-border bg-transparent p-0 cursor-pointer"
-                            />
-                            <span className="text-[10px] text-muted-foreground">High</span>
-                          </label>
-                          <label className="flex items-center gap-1.5 cursor-pointer">
-                            <input
-                              type="color"
-                              value={orLowColor}
-                              onChange={(e) => setOrLowColor(e.target.value)}
-                              onPointerDown={(e) => e.stopPropagation()}
-                              className="w-6 h-6 rounded border border-border bg-transparent p-0 cursor-pointer"
-                            />
-                            <span className="text-[10px] text-muted-foreground">Low</span>
-                          </label>
-                      </div>
-                    </div>
-                  )}
 
                   {/* Market Structure (BOS / CHoCH) — an index study */}
                   {!isOptionView && (
@@ -11003,7 +10990,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       </div>
                     {showStructure && (
                       <button
-                        onClick={(e) => { e.stopPropagation(); setIsEditingStruct(v => !v); }}
+                        onClick={(e) => { e.stopPropagation(); setIsIndicatorsOpen(false); setIsEditingStruct(true); }}
                         title="Structure settings"
                         className="p-1 text-muted-foreground hover:text-foreground transition-colors"
                       >
@@ -11019,31 +11006,6 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       <Star size={14} fill={isFav('BOSCHoCH') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
-                  )}
-                  {isEditingStruct && showStructure && (
-                    <div className={`pl-3 pr-9 md:pr-3 pb-2 ${rowOrder('BOSCHoCH', showStructure)}`}>
-                      <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Show structure for</label>
-                      <select
-                        value={structDays}
-                        onChange={(e) => setStructDays(Math.max(1, Math.min(7, parseInt(e.target.value, 10) || 1)))}
-                        onPointerDown={(e) => e.stopPropagation()}
-                        className="w-full h-8 px-2 rounded-md bg-muted/40 border border-white/10 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                      >
-                        {[1, 2, 3, 4, 5, 6, 7].map((d) => (
-                          <option key={d} value={d}>{d === 1 ? 'Today only' : `Last ${d} days`}</option>
-                        ))}
-                      </select>
-                      <div className="flex items-center justify-between mt-2">
-                        <span className="text-[11px] text-foreground/80">Show BOS labels</span>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setShowBos(v => !v); }}
-                          title={showBos ? 'Hide BOS — keep CHoCH only' : 'Show BOS as well as CHoCH'}
-                          className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ${showBos ? 'bg-emerald-500' : 'bg-muted-foreground/30'}`}
-                        >
-                          <span className={`block w-4 h-4 bg-white rounded-full absolute top-0.5 transition-transform ${showBos ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                        </button>
-                      </div>
-                    </div>
                   )}
 
                   {/* Directional Zones (ported TradingView indicator; replaced Order Blocks) */}
@@ -11120,7 +11082,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       </div>
                     {showFvg && (
                       <button
-                        onClick={(e) => { e.stopPropagation(); setIsEditingFvg(v => !v); }}
+                        onClick={(e) => { e.stopPropagation(); setIsIndicatorsOpen(false); setIsEditingFvg(true); }}
                         title="Fair Value Gap colours"
                         className="p-1 text-muted-foreground hover:text-foreground transition-colors"
                       >
@@ -11136,45 +11098,6 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       <Star size={14} fill={isFav('FairValueGaps') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
-                  {isEditingFvg && showFvg && (
-                    <div className={`pl-3 pr-9 md:pr-3 pb-2 ${rowOrder('FairValueGaps', showFvg)}`}>
-                      <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Gap colours</label>
-                      <div className="flex items-center gap-3">
-                          <label className="flex items-center gap-1.5 cursor-pointer">
-                            <input
-                              type="color"
-                              value={fvgBullColor}
-                              onChange={(e) => setFvgBullColor(e.target.value)}
-                              onPointerDown={(e) => e.stopPropagation()}
-                              className="w-6 h-6 rounded border border-border bg-transparent p-0 cursor-pointer"
-                            />
-                            <span className="text-[10px] text-muted-foreground">Bullish</span>
-                          </label>
-                          <label className="flex items-center gap-1.5 cursor-pointer">
-                            <input
-                              type="color"
-                              value={fvgBearColor}
-                              onChange={(e) => setFvgBearColor(e.target.value)}
-                              onPointerDown={(e) => e.stopPropagation()}
-                              className="w-6 h-6 rounded border border-border bg-transparent p-0 cursor-pointer"
-                            />
-                            <span className="text-[10px] text-muted-foreground">Bearish</span>
-                          </label>
-                      </div>
-                      <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mt-2 mb-1">Gap darkness (%)</label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          value={fvgOpacity}
-                          onChange={(e) => setFvgOpacity(e.target.value)}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          inputMode="decimal"
-                          title="Fair Value Gap darkness (% opacity, 1-100)"
-                          className="w-16 h-8 bg-muted/40 border border-border rounded-md px-2 text-xs text-foreground text-center focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                        <span className="text-[10px] text-muted-foreground">% opacity (1-100)</span>
-                      </div>
-                    </div>
-                  )}
 
                   {/* Demand / Supply Zones */}
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('DemandSupplyZones', showDsZones)}`}>
@@ -11192,7 +11115,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       </div>
                     {showDsZones && (
                       <button
-                        onClick={(e) => { e.stopPropagation(); setIsEditingDsZones(v => !v); }}
+                        onClick={(e) => { e.stopPropagation(); setIsIndicatorsOpen(false); setIsEditingDsZones(true); }}
                         title="Zone settings"
                         className="p-1 text-muted-foreground hover:text-foreground transition-colors"
                       >
@@ -11208,22 +11131,6 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       <Star size={14} fill={isFav('DemandSupplyZones') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
-                  {isEditingDsZones && showDsZones && (
-                    <div className={`pl-3 pr-9 md:pr-3 pb-2 ${rowOrder('DemandSupplyZones', showDsZones)}`}>
-                      <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Zone darkness (%)</label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          value={dsZoneOpacity}
-                          onChange={(e) => setDsZoneOpacity(e.target.value)}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          inputMode="numeric"
-                          title="Zone darkness (% opacity, 1-100)"
-                          className="w-16 h-8 bg-muted/40 border border-border rounded-md px-2 text-xs text-foreground text-center focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                        <span className="text-[10px] text-muted-foreground">% opacity (1-100)</span>
-                      </div>
-                    </div>
-                  )}
 
                   {/* Level Touch Alerts */}
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('LevelTouchAlerts', levelAlertsOn)}`}>
@@ -11241,7 +11148,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       </div>
                     {levelAlertsOn && (
                       <button
-                        onClick={(e) => { e.stopPropagation(); setIsEditingLevelAlerts(v => !v); }}
+                        onClick={(e) => { e.stopPropagation(); setIsIndicatorsOpen(false); setIsEditingLevelAlerts(true); }}
                         title="Level touch alert settings"
                         className="p-1 text-muted-foreground hover:text-foreground transition-colors"
                       >
@@ -11257,34 +11164,6 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       <Star size={14} fill={isFav('LevelTouchAlerts') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
-                  {isEditingLevelAlerts && levelAlertsOn && (
-                    <div className={`pl-3 pr-9 md:pr-3 pb-2 ${rowOrder('LevelTouchAlerts', levelAlertsOn)}`}>
-                      <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Repeat cooldown</label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          value={levelAlertCooldown}
-                          onChange={(e) => setLevelAlertCooldown(e.target.value)}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          inputMode="decimal"
-                          title="Minutes before the same level can alert again"
-                          className="w-16 h-8 bg-muted/40 border border-border rounded-md px-2 text-xs text-foreground text-center focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                        <span className="text-[10px] text-muted-foreground">minutes between repeats</span>
-                      </div>
-                      <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mt-2 mb-1">Re-arm distance</label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          value={levelAlertRearm}
-                          onChange={(e) => setLevelAlertRearm(e.target.value)}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          inputMode="decimal"
-                          title="How far price must move away before the level can alert again"
-                          className="w-16 h-8 bg-muted/40 border border-border rounded-md px-2 text-xs text-foreground text-center focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                        <span className="text-[10px] text-muted-foreground">% away before re-arming</span>
-                      </div>
-                    </div>
-                  )}
 
                   {/* Zone Tap Alerts — the ported Pine script's own alert */}
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('ZoneTapAlerts', zoneTapAlertsOn)}`}>
@@ -11302,7 +11181,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       </div>
                     {zoneTapAlertsOn && (
                       <button
-                        onClick={(e) => { e.stopPropagation(); setIsEditingZoneTapAlerts(v => !v); }}
+                        onClick={(e) => { e.stopPropagation(); setIsIndicatorsOpen(false); setIsEditingZoneTapAlerts(true); }}
                         title="Zone tap alert settings"
                         className="p-1 text-muted-foreground hover:text-foreground transition-colors"
                       >
@@ -11318,22 +11197,6 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       <Star size={14} fill={isFav('ZoneTapAlerts') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
-                  {isEditingZoneTapAlerts && zoneTapAlertsOn && (
-                    <div className={`pl-3 pr-9 md:pr-3 pb-2 ${rowOrder('ZoneTapAlerts', zoneTapAlertsOn)}`}>
-                      <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Ignore zones thinner than</label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          value={zoneTapMinSize}
-                          onChange={(e) => setZoneTapMinSize(e.target.value)}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          inputMode="decimal"
-                          title="Skip taps on zones narrower than this many points"
-                          className="w-16 h-8 bg-muted/40 border border-border rounded-md px-2 text-xs text-foreground text-center focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                        <span className="text-[10px] text-muted-foreground">points (0 = alert on all)</span>
-                      </div>
-                    </div>
-                  )}
 
                   {/* Breakout Authenticity Alerts */}
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BreakoutFakeouts', breakoutAlertsOn)}`}>
@@ -11351,7 +11214,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       </div>
                     {breakoutAlertsOn && (
                       <button
-                        onClick={(e) => { e.stopPropagation(); setIsEditingBreakoutAlerts(v => !v); }}
+                        onClick={(e) => { e.stopPropagation(); setIsIndicatorsOpen(false); setIsEditingBreakoutAlerts(true); }}
                         title="Breakout alert settings"
                         className="p-1 text-muted-foreground hover:text-foreground transition-colors"
                       >
@@ -11367,23 +11230,6 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       <Star size={14} fill={isFav('BreakoutFakeouts') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
-                  {isEditingBreakoutAlerts && breakoutAlertsOn && (
-                    <div className={`pl-3 pr-9 md:pr-3 pb-2 ${rowOrder('BreakoutFakeouts', breakoutAlertsOn)}`}>
-                      <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Alert on</label>
-                      <div className="flex items-center gap-1.5">
-                        {([
-                          { v: 'both', label: 'Strong + fakeout risk' },
-                          { v: 'strong', label: 'Strong only' },
-                        ]).map((o) => (
-                          <button
-                            key={o.v}
-                            onClick={(e) => { e.stopPropagation(); setBreakoutAlertMode(o.v); }}
-                            className={`px-2 h-7 rounded-md text-[10px] border transition-colors ${breakoutAlertMode === o.v ? 'bg-primary/20 text-primary border-primary/40' : 'bg-muted/40 text-muted-foreground border-border'}`}
-                          >{o.label}</button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
 
                   {/* Support/Resistance Lines */}
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('Volume', showVolume)}`}>
@@ -11401,7 +11247,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       </div>
                     {showVolume && (
                       <button
-                        onClick={(e) => { e.stopPropagation(); setIsEditingVolume(v => !v); }}
+                        onClick={(e) => { e.stopPropagation(); setIsIndicatorsOpen(false); setIsEditingVolume(true); }}
                         title="Volume colours"
                         className="p-1 text-muted-foreground hover:text-foreground transition-colors"
                       >
@@ -11417,31 +11263,6 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       <Star size={14} fill={isFav('Volume') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
-                  {isEditingVolume && showVolume && (
-                    <div className={`pl-3 pr-9 md:pr-3 pb-2 ${rowOrder('Volume', showVolume)}`}>
-                      <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Volume colours</label>
-                      <div className="flex items-center gap-3">
-                        {([
-                          { key: 'candleUpColor' as const, label: 'Up' },
-                          { key: 'candleDownColor' as const, label: 'Down' },
-                        ]).map((c) => (
-                          <label key={c.key} className="flex items-center gap-1.5 cursor-pointer">
-                            <input
-                              type="color"
-                              value={settings[c.key]}
-                              onChange={(e) => updateSetting(c.key, e.target.value)}
-                              onPointerDown={(e) => e.stopPropagation()}
-                              className="w-6 h-6 rounded border border-border bg-transparent p-0 cursor-pointer"
-                            />
-                            <span className="text-[10px] text-muted-foreground">{c.label}</span>
-                          </label>
-                        ))}
-                      </div>
-                      {/* Shared with the candles by design: a green candle and its
-                          bar must never disagree. Same pair as Control Center. */}
-                      <p className="text-[9px] text-muted-foreground/70 mt-1">Shared with candle colours</p>
-                    </div>
-                  )}
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('SupportResistanceLines', showSnR)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
@@ -12363,6 +12184,309 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             setIsEditingHLevels(false);
           }}
         />
+      )}
+
+      {/* INDICATOR SETTINGS BOXES. These used to expand inline underneath their row
+          in the indicators list, which pushed every other indicator down the list
+          and left the controls squeezed into the menu's width. Each opens as its
+          own box now, like the older indicators already did. */}
+      {isEditingOpeningRange && (
+        <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 p-0 md:p-4"
+             onClick={() => setIsEditingOpeningRange(false)}>
+          <div className="w-full md:max-w-sm rounded-t-2xl md:rounded-xl border border-border bg-card p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-4 max-h-[75vh] overflow-y-auto"
+               onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-bold text-foreground">15 min High-Low Settings</span>
+              <button onClick={() => setIsEditingOpeningRange(false)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Opening range colours</label>
+            <div className="flex items-center gap-3">
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="color"
+                    value={orHighColor}
+                    onChange={(e) => setOrHighColor(e.target.value)}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="w-6 h-6 rounded border border-border bg-transparent p-0 cursor-pointer"
+                  />
+                  <span className="text-[10px] text-muted-foreground">High</span>
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="color"
+                    value={orLowColor}
+                    onChange={(e) => setOrLowColor(e.target.value)}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="w-6 h-6 rounded border border-border bg-transparent p-0 cursor-pointer"
+                  />
+                  <span className="text-[10px] text-muted-foreground">Low</span>
+                </label>
+            </div>
+          </div>
+        </div>
+      )}
+      {isEditingStruct && (
+        <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 p-0 md:p-4"
+             onClick={() => setIsEditingStruct(false)}>
+          <div className="w-full md:max-w-sm rounded-t-2xl md:rounded-xl border border-border bg-card p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-4 max-h-[75vh] overflow-y-auto"
+               onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-bold text-foreground">BOS / CHoCH Settings</span>
+              <button onClick={() => setIsEditingStruct(false)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Show structure for</label>
+            <select
+              value={structDays}
+              onChange={(e) => setStructDays(Math.max(1, Math.min(7, parseInt(e.target.value, 10) || 1)))}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="w-full h-8 px-2 rounded-md bg-muted/40 border border-white/10 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              {[1, 2, 3, 4, 5, 6, 7].map((d) => (
+                <option key={d} value={d}>{d === 1 ? 'Today only' : `Last ${d} days`}</option>
+              ))}
+            </select>
+            <div className="flex items-center justify-between mt-2">
+              <span className="text-[11px] text-foreground/80">Show BOS labels</span>
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowBos(v => !v); }}
+                title={showBos ? 'Hide BOS — keep CHoCH only' : 'Show BOS as well as CHoCH'}
+                className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ${showBos ? 'bg-emerald-500' : 'bg-muted-foreground/30'}`}
+              >
+                <span className={`block w-4 h-4 bg-white rounded-full absolute top-0.5 transition-transform ${showBos ? 'translate-x-4' : 'translate-x-0.5'}`} />
+              </button>
+            </div>
+            {/* Colour follows the DIRECTION of the break, not whether it is a BOS
+                or a CHoCH — those are told apart by the dashed line and the label. */}
+            <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mt-3 mb-1">Structure colours</label>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="color"
+                  value={structBullColor}
+                  onChange={(e) => setStructBullColor(e.target.value)}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className="w-6 h-6 rounded border border-border bg-transparent p-0 cursor-pointer"
+                />
+                <span className="text-[10px] text-muted-foreground">Bullish</span>
+              </label>
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="color"
+                  value={structBearColor}
+                  onChange={(e) => setStructBearColor(e.target.value)}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className="w-6 h-6 rounded border border-border bg-transparent p-0 cursor-pointer"
+                />
+                <span className="text-[10px] text-muted-foreground">Bearish</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      )}
+      {isEditingFvg && (
+        <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 p-0 md:p-4"
+             onClick={() => setIsEditingFvg(false)}>
+          <div className="w-full md:max-w-sm rounded-t-2xl md:rounded-xl border border-border bg-card p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-4 max-h-[75vh] overflow-y-auto"
+               onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-bold text-foreground">Fair Value Gaps Settings</span>
+              <button onClick={() => setIsEditingFvg(false)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Gap colours</label>
+            <div className="flex items-center gap-3">
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="color"
+                    value={fvgBullColor}
+                    onChange={(e) => setFvgBullColor(e.target.value)}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="w-6 h-6 rounded border border-border bg-transparent p-0 cursor-pointer"
+                  />
+                  <span className="text-[10px] text-muted-foreground">Bullish</span>
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="color"
+                    value={fvgBearColor}
+                    onChange={(e) => setFvgBearColor(e.target.value)}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="w-6 h-6 rounded border border-border bg-transparent p-0 cursor-pointer"
+                  />
+                  <span className="text-[10px] text-muted-foreground">Bearish</span>
+                </label>
+            </div>
+            <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mt-2 mb-1">Gap darkness (%)</label>
+            <div className="flex items-center gap-2">
+              <input
+                value={fvgOpacity}
+                onChange={(e) => setFvgOpacity(e.target.value)}
+                onPointerDown={(e) => e.stopPropagation()}
+                inputMode="decimal"
+                title="Fair Value Gap darkness (% opacity, 1-100)"
+                className="w-16 h-8 bg-muted/40 border border-border rounded-md px-2 text-xs text-foreground text-center focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <span className="text-[10px] text-muted-foreground">% opacity (1-100)</span>
+            </div>
+          </div>
+        </div>
+      )}
+      {isEditingDsZones && (
+        <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 p-0 md:p-4"
+             onClick={() => setIsEditingDsZones(false)}>
+          <div className="w-full md:max-w-sm rounded-t-2xl md:rounded-xl border border-border bg-card p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-4 max-h-[75vh] overflow-y-auto"
+               onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-bold text-foreground">Demand / Supply Zones Settings</span>
+              <button onClick={() => setIsEditingDsZones(false)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Zone darkness (%)</label>
+            <div className="flex items-center gap-2">
+              <input
+                value={dsZoneOpacity}
+                onChange={(e) => setDsZoneOpacity(e.target.value)}
+                onPointerDown={(e) => e.stopPropagation()}
+                inputMode="numeric"
+                title="Zone darkness (% opacity, 1-100)"
+                className="w-16 h-8 bg-muted/40 border border-border rounded-md px-2 text-xs text-foreground text-center focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <span className="text-[10px] text-muted-foreground">% opacity (1-100)</span>
+            </div>
+          </div>
+        </div>
+      )}
+      {isEditingLevelAlerts && (
+        <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 p-0 md:p-4"
+             onClick={() => setIsEditingLevelAlerts(false)}>
+          <div className="w-full md:max-w-sm rounded-t-2xl md:rounded-xl border border-border bg-card p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-4 max-h-[75vh] overflow-y-auto"
+               onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-bold text-foreground">Level Touch Alerts Settings</span>
+              <button onClick={() => setIsEditingLevelAlerts(false)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Repeat cooldown</label>
+            <div className="flex items-center gap-2">
+              <input
+                value={levelAlertCooldown}
+                onChange={(e) => setLevelAlertCooldown(e.target.value)}
+                onPointerDown={(e) => e.stopPropagation()}
+                inputMode="decimal"
+                title="Minutes before the same level can alert again"
+                className="w-16 h-8 bg-muted/40 border border-border rounded-md px-2 text-xs text-foreground text-center focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <span className="text-[10px] text-muted-foreground">minutes between repeats</span>
+            </div>
+            <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mt-2 mb-1">Re-arm distance</label>
+            <div className="flex items-center gap-2">
+              <input
+                value={levelAlertRearm}
+                onChange={(e) => setLevelAlertRearm(e.target.value)}
+                onPointerDown={(e) => e.stopPropagation()}
+                inputMode="decimal"
+                title="How far price must move away before the level can alert again"
+                className="w-16 h-8 bg-muted/40 border border-border rounded-md px-2 text-xs text-foreground text-center focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <span className="text-[10px] text-muted-foreground">% away before re-arming</span>
+            </div>
+          </div>
+        </div>
+      )}
+      {isEditingZoneTapAlerts && (
+        <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 p-0 md:p-4"
+             onClick={() => setIsEditingZoneTapAlerts(false)}>
+          <div className="w-full md:max-w-sm rounded-t-2xl md:rounded-xl border border-border bg-card p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-4 max-h-[75vh] overflow-y-auto"
+               onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-bold text-foreground">Zone Tap Alerts Settings</span>
+              <button onClick={() => setIsEditingZoneTapAlerts(false)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Ignore zones thinner than</label>
+            <div className="flex items-center gap-2">
+              <input
+                value={zoneTapMinSize}
+                onChange={(e) => setZoneTapMinSize(e.target.value)}
+                onPointerDown={(e) => e.stopPropagation()}
+                inputMode="decimal"
+                title="Skip taps on zones narrower than this many points"
+                className="w-16 h-8 bg-muted/40 border border-border rounded-md px-2 text-xs text-foreground text-center focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <span className="text-[10px] text-muted-foreground">points (0 = alert on all)</span>
+            </div>
+          </div>
+        </div>
+      )}
+      {isEditingBreakoutAlerts && (
+        <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 p-0 md:p-4"
+             onClick={() => setIsEditingBreakoutAlerts(false)}>
+          <div className="w-full md:max-w-sm rounded-t-2xl md:rounded-xl border border-border bg-card p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-4 max-h-[75vh] overflow-y-auto"
+               onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-bold text-foreground">Breakout-Fakeouts Settings</span>
+              <button onClick={() => setIsEditingBreakoutAlerts(false)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Alert on</label>
+            <div className="flex items-center gap-1.5">
+              {([
+                { v: 'both', label: 'Strong + fakeout risk' },
+                { v: 'strong', label: 'Strong only' },
+              ]).map((o) => (
+                <button
+                  key={o.v}
+                  onClick={(e) => { e.stopPropagation(); setBreakoutAlertMode(o.v); }}
+                  className={`px-2 h-7 rounded-md text-[10px] border transition-colors ${breakoutAlertMode === o.v ? 'bg-primary/20 text-primary border-primary/40' : 'bg-muted/40 text-muted-foreground border-border'}`}
+                >{o.label}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      {isEditingVolume && (
+        <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 p-0 md:p-4"
+             onClick={() => setIsEditingVolume(false)}>
+          <div className="w-full md:max-w-sm rounded-t-2xl md:rounded-xl border border-border bg-card p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-4 max-h-[75vh] overflow-y-auto"
+               onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-bold text-foreground">Volume Settings</span>
+              <button onClick={() => setIsEditingVolume(false)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <label className="block text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Volume colours</label>
+            <div className="flex items-center gap-3">
+              {([
+                { key: 'candleUpColor' as const, label: 'Up' },
+                { key: 'candleDownColor' as const, label: 'Down' },
+              ]).map((c) => (
+                <label key={c.key} className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="color"
+                    value={settings[c.key]}
+                    onChange={(e) => updateSetting(c.key, e.target.value)}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="w-6 h-6 rounded border border-border bg-transparent p-0 cursor-pointer"
+                  />
+                  <span className="text-[10px] text-muted-foreground">{c.label}</span>
+                </label>
+              ))}
+            </div>
+            {/* Shared with the candles by design: a green candle and its
+                bar must never disagree. Same pair as Control Center. */}
+            <p className="text-[9px] text-muted-foreground/70 mt-1">Shared with candle colours</p>
+          </div>
+        </div>
       )}
 
       {/* OPTION REALITY CHECK. A call can fall on a day the index rises, and the
