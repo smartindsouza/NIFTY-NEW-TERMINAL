@@ -253,6 +253,11 @@ catch (e) { /* already present */ }
 // the table exists. Ownership is load-bearing now, so it cannot be left to luck.
 try { db.exec(`ALTER TABLE trade_journal ADD COLUMN kite_user_id TEXT`); }
 catch (e) { /* already present */ }
+// A row the user has corrected by hand. The Kite import rebuilds the day from the
+// broker every few minutes, which would otherwise undo the correction on the next
+// pass. Locked rows are neither deleted nor rewritten by it.
+try { db.exec(`ALTER TABLE trade_journal ADD COLUMN locked INTEGER DEFAULT 0`); }
+catch (e) { /* already present */ }
 try { db.exec(`CREATE INDEX IF NOT EXISTS idx_trade_journal_owner_time ON trade_journal(kite_user_id, entry_time)`); }
 catch (e) { console.error('[journal] owner index failed', e); }
 try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_trade_journal_kite_key ON trade_journal(kite_key) WHERE kite_key IS NOT NULL`); }
@@ -1602,7 +1607,19 @@ setInterval(() => {
         // string path below turned one into "Fri Sep 18 2026 ..." + "+05:30",
         // which is not a date, so every fill fell through to Date.now() — which
         // is why every trade showed the import time (10:58) as its entry and exit.
-        if (v instanceof Date) { const ms = v.getTime(); return isFinite(ms) ? ms : Date.now(); }
+        // The kiteconnect library turns "2026-09-18 09:27:32" into a Date with
+        // `new Date(str)`. A zoneless, space-separated string is read as the
+        // SERVER's local time — and this server runs in UTC — so a 09:27 IST fill
+        // became 09:27 UTC, which renders as 14:57 IST. Every morning trade showed
+        // an afternoon time. Kite's wall clock is always IST, so the components
+        // are re-read and re-anchored to IST. Using the LOCAL getters makes this
+        // independent of whatever zone the server happens to run in.
+        if (v instanceof Date) {
+          const ms = Date.UTC(v.getFullYear(), v.getMonth(), v.getDate(),
+                              v.getHours(), v.getMinutes(), v.getSeconds(), v.getMilliseconds())
+                     - 5.5 * 3600000;
+          return isFinite(ms) ? ms : Date.now();
+        }
         if (typeof v === 'number') return v < 1e12 ? v * 1000 : v;
         let str = String(v).trim();
         if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(str)) str = str.replace(' ', 'T') + '+05:30';
@@ -1744,13 +1761,21 @@ setInterval(() => {
       // Scoped to THIS account: unscoped, importing on one account erased the
       // other account's day, which is a large part of why the journal read wrong
       // after the client-ID swap.
+      // Hand-corrected rows are left exactly as they are, and the fingerprints they
+      // occupy are not re-inserted below. Zerodha cannot supply a BTST's true entry
+      // price — its trade list is today only — so a correction has to outlive the
+      // rebuild or it is undone within five minutes.
+      const lockedKeys = new Set(
+        (db.prepare(`SELECT kite_key AS k FROM trade_journal WHERE locked = 1 AND kite_user_id = ? AND kite_key IS NOT NULL`)
+          .all(owner) as any[]).map((r) => String(r.k))
+      );
       const wipe = db.prepare(
-        `DELETE FROM trade_journal WHERE kite_key IS NOT NULL AND entry_time >= ? AND kite_user_id = ?`
+        `DELETE FROM trade_journal WHERE kite_key IS NOT NULL AND entry_time >= ? AND kite_user_id = ? AND locked = 0`
       ).run(dayStart, owner);
       // Carried-in rows are re-issued from their lots below, with their original
       // entry date and price and today's exit.
       if (priorRowIds.length) {
-        const delPrior = db.prepare(`DELETE FROM trade_journal WHERE id = ? AND kite_user_id = ?`);
+        const delPrior = db.prepare(`DELETE FROM trade_journal WHERE id = ? AND kite_user_id = ? AND locked = 0`);
         for (const id of priorRowIds) delPrior.run(id, owner);
       }
 
@@ -1781,6 +1806,8 @@ setInterval(() => {
         VALUES (?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?)`);
       for (const a of aggs.values()) {
         if (a.qty <= 0) continue;
+        const key = `${owner}|${a.carried ? a.entryTime : dayStart}|${a.sym}|${a.status}|${a.side}|${a.orderId}`;
+        if (lockedKeys.has(key)) continue;          // corrected by hand; leave it alone
         const { strike, optionType } = parse(a.sym);
         const entryAvg = Math.round((a.entryQP / a.qty) * 100) / 100;
         const exitAvg = a.status === 'CLOSED' ? Math.round((a.exitQP / a.qty) * 100) / 100 : null;
@@ -1799,7 +1826,7 @@ setInterval(() => {
           // trading the same strike on the same day produced the same key and
           // INSERT OR REPLACE silently overwrote one book with the other. The
           // entry order id keeps two round trips in one strike as two rows.
-          `${owner}|${a.carried ? a.entryTime : dayStart}|${a.sym}|${a.status}|${a.side}|${a.orderId}`,
+          key,
           owner,
           a.priorEntrySpot ?? null
         );
@@ -1809,6 +1836,50 @@ setInterval(() => {
 
     } catch (e: any) {
       console.error('[journal import-kite]', e);
+      return res.status(500).json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
+  // Correct a row by hand and LOCK it against the next import. The only source for
+  // a carried position's true entry is the user: Kite's trade list stops at today.
+  // P&L is recomputed from the corrected prices rather than trusted from the body.
+  app.patch('/api/journal/:id', express.json(), (req, res) => {
+    try {
+      const uid = journalOwner();
+      if (!uid) return res.status(401).json({ success: false, error: 'No active Kite session.' });
+      const id = parseInt(String(req.params.id), 10);
+      const row = db.prepare('SELECT * FROM trade_journal WHERE id = ? AND kite_user_id = ?').get(id, uid) as any;
+      if (!row) return res.status(404).json({ success: false, error: 'Trade not found for this account.' });
+
+      const num = (v: any, fallback: number | null) => {
+        if (v === undefined || v === null || v === '') return fallback;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : fallback;
+      };
+      const entryPrice = num(req.body?.entry_price, row.entry_price);
+      const exitPrice = num(req.body?.exit_price, row.exit_price);
+      const entryTime = num(req.body?.entry_time, row.entry_time);
+      const exitTime = num(req.body?.exit_time, row.exit_time);
+
+      let pnl = row.pnl;
+      if (row.status === 'CLOSED' && entryPrice != null && exitPrice != null) {
+        const dir = String(row.side).toUpperCase() === 'BUY' ? 1 : -1;
+        pnl = Math.round(dir * (exitPrice - entryPrice) * (Number(row.qty) || 0) * 100) / 100;
+      }
+
+      let ctx: any = null; try { ctx = row.context ? JSON.parse(row.context) : null; } catch {}
+      ctx = { ...(ctx || {}), edited: true };
+      delete ctx.basisIsClose;                    // no longer an estimate
+
+      db.prepare(
+        `UPDATE trade_journal SET entry_price = ?, exit_price = ?, entry_time = ?, exit_time = ?,
+           pnl = ?, context = ?, locked = 1, updated_at = ? WHERE id = ? AND kite_user_id = ?`
+      ).run(entryPrice, exitPrice, entryTime, exitTime, pnl, JSON.stringify(ctx), Date.now(), id, uid);
+
+      const updated = db.prepare('SELECT * FROM trade_journal WHERE id = ?').get(id) as any;
+      return res.json({ success: true, trade: { ...updated, context: updated.context ? JSON.parse(updated.context) : null } });
+    } catch (e: any) {
+      console.error('[journal patch]', e);
       return res.status(500).json({ success: false, error: e?.message || String(e) });
     }
   });

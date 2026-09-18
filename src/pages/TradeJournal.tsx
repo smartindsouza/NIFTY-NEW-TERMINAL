@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
-import { BookOpen, RefreshCw, TrendingUp, TrendingDown, Trash2, Sparkles, Download, FileSpreadsheet } from 'lucide-react';
+import { BookOpen, RefreshCw, TrendingUp, TrendingDown, Trash2, Sparkles, Download, FileSpreadsheet, Pencil, Check, X } from 'lucide-react';
 
 interface JournalTrade {
   id: number;
@@ -25,6 +25,7 @@ interface JournalTrade {
   exit_reason: string | null;
   pnl: number | null;
   kite_user_id?: string | null;
+  locked?: number;
 }
 
 // IST calendar day for a timestamp — the journal is organised by trading day, and
@@ -146,6 +147,35 @@ export default function TradeJournal() {
     if (t.status === 'CLOSED') g.pnl += t.pnl || 0;
   }
   byDay.sort((a, b) => (a.day < b.day ? 1 : -1));
+
+  // Correcting a price by hand. Zerodha's trade list only covers today, so a
+  // position carried in from a previous day has no entry price the import can
+  // read — it has to come from the user, and it has to survive the next rebuild.
+  const [editId, setEditId] = useState<number | null>(null);
+  const [editEntry, setEditEntry] = useState('');
+  const [editExit, setEditExit] = useState('');
+  const startEdit = (t: JournalTrade) => {
+    setEditId(t.id);
+    setEditEntry(t.entry_price == null ? '' : String(t.entry_price));
+    setEditExit(t.exit_price == null ? '' : String(t.exit_price));
+  };
+  const saveEdit = async (t: JournalTrade) => {
+    try {
+      const res = await fetch(`/api/journal/${t.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entry_price: editEntry === '' ? null : Number(editEntry),
+          exit_price: editExit === '' ? null : Number(editExit),
+        }),
+      });
+      const d = await res.json().catch(() => ({ success: false }));
+      if (!d.success) { toast.error(d.error || 'Could not save the correction.'); return; }
+      toast.success('Corrected — this row is now locked against re-imports.');
+      setEditId(null);
+      refetch();
+    } catch { toast.error('Network error saving the correction.'); }
+  };
 
   const handleDelete = async (id: number) => {
     try {
@@ -275,7 +305,9 @@ export default function TradeJournal() {
                     {t.simulated ? <span className="text-[9px] px-1 py-0.5 rounded bg-sky-500/15 text-sky-400">SIM</span> : null}
                     {/* Carried in from the previous day: entry is Kite's previous close,
                         the same basis Kite uses for the day's P&L on that position. */}
-                    {ctx.carried ? <span className="text-[9px] px-1 py-0.5 rounded bg-violet-500/15 text-violet-300" title="Position carried from the previous day — entry shown is the previous close">CARRIED</span> : null}
+                    {ctx.carried ? <span className="text-[9px] px-1 py-0.5 rounded bg-violet-500/15 text-violet-300" title="Position carried in from a previous day">CARRIED</span> : null}
+                    {ctx.basisIsClose ? <span className="text-[9px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-300" title="Entry is Kite's previous close, not a price this account paid — correct it with the pencil">EST. ENTRY</span> : null}
+                    {t.locked ? <span className="text-[9px] px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-300" title="Corrected by hand — re-imports will not overwrite it">EDITED</span> : null}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {t.status === 'CLOSED' ? (
@@ -286,11 +318,43 @@ export default function TradeJournal() {
                     ) : (
                       <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-primary/15 text-primary">OPEN</span>
                     )}
+                    {editId === t.id ? (
+                      <>
+                        <button onClick={() => saveEdit(t)} className="text-emerald-400 hover:text-emerald-300 transition-colors p-1" title="Save correction">
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => setEditId(null)} className="text-muted-foreground/60 hover:text-foreground transition-colors p-1" title="Cancel">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    ) : (
+                      <button onClick={() => startEdit(t)} className="text-muted-foreground/50 hover:text-primary transition-colors p-1" title="Correct entry / exit price">
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     <button onClick={() => handleDelete(t.id)} className="text-muted-foreground/50 hover:text-rose-400 transition-colors p-1" title="Delete entry">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
+
+                {editId === t.id ? (
+                  <div className="flex items-center gap-2 flex-wrap mt-2 text-[11px] font-mono">
+                    <label className="flex items-center gap-1.5">
+                      <span className="text-muted-foreground">Entry</span>
+                      <input value={editEntry} onChange={(e) => setEditEntry(e.target.value)} inputMode="decimal"
+                        className="w-24 h-8 bg-muted/40 border border-border rounded-md px-2 text-foreground text-center focus:outline-none focus:ring-1 focus:ring-primary" />
+                    </label>
+                    {t.status === 'CLOSED' && (
+                      <label className="flex items-center gap-1.5">
+                        <span className="text-muted-foreground">Exit</span>
+                        <input value={editExit} onChange={(e) => setEditExit(e.target.value)} inputMode="decimal"
+                          className="w-24 h-8 bg-muted/40 border border-border rounded-md px-2 text-foreground text-center focus:outline-none focus:ring-1 focus:ring-primary" />
+                      </label>
+                    )}
+                    <span className="text-[10px] text-muted-foreground">P&L recalculates on save</span>
+                  </div>
+                ) : null}
 
                 <div className="flex items-center gap-x-4 gap-y-1 flex-wrap mt-2 text-[11px] font-mono text-muted-foreground">
                   <span>Qty <span className="text-foreground">{t.qty}</span></span>
