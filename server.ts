@@ -364,6 +364,40 @@ function adoptLegacyJournalRows() {
   } catch (e) { console.error('[journal] legacy adoption failed', e); }
 }
 
+// Readable contract names for the Excel export. Mirrors src/lib/optionName.ts —
+// the workbook is read away from the app, so "NIFTY2692223350CE" is no use there.
+const JOURNAL_UNDERLYING: Record<string, string> = {
+  BANKNIFTY: 'BANK NIFTY', FINNIFTY: 'FIN NIFTY', MIDCPNIFTY: 'MIDCAP NIFTY',
+  NIFTY: 'NIFTY', SENSEX: 'SENSEX', BANKEX: 'BANKEX',
+};
+const JOURNAL_MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+const JOURNAL_WEEKLY_MONTH: Record<string, number> = {
+  '1':1,'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'O':10,'N':11,'D':12,
+};
+function parseContractSymbol(tradingsymbol: string) {
+  const ts = String(tradingsymbol || '').trim().toUpperCase();
+  const m = ts.match(/^([A-Z]+?)(\d.*)(CE|PE)$/);
+  if (!m) return null;
+  const [, rawUnder, middle, type] = m;
+  const underlying = JOURNAL_UNDERLYING[rawUnder] || rawUnder;
+  // Monthly: the two leading digits are the YEAR, not a day.
+  const monthly = middle.match(/^(\d{2})([A-Z]{3})(\d+)$/);
+  if (monthly && JOURNAL_MONTHS.includes(monthly[2])) {
+    return { underlying, strike: Number(monthly[3]), optionType: type, expiryLabel: `${monthly[2]} 20${monthly[1]}` };
+  }
+  const weekly = middle.match(/^(\d{2})([1-9OND])(\d{2})(\d+)$/);
+  if (weekly) {
+    const mon = JOURNAL_WEEKLY_MONTH[weekly[2]];
+    if (mon) return { underlying, strike: Number(weekly[4]), optionType: type, expiryLabel: `${weekly[3]} ${JOURNAL_MONTHS[mon - 1]}` };
+  }
+  return null;
+}
+function contractName(tradingsymbol: string): string {
+  const p = parseContractSymbol(tradingsymbol);
+  if (!p || p.strike == null) return String(tradingsymbol || '');
+  return `${p.underlying} ${p.strike} ${p.optionType}${p.expiryLabel ? ` ${p.expiryLabel}` : ''}`;
+}
+
 // IST day boundaries for a YYYY-MM-DD string. The journal is read by trading day,
 // and the server runs in UTC, so every boundary has to be built explicitly.
 function istDayStart(d: Date): number {
@@ -1914,9 +1948,10 @@ setInterval(() => {
 
       ws.columns = [
         { header: 'Date (IST)',      key: 'date',     width: 12 },
-        { header: 'Symbol',          key: 'sym',      width: 22 },
+        { header: 'Contract',        key: 'sym',      width: 26 },
         { header: 'Strike',          key: 'strike',   width: 9 },
         { header: 'Type',            key: 'otype',    width: 7 },
+        { header: 'Expiry',          key: 'expiry',   width: 11 },
         { header: 'Side',            key: 'side',     width: 7 },
         { header: 'Qty',             key: 'qty',      width: 8 },
         { header: 'Product',         key: 'product',  width: 9 },
@@ -1932,6 +1967,8 @@ setInterval(() => {
         { header: 'Entry spot',      key: 'espot',    width: 11 },
         { header: 'Source',          key: 'source',   width: 14 },
         { header: 'Account',         key: 'acct',     width: 10 },
+        // The raw Zerodha symbol stays, last, for cross-checking against Kite.
+        { header: 'Kite symbol',     key: 'raw',      width: 22 },
       ];
       ws.getRow(1).font = { bold: true };
 
@@ -1946,9 +1983,15 @@ setInterval(() => {
           realised += r.pnl;
           if (r.pnl > 0) wins++; else if (r.pnl < 0) losses++;
         }
+        const parsed = parseContractSymbol(r.tradingsymbol);
         ws.addRow({
           date: ist(r.entry_time).slice(0, 10),
-          sym: r.tradingsymbol, strike: r.strike, otype: r.option_type, side: r.side, qty: r.qty,
+          sym: contractName(r.tradingsymbol),
+          strike: r.strike ?? parsed?.strike ?? null,
+          otype: r.option_type || parsed?.optionType || null,
+          expiry: parsed?.expiryLabel || null,
+          raw: r.tradingsymbol,
+          side: r.side, qty: r.qty,
           product: r.product,
           entry: r.entry_price, etime: ist(r.entry_time),
           exit: r.exit_price, xtime: ist(r.exit_time),

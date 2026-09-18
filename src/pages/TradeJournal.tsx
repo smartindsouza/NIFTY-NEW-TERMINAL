@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
+import { contractName } from '../lib/optionName';
 import { BookOpen, RefreshCw, TrendingUp, TrendingDown, Trash2, Sparkles, Download, FileSpreadsheet, Pencil, Check, X } from 'lucide-react';
 
 interface JournalTrade {
@@ -300,7 +301,9 @@ export default function TradeJournal() {
                     <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', isBuy ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400')}>
                       {t.side}
                     </span>
-                    <span className="font-mono text-sm font-semibold truncate">{t.tradingsymbol}</span>
+                    {/* Readable contract, not the raw Zerodha symbol. The symbol
+                        itself is on the tooltip for cross-checking against Kite. */}
+                    <span className="font-mono text-sm font-semibold truncate" title={t.tradingsymbol}>{contractName(t.tradingsymbol)}</span>
                     {t.test_mode ? <span className="text-[9px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-400">TEST</span> : null}
                     {t.simulated ? <span className="text-[9px] px-1 py-0.5 rounded bg-sky-500/15 text-sky-400">SIM</span> : null}
                     {/* Carried in from the previous day: entry is Kite's previous close,
