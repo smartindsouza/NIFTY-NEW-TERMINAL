@@ -12373,9 +12373,15 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           Kept to ONE horizontally scrolled line: this row used to wrap, and the
           rows it wrapped onto sat underneath the fixed bottom toolbar on a phone —
           rendered but unreachable. Every chip is shrink-0 and nowrap so the row
-          scrolls rather than squeezing them to unreadable widths. */}
+          scrolls rather than squeezing them to unreadable widths.
+
+          The clearance below it is the chart TOOLBAR's height (3.25rem), which is
+          the only thing overlapping this container. It used to reserve the bottom
+          NAV's height as well (4rem + safe area) — but the page root already ends
+          above the nav, so that height was counted twice and left a band of dead
+          space between this row and the toolbar. */}
       {isOptionView && optionReality && (
-        <div className="h-7 flex flex-nowrap items-center gap-1.5 px-1 pb-1 max-md:mb-[calc(4rem+env(safe-area-inset-bottom))] shrink-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="h-7 flex flex-nowrap items-center gap-1.5 px-1 pb-1 max-md:mb-[3.25rem] shrink-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <span className={`shrink-0 whitespace-nowrap text-[10px] font-mono font-bold px-2 py-1 rounded ${optionReality.inTheMoney ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'}`}>
             {optionReality.inTheMoney
               ? `IN THE MONEY by ${Math.round(optionReality.intrinsic)}`
