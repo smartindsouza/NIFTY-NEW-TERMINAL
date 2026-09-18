@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search, ChartNoAxesCombined, TrendingUp, Star } from "lucide-react";
+import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search, ChartNoAxesCombined, TrendingUp, Star, Bell } from "lucide-react";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { useUserSettings, useResolvedTheme } from "../hooks/useUserSettings";
@@ -817,6 +817,7 @@ function LineEditorModal({
   initialLineStyle,
   initialLabelVisible,
   initialTitle,
+  initialAlertOn,
   onApply,
   onDelete,
   onChange
@@ -829,9 +830,10 @@ function LineEditorModal({
   initialLineStyle: number,
   initialLabelVisible: boolean,
   initialTitle?: string,
-  onApply: (price: number, color: string, lineWidth: number, lineStyle: number, labelVisible: boolean, title: string) => void,
+  initialAlertOn?: boolean,
+  onApply: (price: number, color: string, lineWidth: number, lineStyle: number, labelVisible: boolean, title: string, alertOn: boolean) => void,
   onDelete: () => void,
-  onChange?: (price: number, color: string, lineWidth: number, lineStyle: number, labelVisible: boolean, title: string) => void
+  onChange?: (price: number, color: string, lineWidth: number, lineStyle: number, labelVisible: boolean, title: string, alertOn: boolean) => void
 }) {
   const [tab, setTab] = useState<'style' | 'coordinates'>('style');
   const [price, setPrice] = useState(Math.round(initialPrice));
@@ -840,6 +842,7 @@ function LineEditorModal({
   const [lineStyle, setLineStyle] = useState(initialLineStyle);
   const [labelVisible, setLabelVisible] = useState(initialLabelVisible);
   const [title, setTitle] = useState(initialTitle || '');
+  const [alertOn, setAlertOn] = useState(!!initialAlertOn);
 
   const isFirstRender = useRef(true);
   
@@ -849,10 +852,10 @@ function LineEditorModal({
       return;
     }
     if (onChange) {
-      onChange(price, color, lineWidth, lineStyle, labelVisible, title);
+      onChange(price, color, lineWidth, lineStyle, labelVisible, title, alertOn);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [price, color, lineWidth, lineStyle, labelVisible, title]);
+  }, [price, color, lineWidth, lineStyle, labelVisible, title, alertOn]);
 
   const predefinedColors = [
     '#ffffff', '#d1d5db', '#9ca3af', '#6b7280', '#4b5563', '#374151', '#1f2937', '#111827',
@@ -930,6 +933,26 @@ function LineEditorModal({
                 />
                 <span className="text-sm text-full text-foreground hover:text-foreground">Price label</span>
               </label>
+
+              {/* Alert on this line. Independent of the Level Touch Alerts
+                  indicator: a line armed here is watched on its own. */}
+              <label className="flex items-center gap-2 mt-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={alertOn}
+                  onChange={e => setAlertOn(e.target.checked)}
+                  className="rounded border-0 bg-muted/40 dark:bg-black/20 text-blue-500 focus:ring-0"
+                />
+                <span className="text-sm text-foreground flex items-center gap-1.5">
+                  <Bell className="w-3.5 h-3.5 text-amber-400" /> Alert when price touches this line
+                </span>
+              </label>
+              {alertOn && (
+                <p className="text-[11px] text-muted-foreground mt-1.5 leading-relaxed">
+                  Sounds a tone and sends a notification on each cross. Waits for price to move
+                  away before it can sound again, so hovering on the level does not repeat it.
+                </p>
+              )}
             </div>
           )}
           {tab === 'coordinates' && (
@@ -953,7 +976,7 @@ function LineEditorModal({
            </div>
            <div className="flex gap-2">
              <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
-             <button onClick={() => onApply(price, color, lineWidth, lineStyle, labelVisible, title)} className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium">Ok</button>
+             <button onClick={() => onApply(price, color, lineWidth, lineStyle, labelVisible, title, alertOn)} className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium">Ok</button>
            </div>
         </div>
       </div>
@@ -5665,8 +5688,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             title: '',
         });
         const id = Date.now() + Math.random();
-        manualLinesRef.current.push({ id, price: price, instance: newPriceLine, color: '#facc15', lineWidth: 2, axisLabelVisible: true, lineStyle: 0 });
-        setManualLineIds(prev => [...prev, { id, price, color: '#facc15', lineWidth: 2, axisLabelVisible: true, lineStyle: 0 }]);
+        manualLinesRef.current.push({ id, price: price, instance: newPriceLine, color: '#facc15', lineWidth: 2, axisLabelVisible: true, lineStyle: 0, alertOn: false });
+        setManualLineIds(prev => [...prev, { id, price, color: '#facc15', lineWidth: 2, axisLabelVisible: true, lineStyle: 0, alertOn: false }]);
         setCrosshairInfo(null);
     }
   };
@@ -8078,7 +8101,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // Rebuild the alert level list whenever any level source changes. Only levels
   // whose indicator is currently visible are alerted — what you see is what alerts.
   useEffect(() => {
-    const L: { key: string; label: string; price: number }[] = [];
+    const L: { key: string; label: string; price: number; always?: boolean }[] = [];
     const add = (key: string, label: string, price: any) => {
       const p = Number(price);
       if (Number.isFinite(p) && p > 0) L.push({ key, label, price: p });
@@ -8117,8 +8140,17 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       (dz?.demand || []).forEach((z: any, i: number) => add(`dz${i}`, 'Demand zone', z.top));
       (dz?.supply || []).forEach((z: any, i: number) => add(`sz${i}`, 'Supply zone', z.bottom));
     }
+    // A hand-drawn line with its alert switched on is watched whether or not the
+    // Level Touch Alerts indicator is on: the user armed THAT line deliberately,
+    // so it carries `always` and the detector honours it on its own.
+    for (const ln of manualLineIds) {
+      if (!ln?.alertOn) continue;
+      add(`ml${ln.id}`, ln.title?.trim() || `Line ${Math.round(Number(ln.price) || 0)}`, ln.price);
+      const last = L[L.length - 1];
+      if (last && last.key === `ml${ln.id}`) (last as any).always = true;
+    }
     alertLevelsRef.current = L;
-  }, [hLevels, showHLevels, showFiftyPercentLevels, pdhPdlData, showPdhPdl, localAnalytics, showSnR, taInfo, showOpeningRange, showDsZones, intradayLevelsAllowed, isReferenceChart]);
+  }, [hLevels, showHLevels, showFiftyPercentLevels, pdhPdlData, showPdhPdl, localAnalytics, showSnR, taInfo, showOpeningRange, showDsZones, intradayLevelsAllowed, isReferenceChart, manualLineIds]);
 
   // Fire one alert: OS notification (works from background tabs) + beep. No in-app
   // toast — see fireBreakoutAlert: on a phone these cards cover the chart they are
@@ -8185,6 +8217,37 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     } catch(e) {}
   };
 
+  // A line the user DREW and armed himself. Deliberately not routed through
+  // marketAlertsAllowed(): that gate silences every alert on an option chart,
+  // because indicator levels are noise on a decaying premium. This one is not an
+  // indicator — he put the line there and ticked the box — so it fires on an
+  // option chart too. The market-open check still applies; a tone after the close
+  // would be about a price nobody can act on. Distinct two-tone chime so it is
+  // not mistaken for a support/resistance touch.
+  const fireManualLineAlert = (label: string, price: number, ltp: number, dirUp: boolean) => {
+    const nowSec = Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current;
+    if (!isMarketOpen(nowSec)) return;
+    const title = `${label} hit`;
+    const body = `${ltp.toFixed(2)} crossed ${dirUp ? 'up through' : 'down through'} your line at ${price}`;
+    trayNotify(title, body, `manual-${price}`);
+    try { notificationService.add('divergence', title, body, { ephemeral: true }); } catch (e) {}
+    try {
+      const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (AC) {
+        const actx = new AC();
+        const chime = (freq: number, at: number) => {
+          const o = actx.createOscillator(); const g = actx.createGain();
+          o.connect(g); g.connect(actx.destination);
+          o.frequency.value = freq; g.gain.value = 0.09;
+          o.start(actx.currentTime + at); o.stop(actx.currentTime + at + 0.16);
+        };
+        chime(dirUp ? 784 : 587, 0);
+        chime(dirUp ? 1047 : 440, 0.18);
+        setTimeout(() => { try { actx.close(); } catch (e) {} }, 800);
+      }
+    } catch (e) {}
+  };
+
   // Zone-tap alert. Follows the house convention set by fireLevelAlert and
   // fireBreakoutAlert: OS notification (useful when the app is not in front of
   // him) + bell-list entry + a tone, and deliberately NO in-app toast, which on
@@ -8237,7 +8300,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // a level between consecutive ticks; per-level 3-min cooldown, and re-arms only
   // after price moves >0.05% away from the level (prevents hover spam).
   const checkLevelAlerts = (spot: number) => {
-    if (!levelAlertsOnRef.current || !Number.isFinite(spot) || spot <= 0) return;
+    if (!Number.isFinite(spot) || spot <= 0) return;
+    // Hand-drawn lines carry `always`, so the loop still runs with the indicator
+    // off — it just skips everything the indicator would have contributed.
+    const levels = alertLevelsRef.current.filter((l: any) => levelAlertsOnRef.current || l.always);
+    if (!levels.length) return;
     const prev = alertPrevSpotRef.current;
     alertPrevSpotRef.current = spot;
     if (prev === null || prev === spot) return;
@@ -8247,7 +8314,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     const rearmPct = Math.min(5, Math.max(0.005, parseFloat(levelAlertRearm) || 0.05));
     const rearmDist = spot * (rearmPct / 100); // 0.05% ≈ ~12 pts on NIFTY
     const coolMs = Math.min(60, Math.max(0, parseFloat(levelAlertCooldown) || 3)) * 60000;
-    for (const { key, label, price } of alertLevelsRef.current) {
+    for (const { key, label, price, always } of levels as any[]) {
       let st = alertStateRef.current.get(key);
       if (!st) { st = { lastFired: 0, armed: true }; alertStateRef.current.set(key, st); }
       if (!st.armed && Math.abs(spot - price) > rearmDist) st.armed = true;
@@ -8255,7 +8322,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       const crossedDown = prev > price && spot <= price;
       if ((crossedUp || crossedDown) && st.armed && now - st.lastFired > coolMs) {
         st.lastFired = now; st.armed = false;
-        fireLevelAlert(label, price, spot, crossedUp);
+        if (always) fireManualLineAlert(label, price, spot, crossedUp);
+        else fireLevelAlert(label, price, spot, crossedUp);
       }
     }
   };
@@ -11965,6 +12033,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           initialLineStyle={manualLinesRef.current.find((l: any) => l.id === editingLineId)?.lineStyle || 0}
           initialLabelVisible={manualLinesRef.current.find((l: any) => l.id === editingLineId)?.axisLabelVisible ?? true}
           initialTitle={manualLinesRef.current.find((l: any) => l.id === editingLineId)?.title || ''}
+          initialAlertOn={!!manualLinesRef.current.find((l: any) => l.id === editingLineId)?.alertOn}
           onClose={() => setEditingLineId(null)}
           onDelete={() => {
             const idx = manualLinesRef.current.findIndex((l: any) => l.id === editingLineId);
@@ -11975,7 +12044,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             }
             setEditingLineId(null);
           }}
-          onChange={(price, color, lineWidth, lineStyle, labelVisible, title) => {
+          onChange={(price, color, lineWidth, lineStyle, labelVisible, title, alertOn) => {
             const idx = manualLinesRef.current.findIndex((l: any) => l.id === editingLineId);
             if (idx > -1) {
               const lineData = manualLinesRef.current[idx];
@@ -11994,10 +12063,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                 lineData.lineStyle = lineStyle;
                 lineData.axisLabelVisible = labelVisible;
                 lineData.title = title;
+                lineData.alertOn = alertOn;
               } catch(e){}
             }
           }}
-          onApply={(price, color, lineWidth, lineStyle, labelVisible, title) => {
+          onApply={(price, color, lineWidth, lineStyle, labelVisible, title, alertOn) => {
             const idx = manualLinesRef.current.findIndex((l: any) => l.id === editingLineId);
             if (idx > -1) {
               const lineData = manualLinesRef.current[idx];
@@ -12016,7 +12086,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                 lineData.lineStyle = lineStyle;
                 lineData.axisLabelVisible = labelVisible;
                 lineData.title = title;
-                setManualLineIds(prev => prev.map(l => l.id === editingLineId ? { ...l, price, color, lineWidth, lineStyle, axisLabelVisible: labelVisible, title } : l));
+                lineData.alertOn = alertOn;
+                // Written into state (and so into localStorage) — an armed line
+                // must still be armed after a reload.
+                setManualLineIds(prev => prev.map(l => l.id === editingLineId ? { ...l, price, color, lineWidth, lineStyle, axisLabelVisible: labelVisible, title, alertOn } : l));
               } catch(e){}
             }
             setEditingLineId(null);
