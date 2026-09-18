@@ -5994,11 +5994,19 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       const pctTitle = exitTitle;   // one implementation, shared with the refresh above
       const upLabel = effBull ? 'TARGET' : 'SL';
       const loLabel = effBull ? 'SL' : 'TARGET';
-      const uInst = s.createPriceLine({ price: upper, color: '#f43f5e', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: pctTitle(upLabel, upper) });
-      const lInst = s.createPriceLine({ price: lower, color: '#10b981', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: pctTitle(loLabel, lower) });
+      // Colour follows the MEANING, not the position on the chart: red is the
+      // stop, green is the target. These were painted by position — upper always
+      // red, lower always green — so on a long option the target came out red and
+      // the stop green, the opposite of the spot mirror lines drawn elsewhere.
+      const EXIT_SL_COLOR = '#f43f5e';
+      const EXIT_TP_COLOR = '#10b981';
+      const upColor = upLabel === 'SL' ? EXIT_SL_COLOR : EXIT_TP_COLOR;
+      const loColor = loLabel === 'SL' ? EXIT_SL_COLOR : EXIT_TP_COLOR;
+      const uInst = s.createPriceLine({ price: upper, color: upColor, lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: pctTitle(upLabel, upper) });
+      const lInst = s.createPriceLine({ price: lower, color: loColor, lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: pctTitle(loLabel, lower) });
       slLinesRef.current = [
-        { kind: 'upper', price: upper, instance: uInst, label: upLabel, color: '#f43f5e', title: pctTitle(upLabel, upper) },
-        { kind: 'lower', price: lower, instance: lInst, label: loLabel, color: '#10b981', title: pctTitle(loLabel, lower) },
+        { kind: 'upper', price: upper, instance: uInst, label: upLabel, color: upColor, title: pctTitle(upLabel, upper) },
+        { kind: 'lower', price: lower, instance: lInst, label: loLabel, color: loColor, title: pctTitle(loLabel, lower) },
       ];
       slSeriesRef.current = s;
       // Fixed ENTRY line on the traded option's chart (reference, not draggable)
@@ -10102,7 +10110,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                  slSorted.forEach(({ sl, y }) => {
                     const yy = y as number;
                     const txt = sl.label || (sl.kind === 'upper' ? 'TARGET' : 'SL');
-                    const lineColor = sl.color || (sl.kind === 'upper' ? '#f43f5e' : '#10b981');
+                    const lineColor = sl.color || (txt === 'SL' ? '#f43f5e' : '#10b981');
                     ctx.font = 'bold 10px sans-serif';
                     const tw = ctx.measureText(txt).width;
 
