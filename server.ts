@@ -1598,6 +1598,12 @@ setInterval(() => {
       const ts = (t: any) => {
         const v = t.fill_timestamp || t.exchange_timestamp || t.timestamp;
         if (!v) return Date.now();
+        // The kiteconnect library has ALREADY parsed these into Date objects. The
+        // string path below turned one into "Fri Sep 18 2026 ..." + "+05:30",
+        // which is not a date, so every fill fell through to Date.now() — which
+        // is why every trade showed the import time (10:58) as its entry and exit.
+        if (v instanceof Date) { const ms = v.getTime(); return isFinite(ms) ? ms : Date.now(); }
+        if (typeof v === 'number') return v < 1e12 ? v * 1000 : v;
         let str = String(v).trim();
         if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(str)) str = str.replace(' ', 'T') + '+05:30';
         const ms = new Date(str).getTime();
@@ -1605,8 +1611,35 @@ setInterval(() => {
       };
       const sorted = [...trades].sort((a, b) => ts(a) - ts(b));
 
-      // FIFO pair per symbol.
+      const now = Date.now();
+      const istNow = new Date(now + 5.5 * 3600000);
+      const dayStart = Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate()) - 5.5 * 3600000;
+
+      // OVERNIGHT POSITIONS. Kite's trade list only has TODAY's fills. A position
+      // carried in from yesterday (NRML) is not in it, so the first sell of the day
+      // looked like a fresh short, the next buy "closed" that short at a profit,
+      // and the leftover appeared as an OPEN short that does not exist. The book
+      // is seeded with each carried quantity at Kite's previous close — the same
+      // basis Kite uses for the day's P&L on that position — so the pairing and
+      // the P&L line up with the Kite app.
       const openLots: Record<string, any[]> = {};
+      try {
+        const posResp: any = await kc.getPositions();
+        const net: any[] = Array.isArray(posResp?.net) ? posResp.net : [];
+        for (const p of net) {
+          const oq = Number(p.overnight_quantity) || 0;
+          if (!oq || !p.tradingsymbol) continue;
+          const basis = Number(p.close_price) > 0 ? Number(p.close_price) : Number(p.average_price) || 0;
+          if (!(basis > 0)) continue;
+          (openLots[p.tradingsymbol] = openLots[p.tradingsymbol] || []).push({
+            side: oq > 0 ? 'BUY' : 'SELL', qty: Math.abs(oq), price: basis,
+            when: dayStart + (9 * 60 + 15) * 60000, product: p.product || 'NRML',
+            orderId: 'OVERNIGHT', tradeId: null, carried: true,
+          });
+        }
+      } catch (e) { console.error('[journal import-kite] positions read failed (overnight seeding skipped)', e); }
+
+      // FIFO pair per symbol.
       const rows: any[] = [];
       for (const t of sorted) {
         const sym = t.tradingsymbol; if (!sym) continue;
@@ -1622,7 +1655,7 @@ setInterval(() => {
           const take = Math.min(qty, lot.qty);
           const pnl = lot.side === 'BUY' ? (price - lot.price) * take : (lot.price - price) * take;
           rows.push({ sym, side: lot.side, qty: take, entry: lot.price, entryTime: lot.when, exit: price, exitTime: when,
-                      product: lot.product, status: 'CLOSED', pnl });
+                      product: lot.product, status: 'CLOSED', pnl, orderId: lot.orderId, carried: !!lot.carried });
           lot.qty -= take; qty -= take;
           if (lot.qty <= 0) book.shift();
         }
@@ -1632,21 +1665,24 @@ setInterval(() => {
       for (const key of Object.keys(openLots)) {
         for (const lot of openLots[key]) {
           rows.push({ sym: key, side: lot.side, qty: lot.qty, entry: lot.price, entryTime: lot.when,
-                      exit: null, exitTime: null, product: lot.product, status: 'OPEN', pnl: null });
+                      exit: null, exitTime: null, product: lot.product, status: 'OPEN', pnl: null, orderId: lot.orderId, carried: !!lot.carried });
         }
       }
 
-      // AGGREGATE to one row per symbol per state. The first version wrote a row per
-      // FIFO leg, so a single order filled in chunks became seven near-identical
-      // lines differing by five paise — unreadable, and it looked like duplicates.
-      // A journal should show the trade the way it was actually taken.
+      // AGGREGATE to one row per ENTRY ORDER. Chunks of one order filling at five
+      // paise apart collapse into one trade. But two separate round trips in the
+      // same strike stay two rows: the old key (symbol + side) merged them into a
+      // single "BUY 1755" that was never placed, with blended prices nobody paid.
       type Agg = { sym: string; side: string; qty: number; entryQP: number; exitQP: number;
-                   entryTime: number; exitTime: number | null; product: string; status: string; pnl: number };
+                   entryTime: number; exitTime: number | null; product: string; status: string; pnl: number;
+                   orderId: string; carried: boolean };
       const aggs = new Map<string, Agg>();
       for (const r of rows) {
-        const k = `${r.sym}|${r.status}|${r.side}`;
+        const oid = String(r.orderId || 'NA');
+        const k = `${r.sym}|${r.status}|${r.side}|${oid}`;
         const a = aggs.get(k) || { sym: r.sym, side: r.side, qty: 0, entryQP: 0, exitQP: 0,
-                                   entryTime: r.entryTime, exitTime: null, product: r.product, status: r.status, pnl: 0 };
+                                   entryTime: r.entryTime, exitTime: null, product: r.product, status: r.status, pnl: 0,
+                                   orderId: oid, carried: !!r.carried };
         a.qty += r.qty;
         a.entryQP += r.entry * r.qty;                       // quantity-weighted, so the
         if (r.exit != null) a.exitQP += r.exit * r.qty;     // average price is the real one
@@ -1657,9 +1693,6 @@ setInterval(() => {
       }
 
       const parse = (sym: string) => { const m = /(\d+)(CE|PE)$/.exec(sym || ''); return m ? { strike: Number(m[1]), optionType: m[2] } : { strike: null, optionType: null }; };
-      const now = Date.now();
-      const istNow = new Date(now + 5.5 * 3600000);
-      const dayStart = Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate()) - 5.5 * 3600000;
 
       // REBUILD, don't accumulate. Kite's trade list is the full truth for the day,
       // so previously imported rows for today are cleared and rewritten. The first
@@ -1674,6 +1707,26 @@ setInterval(() => {
         `DELETE FROM trade_journal WHERE kite_key IS NOT NULL AND entry_time >= ? AND kite_user_id = ?`
       ).run(dayStart, owner);
 
+      // Rows this app wrote itself when it placed the order describe the SAME
+      // trades the broker is now reporting, at the price the app expected rather
+      // than the fill, with the exit stamped from a position snapshot. Kept
+      // alongside the import they doubled every trade with worse numbers. They
+      // are replaced — but the market context captured at entry (spot, RSI,
+      // S/R, PDH/PDL) is the one thing only the app knows, so it is carried
+      // over to the broker's row for that symbol.
+      const appRows = db.prepare(
+        `SELECT id, tradingsymbol, context FROM trade_journal
+          WHERE kite_key IS NULL AND kite_user_id = ? AND entry_time >= ? AND test_mode = 0 AND simulated = 0`
+      ).all(owner, dayStart) as any[];
+      const contextBySym = new Map<string, any>();
+      const importedSyms = new Set(Array.from(aggs.values()).map((a) => a.sym));
+      const delApp = db.prepare(`DELETE FROM trade_journal WHERE id = ?`);
+      for (const r of appRows) {
+        if (!importedSyms.has(r.tradingsymbol)) continue;   // broker never saw it; leave it
+        try { const c = r.context ? JSON.parse(r.context) : null; if (c && !contextBySym.has(r.tradingsymbol)) contextBySym.set(r.tradingsymbol, c); } catch {}
+        delApp.run(r.id);
+      }
+
       let imported = 0;
       const ins = db.prepare(`INSERT OR REPLACE INTO trade_journal
         (tradingsymbol, exchange, option_type, strike, side, qty, product, entry_price, entry_time, context,
@@ -1684,15 +1737,18 @@ setInterval(() => {
         const { strike, optionType } = parse(a.sym);
         const entryAvg = Math.round((a.entryQP / a.qty) * 100) / 100;
         const exitAvg = a.status === 'CLOSED' ? Math.round((a.exitQP / a.qty) * 100) / 100 : null;
+        const appCtx = contextBySym.get(a.sym);
+        const ctx = { ...(appCtx || {}), source: 'KITE_IMPORT', ...(a.carried ? { carried: true } : {}) };
         ins.run(
           a.sym, 'NFO', optionType, strike, a.side, a.qty, a.product, entryAvg, a.entryTime,
-          JSON.stringify({ source: 'KITE_IMPORT' }), a.status, exitAvg, a.exitTime,
+          JSON.stringify(ctx), a.status, exitAvg, a.exitTime,
           a.status === 'CLOSED' ? 'KITE' : null, a.status === 'CLOSED' ? Math.round(a.pnl * 100) / 100 : null,
           now, now,
           // The account is PART of the fingerprint. Without it, two accounts
           // trading the same strike on the same day produced the same key and
-          // INSERT OR REPLACE silently overwrote one book with the other.
-          `${owner}|${dayStart}|${a.sym}|${a.status}|${a.side}`,
+          // INSERT OR REPLACE silently overwrote one book with the other. The
+          // entry order id keeps two round trips in one strike as two rows.
+          `${owner}|${dayStart}|${a.sym}|${a.status}|${a.side}|${a.orderId}`,
           owner
         );
         imported++;

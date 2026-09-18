@@ -273,6 +273,9 @@ export default function TradeJournal() {
                     <span className="font-mono text-sm font-semibold truncate">{t.tradingsymbol}</span>
                     {t.test_mode ? <span className="text-[9px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-400">TEST</span> : null}
                     {t.simulated ? <span className="text-[9px] px-1 py-0.5 rounded bg-sky-500/15 text-sky-400">SIM</span> : null}
+                    {/* Carried in from the previous day: entry is Kite's previous close,
+                        the same basis Kite uses for the day's P&L on that position. */}
+                    {ctx.carried ? <span className="text-[9px] px-1 py-0.5 rounded bg-violet-500/15 text-violet-300" title="Position carried from the previous day — entry shown is the previous close">CARRIED</span> : null}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {t.status === 'CLOSED' ? (
