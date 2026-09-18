@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
-import { BookOpen, RefreshCw, TrendingUp, TrendingDown, Trash2, Sparkles, Download } from 'lucide-react';
+import { BookOpen, RefreshCw, TrendingUp, TrendingDown, Trash2, Sparkles, Download, FileSpreadsheet } from 'lucide-react';
 
 interface JournalTrade {
   id: number;
@@ -24,7 +24,31 @@ interface JournalTrade {
   exit_time: number | null;
   exit_reason: string | null;
   pnl: number | null;
+  kite_user_id?: string | null;
 }
+
+// IST calendar day for a timestamp — the journal is organised by trading day, and
+// the browser may not be in IST (Dubai is UTC+4).
+const istDay = (ms: number | null | undefined): string => {
+  if (!ms) return 'unknown';
+  return new Date(ms + 5.5 * 3600000).toISOString().slice(0, 10);
+};
+const istDayLabel = (day: string): string => {
+  if (day === 'unknown') return 'Undated';
+  const [y, m, d] = day.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-IN',
+    { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
+};
+// Days back from today, as an IST YYYY-MM-DD.
+const istDaysAgo = (n: number): string => istDay(Date.now() - n * 86400000);
+
+const RANGES = [
+  { key: 'TODAY', label: 'Today', days: 0 },
+  { key: 'WEEK', label: '7 days', days: 6 },
+  { key: 'MONTH', label: '30 days', days: 29 },
+  { key: 'ALL', label: 'All', days: null as number | null },
+] as const;
+type RangeKey = typeof RANGES[number]['key'];
 
 const inr = (v: number | null | undefined) =>
   v === null || v === undefined || isNaN(v) ? '—' : `₹${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
@@ -60,6 +84,17 @@ function Chip({ label, value }: { label: string; value: any }) {
 
 export default function TradeJournal() {
   const [filter, setFilter] = useState<'ALL' | 'OPEN' | 'CLOSED'>('ALL');
+  // The journal keeps every day now, so a range has to be chosen rather than
+  // assumed. Today first, because that is the usual question.
+  const [range, setRange] = useState<RangeKey>('TODAY');
+  const rangeDays = RANGES.find((r) => r.key === range)!.days;
+  const from = rangeDays === null ? null : istDaysAgo(rangeDays);
+  const to = rangeDays === null ? null : istDay(Date.now());
+
+  const downloadExcel = () => {
+    const qs = from && to ? `?from=${from}&to=${to}` : '';
+    window.location.href = `/api/journal/export.xlsx${qs}`;
+  };
 
   const [importing, setImporting] = useState(false);
   const importKite = async () => {
@@ -79,23 +114,38 @@ export default function TradeJournal() {
   };
 
   const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ['trade-journal'],
+    queryKey: ['trade-journal', from, to],
     queryFn: async () => {
-      const res = await fetch('/api/journal');
+      const qs = from && to ? `?from=${from}&to=${to}` : '';
+      const res = await fetch(`/api/journal${qs}`);
       if (!res.ok) throw new Error('Failed to load journal');
       const j = await res.json();
-      return (j.trades || []) as JournalTrade[];
+      return j as { trades: JournalTrade[]; note?: string; accountId?: string };
     },
     refetchOnWindowFocus: false,
   });
 
-  const trades = data || [];
+  const trades = data?.trades || [];
   const shown = trades.filter((t) => filter === 'ALL' ? true : t.status === filter);
 
+  // Every figure below is for the SELECTED RANGE and the logged-in account only.
+  // It used to total every closed row in the table regardless of whose it was,
+  // which is what made Realised P&L wrong after a second account signed in.
   const closed = trades.filter((t) => t.status === 'CLOSED');
   const wins = closed.filter((t) => (t.pnl || 0) > 0).length;
   const winRate = closed.length ? Math.round((wins / closed.length) * 100) : 0;
   const totalPnl = closed.reduce((s, t) => s + (t.pnl || 0), 0);
+
+  // Grouped by trading day, newest first, each with its own realised total.
+  const byDay: { day: string; rows: JournalTrade[]; pnl: number }[] = [];
+  for (const t of shown) {
+    const day = istDay(t.entry_time);
+    let g = byDay.find((x) => x.day === day);
+    if (!g) { g = { day, rows: [], pnl: 0 }; byDay.push(g); }
+    g.rows.push(t);
+    if (t.status === 'CLOSED') g.pnl += t.pnl || 0;
+  }
+  byDay.sort((a, b) => (a.day < b.day ? 1 : -1));
 
   const handleDelete = async (id: number) => {
     try {
@@ -132,6 +182,13 @@ export default function TradeJournal() {
           >
             <RefreshCw className={cn('w-3.5 h-3.5', isFetching && 'animate-spin')} /> Refresh
           </button>
+          <button
+            onClick={downloadExcel}
+            className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 transition-colors text-emerald-300"
+            title="Download these trades as an Excel workbook"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" /> Excel
+          </button>
         </div>
       </div>
 
@@ -141,6 +198,23 @@ export default function TradeJournal() {
         <StatCard label="Closed" value={String(closed.length)} />
         <StatCard label="Win Rate" value={closed.length ? `${winRate}%` : '—'} tone={winRate >= 50 ? 'pos' : closed.length ? 'neg' : 'neutral'} />
         <StatCard label="Realized P&L" value={inr(totalPnl)} tone={totalPnl > 0 ? 'pos' : totalPnl < 0 ? 'neg' : 'neutral'} />
+      </div>
+
+      {/* Range — the record is permanent now, so the window is explicit. */}
+      <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+        {RANGES.map((r) => (
+          <button
+            key={r.key}
+            onClick={() => setRange(r.key)}
+            className={cn('text-[11px] font-semibold px-3 py-1.5 rounded-lg transition-colors',
+              range === r.key ? 'bg-emerald-500/15 text-emerald-300' : 'bg-card text-muted-foreground hover:text-foreground')}
+          >
+            {r.label}
+          </button>
+        ))}
+        {data?.accountId && (
+          <span className="ml-auto text-[10px] font-mono text-muted-foreground">Account {data.accountId}</span>
+        )}
       </div>
 
       {/* Filter */}
@@ -166,13 +240,26 @@ export default function TradeJournal() {
       {/* List */}
       {isLoading ? (
         <div className="text-center text-muted-foreground py-16 text-sm">Loading journal…</div>
+      ) : data?.note ? (
+        <div className="text-center text-muted-foreground py-16 text-sm">{data.note}</div>
       ) : shown.length === 0 ? (
         <div className="text-center text-muted-foreground py-16 text-sm">
-          No trades recorded yet. Place a trade from the chart and it'll appear here with its full market context.
+          No trades in this range. Widen it above, or press "Import from Kite" to pull today's fills.
         </div>
       ) : (
-        <div className="space-y-2.5">
-          {shown.map((t) => {
+        <div className="space-y-5">
+          {byDay.map((g) => (
+          <div key={g.day} className="space-y-2.5">
+            {/* Day header with that day's realised total — the journal spans many
+                days now, so rows need a date they belong to. */}
+            <div className="flex items-center justify-between gap-3 px-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{istDayLabel(g.day)}</span>
+              <span className={cn('text-[11px] font-mono font-bold',
+                g.pnl > 0 ? 'text-emerald-400' : g.pnl < 0 ? 'text-rose-400' : 'text-muted-foreground')}>
+                {g.rows.some((r) => r.status === 'CLOSED') ? inr(g.pnl) : '—'}
+              </span>
+            </div>
+          {g.rows.map((t) => {
             const isBuy = t.side === 'BUY';
             const pnlPos = (t.pnl || 0) >= 0;
             const ctx = t.context || {};
@@ -224,6 +311,8 @@ export default function TradeJournal() {
               </div>
             );
           })}
+          </div>
+          ))}
         </div>
       )}
     </div>

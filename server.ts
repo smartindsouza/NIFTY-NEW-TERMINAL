@@ -247,6 +247,14 @@ db.prepare(`
 // happily duplicate every row on the second run).
 try { db.exec(`ALTER TABLE trade_journal ADD COLUMN kite_key TEXT`); }
 catch (e) { /* already present */ }
+// kite_user_id is also ALTERed in near the top of this file, but that runs BEFORE
+// trade_journal is created — so on a brand new database (a fresh volume) it failed
+// silently and the table came up without an owner column. Repeat it here, after
+// the table exists. Ownership is load-bearing now, so it cannot be left to luck.
+try { db.exec(`ALTER TABLE trade_journal ADD COLUMN kite_user_id TEXT`); }
+catch (e) { /* already present */ }
+try { db.exec(`CREATE INDEX IF NOT EXISTS idx_trade_journal_owner_time ON trade_journal(kite_user_id, entry_time)`); }
+catch (e) { console.error('[journal] owner index failed', e); }
 try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_trade_journal_kite_key ON trade_journal(kite_key) WHERE kite_key IS NOT NULL`); }
 catch (e) { console.error('[journal] kite_key index failed', e); }
 
@@ -323,6 +331,55 @@ async function placeKiteLimitExit(opts: { exchange: string; tradingsymbol: strin
 // Closes the ACTUAL open position for a symbol: reads its real product, quantity and
 // direction from Kite and places a matching closing order. This guarantees the order
 // flattens the position (no product mismatch, no accidental new short).
+// ===== Trade Journal ownership =====
+// Every read and write below is scoped to the Zerodha account that is logged in.
+// Before this, the Kite import wrote rows with NO owner at all, the day-rebuild
+// wiped every account's rows for the day, and the row fingerprint left the account
+// out — so a second account's import overwrote the first's and the P&L totals were
+// summed across both books.
+function journalOwner(): string | null {
+  const u = getKiteUserId();
+  return u ? String(u) : null;
+}
+
+// Rows written before the owner column existed have NULL. They belong to whichever
+// account was using the app first, so they are adopted by that account once and
+// then filtered like everything else — no NULL fallback in the read path, which is
+// what let a second account see the first account's history.
+let legacyAdoptionDone = false;
+function adoptLegacyJournalRows() {
+  if (legacyAdoptionDone) return;
+  try {
+    const firstUid = (db.prepare(
+      'SELECT kite_user_id AS u FROM trade_journal WHERE kite_user_id IS NOT NULL ORDER BY id ASC LIMIT 1'
+    ).get() as any)?.u;
+    if (!firstUid) return;                       // nobody stamped yet; try again later
+    db.prepare('UPDATE trade_journal SET kite_user_id = ? WHERE kite_user_id IS NULL').run(firstUid);
+    legacyAdoptionDone = true;
+  } catch (e) { console.error('[journal] legacy adoption failed', e); }
+}
+
+// IST day boundaries for a YYYY-MM-DD string. The journal is read by trading day,
+// and the server runs in UTC, so every boundary has to be built explicitly.
+function istDayStart(d: Date): number {
+  const ist = new Date(d.getTime() + 5.5 * 3600000);
+  return Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()) - 5.5 * 3600000;
+}
+function journalRange(fromQ: any, toQ: any): { from: number; to: number } {
+  const parseDay = (v: any): number | null => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || '').trim());
+    if (!m) return null;
+    return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) - 5.5 * 3600000;
+  };
+  const fromDay = parseDay(fromQ);
+  const toDay = parseDay(toQ);
+  // Default: everything. The journal is meant to be a permanent record now, not
+  // a view of the current day.
+  const from = fromDay ?? 0;
+  const to = (toDay ?? istDayStart(new Date())) + 24 * 3600000 - 1;
+  return { from, to };
+}
+
 // ===== Trade Journal helpers (Phase 1) =====
 function journalOpenTrade(o: {
   tradingsymbol: string; exchange?: string; side: string; qty: number; product?: string;
@@ -349,7 +406,14 @@ function journalCloseTrade(tradingsymbol: string, c: { exitPrice?: number; pnl?:
   try {
     const now = Date.now();
     // Close the most recent still-open row for this symbol (no-op if none — keeps double-close safe)
-    const row = db.prepare(`SELECT id FROM trade_journal WHERE tradingsymbol = ? AND status = 'OPEN' ORDER BY entry_time DESC LIMIT 1`).get(tradingsymbol) as any;
+    // Scoped to the logged-in account: without this, exiting on one account closed
+    // the other account's open row for the same symbol.
+    const owner = journalOwner();
+    const row = db.prepare(
+      `SELECT id FROM trade_journal WHERE tradingsymbol = ? AND status = 'OPEN'
+         AND (kite_user_id = ? OR kite_user_id IS NULL)
+       ORDER BY entry_time DESC LIMIT 1`
+    ).get(tradingsymbol, owner) as any;
     if (!row) return;
     db.prepare(`UPDATE trade_journal SET status='CLOSED', exit_price=?, exit_time=?, exit_reason=?, pnl=?, updated_at=? WHERE id=?`)
       .run((c.exitPrice ?? null) as any, now, c.reason || 'MANUAL', (c.pnl ?? null) as any, now, row.id);
@@ -387,7 +451,12 @@ async function reconcileJournalWithBroker(force = false): Promise<{ closed: numb
   // A just-placed entry may not be in the book yet; leave the last two minutes
   // alone so reconciliation cannot close a trade that is still being opened.
   const cutoff = Date.now() - 2 * 60 * 1000;
-  const open: any[] = db.prepare("SELECT * FROM trade_journal WHERE status='OPEN' AND entry_time < ?").all(cutoff) as any[];
+  // Only this account's rows: the broker book being read belongs to the logged-in
+  // account, and it says nothing about anyone else's open trades.
+  const owner = journalOwner();
+  const open: any[] = db.prepare(
+    "SELECT * FROM trade_journal WHERE status='OPEN' AND entry_time < ? AND (kite_user_id = ? OR kite_user_id IS NULL)"
+  ).all(cutoff, owner) as any[];
   let closed = 0;
   for (const row of open) {
     // Simulated and test rows are not broker trades; the book can say nothing
@@ -1003,6 +1072,25 @@ setInterval(() => {
     } catch (e) { /* keep watcher alive */ }
   }, 2000);
 
+  // JOURNAL AUTO-CAPTURE. Zerodha's trade list only ever covers the CURRENT day,
+  // so a day the app is never opened is a day lost from the record forever. This
+  // pulls the day's fills on a timer through the session and once after the close,
+  // which is what makes the journal a permanent history rather than a live view.
+  // The import is a per-account rebuild of the day, so running it repeatedly is
+  // harmless — it cannot double-count.
+  setInterval(() => {
+    try {
+      const ist = new Date(Date.now() + 5.5 * 3600000);
+      const d = ist.getUTCDay();
+      if (d === 0 || d === 6) return;
+      const mins = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+      if (mins < 9 * 60 + 15 || mins > 15 * 60 + 55) return;
+      if (!journalOwner()) return;                       // nobody logged in
+      fetch(`http://127.0.0.1:${PORT}/api/journal/import-kite`, { method: 'POST' })
+        .catch(() => {});
+    } catch (e) { /* never let the timer throw */ }
+  }, 5 * 60 * 1000);
+
   // Slow loop (15s): candle-close triggers — close-mode stop/target, trailing init+ratchet+exit, and RSI
   setInterval(async () => {
     try {
@@ -1491,6 +1579,9 @@ setInterval(() => {
   // disconnected legs. An unmatched buy stays OPEN.
   app.post('/api/journal/import-kite', express.json(), async (_req, res) => {
     try {
+      adoptLegacyJournalRows();
+      const owner = journalOwner();
+      if (!owner) return res.json({ success: false, error: 'No active Kite session — log in to Zerodha first.' });
       const kc = getKiteClient();
       // @ts-ignore
       if (!kc || !kc.access_token) return res.json({ success: false, error: 'No active Kite session — log in to Zerodha first.' });
@@ -1576,13 +1667,18 @@ setInterval(() => {
       // OPEN row behind forever — which is why closed positions kept showing OPEN,
       // and why the same symbol appeared open at two different quantities.
       // Only auto-imported rows are touched; anything hand-entered is left alone.
-      const wipe = db.prepare(`DELETE FROM trade_journal WHERE kite_key IS NOT NULL AND entry_time >= ?`).run(dayStart);
+      // Scoped to THIS account: unscoped, importing on one account erased the
+      // other account's day, which is a large part of why the journal read wrong
+      // after the client-ID swap.
+      const wipe = db.prepare(
+        `DELETE FROM trade_journal WHERE kite_key IS NOT NULL AND entry_time >= ? AND kite_user_id = ?`
+      ).run(dayStart, owner);
 
       let imported = 0;
       const ins = db.prepare(`INSERT OR REPLACE INTO trade_journal
         (tradingsymbol, exchange, option_type, strike, side, qty, product, entry_price, entry_time, context,
-         test_mode, simulated, status, exit_price, exit_time, exit_reason, pnl, created_at, updated_at, kite_key)
-        VALUES (?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?)`);
+         test_mode, simulated, status, exit_price, exit_time, exit_reason, pnl, created_at, updated_at, kite_key, kite_user_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?)`);
       for (const a of aggs.values()) {
         if (a.qty <= 0) continue;
         const { strike, optionType } = parse(a.sym);
@@ -1592,7 +1688,12 @@ setInterval(() => {
           a.sym, 'NFO', optionType, strike, a.side, a.qty, a.product, entryAvg, a.entryTime,
           JSON.stringify({ source: 'KITE_IMPORT' }), a.status, exitAvg, a.exitTime,
           a.status === 'CLOSED' ? 'KITE' : null, a.status === 'CLOSED' ? Math.round(a.pnl * 100) / 100 : null,
-          now, now, `${dayStart}|${a.sym}|${a.status}|${a.side}`
+          now, now,
+          // The account is PART of the fingerprint. Without it, two accounts
+          // trading the same strike on the same day produced the same key and
+          // INSERT OR REPLACE silently overwrote one book with the other.
+          `${owner}|${dayStart}|${a.sym}|${a.status}|${a.side}`,
+          owner
         );
         imported++;
       }
@@ -1600,6 +1701,115 @@ setInterval(() => {
 
     } catch (e: any) {
       console.error('[journal import-kite]', e);
+      return res.status(500).json({ success: false, error: e?.message || String(e) });
+    }
+  });
+
+  // Excel export of the journal. Defaults to TODAY; ?from=&to= (YYYY-MM-DD, IST)
+  // widens it. Scoped to the logged-in account like every other journal read.
+  app.get('/api/journal/export.xlsx', async (req, res) => {
+    try {
+      adoptLegacyJournalRows();
+      const uid = journalOwner();
+      if (!uid) return res.status(401).json({ success: false, error: 'No active Kite session — log in to Zerodha first.' });
+
+      const today = istDayStart(new Date());
+      const todayStr = new Date(today + 5.5 * 3600000).toISOString().slice(0, 10);
+      const { from, to } = journalRange(req.query.from ?? todayStr, req.query.to ?? todayStr);
+
+      const rows = db.prepare(
+        `SELECT * FROM trade_journal WHERE kite_user_id = ? AND entry_time >= ? AND entry_time <= ?
+         ORDER BY entry_time ASC`
+      ).all(uid, from, to) as any[];
+
+      const ist = (ms: number | null) => {
+        if (!ms) return '';
+        return new Date(ms + 5.5 * 3600000).toISOString().replace('T', ' ').slice(0, 19);
+      };
+
+      const ExcelJS = await import('exceljs');
+      const wb = new ExcelJS.default.Workbook();
+      wb.creator = 'NIFTY Quant Terminal';
+      wb.created = new Date();
+      const ws = wb.addWorksheet('Trades', { views: [{ state: 'frozen', ySplit: 1 }] });
+
+      ws.columns = [
+        { header: 'Date (IST)',      key: 'date',     width: 12 },
+        { header: 'Symbol',          key: 'sym',      width: 22 },
+        { header: 'Strike',          key: 'strike',   width: 9 },
+        { header: 'Type',            key: 'otype',    width: 7 },
+        { header: 'Side',            key: 'side',     width: 7 },
+        { header: 'Qty',             key: 'qty',      width: 8 },
+        { header: 'Product',         key: 'product',  width: 9 },
+        { header: 'Entry',           key: 'entry',    width: 10 },
+        { header: 'Entry time',      key: 'etime',    width: 20 },
+        { header: 'Exit',            key: 'exit',     width: 10 },
+        { header: 'Exit time',       key: 'xtime',    width: 20 },
+        { header: 'Held (min)',      key: 'held',     width: 11 },
+        { header: 'Points',          key: 'points',   width: 10 },
+        { header: 'P&L',             key: 'pnl',      width: 12 },
+        { header: 'Status',          key: 'status',   width: 9 },
+        { header: 'Exit reason',     key: 'reason',   width: 22 },
+        { header: 'Entry spot',      key: 'espot',    width: 11 },
+        { header: 'Source',          key: 'source',   width: 14 },
+        { header: 'Account',         key: 'acct',     width: 10 },
+      ];
+      ws.getRow(1).font = { bold: true };
+
+      let realised = 0, wins = 0, losses = 0;
+      for (const r of rows) {
+        const ctx = (() => { try { return r.context ? JSON.parse(r.context) : null; } catch { return null; } })();
+        const points = (r.exit_price != null && r.entry_price != null)
+          ? (String(r.side).toUpperCase() === 'BUY' ? r.exit_price - r.entry_price : r.entry_price - r.exit_price)
+          : null;
+        const held = (r.exit_time && r.entry_time) ? Math.round((r.exit_time - r.entry_time) / 60000) : null;
+        if (r.status === 'CLOSED' && typeof r.pnl === 'number') {
+          realised += r.pnl;
+          if (r.pnl > 0) wins++; else if (r.pnl < 0) losses++;
+        }
+        ws.addRow({
+          date: ist(r.entry_time).slice(0, 10),
+          sym: r.tradingsymbol, strike: r.strike, otype: r.option_type, side: r.side, qty: r.qty,
+          product: r.product,
+          entry: r.entry_price, etime: ist(r.entry_time),
+          exit: r.exit_price, xtime: ist(r.exit_time),
+          held, points: points == null ? null : Math.round(points * 100) / 100,
+          pnl: r.pnl, status: r.status, reason: r.exit_reason, espot: r.entry_spot,
+          source: r.simulated ? 'SIMULATED' : r.test_mode ? 'TEST' : (ctx?.source || 'APP'),
+          acct: r.kite_user_id || '',
+        });
+      }
+
+      for (const key of ['entry', 'exit', 'points', 'espot']) ws.getColumn(key).numFmt = '0.00';
+      ws.getColumn('pnl').numFmt = '#,##0.00;[Red]-#,##0.00';
+
+      // A summary sheet, so the totals do not have to be re-derived by hand.
+      const sum = wb.addWorksheet('Summary');
+      sum.columns = [{ header: 'Metric', key: 'k', width: 24 }, { header: 'Value', key: 'v', width: 22 }];
+      sum.getRow(1).font = { bold: true };
+      const closed = rows.filter((r) => r.status === 'CLOSED').length;
+      sum.addRows([
+        { k: 'Account', v: uid },
+        { k: 'From (IST)', v: ist(from).slice(0, 10) },
+        { k: 'To (IST)', v: ist(to).slice(0, 10) },
+        { k: 'Trades', v: rows.length },
+        { k: 'Closed', v: closed },
+        { k: 'Open', v: rows.length - closed },
+        { k: 'Wins', v: wins },
+        { k: 'Losses', v: losses },
+        { k: 'Win rate', v: closed ? `${Math.round((wins / closed) * 100)}%` : '—' },
+        { k: 'Realised P&L', v: Math.round(realised * 100) / 100 },
+        { k: 'Note', v: 'P&L is gross of brokerage, STT and other charges.' },
+      ]);
+      sum.getCell('B10').numFmt = '#,##0.00;[Red]-#,##0.00';
+
+      const fname = `trades_${uid}_${ist(from).slice(0, 10)}_to_${ist(to).slice(0, 10)}.xlsx`;
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
+      const buf = await wb.xlsx.writeBuffer();
+      return res.end(Buffer.from(buf as any));
+    } catch (e: any) {
+      console.error('[journal export]', e);
       return res.status(500).json({ success: false, error: e?.message || String(e) });
     }
   });
@@ -1615,20 +1825,23 @@ setInterval(() => {
       // Correct the book before reading it, so opening the screen is what fixes a
       // stale OPEN row rather than the user having to notice and act.
       try { await reconcileJournalWithBroker(String(req.query.reconcile || '') === '1'); } catch (e) {}
+      adoptLegacyJournalRows();
       const status = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : null;
-      const limit = Math.min(parseInt(String(req.query.limit || '500'), 10) || 500, 2000);
-      // Per-account. Rows written before this column existed have NULL and are
-      // shown to whoever is the first account to log in after the upgrade —
-      // they are Martin's history, and hiding them entirely would be worse than
-      // showing them to him.
-      const uid = getKiteUserId();
-      const firstUid = (db.prepare('SELECT kite_user_id AS u FROM trade_journal WHERE kite_user_id IS NOT NULL ORDER BY id ASC LIMIT 1').get() as any)?.u || uid;
-      const legacyMine = uid && firstUid && uid === firstUid;
-      const rows = (status === 'OPEN' || status === 'CLOSED')
-        ? db.prepare(`SELECT * FROM trade_journal WHERE status = ? AND (kite_user_id = ? ${legacyMine ? 'OR kite_user_id IS NULL' : ''}) ORDER BY entry_time DESC LIMIT ?`).all(status, uid, limit)
-        : db.prepare(`SELECT * FROM trade_journal WHERE (kite_user_id = ? ${legacyMine ? 'OR kite_user_id IS NULL' : ''}) ORDER BY entry_time DESC LIMIT ?`).all(uid, limit);
+      const limit = Math.min(parseInt(String(req.query.limit || '2000'), 10) || 2000, 20000);
+      const uid = journalOwner();
+      // No session means no way to know whose book to show. Showing the last
+      // account's trades to whoever opens the page is exactly the mix-up being
+      // fixed here, so it returns nothing and says why.
+      if (!uid) return res.json({ success: true, trades: [], note: 'Log in to Zerodha to see your journal.' });
+      const { from, to } = journalRange(req.query.from, req.query.to);
+      const where: string[] = ['kite_user_id = ?', 'entry_time >= ?', 'entry_time <= ?'];
+      const args: any[] = [uid, from, to];
+      if (status === 'OPEN' || status === 'CLOSED') { where.push('status = ?'); args.push(status); }
+      const rows = db.prepare(
+        `SELECT * FROM trade_journal WHERE ${where.join(' AND ')} ORDER BY entry_time DESC LIMIT ?`
+      ).all(...args, limit);
       const trades = (rows as any[]).map((r) => ({ ...r, context: r.context ? JSON.parse(r.context) : null }));
-      return res.json({ success: true, trades });
+      return res.json({ success: true, trades, accountId: uid, from, to });
     } catch (e: any) {
       console.error('[journal GET]', e);
       return res.status(500).json({ success: false, error: e?.message || String(e) });
