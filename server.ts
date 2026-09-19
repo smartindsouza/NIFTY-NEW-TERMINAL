@@ -2690,6 +2690,24 @@ setInterval(() => {
   // samples sit behind /api/cas-probe for one session's inspection.
   // ==========================================================================
   const casProbe: { samples: any[]; summary: any; startedAt: number | null } = { samples: [], summary: null, startedAt: null };
+
+  // Samples are kept in memory and ALSO written to disk. Friday's capture proved
+  // the fields exist but every sample returned was from 15:35, after the auction
+  // had matched — imbalance 0, indicative equal to last price. The question that
+  // matters is whether those fields MOVE during collection, 15:15 to 15:30, and
+  // only early samples answer it. A deploy would also have wiped the lot.
+  const CAS_DB_PATH = `${process.env.KITE_DATA_DIR || '.'}/cas_probe.db`;
+  let casDb: any = null;
+  try {
+    casDb = new Database(CAS_DB_PATH);
+    casDb.pragma('journal_mode = WAL');
+    casDb.exec(`CREATE TABLE IF NOT EXISTS cas_samples (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER, ist TEXT, payload TEXT)`);
+  } catch (e) { console.error('[cas] disk store unavailable:', (e as any)?.message || e); casDb = null; }
+
+  const istHHMM = (ms: number) => {
+    const d = new Date(ms + 5.5 * 3600000);
+    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+  };
   const CAS_PROBE_SYMS = ['NSE:NIFTY 50', 'NSE:RELIANCE', 'NSE:HDFCBANK', 'NSE:ICICIBANK', 'NSE:INFY', 'NSE:TCS'];
   function inCasWindow(): boolean {
     const ist = new Date(Date.now() + 5.5 * 3600000);
@@ -2751,14 +2769,65 @@ setInterval(() => {
                    head: body.slice(0, 400) };
     } catch (e: any) { smp.page = { error: e?.response?.status || e?.code || e?.message }; }
     casProbe.samples.push(smp);
+    if (casDb) {
+      try { casDb.prepare('INSERT INTO cas_samples (at, ist, payload) VALUES (?, ?, ?)')
+              .run(smp.at, istHHMM(smp.at), JSON.stringify(smp.quote || {})); } catch (e) { /* disk trouble must not stop sampling */ }
+    }
     casProbe.summary = summariseCasProbe();
   }
   setInterval(() => { casProbeTick().catch(() => {}); }, 5000);
 
-  app.get('/api/cas-probe', (_req, res) => {
-    res.json({ startedAt: casProbe.startedAt, summary: casProbe.summary || summariseCasProbe(),
-               // last three raw samples are enough to read the shapes; the rest is the summary
-               lastSamples: casProbe.samples.slice(-3) });
+  app.get('/api/cas-probe', (req, res) => {
+    // Minute-by-minute movement of the three auction fields across the window —
+    // the shape of the answer, without dumping 252 full payloads. ?raw=HH:MM
+    // returns the full quote for one minute if a shape needs inspecting.
+    const want = String(req.query.raw || '');
+    let rows: any[] = [];
+    try {
+      rows = casDb
+        ? casDb.prepare('SELECT at, ist, payload FROM cas_samples ORDER BY id ASC').all() as any[]
+        : casProbe.samples.map((x: any) => ({ at: x.at, ist: istHHMM(x.at), payload: JSON.stringify(x.quote || {}) }));
+    } catch (e) { rows = []; }
+
+    if (want) {
+      const hit = rows.find((r) => r.ist === want);
+      return res.json({ ist: want, sample: hit ? JSON.parse(hit.payload) : null, available: [...new Set(rows.map(r => r.ist))] });
+    }
+
+    // One row per minute (the first sample of each), reduced to the fields in question.
+    const byMinute = new Map<string, any>();
+    for (const r of rows) {
+      if (byMinute.has(r.ist)) continue;
+      let q: any = {};
+      try { q = JSON.parse(r.payload); } catch (e) { continue; }
+      const line: any = { ist: r.ist };
+      for (const sym of Object.keys(q)) {
+        const d = q[sym] || {};
+        const short = sym.replace('NSE:', '');
+        line[short] = {
+          last: d.last_price ?? null,
+          ind: d.indicative_close_price ?? null,
+          ref: d.reference_limit_price ?? null,
+          imb: d.total_imbalance_qty ?? null,
+          // the two facts the Friday capture could not settle
+          indMovesVsLast: (d.indicative_close_price != null && d.last_price != null)
+            ? +(d.indicative_close_price - d.last_price).toFixed(2) : null,
+        };
+      }
+      byMinute.set(r.ist, line);
+    }
+    const timeline = [...byMinute.values()];
+    const anyImbalance = timeline.some(l => Object.values(l).some((v: any) => v && typeof v === 'object' && Number(v.imb) > 0));
+    const anyDivergence = timeline.some(l => Object.values(l).some((v: any) => v && typeof v === 'object' && Math.abs(Number(v.indMovesVsLast || 0)) > 0.01));
+    res.json({
+      startedAt: casProbe.startedAt,
+      persisted: !!casDb,
+      totalSamples: rows.length,
+      // THE ANSWER: did the auction fields carry live information during the window?
+      verdict: { anyImbalance, anyDivergence },
+      summary: casProbe.summary || summariseCasProbe(),
+      timeline,
+    });
   });
 
   app.get('/api/market-context', async (_req, res) => {
