@@ -4755,6 +4755,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     },
     has(sym: string) { return this.read().includes(sym); },
     add(sym: string) {
+      // A dismissal exists to stop the auto-open reopening a chart for a position
+      // the user has chosen to hide — so it only means anything while that
+      // contract is HELD. Closing a chart after exiting its trade recorded one
+      // anyway, and with no position left, nothing would ever clear it: the next
+      // order on the same strike then never opened its chart. That was the most
+      // natural order of events — exit the trade, then close its chart.
+      const held = slActivePosRef.current?.symbol;
+      if (held !== sym) return;
       try { const a = this.read(); if (!a.includes(sym)) { a.push(sym); localStorage.setItem('dismissedOptionCharts', JSON.stringify(a.slice(-20))); } } catch (e) {}
     },
     remove(sym: string) {
@@ -5324,6 +5332,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const tradeInstrumentRef = useRef<any>(null);
   const [tradeTabInstr, setTradeTabInstr] = useState<any>(null);
   const autoOpenedForRef = useRef<string>('');
+  const lastPosSymRef = useRef<string>('');   // survives a reload via re-detection
   // Chart-side manual exit: first tap arms (CONFIRM EXIT?), second tap fires.
   const slActivePosRef = useRef<any>(null);
   // The SL/TP levels currently ARMED on the server, per symbol. The chart used to
@@ -5706,10 +5715,20 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       premRuleRef.current = null;   // a new position must start from defaults, not the last one's levels
       // The position is gone, so its dismissal has served its purpose: taking the
       // same contract again should open its chart as usual.
-      try { const prevSym = autoOpenedForRef.current; if (prevSym) dismissedChart.remove(prevSym); } catch (e) {}
+      // Clear by the last position SEEN, not by autoOpenedForRef. That ref lives
+      // in memory, so after an app restart it is empty and the dismissal was never
+      // removed — the claim that it "never outlives the trade" was false across a
+      // restart. lastPosSymRef is re-set on reload, because the open position is
+      // detected again the moment the app comes back.
+      try {
+        const prevSym = lastPosSymRef.current || autoOpenedForRef.current;
+        if (prevSym) dismissedChart.remove(prevSym);
+      } catch (e) {}
+      lastPosSymRef.current = '';
       autoOpenedForRef.current = '';
       return;
     }
+    lastPosSymRef.current = sym;
     if (autoOpenedForRef.current === sym) return;
     // Closed on purpose: still resolve the contract (the trade tab, the exit
     // button and the premium rule all need it) but do NOT reopen the chart.
