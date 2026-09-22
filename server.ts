@@ -92,6 +92,18 @@ try { db.exec(`ALTER TABLE trade_journal ADD COLUMN kite_user_id TEXT`); } catch
 try { db.exec(`ALTER TABLE premium_exit_rules ADD COLUMN kite_user_id TEXT`); } catch (e) { /* column exists */ }
 try { db.exec(`ALTER TABLE exit_rules ADD COLUMN kite_user_id TEXT`); } catch (e) { /* column exists */ }
 
+// POSITIONS RUN FREE. When the user removes SL/TP, the rule is cancelled — but
+// the client arms the default -10%/+20% for any position with no active rule,
+// the moment it sees the position. So a reload would silently re-arm the stop
+// he just removed. This records the choice per position; the client checks it
+// before auto-arming. Cleared when a new rule is deliberately armed, and keyed
+// by the position's symbol and entry price so a NEW trade on the same contract
+// is protected as normal.
+db.exec(`CREATE TABLE IF NOT EXISTS premium_exit_free (
+  tradingsymbol TEXT NOT NULL, entry REAL NOT NULL, at INTEGER NOT NULL,
+  PRIMARY KEY (tradingsymbol, entry)
+)`);
+
 // Institutional flow is LIVE ONLY, per Martin: no table, no stored snapshots.
 // Each request fetches the latest published day; if no source answers, the
 // screen says unavailable rather than showing an older day as if it were now.
@@ -1382,6 +1394,8 @@ setInterval(() => {
   // ===== Premium-based auto-exit (draggable SL/TP lines on the option chart) =====
   // set: validates the position live on Zerodha, then arms/updates the rule.
   app.post('/api/premium-exit/set', express.json(), async (req, res) => {
+    // A deliberate re-arm ends "running free" for this contract.
+    try { if (req.body?.tradingsymbol) db.prepare('DELETE FROM premium_exit_free WHERE tradingsymbol = ?').run(req.body.tradingsymbol); } catch (e) {}
     try {
       const { tradingsymbol, sl, tp, entry, trail, trailTp, optionType: optTypeIn } = req.body || {};
       const slN = Number(sl), tpN = Number(tp);
@@ -1495,6 +1509,16 @@ setInterval(() => {
     }
   });
 
+  // Is this position deliberately running without a stop?
+  app.get('/api/premium-exit/free', (req, res) => {
+    try {
+      const sym = String(req.query.tradingsymbol || ''), entry = Number(req.query.entry);
+      if (!sym || !Number.isFinite(entry)) return res.json({ free: false });
+      const row = db.prepare('SELECT 1 FROM premium_exit_free WHERE tradingsymbol = ? AND ABS(entry - ?) < 0.001').get(sym, entry);
+      return res.json({ free: !!row });
+    } catch (e: any) { return res.json({ free: false }); }
+  });
+
   app.get('/api/premium-exit/get', (req, res) => {
     try {
       const sym = String(req.query.tradingsymbol || '');
@@ -1517,6 +1541,11 @@ setInterval(() => {
       db.prepare("UPDATE premium_exit_rules SET status='CANCELLED', updated_at=? WHERE tradingsymbol=? AND status='ACTIVE'").run(Date.now(), tradingsymbol);
       syncPremiumRuleInMemory(null, prevRow?.instrument_token ? Number(prevRow.instrument_token) : null);
       trailStates.delete(tradingsymbol);
+      // Remember the position runs free, so a reload does not re-arm defaults.
+      const entry = Number(req.body?.entry);
+      if (Number.isFinite(entry) && entry > 0) {
+        db.prepare('INSERT OR REPLACE INTO premium_exit_free (tradingsymbol, entry, at) VALUES (?, ?, ?)').run(tradingsymbol, entry, Date.now());
+      }
       return res.json({ success: true });
     } catch (e: any) { return res.status(500).json({ success: false, error: e?.message || String(e) }); }
   });

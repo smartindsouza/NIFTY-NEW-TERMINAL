@@ -2086,11 +2086,16 @@ function OiBarsEditorModal({
 // exit rule is denominated in — the same number then drives the spot mirror
 // through the existing Black-Scholes map, so both charts stay consistent.
 function TpSlDefaultsModal({
-  onClose, initialSl, initialTp, initialTrail, onApply,
+  onClose, initialSl, initialTp, initialTrail, onApply, activeSymbol, onRemove,
 }: {
   onClose: () => void, initialSl: number, initialTp: number, initialTrail: boolean,
   onApply: (slPct: number, tpPct: number, trail: boolean) => void,
+  activeSymbol?: string | null, onRemove?: () => Promise<void> | void,
 }) {
+  // Two taps to remove: the first arms the button, the second acts. Removing a
+  // stop from a live trade is the one action here that cannot be undone by
+  // accident, so it must not be one stray tap away.
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const [sl, setSl] = useState(String(initialSl));
   const [tp, setTp] = useState(String(initialTp));
   const [trail, setTrail] = useState(initialTrail);
@@ -2142,6 +2147,27 @@ function TpSlDefaultsModal({
           <button onClick={() => { setSl('10'); setTp('20'); }}
             className="text-[11px] text-muted-foreground hover:text-foreground transition-colors underline">Reset to 10% / 20%</button>
         </div>
+        {activeSymbol && onRemove && (
+          <div className="mx-4 mb-2 rounded-lg border border-rose-500/30 bg-rose-500/5 p-3">
+            <div className="text-xs font-semibold text-foreground">Open trade: {activeSymbol}</div>
+            <div className="text-[11px] text-muted-foreground mt-0.5">
+              Remove its SL and TP and let it run. Nothing will exit it automatically —
+              not the stop, not the target, not the trail. Your next new trade is
+              protected as normal.
+            </div>
+            <button
+              onClick={async () => {
+                if (!confirmRemove) { setConfirmRemove(true); return; }
+                await onRemove();
+                onClose();
+              }}
+              className={`mt-2 w-full py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                confirmRemove ? 'bg-rose-600 text-white hover:bg-rose-700' : 'bg-rose-500/15 text-rose-500 hover:bg-rose-500/25'}`}
+            >
+              {confirmRemove ? 'Tap again to remove SL & TP' : 'Remove SL & TP from this trade'}
+            </button>
+          </div>
+        )}
         <div className="flex items-center justify-end p-4 border-t border-0 bg-muted gap-2 mt-2">
           <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
           <button disabled={!valid} onClick={() => onApply(slN, tpN, trail)}
@@ -4558,6 +4584,37 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const [isEditingDz, setIsEditingDz] = useState(false);
   const [isEditingTpSl, setIsEditingTpSl] = useState(false);
 
+  // REMOVE SL/TP FROM THE OPEN TRADE. Cancels the server rule (so neither the
+  // exit watcher nor the trailing engine can fire), records that this position
+  // runs free (so a reload cannot re-arm the defaults), and takes the lines off
+  // the chart. The next NEW trade is protected as normal — the record is keyed
+  // to this contract and entry price.
+  const removeStopFromTrade = async () => {
+    const pos = slActivePosRef.current;
+    if (!pos?.symbol) return;
+    try {
+      const r = await fetch('/api/premium-exit/clear', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tradingsymbol: pos.symbol, entry: pos.entryPrice }),
+      });
+      const d = await r.json();
+      if (!d?.success) throw new Error(d?.error || 'clear failed');
+      runFreeRef.current = pos.symbol;
+      premRuleRef.current = null;
+      setPremSync('OFF');
+      invalidateArmedRule();   // neither pane may keep showing the cancelled rule
+      const ser = slSeriesRef.current;
+      if (ser) {
+        slLinesRef.current.forEach((l: any) => { try { ser.removePriceLine(l.instance); } catch (e) {} });
+        slLinesRef.current = [];
+        if (slEntryLineRef.current) { try { ser.removePriceLine(slEntryLineRef.current); } catch (e) {} slEntryLineRef.current = null; }
+      }
+      toast.success(`SL/TP removed — ${pos.symbol} is running free`);
+    } catch (e: any) {
+      toast.error(`Could not remove SL/TP: ${e?.message || e}. Your stop is still armed.`);
+    }
+  };
+
   // ===== Risk:Reward tool =====
   // A measuring tool, deliberately inert: it never arms, orders or touches the
   // exit rule. Placing one is tap-to-place like a drawing, and the box is local
@@ -5333,6 +5390,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const [tradeTabInstr, setTradeTabInstr] = useState<any>(null);
   const autoOpenedForRef = useRef<string>('');
   const lastPosSymRef = useRef<string>('');   // survives a reload via re-detection
+  // The open position is deliberately running without SL/TP. The line drawing
+  // checks it: with no armed rule it would otherwise fall back to drawing lines
+  // at the DEFAULT percentages — two authoritative-looking levels for an exit
+  // that does not exist.
+  const runFreeRef = useRef<string>('');
   // Chart-side manual exit: first tap arms (CONFIRM EXIT?), second tap fires.
   const slActivePosRef = useRef<any>(null);
   // The SL/TP levels currently ARMED on the server, per symbol. The chart used to
@@ -5780,6 +5842,16 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           };
           apply(0);
         } else {
+          // Deliberately running free? Then do NOT arm the defaults. Without this
+          // check a reload re-armed the -10%/+20% stop the user had just removed,
+          // silently — the most dangerous way this could fail, since he would
+          // believe the trade was unprotected-by-choice when it was not.
+          try {
+            const fr = await fetch(`/api/premium-exit/free?tradingsymbol=${encodeURIComponent(pos.symbol)}&entry=${pos.entryPrice}`);
+            const fd = await fr.json();
+            if (cancelled) return;
+            if (fd?.free) { setPremSync('OFF'); premRuleRef.current = null; runFreeRef.current = pos.symbol; return; }
+          } catch (e) { /* on failure fall through to arming: protection is the safer default */ }
           // Read from a ref: this runs inside an async effect, and the user may
           // have changed the defaults since it started.
           const { slPct, tpPct } = tpSlDefaultsRef.current;
@@ -5968,7 +6040,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       // and spot*0.99 and painted an invented +/-1% band that had NOTHING to do with
       // the real exit. Two lines that look authoritative and mean nothing are worse
       // than no lines, so any existing ones are torn down here.
-      if (!viewingTrade) {
+      if (!viewingTrade || (posNow?.symbol && runFreeRef.current === posNow.symbol)) {
         if (slLinesRef.current.length) {
           slLinesRef.current.forEach(l => { try { s.removePriceLine(l.instance); } catch (e) {} });
           slLinesRef.current = [];
@@ -7929,8 +8001,57 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
              }
              if (drift && Date.now() - lastTailReseedRef.current > 60000) {
                lastTailReseedRef.current = Date.now();
-               console.warn(`[chart] closed-bar audit: ${drift} — reseeding history`);
-               try { refetchTa(); } catch (e) {}
+               // REPAIR IN PLACE — do not rebuild. This used to call refetchTa(),
+               // which replaced chartData and TORE DOWN AND REBUILT the entire
+               // chart. With a 2-point tolerance, tick-built candles drift that far
+               // routinely, so during the session the whole chart rebuilt about
+               // once a minute: that is the freeze (no chart to zoom mid-rebuild),
+               // the view re-fitting "after a few minutes", and the slowness
+               // (5,000 candles re-processed and a 1.5s endpoint re-hit each time).
+               //
+               // The audit only ever inspects the last three closed candles, so the
+               // repair merges exactly those into the chart's full history and
+               // redraws the SAME series. History is never at risk, the view is
+               // kept, and the corrected bars go into liveClosedCandlesRef so the
+               // next audit sees them fixed and stays quiet.
+               //
+               // Any failure falls back to the old full reseed, so correctness can
+               // only improve, never regress.
+               try {
+                 const merged = new Map<number, any>();
+                 for (const c of (chartDataRef.current?.candles || [])) merged.set(toUnixSeconds(c.time), c);
+                 for (const c of liveClosedCandlesRef.current) merged.set(toUnixSeconds(c.time), c);
+                 const fixed: any[] = [];
+                 for (const sc of serverClosed) {
+                   const t = getMarketAlignedCandleStart(toUnixSeconds(sc.time), tfMin, !isReferenceChartRef.current);
+                   const bar = { ...sc, time: t };
+                   merged.set(t, bar); fixed.push(bar);
+                 }
+                 // keep the bar that is still forming
+                 const live = lastCandleDataRef.current;
+                 if (live) merged.set(toUnixSeconds(live.time), live);
+                 const ordered = [...merged.entries()].sort((a, b) => a[0] - b[0]).map(([, c]) => c);
+                 const ts = mainChartRef.current?.timeScale();
+                 const keep = ts?.getVisibleLogicalRange?.();
+                 mainSeriesRef.current?.setData(ordered.map((c: any) => ({
+                   time: c.time as any, open: c.open, high: c.high, low: c.low, close: c.close,
+                 })));
+                 const up = settingsRef.current.candleUpColor, dn = settingsRef.current.candleDownColor;
+                 volumeSeriesRef.current?.setData(ordered.map((c: any) => ({
+                   time: c.time as any, value: c.volume || 0,
+                   color: c.close >= c.open ? hexToRgba(up, 0.4) : hexToRgba(dn, 0.4),
+                 })));
+                 if (keep && ts) ts.setVisibleLogicalRange(keep);
+                 // record the corrections so the next audit sees them
+                 for (const b of fixed) {
+                   const i = liveClosedCandlesRef.current.findIndex((c: any) => toUnixSeconds(c.time) === b.time);
+                   if (i >= 0) liveClosedCandlesRef.current[i] = b; else liveClosedCandlesRef.current.push(b);
+                 }
+                 console.warn(`[chart] closed-bar audit: ${drift} — repaired ${fixed.length} bar(s) in place`);
+               } catch (e) {
+                 console.warn(`[chart] closed-bar audit: in-place repair failed, full reseed`, e);
+                 try { refetchTa(); } catch (e2) {}
+               }
              }
            }
 
@@ -12189,6 +12310,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           initialTrail={tpSlDefaults.trail}
           onClose={() => setIsEditingTpSl(false)}
           onApply={(slPct, tpPct, trail) => { setTpSlDefaults({ slPct, tpPct, trail }); setIsEditingTpSl(false); }}
+          activeSymbol={slActivePos?.symbol && runFreeRef.current !== slActivePos.symbol ? slActivePos.symbol : null}
+          onRemove={removeStopFromTrade}
         />
       )}
 
