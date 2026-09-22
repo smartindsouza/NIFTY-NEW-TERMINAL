@@ -2086,23 +2086,28 @@ function OiBarsEditorModal({
 // exit rule is denominated in — the same number then drives the spot mirror
 // through the existing Black-Scholes map, so both charts stay consistent.
 function TpSlDefaultsModal({
-  onClose, initialSl, initialTp, initialTrail, onApply, activeSymbol, onRemove,
+  onClose, initialSl, initialTp, initialTrail, initialSlOn, initialTpOn, onApply, activeSymbol,
 }: {
   onClose: () => void, initialSl: number, initialTp: number, initialTrail: boolean,
-  onApply: (slPct: number, tpPct: number, trail: boolean) => void,
-  activeSymbol?: string | null, onRemove?: () => Promise<void> | void,
+  initialSlOn: boolean, initialTpOn: boolean,
+  onApply: (slPct: number, tpPct: number, trail: boolean, slOn: boolean, tpOn: boolean) => void,
+  activeSymbol?: string | null,
 }) {
-  // Two taps to remove: the first arms the button, the second acts. Removing a
-  // stop from a live trade is the one action here that cannot be undone by
-  // accident, so it must not be one stray tap away.
-  const [confirmRemove, setConfirmRemove] = useState(false);
+  // Independent switches: a trade can carry only a stop, only a target, or
+  // neither. They replace the single "remove SL & TP" button, which could only
+  // do the last of those.
+  const [slOn, setSlOn] = useState(initialSlOn);
+  const [tpOn, setTpOn] = useState(initialTpOn);
   const [sl, setSl] = useState(String(initialSl));
   const [tp, setTp] = useState(String(initialTp));
   const [trail, setTrail] = useState(initialTrail);
   const slN = parseFloat(sl), tpN = parseFloat(tp);
   // A stop at or beyond 100% of premium cannot be hit before the option is
   // worthless, and a non-positive target is not a target.
-  const valid = Number.isFinite(slN) && Number.isFinite(tpN) && slN > 0 && slN < 100 && tpN > 0;
+  // Only an ENABLED field has to be valid — a switched-off one is ignored, so it
+  // must not be able to block Ok.
+  const valid = (!slOn || (Number.isFinite(slN) && slN > 0 && slN < 100))
+             && (!tpOn || (Number.isFinite(tpN) && tpN > 0));
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-transparent p-4 animate-in fade-in duration-250" onClick={onClose}>
       <div className="bg-card border border-0 rounded-lg w-full max-w-[320px] overflow-visible flex flex-col pt-1 relative" onClick={e => e.stopPropagation()}>
@@ -2115,19 +2120,29 @@ function TpSlDefaultsModal({
             Applied when a new trade opens and no exit rule exists yet. Percentages of the entry premium; the spot chart mirrors them automatically.
           </div>
           <div className="flex items-center justify-between">
-            <div className="text-sm font-medium text-foreground/80">Stop loss</div>
-            <div className="flex items-center gap-1">
-              <input type="number" step="0.5" min="0.5" max="99" value={sl} onChange={e => setSl(e.target.value)}
-                className="w-20 text-center bg-card/40 border border-0 font-mono text-sm h-9 rounded focus:outline-none focus:border-primary text-foreground" />
+            <div className={`text-sm font-medium ${slOn ? 'text-foreground/80' : 'text-muted-foreground line-through'}`}>Stop loss</div>
+            <div className="flex items-center gap-2">
+              <input type="number" step="0.5" min="0.5" max="99" value={sl} onChange={e => setSl(e.target.value)} disabled={!slOn}
+                className="w-20 text-center bg-card/40 border border-0 font-mono text-sm h-9 rounded focus:outline-none focus:border-primary text-foreground disabled:opacity-40" />
               <span className="text-xs text-muted-foreground">%</span>
+              <button onClick={() => setSlOn(v => !v)} aria-label={`Stop loss ${slOn ? 'on' : 'off'}`}
+                title={slOn ? 'Stop loss on — tap to switch off' : 'Stop loss off — tap to switch on'}
+                className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ${slOn ? 'bg-primary' : 'bg-slate-500/40'}`}>
+                <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${slOn ? 'left-[18px]' : 'left-0.5'}`} />
+              </button>
             </div>
           </div>
           <div className="flex items-center justify-between">
-            <div className="text-sm font-medium text-foreground/80">Target</div>
-            <div className="flex items-center gap-1">
-              <input type="number" step="0.5" min="0.5" value={tp} onChange={e => setTp(e.target.value)}
-                className="w-20 text-center bg-card/40 border border-0 font-mono text-sm h-9 rounded focus:outline-none focus:border-primary text-foreground" />
+            <div className={`text-sm font-medium ${tpOn ? 'text-foreground/80' : 'text-muted-foreground line-through'}`}>Target</div>
+            <div className="flex items-center gap-2">
+              <input type="number" step="0.5" min="0.5" value={tp} onChange={e => setTp(e.target.value)} disabled={!tpOn}
+                className="w-20 text-center bg-card/40 border border-0 font-mono text-sm h-9 rounded focus:outline-none focus:border-primary text-foreground disabled:opacity-40" />
               <span className="text-xs text-muted-foreground">%</span>
+              <button onClick={() => setTpOn(v => !v)} aria-label={`Target ${tpOn ? 'on' : 'off'}`}
+                title={tpOn ? 'Target on — tap to switch off' : 'Target off — tap to switch on'}
+                className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ${tpOn ? 'bg-primary' : 'bg-slate-500/40'}`}>
+                <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${tpOn ? 'left-[18px]' : 'left-0.5'}`} />
+              </button>
             </div>
           </div>
           {!valid && <div className="text-[11px] text-amber-400">Stop must be between 0 and 100%; target above 0.</div>}
@@ -2147,30 +2162,16 @@ function TpSlDefaultsModal({
           <button onClick={() => { setSl('10'); setTp('20'); }}
             className="text-[11px] text-muted-foreground hover:text-foreground transition-colors underline">Reset to 10% / 20%</button>
         </div>
-        {activeSymbol && onRemove && (
-          <div className="mx-4 mb-2 rounded-lg border border-rose-500/30 bg-rose-500/5 p-3">
-            <div className="text-xs font-semibold text-foreground">Open trade: {activeSymbol}</div>
-            <div className="text-[11px] text-muted-foreground mt-0.5">
-              Remove its SL and TP and let it run. Nothing will exit it automatically —
-              not the stop, not the target, not the trail. Your next new trade is
-              protected as normal.
-            </div>
-            <button
-              onClick={async () => {
-                if (!confirmRemove) { setConfirmRemove(true); return; }
-                await onRemove();
-                onClose();
-              }}
-              className={`mt-2 w-full py-1.5 rounded-md text-xs font-semibold transition-colors ${
-                confirmRemove ? 'bg-rose-600 text-white hover:bg-rose-700' : 'bg-rose-500/15 text-rose-500 hover:bg-rose-500/25'}`}
-            >
-              {confirmRemove ? 'Tap again to remove SL & TP' : 'Remove SL & TP from this trade'}
-            </button>
+        {activeSymbol && (
+          <div className="mx-4 mb-2 rounded-lg border border-border bg-muted/30 p-3 text-[11px] text-muted-foreground">
+            Pressing Ok also applies these switches to your open trade, <span className="font-mono text-foreground/80">{activeSymbol}</span>.
+            A switched-off leg can never close the trade. Both off lets it run free — no
+            stop, no target, no trail — and a reload keeps it that way.
           </div>
         )}
         <div className="flex items-center justify-end p-4 border-t border-0 bg-muted gap-2 mt-2">
           <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
-          <button disabled={!valid} onClick={() => onApply(slN, tpN, trail)}
+          <button disabled={!valid} onClick={() => onApply(slN, tpN, trail, slOn, tpOn)}
             className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium disabled:opacity-40">Ok</button>
         </div>
       </div>
@@ -4589,6 +4590,25 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // runs free (so a reload cannot re-arm the defaults), and takes the lines off
   // the chart. The next NEW trade is protected as normal — the record is keyed
   // to this contract and entry price.
+  // Apply the editor's switches to the OPEN trade. Both off = run free (the
+  // existing removal: server rule cancelled, recorded so a reload cannot re-arm
+  // the defaults, lines taken off). Otherwise re-arm at the given percentages
+  // with the switches, which the server enforces on both firing paths.
+  const applySwitchesToLiveTrade = async (slPct: number, tpPct: number, slOn: boolean, tpOn: boolean) => {
+    const pos = slActivePosRef.current;
+    if (!pos?.symbol || !(pos.entryPrice > 0)) return;
+    if (!slOn && !tpOn) { await removeStopFromTrade(); return; }
+    runFreeRef.current = '';
+    // The ref is read by pushPremiumRule, so it must hold the new switches first.
+    tpSlDefaultsRef.current = { ...tpSlDefaultsRef.current, slPct, tpPct, slOn, tpOn };
+    const long = pos.side !== 'SELL';
+    const e = pos.entryPrice;
+    const slPx = +(long ? e * (1 - slPct / 100) : e * (1 + slPct / 100)).toFixed(2);
+    const tpPx = +(long ? e * (1 + tpPct / 100) : e * (1 - tpPct / 100)).toFixed(2);
+    await pushPremiumRule(slPx, tpPx);
+    toast.success(`${pos.symbol}: stop ${slOn ? 'ON' : 'OFF'} · target ${tpOn ? 'ON' : 'OFF'}`);
+  };
+
   const removeStopFromTrade = async () => {
     const pos = slActivePosRef.current;
     if (!pos?.symbol) return;
@@ -4751,17 +4771,17 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   rrArmRef.current = rrArm;
   // 10 / 20 preserves the levels this terminal has always defaulted to, so
   // nothing changes for a trade taken before these are ever opened.
-  const [tpSlDefaults, setTpSlDefaults] = useState<{ slPct: number; tpPct: number; trail: boolean }>(() => {
+  const [tpSlDefaults, setTpSlDefaults] = useState<{ slPct: number; tpPct: number; trail: boolean; slOn?: boolean; tpOn?: boolean }>(() => {
     try {
       const raw = localStorage.getItem('tpSlDefaults');
       if (raw) {
         const p = JSON.parse(raw);
         const sl = Number(p?.slPct), tp = Number(p?.tpPct);
         const trail = p?.trail === undefined ? true : !!p.trail;   // absent = ON: it is Martin's method
-        if (Number.isFinite(sl) && sl > 0 && sl < 100 && Number.isFinite(tp) && tp > 0) return { slPct: sl, tpPct: tp, trail };
+        if (Number.isFinite(sl) && sl > 0 && sl < 100 && Number.isFinite(tp) && tp > 0) return { slPct: sl, tpPct: tp, trail, slOn: p?.slOn !== false, tpOn: p?.tpOn !== false };
       }
     } catch (e) {}
-    return { slPct: 10, tpPct: 20, trail: true };
+    return { slPct: 10, tpPct: 20, trail: true, slOn: true, tpOn: true };
   });
   useEffect(() => {
     try { localStorage.setItem('tpSlDefaults', JSON.stringify(tpSlDefaults)); } catch (e) {}
@@ -5308,9 +5328,16 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           const posNow = slActivePosRef.current;
           const u = slLinesRef.current.find((l: any) => l.kind === 'upper');
           const lo = slLinesRef.current.find((l: any) => l.kind === 'lower');
-          if (posNow && u && lo) {
+          // With a leg switched off only ONE line exists. Requiring both meant a
+          // drag of the remaining line never reached the server. The absent leg
+          // keeps its value from the armed rule — it is still stored, just
+          // disabled, so the switch can turn it back on at the same level.
+          const rule = premRuleRef.current;
+          if (posNow && (u || lo)) {
             const long = posNow.side === 'BUY';
-            pushPremiumRule(long ? lo.price : u.price, long ? u.price : lo.price);
+            const slPx = long ? (lo?.price ?? rule?.sl) : (u?.price ?? rule?.sl);
+            const tpPx = long ? (u?.price ?? rule?.tp) : (lo?.price ?? rule?.tp);
+            if (Number.isFinite(slPx) && Number.isFinite(tpPx)) pushPremiumRule(slPx as number, tpPx as number);
           }
         }
         return;
@@ -5605,6 +5632,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           // Trailing exit (pullback method) — the server builds the state at arm time.
           trail: !!tpSlDefaultsRef.current.trail,
           trailTp: !!trailTpRef.current,
+          // Carried on EVERY push, drags included: dragging the stop line must not
+          // quietly switch a disabled target back on, or vice versa.
+          slOn: tpSlDefaultsRef.current.slOn !== false,
+          tpOn: tpSlDefaultsRef.current.tpOn !== false,
           optionType: pos.optionType || (String(pos.symbol).endsWith('PE') ? 'PE' : 'CE'),
         })
       });
@@ -5833,11 +5864,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           const apply = (attempt: number) => {
             const u = slLinesRef.current.find((l: any) => l.kind === 'upper');
             const lo = slLinesRef.current.find((l: any) => l.kind === 'lower');
-            if (u && lo) {
+            // Snap whichever legs exist. Waiting for BOTH meant a trade with one
+            // leg switched off retried ten times and never restored its line.
+            if (u || lo) {
               const upVal = long ? rule.tp : rule.sl;
               const loVal = long ? rule.sl : rule.tp;
-              u.price = upVal; lo.price = loVal;
-              try { u.instance.applyOptions({ price: upVal }); lo.instance.applyOptions({ price: loVal }); } catch (e) {}
+              if (u) { u.price = upVal; try { u.instance.applyOptions({ price: upVal }); } catch (e) {} }
+              if (lo) { lo.price = loVal; try { lo.instance.applyOptions({ price: loVal }); } catch (e) {} }
             } else if (attempt < 10) setTimeout(() => apply(attempt + 1), 300);
           };
           apply(0);
@@ -6132,12 +6165,21 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       // as well printed the same string twice, once mid-chart and once crammed
       // against the price scale. axisLabelVisible stays true so the price still
       // shows on the scale, which is what the axis is for.
-      const uInst = s.createPriceLine({ price: upper, color: upColor, lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: '' });
-      const lInst = s.createPriceLine({ price: lower, color: loColor, lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: '' });
+      // A switched-off leg draws no line: a stop or target on the chart that can
+      // never fire is worse than none, because it looks authoritative.
+      const legOn = (label: string) => label === 'SL'
+        ? tpSlDefaultsRef.current.slOn !== false
+        : tpSlDefaultsRef.current.tpOn !== false;
+      const uInst = legOn(upLabel) ? s.createPriceLine({ price: upper, color: upColor, lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: '' }) : null;
+      const lInst = legOn(loLabel) ? s.createPriceLine({ price: lower, color: loColor, lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: '' }) : null;
+      // Only ENABLED legs enter the list. Everything downstream — the on-line
+      // pills, drag hit-testing, price updates while dragging — iterates this
+      // list, so leaving a disabled leg out means none of them can draw, grab or
+      // move a line that does not exist.
       slLinesRef.current = [
         { kind: 'upper', price: upper, instance: uInst, label: upLabel, color: upColor, title: pctTitle(upLabel, upper) },
         { kind: 'lower', price: lower, instance: lInst, label: loLabel, color: loColor, title: pctTitle(loLabel, lower) },
-      ];
+      ].filter((l) => l.instance !== null);
       slSeriesRef.current = s;
       // Fixed ENTRY line on the traded option's chart (reference, not draggable)
       try { if (slEntryLineRef.current) { s.removePriceLine(slEntryLineRef.current); } } catch (e) {}
@@ -12309,9 +12351,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           initialTp={tpSlDefaults.tpPct}
           initialTrail={tpSlDefaults.trail}
           onClose={() => setIsEditingTpSl(false)}
-          onApply={(slPct, tpPct, trail) => { setTpSlDefaults({ slPct, tpPct, trail }); setIsEditingTpSl(false); }}
-          activeSymbol={slActivePos?.symbol && runFreeRef.current !== slActivePos.symbol ? slActivePos.symbol : null}
-          onRemove={removeStopFromTrade}
+          initialSlOn={tpSlDefaults.slOn !== false}
+          initialTpOn={tpSlDefaults.tpOn !== false}
+          onApply={(slPct, tpPct, trail, slOn, tpOn) => {
+            setTpSlDefaults({ slPct, tpPct, trail, slOn, tpOn });
+            setIsEditingTpSl(false);
+            applySwitchesToLiveTrade(slPct, tpPct, slOn, tpOn);
+          }}
+          activeSymbol={slActivePos?.symbol || null}
         />
       )}
 

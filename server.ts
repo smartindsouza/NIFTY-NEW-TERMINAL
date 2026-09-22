@@ -92,6 +92,12 @@ try { db.exec(`ALTER TABLE trade_journal ADD COLUMN kite_user_id TEXT`); } catch
 try { db.exec(`ALTER TABLE premium_exit_rules ADD COLUMN kite_user_id TEXT`); } catch (e) { /* column exists */ }
 try { db.exec(`ALTER TABLE exit_rules ADD COLUMN kite_user_id TEXT`); } catch (e) { /* column exists */ }
 
+// INDEPENDENT SL / TP SWITCHES. A rule can now run with only a stop, only a
+// target, or neither. Default 1 (on), so every rule armed before this column
+// existed behaves exactly as it did.
+try { db.exec(`ALTER TABLE premium_exit_rules ADD COLUMN sl_on INTEGER DEFAULT 1`); } catch (e) { /* column exists */ }
+try { db.exec(`ALTER TABLE premium_exit_rules ADD COLUMN tp_on INTEGER DEFAULT 1`); } catch (e) { /* column exists */ }
+
 // POSITIONS RUN FREE. When the user removes SL/TP, the rule is cancelled — but
 // the client arms the default -10%/+20% for any position with no active rule,
 // the moment it sees the position. So a reload would silently re-arm the stop
@@ -563,8 +569,11 @@ async function closePositionBySymbol(tradingsymbol: string, reason: string = 'MA
 // poll can race freely and at most ONE exit order can ever result.
 function evalPremiumRule(rule: any, ltp: number): 'SL' | 'TARGET' | null {
   const long = rule.side === 'BUY';
-  const hitSl = long ? ltp <= rule.sl : ltp >= rule.sl;
-  const hitTp = long ? ltp >= rule.tp : ltp <= rule.tp;
+  // A switched-off leg can never fire. Explicit 0 only: a missing column reads
+  // as on, which is the behaviour every existing rule was armed with.
+  const slOn = rule.sl_on !== 0, tpOn = rule.tp_on !== 0;
+  const hitSl = slOn && (long ? ltp <= rule.sl : ltp >= rule.sl);
+  const hitTp = tpOn && (long ? ltp >= rule.tp : ltp <= rule.tp);
   return hitSl ? 'SL' : hitTp ? 'TARGET' : null;
 }
 
@@ -651,6 +660,22 @@ async function closePartialBySymbol(tradingsymbol: string, qty: number, reason: 
 async function applyTrailActions(tradingsymbol: string, st: TrailState, actions: TrailAction[], source: string): Promise<void> {
   if (!actions.length) return;
   persistTrail(tradingsymbol, st);
+  // The switches gate EXITS — the only actions that place an order. The engine
+  // still computes internally (a stop still tightens at 70%, which only matters
+  // if the stop is on), but a disabled leg can never close any part of the trade.
+  let slOn = true, tpOn = true;
+  try {
+    const f: any = db.prepare('SELECT sl_on, tp_on FROM premium_exit_rules WHERE tradingsymbol = ?').get(tradingsymbol);
+    if (f) { slOn = f.sl_on !== 0; tpOn = f.tp_on !== 0; }
+  } catch (e) { /* on doubt, both on — protection is the safer default */ }
+  const isStopExit = (r: string) => r === 'SL' || r === 'SL_AT_COST';
+  const isTargetExit = (r: string) => r === 'TARGET' || r === 'TARGET_TP2';
+  actions = actions.filter((a: any) => {
+    if (a.type === 'EXIT_ALL' && isStopExit(a.reason) && !slOn) return false;
+    if (a.type === 'EXIT_ALL' && isTargetExit(a.reason) && !tpOn) return false;
+    if (a.type === 'EXIT_PARTIAL' && !tpOn) return false;
+    return true;
+  });
   for (const a of actions) {
     if (a.type === 'SET_SL' || a.type === 'SET_TP') {
       console.log(`[trail] ${tradingsymbol} ${a.type} ${a.type === 'SET_SL' ? a.sl : a.tp} (${a.reason}, ${source})`);
@@ -1397,7 +1422,8 @@ setInterval(() => {
     // A deliberate re-arm ends "running free" for this contract.
     try { if (req.body?.tradingsymbol) db.prepare('DELETE FROM premium_exit_free WHERE tradingsymbol = ?').run(req.body.tradingsymbol); } catch (e) {}
     try {
-      const { tradingsymbol, sl, tp, entry, trail, trailTp, optionType: optTypeIn } = req.body || {};
+      const { tradingsymbol, sl, tp, entry, trail, trailTp, slOn, tpOn, optionType: optTypeIn } = req.body || {};
+      const slOnN = slOn === false ? 0 : 1, tpOnN = tpOn === false ? 0 : 1;
       const slN = Number(sl), tpN = Number(tp);
       if (!tradingsymbol || !isFinite(slN) || !isFinite(tpN) || slN <= 0 || tpN <= 0) {
         return res.status(400).json({ success: false, error: 'Missing tradingsymbol / sl / tp' });
@@ -1497,6 +1523,8 @@ setInterval(() => {
           instrument_token=excluded.instrument_token, trail_state=excluded.trail_state, updated_at=excluded.updated_at,
           kite_user_id=excluded.kite_user_id`)
         .run(tradingsymbol, pos.exchange || 'NFO', side, Math.abs(pos.quantity), entryPx, slN, tpN, ruleToken, trailJson, Date.now(), Date.now(), getKiteUserId());
+      // Switches written separately so the long upsert above stays exactly as it was.
+      db.prepare('UPDATE premium_exit_rules SET sl_on = ?, tp_on = ? WHERE tradingsymbol = ?').run(slOnN, tpOnN, tradingsymbol);
       const armedRow: any = db.prepare("SELECT * FROM premium_exit_rules WHERE tradingsymbol=?").get(tradingsymbol);
       syncPremiumRuleInMemory(armedRow);
       loadTrailState(armedRow);
