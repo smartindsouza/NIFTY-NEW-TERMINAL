@@ -1380,6 +1380,62 @@ function computeFvgZones(candles: any[]): any[] {
 const STRUCT_LOOKBACK = 2;   // candles either side that define a swing
 const STRUCT_MAX = 6;        // events kept PER DAY (see computeMarketStructure)
 
+// ============================================================================
+// REVERSAL PIN BARS. A pin on its own is noise — a 5-minute NIFTY chart prints
+// dozens a day. This marks only the ones that meet the filters that matter:
+//   * SHAPE: rejection wick at least 2x the body, close in the far third
+//   * SIZE: range at least 1.2x the average of the previous 10 candles
+//   * LOCATION: the wick PIERCES a level the chart is showing and the candle
+//     CLOSES BACK on the other side — a stop-run that failed. This is the
+//     filter that separates a signal from a shape.
+// Levels are today's (PDH/PDL, 15m range, S/R, H-levels, zones, manual lines),
+// so pins are marked for today's session only; testing yesterday's candles
+// against today's PDH would be meaningless.
+//
+// DELTA (live only): the futures-pressure proxy is captured at each candle's
+// close. A bullish pin with SELLING pressure means sellers hit the market down
+// the wick and were absorbed — the stronger version. It is marked "Δ". Kite has
+// no true aggressor delta and no per-candle history of the proxy, so candles
+// that closed before the app was open simply have no reading — they are never
+// marked strong, rather than guessed at.
+// ============================================================================
+export type PinSignal = { time: number; kind: 'bull' | 'bear'; level: number; label: string; strong: boolean };
+export function detectReversalPins(
+  candles: { time: number; open: number; high: number; low: number; close: number }[],
+  levels: { price: number; label: string }[],
+  pressureAtClose: Map<number, number>,
+  lookback = 10,
+): PinSignal[] {
+  const out: PinSignal[] = [];
+  if (!candles.length || !levels.length) return out;
+  for (let i = lookback; i < candles.length; i++) {
+    const c = candles[i];
+    const range = c.high - c.low;
+    if (!(range > 0)) continue;
+    let avg = 0;
+    for (let k = i - lookback; k < i; k++) avg += candles[k].high - candles[k].low;
+    avg /= lookback;
+    if (range < 1.2 * avg) continue;
+    const body = Math.abs(c.close - c.open);
+    const bodyFloor = Math.max(body, range * 0.05);   // a doji still needs a real wick
+    const lower = Math.min(c.open, c.close) - c.low;
+    const upper = c.high - Math.max(c.open, c.close);
+    const p = pressureAtClose.get(c.time);
+    // Bullish: long lower wick, close in the top third, wick went BELOW a level
+    // and the close came back ABOVE it.
+    if (lower >= 2 * bodyFloor && c.close >= c.low + range * (2 / 3)) {
+      const hit = levels.find((l) => c.low < l.price && c.close > l.price);
+      if (hit) { out.push({ time: c.time, kind: 'bull', level: hit.price, label: hit.label, strong: p !== undefined && p <= -0.15 }); continue; }
+    }
+    // Bearish: the mirror.
+    if (upper >= 2 * bodyFloor && c.close <= c.high - range * (2 / 3)) {
+      const hit = levels.find((l) => c.high > l.price && c.close < l.price);
+      if (hit) out.push({ time: c.time, kind: 'bear', level: hit.price, label: hit.label, strong: p !== undefined && p >= 0.15 });
+    }
+  }
+  return out;
+}
+
 /** IST calendar day of a candle. Structure events are grouped by it so the cap
  *  applies per day rather than to the whole history — the old single cap kept
  *  only the newest events, which is why nothing before today ever appeared. */
@@ -3555,6 +3611,24 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   });
   useEffect(() => { try { localStorage.setItem('structDays', String(structDays)); } catch (e) {} }, [structDays]);
   const [isEditingStruct, setIsEditingStruct] = useState(false);
+
+  // Reversal pin bars. Off by default: a new marker type should be switched on
+  // deliberately, not appear on the chart unannounced.
+  const [showPinBars, setShowPinBars] = useState<boolean>(() => {
+    try { return localStorage.getItem('showPinBars') === 'true'; } catch (e) { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('showPinBars', String(showPinBars)); } catch (e) {}
+    if (!showPinBars) {
+      try { mainSeriesRef.current?.setMarkers?.([]); } catch (e) {}
+      pinSigRef.current = '';
+    }
+  }, [showPinBars]);
+  const showPinBarsRef = useRef(showPinBars);
+  showPinBarsRef.current = showPinBars;
+  const pinSigRef = useRef('');
+  const pinSeriesRef = useRef<any>(null);          // markers live on a series; a rebuild makes a new one
+  const pinPressureRef = useRef<Map<number, number>>(new Map());  // pressure proxy at each candle's close
   // BOS is the ordinary, frequent event; CHoCH is the interesting one. Being able
   // to drop BOS and keep CHoCH is the whole point of the toggle.
   // BOS/CHoCH colours. The events were painted in a fixed sky/pink pair keyed to
@@ -10096,6 +10170,48 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               // Market structure: a dashed line at the broken level running from the
               // swing that set it to the candle that closed through it, tagged BOS or
               // CHoCH. Index charts only, and recomputed only on a candle close.
+              // Reversal pins: recomputed only when a candle closes (or the series
+              // is rebuilt), exactly like BOS-CHoCH. Index charts only — the levels
+              // are index levels.
+              if (showPinBarsRef.current && !isOptionView && mainSeriesRef.current) {
+                const baseP = chartDataRef.current?.candles || [];
+                const lastBT = baseP.length ? baseP[baseP.length - 1].time : 0;
+                const sinceP = liveClosedCandlesRef.current.filter((k: any) => k.time > lastBT);
+                const newest = sinceP.length ? sinceP[sinceP.length - 1] : baseP[baseP.length - 1];
+                const lv = alertLevelsRef.current || [];
+                const sigP = `${instrumentToken}|${timeframe}|${baseP.length}|${sinceP.length}|${newest ? newest.time : 0}|${lv.length}`;
+                if (sigP !== pinSigRef.current || pinSeriesRef.current !== mainSeriesRef.current) {
+                  // Capture the proxy for the candle that JUST closed. Candles that
+                  // closed before the app was open have no reading and stay unmarked
+                  // as strong, rather than guessed at.
+                  if (newest && sigP !== pinSigRef.current && !pinPressureRef.current.has(newest.time) && deltaRef.current) {
+                    pinPressureRef.current.set(newest.time, Number(deltaRef.current.pressure) || 0);
+                  }
+                  pinSigRef.current = sigP;
+                  pinSeriesRef.current = mainSeriesRef.current;
+                  try {
+                    const today = istDayKey(Math.floor(Date.now() / 1000));
+                    const all = sinceP.length ? [...baseP, ...sinceP] : baseP;
+                    // Today's session plus the 10 candles before it, so the size filter
+                    // has a baseline for the first candles of the day.
+                    const firstToday = all.findIndex((c: any) => istDayKey(toUnixSeconds(c.time)) === today);
+                    const slice = firstToday >= 0 ? all.slice(Math.max(0, firstToday - 10)) : [];
+                    const pins = detectReversalPins(
+                      slice.map((c: any) => ({ time: toUnixSeconds(c.time), open: c.open, high: c.high, low: c.low, close: c.close })),
+                      lv.map((l: any) => ({ price: Number(l.price), label: String(l.label || '') })).filter((l: any) => Number.isFinite(l.price)),
+                      pinPressureRef.current,
+                    ).filter((pn) => istDayKey(pn.time) === today);
+                    mainSeriesRef.current.setMarkers(pins.map((pn) => ({
+                      time: pn.time as any,
+                      position: pn.kind === 'bull' ? 'belowBar' : 'aboveBar',
+                      shape: pn.kind === 'bull' ? 'arrowUp' : 'arrowDown',
+                      color: pn.kind === 'bull' ? settingsRef.current.candleUpColor : settingsRef.current.candleDownColor,
+                      text: `PIN${pn.strong ? ' Δ' : ''} · ${pn.label}`,
+                    })));
+                  } catch (e) { /* a marker problem must never stop the frame */ }
+                }
+              }
+
               if (showStructure && !isOptionView && mainSeriesRef.current) {
                 const baseC = chartDataRef.current?.candles || [];
                 const arc = liveClosedCandlesRef.current;
@@ -11496,7 +11612,28 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     >
                       <Star size={14} fill={isFav('BreakoutFakeouts') ? 'currentColor' : 'none'} />
                     </button>
+                  </div>                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('ReversalPinBars', showPinBars)}`}>
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowPinBars(!showPinBars); }}
+                          aria-label={`Toggle Reversal Pin Bars`}
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showPinBars) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showPinBars) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none" title="Pin bars whose wick pierces a level on the chart and closes back. Δ = the futures-pressure proxy showed absorption at the close (live only).">Reversal Pin Bars</span>
+                      </div>
+                    <span className="p-1 w-[22px] shrink-0" aria-hidden="true" />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('ReversalPinBars'); }}
+                      title={isFav('ReversalPinBars') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('ReversalPinBars') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('ReversalPinBars') ? 'currentColor' : 'none'} />
+                    </button>
                   </div>
+
 
                   {/* Support/Resistance Lines */}
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('Volume', showVolume)}`}>
