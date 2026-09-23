@@ -10556,9 +10556,29 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                  // line like SL and TARGET. It had only an axis tag, and that has
                  // been removed with the others — without this it would be an
                  // unlabelled grey line.
+                 // Risk to reward from the LIVE line prices, recomputed every frame
+                 // so it follows a drag as it happens. Reward over risk, as 1:x.
+                 const entryRiskReward = (entry: number): string => {
+                   const sl = slLinesRef.current.find((l: any) => l.label === 'SL')?.price;
+                   const tp = slLinesRef.current.find((l: any) => l.label === 'TARGET')?.price;
+                   const long = (slActivePosRef.current?.side || 'BUY') !== 'SELL';
+                   // A switched-off leg has no line, so there is no ratio to show —
+                   // say which side is missing rather than invent one.
+                   if (sl === undefined && tp === undefined) return '';
+                   if (sl === undefined) return ' · no SL';
+                   if (tp === undefined) return ' · no TP';
+                   const risk = long ? entry - sl : sl - entry;
+                   const reward = long ? tp - entry : entry - tp;
+                   // Stop at or beyond entry — after the 70% move to cost, say —
+                   // means nothing is at risk: the ratio would be infinite or
+                   // negative, and neither is useful to read.
+                   if (!(risk > 0)) return ' · risk-free';
+                   if (!(reward > 0)) return ' · R:R —';
+                   return ` · R:R 1:${(reward / risk).toFixed(2)}`;
+                 };
                  const entryPx = slEntryRef.current;
                  const withEntry = entryPx
-                   ? [...slLinesRef.current, { kind: 'entry' as const, price: entryPx, label: 'ENTRY', color: '#94a3b8', title: `ENTRY ${entryPx.toFixed(2)}` }]
+                   ? [...slLinesRef.current, { kind: 'entry' as const, price: entryPx, label: 'ENTRY', color: '#94a3b8', title: `ENTRY ${entryPx.toFixed(2)}${entryRiskReward(entryPx)}` }]
                    : [...slLinesRef.current];
                  const slSorted = withEntry
                    .map(sl => ({ sl, y: mainSeriesRef.current!.priceToCoordinate(sl.price) }))
