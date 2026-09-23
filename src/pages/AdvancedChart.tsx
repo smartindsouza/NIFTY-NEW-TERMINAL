@@ -3483,6 +3483,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const volumeSeriesRef = useRef<any>(null);
   const lastCandleTimeRef = useRef<number | null>(null);
   // Cooldown so a persistent clock desync can't trigger a reseed storm.
+  const desyncSinceRef = useRef(0);   // when the chart first ran ahead of the server (0 = not ahead)
   const lastDesyncReseedRef = useRef<number>(0);
   // Cooldown for the closed-bar audit below, so a reseed can never loop.
   const lastTailReseedRef = useRef<number>(0);
@@ -8049,13 +8050,29 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
            const updateTime = getMarketAlignedCandleStart(toUnixSeconds(latestCandle.time), tfMin, !isReferenceChartRef.current);
 
            if (lastCandleTimeRef.current !== null && updateTime < lastCandleTimeRef.current) {
-             // The chart's candle clock is AHEAD of the server's. That means we
-             // rolled onto a bar that doesn't exist yet (bad tick timestamp, or a
-             // clock/offset drift). Previously this returned every cycle, which
-             // permanently switched off the 15s correction: volume stopped
-             // updating and any wick invented by a stray tick stayed until the
-             // user manually refreshed. Treat it as a desync and reseed instead,
-             // rate-limited so it can never loop.
+             // The chart's candle clock is AHEAD of the server's.
+             //
+             // ONE BAR AHEAD IS NORMAL. The instant a new bar starts, live ticks
+             // open it on the chart, but the server's candles lag — option data
+             // by up to a minute. On a 1-minute premium chart that made this
+             // branch fire after nearly every minute boundary and TEAR DOWN AND
+             // REBUILD the whole chart: the premium chart "resetting itself
+             // after about a minute". The server simply had not caught up yet.
+             //
+             // So a one-bar lead is left alone and this poll skips — the next one
+             // after the server has the bar corrects normally. It becomes a
+             // desync only if the lead is TWO+ bars, or a one-bar lead lasts
+             // longer than a full bar plus a minute's grace (a stray tick opened
+             // a bar that is never coming). That keeps the protection this
+             // branch exists for: previously returning every cycle permanently
+             // switched off the 15s correction.
+             const leadSec = lastCandleTimeRef.current - updateTime;
+             const barSec = tfMin * 60;
+             if (leadSec <= barSec) {
+               if (!desyncSinceRef.current) desyncSinceRef.current = Date.now();
+               if (Date.now() - desyncSinceRef.current < barSec * 1000 + 60000) return;   // normal lag
+             }
+             desyncSinceRef.current = 0;
              const sinceLastReseed = Date.now() - lastDesyncReseedRef.current;
              if (sinceLastReseed > 30000) {
                lastDesyncReseedRef.current = Date.now();
@@ -8064,6 +8081,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
              }
              return;
            }
+
+           desyncSinceRef.current = 0;   // server level with (or ahead of) the chart: any lag is over
 
            // Self-heal: if the server is 2+ bars ahead of the chart's last drawn bar
            // (tab was throttled/asleep, or we seeded from stale cache), a single-bar
