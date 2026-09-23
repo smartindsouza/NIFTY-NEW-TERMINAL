@@ -5505,7 +5505,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // re-ran. The lines then disagreed with the live protective rule: the chart said
   // -10% while the server was holding whatever had been dragged. This ref is the
   // last known armed pair and is what the lines are seeded from.
-  const premRuleRef = useRef<{ symbol: string; sl: number; tp: number; trail?: any } | null>(null);
+  const premRuleRef = useRef<{ symbol: string; sl: number; tp: number; trail?: any; slOn?: boolean; tpOn?: boolean } | null>(null);
   // >0 while an arm request is in flight. Guards every periodic reader.
   const rulePushPendingRef = useRef(0);
   useEffect(() => { slActivePosRef.current = slActivePos; }, [slActivePos]);
@@ -5524,7 +5524,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // the premium they mean, so they never masquerade as hard index triggers.
   const spotMapLinesRef = useRef<{ kind: 'sl' | 'tp', price: number, premium: number, instance: any }[]>([]);
   const spotMapSeriesRef = useRef<any>(null);
-  const spotMapRef = useRef<{ spot: number; delta: number; iv: number; slSpot: number | null; tpSpot: number | null; sl: number; tp: number; symbol: string } | null>(null);
+  const spotMapRef = useRef<{ spot: number; delta: number; iv: number; slSpot: number | null; tpSpot: number | null; sl: number; tp: number; symbol: string; slOn?: boolean; tpOn?: boolean } | null>(null);
   const spotMapBusyRef = useRef(false);
 
   // Is the CURRENT chart the spot index that the open position is written on?
@@ -5559,7 +5559,12 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         const rd = rr;
         const live = rd?.rule;
         if (live && live.status === 'ACTIVE' && Number.isFinite(Number(live.sl)) && Number.isFinite(Number(live.tp))) {
-          premRuleRef.current = { symbol: pos.symbol, sl: Number(live.sl), tp: Number(live.tp) };
+          // Keep the SWITCHES, not just the prices. The server rule carries them,
+          // but this copied only sl and tp, so the spot mirror drew both lines
+          // whatever was switched off. The server is the only thing the two
+          // panes share, so it is the only trustworthy source for this pane.
+          premRuleRef.current = { symbol: pos.symbol, sl: Number(live.sl), tp: Number(live.tp),
+                                  slOn: live.sl_on !== 0, tpOn: live.tp_on !== 0 };
         } else if (rr.ok) {
           // The rule is GONE — the stop fired, the target filled, or it was
           // cleared. Previously this branch did nothing, so the last known rule
@@ -5605,6 +5610,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         slSpot: ease(prev?.slSpot, d.spotFor[0] ?? null),
         tpSpot: ease(prev?.tpSpot, d.spotFor[1] ?? null),
         sl: rule.sl, tp: rule.tp, symbol: pos.symbol,
+        slOn: rule.slOn !== false, tpOn: rule.tpOn !== false,
       };
     } catch { spotMapRef.current = null; }
     finally { spotMapBusyRef.current = false; }
@@ -5633,8 +5639,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     for (const w of want) {
       const existing = spotMapLinesRef.current.find(l => l.kind === w.kind);
       // An unreachable level (premium below intrinsic, say) has no spot answer —
-      // remove the line rather than parking it at an invented price.
-      if (w.price === null || !Number.isFinite(w.price)) {
+      // remove the line rather than parking it at an invented price. A leg that
+      // is SWITCHED OFF is removed the same way: it can never fire, so a line for
+      // it on the spot chart would be a promise the server will not keep.
+      const legOn = w.kind === 'sl' ? m.slOn !== false : m.tpOn !== false;
+      if (!legOn || w.price === null || !Number.isFinite(w.price)) {
         if (existing) { try { ser.removePriceLine(existing.instance); } catch (e) {} 
           spotMapLinesRef.current = spotMapLinesRef.current.filter(l => l !== existing); }
         continue;
@@ -5693,7 +5702,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     // only reached the option chart when its 5s poll next ran — and not at all if
     // that poll happened to be busy or the pane was mid-drag. Broadcasting means
     // both halves move together the moment a level is armed.
-    try { window.dispatchEvent(new CustomEvent('terminal:rule-changed', { detail: { symbol: pos.symbol, sl: slPx, tp: tpPx } })); } catch (e) {}
+    try { window.dispatchEvent(new CustomEvent('terminal:rule-changed', { detail: { symbol: pos.symbol, sl: slPx, tp: tpPx,
+      slOn: tpSlDefaultsRef.current.slOn !== false, tpOn: tpSlDefaultsRef.current.tpOn !== false } })); } catch (e) {}
     // Record what is being armed BEFORE the round trip, so a redraw that happens
     // while the request is in flight still draws the dragged levels.
     premRuleRef.current = { symbol: pos.symbol, sl: slPx, tp: tpPx };
@@ -6241,9 +6251,15 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       // shows on the scale, which is what the axis is for.
       // A switched-off leg draws no line: a stop or target on the chart that can
       // never fire is worse than none, because it looks authoritative.
-      const legOn = (label: string) => label === 'SL'
-        ? tpSlDefaultsRef.current.slOn !== false
-        : tpSlDefaultsRef.current.tpOn !== false;
+      // The SERVER's switches win when this pane has them for this position: a
+      // switch changed from the OTHER pane's gear only reaches this pane through
+      // the server, never through its local defaults.
+      const legOn = (label: string) => {
+        const pr = premRuleRef.current;
+        const srv = !!(pr && posNow && pr.symbol === posNow.symbol && typeof pr.slOn === 'boolean');
+        if (label === 'SL') return srv ? pr!.slOn !== false : tpSlDefaultsRef.current.slOn !== false;
+        return srv ? pr!.tpOn !== false : tpSlDefaultsRef.current.tpOn !== false;
+      };
       const uInst = legOn(upLabel) ? s.createPriceLine({ price: upper, color: upColor, lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: '' }) : null;
       const lInst = legOn(loLabel) ? s.createPriceLine({ price: lower, color: loColor, lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: '' }) : null;
       // Only ENABLED legs enter the list. Everything downstream — the on-line
@@ -6287,10 +6303,25 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       try {
         const d = await fetchArmedRule(pos.symbol);
         const live = d?.rule;
-        if (!live || live.status !== 'ACTIVE') return;
+        if (!live || live.status !== 'ACTIVE') {
+          // No active rule. If that is because BOTH legs were switched off from
+          // the other pane, the server has recorded the position as running
+          // free: adopt that here too, which tears this pane's lines down.
+          if (d?.ok !== false && runFreeRef.current !== pos.symbol) {
+            try {
+              const fr = await fetch(`/api/premium-exit/free?tradingsymbol=${encodeURIComponent(pos.symbol)}&entry=${pos.entryPrice}`);
+              const fd = await fr.json();
+              if (fd?.free) runFreeRef.current = pos.symbol;
+            } catch (e) { /* keep what is drawn */ }
+          }
+          return;
+        }
         const sl = Number(live.sl), tp = Number(live.tp);
         if (!Number.isFinite(sl) || !Number.isFinite(tp)) return;
-        premRuleRef.current = { symbol: pos.symbol, sl, tp, trail: live.trail || null };
+        premRuleRef.current = { symbol: pos.symbol, sl, tp, trail: live.trail || null,
+                                slOn: live.sl_on !== 0, tpOn: live.tp_on !== 0 };
+        if (runFreeRef.current === pos.symbol) runFreeRef.current = '';   // re-armed elsewhere
+        reconcileLegs(live.sl_on !== 0, live.tp_on !== 0);
         if (exitDragRef.current) return;
         const long = (pos.side || 'BUY') !== 'SELL';
         for (const l of slLinesRef.current) {
@@ -6305,6 +6336,21 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       } catch (e) { /* keep the last known rule */ }
       finally { ruleSyncBusy = false; }
     };
+    // If the legs DRAWN differ from the legs SWITCHED ON, drop the lines;
+    // ensure() rebuilds them within a second and legOn() decides which exist.
+    // The periodic sync only ever moved existing lines, so it could never add
+    // or remove one when a switch changed.
+    function reconcileLegs(slOn: boolean, tpOn: boolean) {
+      const drawn = new Set(slLinesRef.current.map((l: any) => l.label));
+      const want = new Set<string>();
+      if (slOn) want.add('SL');
+      if (tpOn) want.add('TARGET');
+      const same = drawn.size === want.size && [...want].every((x) => drawn.has(x));
+      if (same) return;
+      const ser = slSeriesRef.current;
+      slLinesRef.current.forEach((l: any) => { try { ser?.removePriceLine(l.instance); } catch (e) {} });
+      slLinesRef.current = [];
+    }
     // Adopt a rule change the instant another chart arms one, rather than waiting
     // for the poll below. Same handler either way.
     const onRuleChanged = (ev: any) => {
@@ -6312,8 +6358,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       const pos = slActivePosRef.current;
       if (!d || !pos || d.symbol !== pos.symbol) return;
       if (!Number.isFinite(d.sl) || !Number.isFinite(d.tp)) return;
-      premRuleRef.current = { symbol: pos.symbol, sl: d.sl, tp: d.tp, trail: premRuleRef.current?.trail };
+      premRuleRef.current = { symbol: pos.symbol, sl: d.sl, tp: d.tp, trail: premRuleRef.current?.trail,
+                              slOn: d.slOn !== false, tpOn: d.tpOn !== false };
       if (!isOptionViewRef.current || exitDragRef.current) return;
+      reconcileLegs(d.slOn !== false, d.tpOn !== false);
       const long = (pos.side || 'BUY') !== 'SELL';
       for (const l of slLinesRef.current) {
         const want = l.kind === 'upper' ? (long ? d.tp : d.sl) : (long ? d.sl : d.tp);
