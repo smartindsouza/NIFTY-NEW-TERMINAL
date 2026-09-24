@@ -50,7 +50,9 @@ const RANGES = [
   { key: 'MONTH', label: '30 days', days: 29 },
   { key: 'ALL', label: 'All', days: null as number | null },
 ] as const;
-type RangeKey = typeof RANGES[number]['key'];
+// 'CUSTOM' sits outside the preset list: it has no day count, only the two dates
+// the user picks.
+type RangeKey = typeof RANGES[number]['key'] | 'CUSTOM';
 
 const inr = (v: number | null | undefined) =>
   v === null || v === undefined || isNaN(v) ? '—' : `₹${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
@@ -89,9 +91,19 @@ export default function TradeJournal() {
   // The journal keeps every day now, so a range has to be chosen rather than
   // assumed. Today first, because that is the usual question.
   const [range, setRange] = useState<RangeKey>('TODAY');
-  const rangeDays = RANGES.find((r) => r.key === range)!.days;
-  const from = rangeDays === null ? null : istDaysAgo(rangeDays);
-  const to = rangeDays === null ? null : istDay(Date.now());
+  // Custom period, as IST YYYY-MM-DD — the same form the presets use, so the
+  // server filter, the summary cards and the Excel export all work unchanged.
+  // Defaults to the last 7 days so opening Custom shows something useful.
+  const [customFrom, setCustomFrom] = useState<string>(() => istDaysAgo(6));
+  const [customTo, setCustomTo] = useState<string>(() => istDay(Date.now()));
+  const today = istDay(Date.now());
+  const preset = range === 'CUSTOM' ? null : RANGES.find((r) => r.key === range)!;
+  const rangeDays = preset ? preset.days : null;
+  // A backwards pair (From after To) is read the sensible way round rather than
+  // returning nothing.
+  const [cFrom, cTo] = customFrom <= customTo ? [customFrom, customTo] : [customTo, customFrom];
+  const from = range === 'CUSTOM' ? cFrom : (rangeDays === null ? null : istDaysAgo(rangeDays));
+  const to = range === 'CUSTOM' ? cTo : (rangeDays === null ? null : istDay(Date.now()));
 
   const downloadExcel = () => {
     const qs = from && to ? `?from=${from}&to=${to}` : '';
@@ -223,7 +235,14 @@ export default function TradeJournal() {
         </div>
       </div>
 
-      {/* Summary */}
+      {/* Summary. The caption names the exact period the figures cover, so a
+          screenshot or a shared report is self-explanatory. */}
+      <div className="text-[11px] text-muted-foreground mb-1.5">
+        {from && to
+          ? (from === to ? `Report for ${istDayLabel(from)}` : `Report: ${istDayLabel(from)} – ${istDayLabel(to)}`)
+          : 'Report: all trades'}
+        <span className="opacity-60"> · by entry date, IST</span>
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-3 mb-4">
         <StatCard label="Total Trades" value={String(trades.length)} />
         <StatCard label="Closed" value={String(closed.length)} />
@@ -243,6 +262,29 @@ export default function TradeJournal() {
             {r.label}
           </button>
         ))}
+        <button
+          onClick={() => setRange('CUSTOM')}
+          className={cn('text-[11px] font-semibold px-3 py-1.5 rounded-lg transition-colors',
+            range === 'CUSTOM' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-card text-muted-foreground hover:text-foreground')}
+        >
+          Custom
+        </button>
+        {range === 'CUSTOM' && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <label className="flex items-center gap-1 text-[11px] text-muted-foreground">
+              From
+              <input type="date" value={customFrom} max={today}
+                onChange={(e) => e.target.value && setCustomFrom(e.target.value)}
+                className="h-7 px-2 rounded-md bg-card border border-border text-[11px] font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
+            </label>
+            <label className="flex items-center gap-1 text-[11px] text-muted-foreground">
+              To
+              <input type="date" value={customTo} max={today}
+                onChange={(e) => e.target.value && setCustomTo(e.target.value)}
+                className="h-7 px-2 rounded-md bg-card border border-border text-[11px] font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
+            </label>
+          </div>
+        )}
         {data?.accountId && (
           <span className="ml-auto text-[10px] font-mono text-muted-foreground">Account {data.accountId}</span>
         )}
