@@ -1743,13 +1743,26 @@ setInterval(() => {
       try {
         const posResp: any = await kc.getPositions();
         const net: any[] = Array.isArray(posResp?.net) ? posResp.net : [];
-        // Journal rows from earlier days that are still open — or that an earlier
-        // import TODAY already closed as carried (re-running the import must be
-        // able to rebuild them from the same starting point).
+        // Journal rows from earlier days that are still open, or that were CLOSED
+        // TODAY by anything — not only by an earlier run of this import.
+        //
+        // It used to require the import's own "carried" marker on a row closed
+        // today. But the app's exit path also closes rows, and it records Kite's
+        // last traded price at the moment the exit order is PLACED — which in the
+        // first minute of the session is still yesterday's close. Martin's BTST
+        // (bought 23 Sep at 121.30, sold 24 Sep at 40.40) was closed that way at
+        // 106.60, lacked the marker, so the import did not recognise it as the
+        // carried lot: it estimated a second entry at the previous close and
+        // split one trade into two rows. The total was right; the story was not.
+        //
+        // A row entered before today and closed today IS a carried position being
+        // closed today, so it is treated as the lot and re-paired against today's
+        // real fills — replacing a stale exit with the actual one. Only rows that
+        // match a real overnight quantity are ever consumed, so nothing else moves.
         const prior = db.prepare(
           `SELECT * FROM trade_journal
             WHERE kite_user_id = ? AND entry_time < ? AND test_mode = 0 AND simulated = 0
-              AND (status = 'OPEN' OR (exit_time >= ? AND context LIKE '%"carried":true%'))
+              AND (status = 'OPEN' OR exit_time >= ?)
             ORDER BY entry_time ASC`
         ).all(owner, dayStart, dayStart) as any[];
         for (const p of net) {
