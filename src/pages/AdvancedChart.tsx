@@ -4042,6 +4042,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
   // States for chart-click option strike selection
   const [clickMenu, setClickMenu] = useState<{ x: number, y: number, price: number } | null>(null);
+  const clickMenuRef = useRef(clickMenu);          // read by the axis listener, which is attached once
+  clickMenuRef.current = clickMenu;
+  const clickMenuElRef = useRef<HTMLDivElement | null>(null);
   // Same URL signal App uses. In this mode the tab is about ONE contract, so the
   // index switcher is hidden too — it would only offer a way to navigate away from
   // the thing the tab exists to show.
@@ -8880,6 +8883,63 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     }
   }, [chartData, hLevels, showFiftyPercentLevels, showHLevels, isReferenceChart]);
 
+  // STRIKE MENU ON THE PRICE AXIS. It used to open on a click anywhere on the
+  // chart. It now opens only from the price axis — the place where a price is
+  // actually being chosen — and sits docked against it at that price.
+  //
+  // The chart library's click event only fires for the chart AREA; clicks on
+  // the axis never reach it. So this listens on the container itself and keeps
+  // only clicks that land on the axis strip, above the time axis.
+  //
+  // Dismissal: moving the mouse back into the chart area closes it (desktop),
+  // and tapping the chart closes it (mobile, via the chart click handler).
+  // The menu is rendered INSIDE the container, so pointer events over the menu
+  // itself are ignored — otherwise reaching for a strike would close it.
+  useEffect(() => {
+    const el = chartContainerRef.current;
+    if (!el) return;
+    let downAt: { x: number; y: number } | null = null;
+    const geom = () => {
+      const rect = el.getBoundingClientRect();
+      let psW = 0, tsH = 0;
+      try { psW = mainChartRef.current?.priceScale('right')?.width?.() || 0; } catch (e) {}
+      try { tsH = mainChartRef.current?.timeScale()?.height?.() || 0; } catch (e) {}
+      return { rect, psW, axisLeft: rect.width - psW, plotBottom: rect.height - tsH };
+    };
+    const onDown = (e: PointerEvent) => { downAt = { x: e.clientX, y: e.clientY }; };
+    const onClick = (e: MouseEvent) => {
+      if (clickMenuElRef.current?.contains(e.target as Node)) return;
+      if (isOptionViewRef.current || isReferenceChartRef.current || !quickTradeEnabledRef.current) return;
+      if (draggingLineRef.current || triggerBoxOpenRef.current) return;
+      // Dragging the axis to rescale it also ends in a click; that is not a
+      // request for the menu.
+      if (downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 5) return;
+      const g = geom();
+      if (!(g.psW > 0)) return;
+      const x = e.clientX - g.rect.left, y = e.clientY - g.rect.top;
+      if (x < g.axisLeft || y < 0 || y > g.plotBottom) return;       // not on the price axis
+      const price = mainSeriesRef.current?.coordinateToPrice(y);
+      if (price === null || price === undefined || !Number.isFinite(price as number)) return;
+      // Docked: the menu's right edge overlaps the axis by 2px, so the pointer
+      // goes straight from the axis onto the menu without crossing the chart.
+      setClickMenu({ x: Math.max(0, g.axisLeft - 158), y, price: Math.round(price as number) });
+    };
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse' || !clickMenuRef.current) return;
+      if (clickMenuElRef.current?.contains(e.target as Node)) return;
+      const g = geom();
+      if (e.clientX - g.rect.left < g.axisLeft) setClickMenu(null);   // back over the chart
+    };
+    el.addEventListener('pointerdown', onDown, true);
+    el.addEventListener('click', onClick);
+    el.addEventListener('pointermove', onMove);
+    return () => {
+      el.removeEventListener('pointerdown', onDown, true);
+      el.removeEventListener('click', onClick);
+      el.removeEventListener('pointermove', onMove);
+    };
+  }, [chartData]);
+
   useEffect(() => {
     if (!chartContainerRef.current || !chartData || chartData.candles.length === 0) return;
 
@@ -9165,14 +9225,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             return;
           }
 
-          if (price !== null && quickTradeEnabledRef.current && !isOptionViewRef.current) {
-            // Open the menu near the clicked cursor coordinate
-            setClickMenu({
-              x: param.point.x,
-              y: param.point.y,
-              price: Math.round(price)
-            });
-          }
+          // The strike menu opens from the PRICE AXIS now (see the axis listener).
+          // A tap on the chart area closes it — the mobile dismissal.
+          setClickMenu(null);
         }
       } catch (e) {
         // ignore Object is disposed
@@ -12360,7 +12415,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             })()}
             
             {clickMenu && (
-              <div 
+              <div
+                ref={clickMenuElRef}
                 className="absolute z-[100] bg-popover border border-0 rounded-lg p-2 flex flex-col gap-1.5 w-[160px] transition-all duration-150 animate-in fade-in zoom-in-95"
                 style={{
                   top: `${Math.max(5, Math.min(clickMenu.y, (chartContainerRef.current?.getBoundingClientRect().height || 450) - 170))}px`,
