@@ -10787,11 +10787,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                 const tw = ctx.measureText(text).width;
                 const ph = 20, pw = tw + 20, r = ph / 2;
                 // Clear of the "+" add-line button as well as the axis. That button
-                // sits on the same crosshair line, 24px wide and 65px from the
-                // chart's right edge (right-[65px] w-6), so the pill's right edge
+                // sits on the same crosshair line, 20px wide and 65px from the
+                // chart's right edge (right-[65px] w-5), so the pill's right edge
                 // goes 8px left of the button's left edge — anchored to where the
                 // button actually is rather than nudged by eye.
-                const PLUS_RIGHT = 65, PLUS_W = 24, GAP = 8;
+                const PLUS_RIGHT = 65, PLUS_W = 20, GAP = 8;   // w-5, matched to the pill
                 const rightEdge = Math.min(x - GAP, cw - PLUS_RIGHT - PLUS_W - GAP);
                 const px = Math.max(4, rightEdge - pw);
                 const py = crossY - ph / 2;
@@ -12245,13 +12245,21 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                 onClick={handleAddManualLine}
                 onMouseEnter={() => { isHoveringButtonRef.current = true; }}
                 onMouseLeave={() => { isHoveringButtonRef.current = false; }}
-                className="absolute right-[65px] w-6 h-6 rounded-full bg-card border  flex items-center justify-center text-foreground/80 hover:text-foreground hover:bg-slate-700 z-[60] transition-colors"
+                // Styled to MATCH the premium chart's "BUY / SELL @" pill beside it:
+                // same 20px height, same 1.25px outline, same fill and text colours
+                // in each theme. The pill is drawn on the canvas with these exact
+                // values, so they are repeated here rather than approximated.
+                className="absolute right-[65px] w-5 h-5 rounded-full flex items-center justify-center z-[60] transition-opacity hover:opacity-80"
                 style={{
                   top: `${crosshairInfo.y}px`,
-                  transform: 'translateY(-50%)' // Center vertically
+                  transform: 'translateY(-50%)', // Center vertically
+                  border: '1.25px solid',
+                  background: resolvedTheme === 'light' ? 'rgba(255, 255, 255, 0.95)' : 'rgba(19, 23, 34, 0.92)',
+                  borderColor: resolvedTheme === 'light' ? 'rgba(15, 23, 42, 0.55)' : 'rgba(209, 212, 220, 0.7)',
+                  color: resolvedTheme === 'light' ? '#0f172a' : '#e2e8f0',
                 }}
               >
-                <Plus size={14} />
+                <Plus size={12} strokeWidth={2.5} />
               </button>
             )}
             {slPanelOpen && slActivePos && (
