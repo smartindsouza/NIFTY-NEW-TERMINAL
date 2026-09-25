@@ -10786,7 +10786,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                 ctx.font = "600 11px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
                 const tw = ctx.measureText(text).width;
                 const ph = 20, pw = tw + 20, r = ph / 2;
-                const px = x - pw - 8;                       // right end, clear of the axis
+                // Clear of the "+" add-line button as well as the axis. That button
+                // sits on the same crosshair line, 24px wide and 65px from the
+                // chart's right edge (right-[65px] w-6), so the pill's right edge
+                // goes 8px left of the button's left edge — anchored to where the
+                // button actually is rather than nudged by eye.
+                const PLUS_RIGHT = 65, PLUS_W = 24, GAP = 8;
+                const rightEdge = Math.min(x - GAP, cw - PLUS_RIGHT - PLUS_W - GAP);
+                const px = Math.max(4, rightEdge - pw);
                 const py = crossY - ph / 2;
                 ctx.beginPath();
                 ctx.moveTo(px + r, py);
