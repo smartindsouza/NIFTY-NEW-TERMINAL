@@ -3579,6 +3579,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   }, [testOrderMode]);
   const [crosshairInfo, setCrosshairInfo] = useState<{ x: number, y: number, price: number } | null>(null);
   const crosshairInfoRef = useRef<{ x: number, y: number, price: number } | null>(null);
+  // Whether the library's own crosshair axis label is currently switched off,
+  // and on which chart instance — a rebuilt chart starts with it on again.
+  const axisLabelStateRef = useRef<{ chart: any; hidden: boolean }>({ chart: null, hidden: false });
 
   useEffect(() => {
     crosshairInfoRef.current = crosshairInfo;
@@ -10755,17 +10758,41 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               ctx.setLineDash([]);
             }
 
-            const labelHeight = 22;
-            const labelY = crossY - labelHeight / 2;
-            
-            ctx.fillStyle = '#2b2b43'; // crosshair label bg color
-            ctx.fillRect(x, labelY, priceScaleWidth, labelHeight);
-            
-            ctx.fillStyle = '#d1d4dc'; // crosshair text color
-            ctx.font = "12px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(crossPrice.toFixed(2), x + priceScaleWidth / 2, labelY + labelHeight / 2);
+            // Is the BUY / SELL pill showing? Decided here, before the axis label,
+            // because when it is, the axis price is a duplicate: the pill already
+            // states the price a tap would arm (and states it rounded to the tick,
+            // which the raw axis figure beside it contradicted by a few paise).
+            const plotBottomP = ch - (mainChartRef.current.timeScale().height() || 26);
+            const pillOn = !!(isOptionViewRef.current && quickTradeEnabledRef.current && !rrArmRef.current
+              && !triggerBoxOpenRef.current && !isReferenceChartRef.current
+              && crossX >= 0 && crossX < x && crossY <= plotBottomP && Number.isFinite(crossPrice));
+
+            // The chart library draws its OWN crosshair price label on the axis, and
+            // the label below is painted exactly over it. Skipping ours alone would
+            // let the library's show through, so it is switched off too — only on
+            // the change, never every frame, and re-applied if the chart is rebuilt.
+            try {
+              const chartNow = mainChartRef.current;
+              const st = axisLabelStateRef.current;
+              if (st.chart !== chartNow || st.hidden !== pillOn) {
+                chartNow.applyOptions({ crosshair: { horzLine: { labelVisible: !pillOn } } });
+                axisLabelStateRef.current = { chart: chartNow, hidden: pillOn };
+              }
+            } catch (e) {}
+
+            if (!pillOn) {
+              const labelHeight = 22;
+              const labelY = crossY - labelHeight / 2;
+
+              ctx.fillStyle = '#2b2b43'; // crosshair label bg color
+              ctx.fillRect(x, labelY, priceScaleWidth, labelHeight);
+
+              ctx.fillStyle = '#d1d4dc'; // crosshair text color
+              ctx.font = "12px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(crossPrice.toFixed(2), x + priceScaleWidth / 2, labelY + labelHeight / 2);
+            }
 
             // PREMIUM CHART HOVER HINT: "BUY / SELL @ 119.00" in an outlined pill on
             // the crosshair line, just left of the price axis — what a tap here
@@ -10776,10 +10803,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             // the 0.05 NSE option tick — so the pill never promises a price the
             // box then contradicts.
             try {
-              const plotBottomH = ch - (mainChartRef.current.timeScale().height() || 26);
-              if (isOptionViewRef.current && quickTradeEnabledRef.current && !rrArmRef.current
-                  && !triggerBoxOpenRef.current && !isReferenceChartRef.current
-                  && crossX >= 0 && crossX < x && crossY <= plotBottomH && Number.isFinite(crossPrice)) {
+              if (pillOn) {
                 const level = Math.max(0.05, Math.round(crossPrice / 0.05) * 0.05);
                 const text = `BUY / SELL @ ${level.toFixed(2)}`;
                 const light = document.documentElement.classList.contains('light');
