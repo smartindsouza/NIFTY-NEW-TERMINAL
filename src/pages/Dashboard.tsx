@@ -365,12 +365,14 @@ export function Dashboard() {
         </div>
         
         <div className="p-6">
-           <div className="flex justify-between items-end mb-4">
+           {/* Stacked: the signal on its own line, the score balance beneath it.
+               The signal is 10% smaller than before (text-3xl is 30px / 36px). */}
+           <div className="flex flex-col items-start gap-2 mb-4">
              <div>
                <p className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">SIGNAL</p>
                <div className="flex items-center gap-3">
                  <ArrowRight className={cn("w-6 h-6", signalColor)} />
-                 <h2 className={cn("text-3xl font-black tracking-wide uppercase", signalColor)}>{decision.signal}</h2>
+                 <h2 className={cn("text-[27px] leading-[32px] font-black tracking-wide uppercase", signalColor)}>{decision.signal}</h2>
                </div>
              </div>
              {/* SCORE BALANCE, replacing "confidence". That figure was hardcoded
@@ -378,13 +380,13 @@ export function Dashboard() {
                  outside it was 65 + 5 x the score gap: never measured against
                  outcomes. The raw balance is what the signal is actually built
                  from, and it moves with the market. */}
-             <div className="text-right">
+             <div className="flex items-baseline gap-2">
                <h2 className="text-3xl font-mono font-bold whitespace-nowrap">
                  <span className={decision.bearScore > decision.bullScore ? 'text-rose-400' : 'text-muted-foreground'}>{decision.bearScore}</span>
-                 <span className="text-muted-foreground/60 mx-1">:</span>
+                 <span className="text-muted-foreground/60">:</span>
                  <span className={decision.bullScore > decision.bearScore ? 'text-emerald-400' : 'text-muted-foreground'}>{decision.bullScore}</span>
                </h2>
-               <p className="text-[9px] tracking-widest uppercase text-muted-foreground">BEAR : BULL</p>
+               <p className="text-[9px] tracking-widest uppercase text-muted-foreground">BEAR:BULL</p>
              </div>
            </div>
 
