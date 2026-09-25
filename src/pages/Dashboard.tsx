@@ -373,19 +373,54 @@ export function Dashboard() {
                  <h2 className={cn("text-3xl font-black tracking-wide uppercase", signalColor)}>{decision.signal}</h2>
                </div>
              </div>
+             {/* SCORE BALANCE, replacing "confidence". That figure was hardcoded
+                 to 65 whenever spot sat inside the OI range — almost always — and
+                 outside it was 65 + 5 x the score gap: never measured against
+                 outcomes. The raw balance is what the signal is actually built
+                 from, and it moves with the market. */}
              <div className="text-right">
-               <h2 className={cn("text-3xl font-mono font-bold", signalColor)}>{decision.confidence.toFixed(0)}%</h2>
-               <p className={cn("text-[9px] tracking-widest uppercase", signalColor, "opacity-50")}>CONFIDENCE</p>
+               <h2 className="text-3xl font-mono font-bold whitespace-nowrap">
+                 <span className={decision.bearScore > decision.bullScore ? 'text-rose-400' : 'text-muted-foreground'}>{decision.bearScore}</span>
+                 <span className="text-muted-foreground/60 mx-1">:</span>
+                 <span className={decision.bullScore > decision.bearScore ? 'text-emerald-400' : 'text-muted-foreground'}>{decision.bullScore}</span>
+               </h2>
+               <p className="text-[9px] tracking-widest uppercase text-muted-foreground">BEAR : BULL</p>
              </div>
            </div>
 
-           <div className="relative h-2 w-full bg-muted mb-10 overflow-visible mt-6 rounded-full">
-             <div className={cn("absolute top-0 left-0 h-full rounded-l-full", decision.confidence === 100 ? "rounded-r-full" : "rounded-r-none", signalBg)} style={{width: `${decision.confidence}%`}}></div>
-             <div className="absolute -top-1 bottom-[-4px] w-0.5 bg-muted-foreground" style={{left: '65%'}}></div>
-             <p className="absolute top-4 text-[9px] text-muted-foreground whitespace-nowrap" style={{left: '65%', transform: 'translateX(-50%)'}}>65% entry threshold</p>
-             <p className="absolute top-4 right-0 text-[10px] text-muted-foreground font-mono">100%</p>
-             <p className="absolute top-4 left-0 text-[10px] text-muted-foreground font-mono">0%</p>
-           </div>
+           {/* WHERE SPOT SITS IN THE RANGE. For range trading this is the actual
+               decision: near the support edge favours longs, near resistance
+               favours shorts, the middle offers no edge. Replaces a confidence
+               bar that always sat exactly on its own "65% entry threshold". */}
+           {(() => {
+             const sup = Number(analytics?.supportZone?.strikePrice);
+             const res = Number(analytics?.resistanceZone?.strikePrice);
+             if (!(sup > 0) || !(res > sup) || !(spot > 0)) return null;
+             const pos = (spot - sup) / (res - sup);                 // 0 at support, 1 at resistance
+             const clamped = Math.max(0, Math.min(1, pos));
+             const pct = Math.round(clamped * 100);
+             // Edges are the outer fifth of the range at each end — a simple,
+             // stated rule, not a tuned parameter.
+             const where = pos < 0 ? `Below support by ${(sup - spot).toFixed(0)} pts`
+               : pos > 1 ? `Above resistance by ${(spot - res).toFixed(0)} pts`
+               : pos <= 0.2 ? `Near support — long edge · ${(spot - sup).toFixed(0)} pts above ${sup}`
+               : pos >= 0.8 ? `Near resistance — short edge · ${(res - spot).toFixed(0)} pts below ${res}`
+               : `Mid-range — no edge · ${pct}% of the way from ${sup} to ${res}`;
+             const tone = pos < 0 || pos > 1 ? 'text-amber-400' : pos <= 0.2 ? 'text-emerald-400' : pos >= 0.8 ? 'text-rose-400' : 'text-muted-foreground';
+             return (
+               <div className="mt-6 mb-10">
+                 <div className="relative h-2 w-full rounded-full overflow-visible bg-muted">
+                   <div className="absolute inset-y-0 left-0 w-[20%] rounded-l-full bg-emerald-500/25" />
+                   <div className="absolute inset-y-0 right-0 w-[20%] rounded-r-full bg-rose-500/25" />
+                   <div className="absolute -top-1.5 w-3 h-5 -translate-x-1/2 rounded-sm bg-foreground shadow"
+                        style={{ left: `${clamped * 100}%` }} title={`Spot ${spot.toFixed(2)}`} />
+                   <p className="absolute top-4 left-0 text-[10px] text-muted-foreground font-mono">S {sup}</p>
+                   <p className="absolute top-4 right-0 text-[10px] text-muted-foreground font-mono">R {res}</p>
+                 </div>
+                 <p className={cn('mt-7 text-[11px] font-medium', tone)}>{where}</p>
+               </div>
+             );
+           })()}
 
            {/* Biases Split */}
            <div className="grid grid-cols-2 gap-4 md:gap-8 mb-6 md:mb-8">
