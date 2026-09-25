@@ -8049,6 +8049,36 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
            const latestCandle = data.candles[data.candles.length - 1];
            const updateTime = getMarketAlignedCandleStart(toUnixSeconds(latestCandle.time), tfMin, !isReferenceChartRef.current);
 
+           // Rewrite specific CLOSED bars in place: merge them into the full
+           // history and redraw the SAME series, keeping the view. Used by the
+           // closed-bar audit and by the wick repair below. update() cannot touch
+           // a bar behind the newest, so this is the only way to fix one.
+           const writeBarsInPlace = (bars: any[]) => {
+             const merged = new Map<number, any>();
+             for (const c of (chartDataRef.current?.candles || [])) merged.set(toUnixSeconds(c.time), c);
+             for (const c of liveClosedCandlesRef.current) merged.set(toUnixSeconds(c.time), c);
+             for (const b of bars) merged.set(b.time, b);
+             const liveBar = lastCandleDataRef.current;          // keep the bar still forming
+             if (liveBar) merged.set(toUnixSeconds(liveBar.time), liveBar);
+             const ordered = [...merged.entries()].sort((a, b) => a[0] - b[0]).map(([, c]) => c);
+             const ts = mainChartRef.current?.timeScale();
+             const keep = ts?.getVisibleLogicalRange?.();
+             mainSeriesRef.current?.setData(ordered.map((c: any) => ({
+               time: c.time as any, open: c.open, high: c.high, low: c.low, close: c.close,
+             })));
+             const up = settingsRef.current.candleUpColor, dn = settingsRef.current.candleDownColor;
+             volumeSeriesRef.current?.setData(ordered.map((c: any) => ({
+               time: c.time as any, value: c.volume || 0,
+               color: c.close >= c.open ? hexToRgba(up, 0.4) : hexToRgba(dn, 0.4),
+             })));
+             if (keep && ts) ts.setVisibleLogicalRange(keep);
+             // record the corrections so the next audit sees them fixed
+             for (const b of bars) {
+               const i = liveClosedCandlesRef.current.findIndex((c: any) => toUnixSeconds(c.time) === b.time);
+               if (i >= 0) liveClosedCandlesRef.current[i] = b; else liveClosedCandlesRef.current.push(b);
+             }
+           };
+
            if (lastCandleTimeRef.current !== null && updateTime < lastCandleTimeRef.current) {
              // The chart's candle clock is AHEAD of the server's.
              //
@@ -8070,7 +8100,32 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
              const barSec = tfMin * 60;
              if (leadSec <= barSec) {
                if (!desyncSinceRef.current) desyncSinceRef.current = Date.now();
-               if (Date.now() - desyncSinceRef.current < barSec * 1000 + 60000) return;   // normal lag
+               if (Date.now() - desyncSinceRef.current < barSec * 1000 + 60000) {
+                 // Normal lag — but do NOT skip everything, as this briefly did. The
+                 // server's newest candle is the chart's JUST-CLOSED one, the candle
+                 // that most needs checking, and on a 5-minute chart this window
+                 // can last six minutes. A doji whose hammer wick the live ticks
+                 // missed stayed a doji until a timeframe switch reloaded it.
+                 //
+                 // Only the SAFE direction is applied: the server's snapshot may
+                 // predate the candle's close, so its close cannot be trusted here —
+                 // but its extremes can only be LESS stretched than the final ones.
+                 // A lower low or higher high on the server therefore means the
+                 // chart genuinely missed a wick. Open and close are left alone.
+                 try {
+                   const ours = liveClosedCandlesRef.current.find((c: any) => toUnixSeconds(c.time) === updateTime)
+                     || (chartDataRef.current?.candles || []).find((c: any) => toUnixSeconds(c.time) === updateTime);
+                   if (ours) {
+                     const tolW = Math.max((latestCandle.close || 0) * 0.00005, 0.1);
+                     const hi = Math.max(ours.high, latestCandle.high), lo = Math.min(ours.low, latestCandle.low);
+                     if (hi > ours.high + tolW || lo < ours.low - tolW) {
+                       writeBarsInPlace([{ ...ours, time: updateTime, high: hi, low: lo }]);
+                       console.warn(`[chart] wick repair on the just-closed bar ${updateTime}: ${ours.low}-${ours.high} -> ${lo}-${hi}`);
+                     }
+                   }
+                 } catch (e) { /* display repair only; the next poll tries again */ }
+                 return;
+               }
              }
              desyncSinceRef.current = 0;
              const sinceLastReseed = Date.now() - lastDesyncReseedRef.current;
@@ -8173,9 +8228,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                const t = getMarketAlignedCandleStart(toUnixSeconds(sc.time), tfMin, !isReferenceChartRef.current);
                const oc = ours.get(t);
                if (!oc) { drift = `bar ${t} missing from the chart`; break; }
-               // Tolerance is deliberately tight but not zero: a bar built from ticks can
-               // sit a point or two off the server's, which is not worth a reseed.
-               const tol = Math.max((sc.close || 0) * 0.0005, 2);
+               // Tight but not zero. This was max(0.05% of price, 2) — about 11.5
+               // points at NIFTY 23,000 — so a closed candle whose wick was wrong by
+               // less than that was never corrected: a doji that should have been a
+               // hammer stayed a doji. The worry was cost, and the repair is now an
+               // in-place redraw rather than a rebuild, so it can afford to be exact.
+               // ~1 point on NIFTY, 0.1 on a premium.
+               const tol = Math.max((sc.close || 0) * 0.00005, 0.1);
                if (
                  Math.abs((oc.close ?? 0) - sc.close) > tol ||
                  (oc.high ?? 0) < sc.high - tol ||
@@ -8201,35 +8260,12 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                // Any failure falls back to the old full reseed, so correctness can
                // only improve, never regress.
                try {
-                 const merged = new Map<number, any>();
-                 for (const c of (chartDataRef.current?.candles || [])) merged.set(toUnixSeconds(c.time), c);
-                 for (const c of liveClosedCandlesRef.current) merged.set(toUnixSeconds(c.time), c);
                  const fixed: any[] = [];
                  for (const sc of serverClosed) {
                    const t = getMarketAlignedCandleStart(toUnixSeconds(sc.time), tfMin, !isReferenceChartRef.current);
-                   const bar = { ...sc, time: t };
-                   merged.set(t, bar); fixed.push(bar);
+                   fixed.push({ ...sc, time: t });
                  }
-                 // keep the bar that is still forming
-                 const live = lastCandleDataRef.current;
-                 if (live) merged.set(toUnixSeconds(live.time), live);
-                 const ordered = [...merged.entries()].sort((a, b) => a[0] - b[0]).map(([, c]) => c);
-                 const ts = mainChartRef.current?.timeScale();
-                 const keep = ts?.getVisibleLogicalRange?.();
-                 mainSeriesRef.current?.setData(ordered.map((c: any) => ({
-                   time: c.time as any, open: c.open, high: c.high, low: c.low, close: c.close,
-                 })));
-                 const up = settingsRef.current.candleUpColor, dn = settingsRef.current.candleDownColor;
-                 volumeSeriesRef.current?.setData(ordered.map((c: any) => ({
-                   time: c.time as any, value: c.volume || 0,
-                   color: c.close >= c.open ? hexToRgba(up, 0.4) : hexToRgba(dn, 0.4),
-                 })));
-                 if (keep && ts) ts.setVisibleLogicalRange(keep);
-                 // record the corrections so the next audit sees them
-                 for (const b of fixed) {
-                   const i = liveClosedCandlesRef.current.findIndex((c: any) => toUnixSeconds(c.time) === b.time);
-                   if (i >= 0) liveClosedCandlesRef.current[i] = b; else liveClosedCandlesRef.current.push(b);
-                 }
+                 writeBarsInPlace(fixed);
                  console.warn(`[chart] closed-bar audit: ${drift} — repaired ${fixed.length} bar(s) in place`);
                } catch (e) {
                  console.warn(`[chart] closed-bar audit: in-place repair failed, full reseed`, e);
