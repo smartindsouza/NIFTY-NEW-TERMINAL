@@ -10766,6 +10766,48 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(crossPrice.toFixed(2), x + priceScaleWidth / 2, labelY + labelHeight / 2);
+
+            // PREMIUM CHART HOVER HINT: "BUY / SELL @ 119.00" in an outlined pill on
+            // the crosshair line, just left of the price axis — what a tap here
+            // would arm, before tapping. Shown only when a tap WOULD arm: option
+            // chart, quick trade on, R:R not armed (that tap goes to R:R), no box
+            // already open, and the cursor over the plot rather than the axes.
+            // The figure is rounded exactly as the trigger box rounds a tap — to
+            // the 0.05 NSE option tick — so the pill never promises a price the
+            // box then contradicts.
+            try {
+              const plotBottomH = ch - (mainChartRef.current.timeScale().height() || 26);
+              if (isOptionViewRef.current && quickTradeEnabledRef.current && !rrArmRef.current
+                  && !triggerBoxOpenRef.current && !isReferenceChartRef.current
+                  && crossX >= 0 && crossX < x && crossY <= plotBottomH && Number.isFinite(crossPrice)) {
+                const level = Math.max(0.05, Math.round(crossPrice / 0.05) * 0.05);
+                const text = `BUY / SELL @ ${level.toFixed(2)}`;
+                const light = document.documentElement.classList.contains('light');
+                ctx.font = "600 11px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
+                const tw = ctx.measureText(text).width;
+                const ph = 20, pw = tw + 20, r = ph / 2;
+                const px = x - pw - 8;                       // right end, clear of the axis
+                const py = crossY - ph / 2;
+                ctx.beginPath();
+                ctx.moveTo(px + r, py);
+                ctx.lineTo(px + pw - r, py);
+                ctx.arc(px + pw - r, py + r, r, -Math.PI / 2, Math.PI / 2);
+                ctx.lineTo(px + r, py + ph);
+                ctx.arc(px + r, py + r, r, Math.PI / 2, (3 * Math.PI) / 2);
+                ctx.closePath();
+                // Solid fill in the chart's own background so the line and candles
+                // behind never cut through the text; the outline is the pill.
+                ctx.fillStyle = light ? 'rgba(255, 255, 255, 0.95)' : 'rgba(19, 23, 34, 0.92)';
+                ctx.fill();
+                ctx.lineWidth = 1.25;
+                ctx.strokeStyle = light ? 'rgba(15, 23, 42, 0.55)' : 'rgba(209, 212, 220, 0.7)';
+                ctx.stroke();
+                ctx.fillStyle = light ? '#0f172a' : '#e2e8f0';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(text, px + pw / 2, crossY + 0.5);
+              }
+            } catch (e) { /* a hint must never break the frame */ }
           }
         }
 
