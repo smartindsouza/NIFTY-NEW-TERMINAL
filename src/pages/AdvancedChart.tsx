@@ -3579,6 +3579,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   }, [testOrderMode]);
   const [crosshairInfo, setCrosshairInfo] = useState<{ x: number, y: number, price: number } | null>(null);
   const crosshairInfoRef = useRef<{ x: number, y: number, price: number } | null>(null);
+  // A manual-line grab switched chart zoom/scroll off; the release must restore it.
+  const manualZoomLockedRef = useRef(false);
   // Whether the library's own crosshair axis label is currently switched off,
   // and on which chart instance — a rebuilt chart starts with it on again.
   const axisLabelStateRef = useRef<{ chart: any; hidden: boolean }>({ chart: null, hidden: false });
@@ -5815,6 +5817,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     if (foundLineId) {
        draggingLineRef.current = { id: foundLineId, startY: y, dragged: false };
        mainChartRef.current.applyOptions({ handleScroll: false, handleScale: false });
+       // Remember that THIS grab switched zoom off, so the release restores it
+       // whatever has happened to draggingLineRef in between.
+       manualZoomLockedRef.current = true;
     }
   };
 
@@ -5847,6 +5852,20 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
+    // ZOOM MUST ALWAYS COME BACK. Restoring scroll/zoom used to depend on
+    // draggingLineRef still being set — but a stale 150ms timer from a PREVIOUS
+    // release could null it mid-drag (press near a line twice within 150ms, or
+    // the second finger of a pinch), so this release skipped the restore and
+    // zoom stayed off for good. Two lines on the chart made that easy to hit.
+    // The lock flag records that a grab switched zoom off; the release honours it
+    // unconditionally.
+    if (manualZoomLockedRef.current && mainChartRef.current) {
+      manualZoomLockedRef.current = false;
+      mainChartRef.current.applyOptions({
+        handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
+        handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true }
+      });
+    }
     if (draggingLineRef.current) endLineDrag(e);
     // SL/TP and spot-mirror releases are handled by startExitLineDrag's own
     // pointerup listener, which also restores chart scrolling. Manual lines below.
@@ -5863,8 +5882,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
            handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true }
         });
         
+        // Clear only THIS drag. A timer left over from an earlier release must not
+        // wipe a newer grab — that was the race that stranded zoom off.
+        const thisDrag = draggingLineRef.current;
         setTimeout(() => {
-           draggingLineRef.current = null;
+           if (draggingLineRef.current === thisDrag) draggingLineRef.current = null;
         }, 150);
     }
   };
@@ -12236,6 +12258,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               onPointerDownCapture={handlePointerDown}
               onPointerMoveCapture={handlePointerMove}
               onPointerUpCapture={handlePointerUp}
+              onPointerCancelCapture={handlePointerUp}
               onPointerLeave={handlePointerUp}
               className="border border-0 rounded-none md:bg-background stretch-self flex-grow relative w-full overflow-hidden z-20"
             />
