@@ -6775,7 +6775,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const baseKeyNow = triggerBox ? `${triggerBox.contract.tradingsymbol}|${triggerBox.side}|${triggerBox.product}` : '';
   const marginPerLot = (marginBaseRef.current && marginBaseRef.current.key === baseKeyNow)
     ? marginBaseRef.current.perLot : 0;
-  const maxLots = marginPerLot > 0 ? Math.max(0, Math.floor((availBalance || 0) / marginPerLot)) : 0;
+  // Sized the way the order will ACTUALLY be charged, so the number shown is the
+  // number placed. The fired order is a limit 0.5% above the live price, and the
+  // server keeps 1.5% of funds as headroom when it re-sizes at the moment of
+  // firing. Filling the balance to the rupee at the trigger price is why armed
+  // buys kept being rejected for insufficient funds.
+  const maxLots = marginPerLot > 0
+    ? Math.max(0, Math.floor(((availBalance || 0) * 0.985) / (marginPerLot * (triggerBox?.side === 'BUY' ? 1.005 : 1))))
+    : 0;
 
   // AUTO MAX cannot know the size until Zerodha has quoted a margin, and the
   // quote needs a lot count to ask about — so the box necessarily opens at 1 lot
@@ -6824,6 +6831,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           instrument_token: triggerBox.contract.instrument_token,
           exchange: triggerBox.contract.exchange,
           side: triggerBox.side, product: triggerBox.product, quantity: qty,
+          lot_size: triggerBox.contract.lot_size || 0,   // lets the server re-size in whole lots when it fires
           trigger_price: triggerBox.level, current_price: triggerBox.current,
           ...(force ? { force: true } : {}),
         }),
@@ -6919,9 +6927,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         });
         setFailedTriggers(prev2 => [{ ...r }, ...prev2.filter(x => x.id !== r.id)].slice(0, 4));
       } else if (r.status === 'FIRED') {
-        toast.success(`Order placed — ${r.side} ${r.quantity} ${prettyOptionName(r.tradingsymbol)}`, {
-          description: `Level ${Number(r.trigger_price).toFixed(2)} reached at ${Number(r.fired_price).toFixed(2)}.`,
-          duration: 12000,
+        // What was actually placed: the server re-sizes to the funds available at
+        // the moment of firing, so it can be fewer lots than were armed — and the
+        // reason is shown rather than left to be discovered in Kite.
+        const placed = Number(r.placed_qty) > 0 ? Number(r.placed_qty) : r.quantity;
+        toast.success(`Order placed — ${r.side} ${placed} ${prettyOptionName(r.tradingsymbol)}`, {
+          description: `Level ${Number(r.trigger_price).toFixed(2)} reached at ${Number(r.fired_price).toFixed(2)}.${r.note ? ` ${r.note}` : ''}`,
+          duration: r.note ? 30000 : 12000,
         });
       }
     }
@@ -12330,6 +12342,37 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               onPointerLeave={handlePointerUp}
               className="border border-0 rounded-none md:bg-background stretch-self flex-grow relative w-full overflow-hidden z-20"
             />
+            {/* ARMED ORDERS, at the top of the chart for quick access to CANCEL.
+                They sat pinned to the bottom-left of the screen — on a phone just
+                above the nav bar, a long reach mid-trade.
+                Rendered OVER the chart but not INSIDE its container: the container
+                intercepts presses before its children (that is how line dragging
+                works), so a CANCEL inside it sitting near an SL line could grab the
+                line. And only once: both panes render this component, and every
+                layout has exactly one non-option pane — the spot pane on desktop,
+                the single chart on mobile. */}
+            {paneRole !== 'option' && armedTriggers.length > 0 && (
+              <div className="absolute top-12 left-2 z-40 flex flex-col gap-1.5 pointer-events-auto">
+                {armedTriggers.map((t: any) => (
+                  <div key={t.id} className="flex items-center gap-2 bg-amber-500/15 border border-amber-500/40 rounded-lg px-2.5 py-1.5 backdrop-blur-sm">
+                    <span className="text-[10px] font-mono font-bold text-amber-300">
+                      {t.side} {prettyOptionName(t.tradingsymbol)} @ {Number(t.trigger_price).toFixed(2)}
+                      <span className="opacity-70"> · {t.direction === 'UP' ? 'on rise' : 'on fall'}</span>
+                    </span>
+                    <button
+                      onClick={async () => {
+                        const r = await fetch(`/api/triggers/${t.id}`, { method: 'DELETE' }).then(x => x.json()).catch(() => null);
+                        if (r?.ok) { toast.success('Trigger cancelled'); } else { toast.error(r?.error || 'Could not cancel'); }
+                        refetchTriggers();
+                      }}
+                      className="text-[10px] font-bold text-amber-200 hover:text-white px-2 py-1 rounded bg-black/30"
+                    >
+                      CANCEL
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             {showJumpToLatest && !chartOverlayOpen && (
               <button
                 onClick={() => {
@@ -13364,29 +13407,6 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                 className="ml-auto shrink-0 text-[10px] font-bold text-rose-100 hover:text-white px-1.5 py-0.5 rounded bg-black/30"
               >
                 DISMISS
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {armedTriggers.length > 0 && (
-        <div className="fixed left-2 bottom-[calc(7.5rem+env(safe-area-inset-bottom))] md:bottom-4 z-40 flex flex-col gap-1.5">
-          {armedTriggers.map((t: any) => (
-            <div key={t.id} className="flex items-center gap-2 bg-amber-500/15 border border-amber-500/40 rounded-lg px-2.5 py-1.5">
-              <span className="text-[10px] font-mono font-bold text-amber-300">
-                {t.side} {prettyOptionName(t.tradingsymbol)} @ {Number(t.trigger_price).toFixed(2)}
-                <span className="opacity-70"> · {t.direction === 'UP' ? 'on rise' : 'on fall'}</span>
-              </span>
-              <button
-                onClick={async () => {
-                  const r = await fetch(`/api/triggers/${t.id}`, { method: 'DELETE' }).then(x => x.json()).catch(() => null);
-                  if (r?.ok) { toast.success('Trigger cancelled'); } else { toast.error(r?.error || 'Could not cancel'); }
-                  refetchTriggers();
-                }}
-                className="text-[10px] font-bold text-amber-200 hover:text-white px-1.5 py-0.5 rounded bg-black/30"
-              >
-                CANCEL
               </button>
             </div>
           ))}

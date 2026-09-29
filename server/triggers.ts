@@ -70,6 +70,11 @@ export function initTriggers(database: any) {
     status TEXT,                 -- ARMED | FIRING | FIRED | CANCELLED | EXPIRED | FAILED
     fired_at INTEGER, fired_price REAL, order_id TEXT, error TEXT
   );`);
+  // Sizing at the moment of firing needs the contract's lot size (to size in
+  // whole lots) and records what was actually placed and why, when that differs.
+  try { db.exec(`ALTER TABLE pending_triggers ADD COLUMN lot_size INTEGER`); } catch (e) { /* exists */ }
+  try { db.exec(`ALTER TABLE pending_triggers ADD COLUMN placed_qty INTEGER`); } catch (e) { /* exists */ }
+  try { db.exec(`ALTER TABLE pending_triggers ADD COLUMN note TEXT`); } catch (e) { /* exists */ }
   // Anything left ARMED from an earlier day cannot be honoured today — the level
   // meant something in yesterday's market. Retire them at boot.
   try {
@@ -100,6 +105,66 @@ export function expireAtClose() {
       WHERE status='ARMED'`).run();
     if (n?.changes) console.log(`[triggers] ${n.changes} trigger(s) expired at the close`);
   } catch (e) {}
+}
+
+// SIZE AT THE MOMENT OF FIRING. Armed BUYs were being rejected for insufficient
+// funds almost every time. The size was fixed at ARM time: AUTO MAX divided the
+// whole balance by the cost of a lot at the TRIGGER price, leaving no headroom.
+// But the order is sent as a limit 0.5% ABOVE the live price (Kite rejects plain
+// market orders via the API — see /api/orders), and when it fires the live price
+// is at or past the level. So Zerodha blocks at least 0.5% more than was sized
+// for, and a size that used every rupee cannot cover it.
+//
+// Now, when the level hits, the server reads the funds available right then,
+// prices ONE lot exactly as the order will be priced (live price x 1.005, on the
+// 0.05 tick) with Zerodha's own margin calculator — charges included — and places
+// the largest whole number of lots that fits within 98.5% of funds, NEVER MORE
+// than was armed. The 1.5% margin covers the few hundred milliseconds between
+// this check and the order, during which /api/orders re-reads the price.
+//
+// Fewer lots than armed is recorded with the reason. Not even one lot affordable
+// means no order is sent, with the numbers — the same outcome as a rejection, but
+// said plainly and before it happens. Anything that cannot be checked (session,
+// rate limit, an old trigger without its lot size) falls back to the armed size,
+// exactly as before: a sizing step that fails must never block a trade.
+const FUNDS_HEADROOM = 0.985;
+export function fitLots(armedLots: number, perLot: number, available: number): number {
+  if (!(armedLots > 0) || !(perLot > 0) || !(available >= 0)) return armedLots;
+  return Math.max(0, Math.min(armedLots, Math.floor((available * FUNDS_HEADROOM) / perLot)));
+}
+async function sizeAtFire(row: any, ltp: number): Promise<{ qty: number; note: string | null; fail?: string }> {
+  const armedQty = Number(row.quantity) || 0;
+  const lot = Number(row.lot_size) || 0;
+  if (!(lot > 0) || !(armedQty >= lot) || String(row.side) !== 'BUY') return { qty: armedQty, note: null };
+  try {
+    const kc: any = getKiteClient();
+    if (!kc || !kc.access_token) return { qty: armedQty, note: null };
+    const limit = Math.round((ltp * 1.005) / 0.05) * 0.05;       // exactly as /api/orders prices it
+    const [mg, funds] = await Promise.all([
+      kc.orderMargins([{
+        exchange: String(row.exchange || 'NFO'), tradingsymbol: String(row.tradingsymbol),
+        transaction_type: 'BUY', variety: 'regular', product: String(row.product || 'NRML'),
+        order_type: 'LIMIT', quantity: lot, price: +limit.toFixed(2), trigger_price: 0,
+      }]),
+      kc.getMargins(),
+    ]);
+    const perLot = Number(mg?.[0]?.total) + (Number(mg?.[0]?.charges?.total) || 0);
+    const available = Number(funds?.equity?.available?.live_balance ?? funds?.equity?.net);
+    if (!(perLot > 0) || !isFinite(available)) return { qty: armedQty, note: null };
+    const armedLots = Math.floor(armedQty / lot);
+    const lots = fitLots(armedLots, perLot, available);
+    if (lots < 1) {
+      return { qty: 0, note: null,
+        fail: `Not enough funds for 1 lot at ~${limit.toFixed(2)}: one lot needs ₹${Math.round(perLot).toLocaleString('en-IN')}, available ₹${Math.round(available).toLocaleString('en-IN')}. No order sent.` };
+    }
+    const qty = lots * lot;
+    return { qty, note: lots < armedLots
+      ? `Placed ${lots} of ${armedLots} lots — ${armedLots} would need ₹${Math.round(armedLots * perLot).toLocaleString('en-IN')} at ~${limit.toFixed(2)}; ₹${Math.round(available).toLocaleString('en-IN')} available.`
+      : null };
+  } catch (e: any) {
+    console.warn('[triggers] fire-time sizing unavailable, using the armed size:', e?.message || e);
+    return { qty: armedQty, note: null };
+  }
 }
 
 async function placeThroughOwnApi(row: any): Promise<{ ok: boolean; orderId?: string; error?: string }> {
@@ -150,7 +215,20 @@ export function onTickForTriggers(token: number, ltp: number) {
     if (!claimed) continue;
 
     console.log(`[triggers] ${row.side} ${row.quantity} ${row.tradingsymbol} — level ${row.trigger_price} reached at ${ltp}`);
-    placeThroughOwnApi(row).then((out) => {
+    sizeAtFire(row, ltp).then((sz) => {
+      if (sz.fail) {
+        try {
+          db.prepare(`UPDATE pending_triggers SET status='FAILED', fired_at=?, error=? WHERE id=?`)
+            .run(Date.now(), sz.fail.slice(0, 300), row.id);
+        } catch (e) {}
+        console.error(`[triggers] NOT PLACED ${row.tradingsymbol}: ${sz.fail}`);
+        return null;
+      }
+      try { db.prepare(`UPDATE pending_triggers SET placed_qty=?, note=? WHERE id=?`).run(sz.qty, sz.note, row.id); } catch (e) {}
+      if (sz.note) console.warn(`[triggers] ${row.tradingsymbol}: ${sz.note}`);
+      return placeThroughOwnApi({ ...row, quantity: sz.qty });
+    }).then((out) => {
+      if (!out) return;
       try {
         if (out.ok) {
           db.prepare(`UPDATE pending_triggers SET status='FIRED', fired_at=?, order_id=? WHERE id=?`)
@@ -162,7 +240,7 @@ export function onTickForTriggers(token: number, ltp: number) {
           console.error(`[triggers] FAILED ${row.tradingsymbol}: ${out.error}`);
         }
       } catch (e) { console.error('[triggers] could not record outcome', e); }
-    });
+    }).catch((e) => console.error('[triggers] fire chain error — check Kite for this order', e));
   }
 }
 
@@ -239,11 +317,12 @@ export function registerTriggers(app: any, database: any) {
       const id = `trg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       db.prepare(`INSERT INTO pending_triggers
         (id, created_at, trade_date, tradingsymbol, instrument_token, exchange, side, product, quantity,
-         trigger_price, direction, armed_at_price, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ARMED')`)
+         trigger_price, direction, armed_at_price, status, lot_size)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ARMED', ?)`)
         .run(id, Date.now(), istDate(), String(b.tradingsymbol).toUpperCase(), token,
              String(b.exchange || 'NFO'), side, product, quantity,
-             triggerPrice, directionFor(triggerPrice, currentPrice), currentPrice);
+             triggerPrice, directionFor(triggerPrice, currentPrice), currentPrice,
+             (parseInt(String(b.lot_size), 10) > 0 ? parseInt(String(b.lot_size), 10) : null));
 
       res.json({
         ok: true, id, direction: directionFor(triggerPrice, currentPrice),
