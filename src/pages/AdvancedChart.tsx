@@ -3462,6 +3462,59 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const isSpotPane = paneRole === 'spot';
   const isOptionPane = paneRole === 'option';
   const isPane = paneRole === 'spot' || paneRole === 'option';
+
+  // LIVE SIGNAL on the chart. Same endpoint, same 30s poll and the SAME query
+  // key as the Live Signal screen, so React Query shares one fetch between them
+  // and the chart can never show a different answer from the screen. The verdict
+  // is derived exactly as that screen derives it: the index fired LONG/SHORT on
+  // the latest candle AND the matching option's 5-min RSI is above 40. Only a
+  // CONFIRMED signal is shown — an unconfirmed one is what the screen tells you
+  // to skip, so it does not belong beside the pressure badge as an alert.
+  const { data: liveSigData } = useQuery({
+    queryKey: ['live-signal'],
+    queryFn: async () => { const r = await fetch('/api/signal/live'); return await r.json(); },
+    refetchInterval: 30000,
+    refetchOnWindowFocus: true,
+  });
+  const liveSig = useMemo(() => {
+    const idx = liveSigData?.index;
+    const dir: 'LONG' | 'SHORT' | null = idx?.firedOnLast ? idx.lastSignal?.dir : null;
+    if (!dir) return null;
+    const optSide = dir === 'LONG' ? liveSigData?.ce : liveSigData?.pe;
+    if (!optSide?.confirms) return null;
+    const t = new Date(String(idx.lastSignal?.time || ''));
+    const ok = Number.isFinite(t.getTime());
+    const hhmm = ok ? t.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }) : '';
+    // Fresh = the signal's candle is from the last 15 minutes. A signal left on
+    // the latest candle keeps showing after the close, as on the screen; the
+    // badge carries its time so a stale one reads as stale, and only a fresh one
+    // raises an alert — reopening the app in the evening must not "fire" 14:35's.
+    let fresh: boolean;
+    if (ok) fresh = Date.now() - t.getTime() <= 15 * 60 * 1000;
+    else {
+      const m = (Math.floor(Date.now() / 60000) + 330) % 1440;   // IST minute of day
+      fresh = m >= 555 && m <= 930;                               // 09:15-15:30
+    }
+    return { dir, kind: dir === 'LONG' ? 'CALL' : 'PUT', time: hhmm, fresh,
+             id: `${dir}|${String(idx.lastSignal?.time || '')}`, rsi: optSide?.rsi };
+  }, [liveSigData]);
+
+  // Alert ONCE per signal — keyed by direction and candle time — not on every
+  // 30s poll. Remembered across reloads so the same signal never fires twice.
+  // Spot pane only: both panes share this component, and two toasts for one
+  // signal would be noise.
+  useEffect(() => {
+    if (paneRole === 'option' || !liveSig) return;
+    let last = '';
+    try { last = localStorage.getItem('liveSignalAlerted') || ''; } catch (e) {}
+    if (liveSig.id === last) return;
+    try { localStorage.setItem('liveSignalAlerted', liveSig.id); } catch (e) {}
+    if (!liveSig.fresh) return;
+    const title = `Live signal: ${liveSig.kind}${liveSig.time ? ` @ ${liveSig.time}` : ''}`;
+    const body = `Index fired ${liveSig.dir} on the latest candle; the ${liveSig.kind === 'CALL' ? 'CE' : 'PE'} RSI confirms above 40.`;
+    try { toast.success(title, { description: body }); } catch (e) {}
+    try { notificationService.add('divergence', title, body, { ephemeral: true, source: 'live-signal', key: liveSig.id }); } catch (e) {}
+  }, [liveSig?.id, paneRole]);
   useProfiler("AdvancedChart");
   const { data: kiteDiagnosticsData } = useQuery({
     queryKey: ['kiteDiagnostics'],
@@ -11219,6 +11272,21 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               </span>
             );
           })()}
+          {/* Live Signal, beside the pressure badge. Shown only for a CONFIRMED
+              signal on the latest candle, with its candle time so a signal left
+              over after the close reads as old rather than live. */}
+          {liveSig && (
+            <span
+              className={`px-3 py-1 rounded-md text-xs font-mono font-bold whitespace-nowrap ${
+                liveSig.kind === 'CALL'
+                  ? (resolvedTheme === 'light' ? 'bg-emerald-600/15 text-emerald-700' : 'bg-emerald-500/20 text-emerald-400')
+                  : (resolvedTheme === 'light' ? 'bg-rose-600/15 text-rose-700' : 'bg-rose-500/20 text-rose-400')
+              } ${liveSig.fresh ? '' : 'opacity-60'}`}
+              title={`Live Signal screen: index fired ${liveSig.dir} on the latest candle and the ${liveSig.kind === 'CALL' ? 'CE' : 'PE'} 5-min RSI${liveSig.rsi != null ? ` (${liveSig.rsi})` : ''} is above 40.${liveSig.fresh ? '' : ' This signal is not recent.'}`}
+            >
+              SIGNAL: {liveSig.kind}{liveSig.time ? ` · ${liveSig.time}` : ''}
+            </span>
+          )}
           {wsError && (
              <span className="bg-red-500/20 text-red-400 px-3 py-1 rounded-md text-xs font-mono font-bold animate-pulse whitespace-nowrap">
               WS ERROR: {wsError}
