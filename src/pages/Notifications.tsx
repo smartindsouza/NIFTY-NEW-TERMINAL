@@ -175,7 +175,7 @@ export default function Notifications() {
             <>
               <button
                 onClick={markAllAsRead}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-muted/80 hover:bg-slate-700/80 border border-0 rounded-lg text-foreground/80 transition-all font-mono"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-muted/80 hover:bg-muted border border-0 rounded-lg text-foreground/80 transition-all font-mono"
               >
                 <CheckCheck className="w-3.5 h-3.5" /> Mark all read
               </button>
@@ -264,7 +264,7 @@ export default function Notifications() {
           )}
 
           {filteredNotifications.length === 0 ? (
-            <Card className="flex flex-col items-center justify-center p-12 text-center  bg-[#0d121d]/40 rounded-2xl">
+            <Card className="flex flex-col items-center justify-center p-12 text-center bg-card rounded-2xl">
               <div className="w-12 h-12 rounded-full bg-muted/40 flex items-center justify-center mb-4 text-muted-foreground">
                 <Inbox className="w-6 h-6" />
               </div>
@@ -283,10 +283,15 @@ export default function Notifications() {
                   key={notif.id}
                   onClick={() => !notif.read && markAsRead(notif.id)}
                   className={cn(
-                    "relative group p-4 border rounded-xl transition-all duration-300 cursor-pointer text-left",
+                    // overflow-hidden clips the unread stripe below to the card's
+                    // rounded corners; without it the stripe's own corners did not
+                    // follow the card's curve and showed as a stray line on the left.
+                    "relative group p-4 border rounded-xl transition-all duration-300 cursor-pointer text-left overflow-hidden",
+                    // Theme card surface: these were hard-coded near-black, so the
+                    // cards stayed dark in light mode.
                     notif.read
-                      ? "bg-[#0b0e14]/40 /45 hover:"
-                      : "bg-[#0d1321]/80 border-primary/20 hover:border-primary/40"
+                      ? "bg-card border-border/60 hover:border-border"
+                      : "bg-card border-primary/30 hover:border-primary/50"
                   )}
                 >
                   {/* Left priority line indicator for unread items */}

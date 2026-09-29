@@ -139,24 +139,24 @@ export function InstitutionalFlow() {
 
       {latest && (
         <>
-          <div className="rounded-2xl bg-gradient-to-br from-indigo-900/70 to-indigo-950/70 border border-indigo-500/25 p-5 md:p-6">
+          <div className="rounded-2xl bg-transparent border-2 border-primary/70 p-5 md:p-6">
             {/* The OFFICIAL REPORT / NSE / Provisional panel is gone at Martin's
                 request; the source line at the foot of the page still records
                 where the figures came from. */}
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-[10px] uppercase tracking-widest text-indigo-200/70">Combined net flow</div>
+                <div className="text-[10px] uppercase tracking-widest text-primary font-semibold">Combined net flow</div>
                 <div className={`text-3xl md:text-4xl font-bold tabular-nums mt-2 ${netPositive ? "text-emerald-300" : "text-rose-300"}`}>
                   {cr(latest.combinedNet, true)}
                 </div>
-                <div className="text-xs text-indigo-100/70 mt-2 max-w-xl">{data?.explanation}</div>
+                <div className="text-xs text-muted-foreground mt-2 max-w-xl">{data?.explanation}</div>
               </div>
               <button
                 onClick={hardRefresh}
                 disabled={isFetching}
                 title="Fetch the latest published day, bypassing any cached copy"
                 aria-label="Refresh institutional flow"
-                className="shrink-0 h-8 w-8 rounded-full border border-indigo-400/30 bg-indigo-950/50 text-indigo-100/80 hover:text-white hover:border-indigo-300/50 transition-colors flex items-center justify-center disabled:opacity-50"
+                className="shrink-0 h-8 w-8 rounded-full border border-primary/60 bg-transparent text-primary hover:bg-primary/10 transition-colors flex items-center justify-center disabled:opacity-50"
               >
                 <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} />
               </button>
