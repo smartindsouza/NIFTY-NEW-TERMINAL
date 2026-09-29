@@ -38,6 +38,23 @@ function OptionCard({ side, data, active }: { side: 'CE' | 'PE'; data: any; acti
   );
 }
 
+// When a signal was given. The server sends the START time of the 5-min candle
+// the signal fired on, and the signal is based on that whole candle — so the
+// honest answer is the candle's window ("2:30 pm – 2:35 pm"), not one time that
+// could be misread as the instant it fired. The date is added when it is not
+// today. IST throughout, as the market runs on it.
+function signalWindow(raw: unknown): string | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  // "+0530" -> "+05:30": some engines only parse an offset with a colon.
+  const t = new Date(String(raw).replace(/([+-]\d{2})(\d{2})$/, '$1:$2'));
+  if (!Number.isFinite(t.getTime())) return null;
+  const end = new Date(t.getTime() + 5 * 60 * 1000);
+  const hm = (d: Date) => d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true });
+  const day = (d: Date) => d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: '2-digit', month: 'short' });
+  const onDay = day(t) === day(new Date()) ? '' : `, ${day(t)}`;
+  return `${hm(t)} – ${hm(end)}${onDay} IST`;
+}
+
 export default function LiveSignal() {
   const { data, refetch, isFetching } = useQuery({
     queryKey: ['live-signal'],
@@ -51,6 +68,7 @@ export default function LiveSignal() {
   const dir: 'LONG' | 'SHORT' | null = idx?.firedOnLast ? idx.lastSignal?.dir : null;
   const side = dir === 'LONG' ? data?.ce : dir === 'SHORT' ? data?.pe : null;
   const confirmed = !!(dir && side?.confirms);
+  const sigWhen = signalWindow(idx?.lastSignal?.time);
 
   let verdict = { text: 'No active entry signal on the latest candle.', tone: 'idle' as 'idle' | 'go' | 'wait' };
   if (dir && confirmed) verdict = { text: `${dir === 'LONG' ? 'CALL' : 'PUT'} signal confirmed — index fired ${dir} and the ${dir === 'LONG' ? 'CE' : 'PE'} RSI is above 40.`, tone: 'go' };
@@ -83,6 +101,9 @@ export default function LiveSignal() {
           <div className={cn('rounded-2xl p-4 border mb-4', vCls)}>
             <div className="text-[11px] uppercase tracking-wider opacity-70 mb-1">Verdict</div>
             <div className="text-sm font-medium leading-snug">{verdict.text}</div>
+            {dir && sigWhen && (
+              <div className="mt-1.5 text-xs font-mono opacity-80">Signal candle: {sigWhen}</div>
+            )}
           </div>
 
           {/* Index state */}
@@ -103,6 +124,7 @@ export default function LiveSignal() {
                   idx.lastSignal.dir === 'LONG' ? 'text-emerald-400' : 'text-rose-400')}>
                   {idx.lastSignal.dir === 'LONG' ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
                   Last {idx.lastSignal.dir} signal {idx.firedOnLast ? 'on the latest candle' : `${idx.lastSignal.barsAgo} candle(s) ago`}
+                  {sigWhen && <span className="font-mono font-normal text-muted-foreground">· {sigWhen}</span>}
                 </span>
               ) : (
                 <span className="flex items-center gap-1.5 text-muted-foreground"><Minus className="w-4 h-4" /> No recent signal</span>
