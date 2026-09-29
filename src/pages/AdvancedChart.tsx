@@ -2235,18 +2235,56 @@ function TpSlDefaultsModal({
   );
 }
 
+// FVG WITH DIRECTIONAL ZONES — derived from the indicator's OUTPUT only.
+// computeDirectionalZones is Martin's port and is deliberately left untouched.
+// This does not re-implement it; it reads what it emits.
+//
+// The indicator creates a zone when a candle leaves a three-bar gap against the
+// candle TWO bars earlier, and the zone's box wraps that earlier candle
+// (leftIdx = i - 2, top/bottom = its high/low). So for each emitted zone, the
+// gap that created it lies between the OB candle and the candle two bars later:
+// ABOVE the OB when price moved up (that candle's low > the OB's high), BELOW
+// it when price moved down (its high < the OB's low).
+//
+// A zone is used only if the candle at its time really is the one it wraps —
+// high and low must match exactly. Anything else (a left edge clamped to the
+// first candle, a timing mismatch) is skipped rather than drawn in the wrong place.
+// Unlike the standalone FVG indicator, these gaps are NOT deleted when price
+// fills them: they belong to the zone and stay with it for as long as it shows.
+type DzFvg = { top: number; bottom: number; time: number; endTime: number | null; side: 'above' | 'below' };
+function deriveZoneFvgs(zones: { top: number; bottom: number; time: number; endTime: number | null }[], candles: any[]): DzFvg[] {
+  const out: DzFvg[] = [];
+  if (!zones?.length || !candles?.length) return out;
+  const at = new Map<number, number>();
+  candles.forEach((c: any, i: number) => at.set(toUnixSeconds(c.time), i));
+  for (const z of zones) {
+    const k = at.get(toUnixSeconds(z.time as any));
+    if (k === undefined) continue;
+    const ob = candles[k], imb = candles[k + 2];
+    if (!ob || !imb) continue;
+    if (ob.high !== z.top || ob.low !== z.bottom) continue;   // not the candle this zone wraps
+    if (imb.low > ob.high) out.push({ top: imb.low, bottom: ob.high, time: z.time, endTime: z.endTime, side: 'above' });
+    else if (imb.high < ob.low) out.push({ top: ob.low, bottom: imb.high, time: z.time, endTime: z.endTime, side: 'below' });
+  }
+  return out;
+}
+
 function DirectionalZonesEditorModal({
   onClose,
   initialStyle,
   defaults,
   onApply,
   onChange,
+  fvg,
+  onFvgChange,
 }: {
   onClose: () => void,
   initialStyle: Record<string, { color: string; opacity: number }>,
   defaults: Record<string, { color: string; opacity: number }>,
   onApply: (style: Record<string, { color: string; opacity: number }>) => void,
   onChange?: (style: Record<string, { color: string; opacity: number }>) => void,
+  fvg?: { on: boolean; color: string; opacity: number },
+  onFvgChange?: (fvg: { on: boolean; color: string; opacity: number }) => void,
 }) {
   const [style, setStyle] = useState(initialStyle);
   useEffect(() => { if (onChange) onChange(style); }, [style, onChange]);
@@ -2284,6 +2322,30 @@ function DirectionalZonesEditorModal({
               />
             </div>
           ))}
+          {/* FVG with zones: the gap that created each zone, drawn beside it. A
+              display option like the rows above — the indicator never sees it. */}
+          {fvg && onFvgChange && (
+            <div className="flex items-center justify-between pt-1 border-t border-border/60">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => onFvgChange({ ...fvg, on: !fvg.on })}
+                  aria-label={`FVG ${fvg.on ? 'on' : 'off'}`}
+                  className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ${fvg.on ? 'bg-primary' : 'bg-slate-500/40'}`}
+                >
+                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${fvg.on ? 'left-[18px]' : 'left-0.5'}`} />
+                </button>
+                <div className="text-sm font-medium text-foreground/80">FVG</div>
+              </div>
+              {fvg.on && (
+                <TVStylePicker
+                  color={fvg.color}
+                  opacity={fvg.opacity}
+                  onColorChange={(c) => onFvgChange({ ...fvg, color: c })}
+                  onOpacityChange={(o) => onFvgChange({ ...fvg, opacity: o })}
+                />
+              )}
+            </div>
+          )}
           <button
             onClick={() => setStyle({ ...defaults })}
             className="text-[11px] text-muted-foreground hover:text-foreground transition-colors underline"
@@ -3774,6 +3836,21 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     try { localStorage.setItem('dzStyle', JSON.stringify(dzStyle)); } catch(e) {}
   }, [dzStyle]);
   const dzStyleRef = useRef(dzStyle);
+
+  // FVG with Directional Zones: off by default; amber so it reads apart from
+  // the zones' own blues and purples. Read through a ref by the canvas loop.
+  const [dzFvg, setDzFvg] = useState<{ on: boolean; color: string; opacity: number }>(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem('dzFvg') || 'null');
+      if (v && typeof v.on === 'boolean' && typeof v.color === 'string' && Number.isFinite(v.opacity)) return v;
+    } catch (e) {}
+    return { on: false, color: '#f59e0b', opacity: 22 };
+  });
+  useEffect(() => { try { localStorage.setItem('dzFvg', JSON.stringify(dzFvg)); } catch (e) {} }, [dzFvg]);
+  const dzFvgRef = useRef(dzFvg);
+  dzFvgRef.current = dzFvg;
+  const dzFvgSnapshotRef = useRef(dzFvg);            // for Cancel in the editor
+  const dzFvgCacheRef = useRef<{ key: string; gaps: DzFvg[] }>({ key: '', gaps: [] });
   dzStyleRef.current = dzStyle;
 
   const [dsZoneOpacity, setDsZoneOpacity] = useState<string>(() => {
@@ -10558,6 +10635,48 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                 }
               }
 
+              // FVG WITH DIRECTIONAL ZONES — a separate pass over the zones block's
+              // OUTPUT. The block above is untouched; this only reads obZonesRef.
+              // Derived once per recompute (keyed on the zones block's own signature),
+              // then each gap is drawn with its zone's horizontal extent so the two
+              // read as one unit: amber fill plus a thin outline to tell it apart.
+              if (showOrderBlocks && dzFvgRef.current.on && !isOptionView && mainSeriesRef.current) {
+                try {
+                  const zonesNow = obZonesRef.current || [];
+                  const key = `${obSigRef.current}|${zonesNow.length}`;
+                  if (dzFvgCacheRef.current.key !== key) {
+                    const baseF = chartDataRef.current?.candles || [];
+                    const lastF = baseF.length ? baseF[baseF.length - 1].time : 0;
+                    const sinceF = liveClosedCandlesRef.current.filter((k: any) => k.time > lastF);
+                    dzFvgCacheRef.current = { key, gaps: deriveZoneFvgs(zonesNow as any, sinceF.length ? [...baseF, ...sinceF] : baseF) };
+                  }
+                  const fv = dzFvgRef.current;
+                  const alpha = Math.min(100, Math.max(0, fv.opacity)) / 100;
+                  ctx.save();
+                  for (const g of dzFvgCacheRef.current.gaps) {
+                    const yTop = mainSeriesRef.current.priceToCoordinate(g.top);
+                    const yBot = mainSeriesRef.current.priceToCoordinate(g.bottom);
+                    if (yTop === null || yBot === null) continue;
+                    const x0 = mainChartRef.current?.timeScale()?.timeToCoordinate(g.time as any);
+                    const gx = (x0 === null || x0 === undefined) ? 0 : Math.max(0, x0);
+                    let gRight = textAlignX;
+                    if (g.endTime) {
+                      const x1 = mainChartRef.current?.timeScale()?.timeToCoordinate(g.endTime as any);
+                      if (x1 !== null && x1 !== undefined) gRight = Math.min(textAlignX, x1);
+                    }
+                    const gw = Math.max(0, gRight - gx);
+                    if (gw <= 0) continue;
+                    const yA = Math.min(yTop, yBot), h = Math.max(1, Math.abs(yBot - yTop));
+                    ctx.fillStyle = hexToRgba(fv.color, alpha);
+                    ctx.fillRect(gx, yA, gw, h);
+                    ctx.strokeStyle = hexToRgba(fv.color, Math.min(1, alpha + 0.35));
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(gx + 0.5, yA + 0.5, Math.max(0, gw - 1), Math.max(0, h - 1));
+                  }
+                  ctx.restore();
+                } catch (e) { /* a display extra must never break the frame */ }
+              }
+
               if (showDsZones && !isOptionView && dz && mainSeriesRef.current) {
                 const pct = Math.min(100, Math.max(1, parseFloat(dsZoneOpacity) || 8)) / 100;
                 const drawZone = (z: any, rgb: string, labelColor: string, label: string) => {
@@ -11767,6 +11886,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                         onClick={(e) => {
                           e.stopPropagation();
                           dzStyleSnapshotRef.current = dzStyle;   // for Cancel
+                          dzFvgSnapshotRef.current = dzFvg;
                           setIsEditingDz(true);
                           setIsIndicatorsOpen(false);
                         }}
@@ -12899,9 +13019,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         <DirectionalZonesEditorModal
           initialStyle={dzStyle}
           defaults={DZ_DEFAULTS}
-          onClose={() => { setDzStyle(dzStyleSnapshotRef.current); setIsEditingDz(false); }}
+          onClose={() => { setDzStyle(dzStyleSnapshotRef.current); setDzFvg(dzFvgSnapshotRef.current); setIsEditingDz(false); }}
           onApply={(style) => { setDzStyle(style); setIsEditingDz(false); }}
           onChange={(style) => setDzStyle(style)}
+          fvg={dzFvg}
+          onFvgChange={setDzFvg}
         />
       )}
 
