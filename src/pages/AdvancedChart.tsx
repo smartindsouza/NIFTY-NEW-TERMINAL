@@ -11879,6 +11879,22 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                         </button>
                         <span className="truncate select-none">Directional Zones</span>
                       </div>
+                    {/* FVG toggle, right on the row. It first lived only inside the
+                        settings panel behind the gear, where Martin could not find it —
+                        not where anyone reaches for an on/off switch. Shown while the
+                        zones are on, since the gaps belong to the zones. The switch in
+                        the panel stays too; both drive the same setting. */}
+                    {showOrderBlocks && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setDzFvg(v => ({ ...v, on: !v.on })); }}
+                        aria-label={`FVG with zones ${dzFvg.on ? 'on' : 'off'}`}
+                        title={dzFvg.on ? 'FVG shown with each zone — tap to hide' : 'Show the FVG that created each zone'}
+                        className={`shrink-0 px-1.5 py-0.5 rounded border text-[10px] font-bold leading-none transition-colors ${
+                          dzFvg.on ? 'border-amber-500/60 bg-amber-500/20 text-amber-500' : 'border-border text-muted-foreground hover:text-foreground'}`}
+                      >
+                        FVG
+                      </button>
+                    )}
                     {/* Same gear affordance as OI Bars / RSI: settings on tap
                         rather than an always-open panel cluttering the menu. */}
                     {showOrderBlocks && (
