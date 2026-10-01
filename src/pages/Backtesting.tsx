@@ -3,7 +3,7 @@ import { Play, TrendingUp, Calendar, AlertTriangle, CheckCircle2 } from "lucide-
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
-import SwapSweepBacktest from "@/components/SwapSweepBacktest";
+import SwapSweepBacktest from "../components/SwapSweepBacktest";
 
 export default function Backtesting() {
   const [strategy, setStrategy] = useState("Short Straddle");

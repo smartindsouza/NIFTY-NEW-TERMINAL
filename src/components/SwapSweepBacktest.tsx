@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Play, Info } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
-import { detectSwapSweep, backtestSwapSweep, ssStats, ssTime, ssIstDay, type SsTrade, type SsStats } from "@/lib/swapSweep";
+import { detectSwapSweep, backtestSwapSweep, ssStats, ssTime, ssIstDay, type SsTrade, type SsStats } from "../lib/swapSweep";
 
 // A REAL backtest of the Swap-Sweep Reversal on NIFTY 50 candles from the app's
 // own history endpoint — the same candles the chart draws — using the same
