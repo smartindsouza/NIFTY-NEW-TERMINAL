@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { useUserSettings, useResolvedTheme } from "../hooks/useUserSettings";
 import { zoomDiag } from "../lib/zoomDiag";
+import { detectSwapSweep, ssTime, type SsSignal } from "../lib/swapSweep";
 import { getDivergences } from "../lib/divergence";
 import { evaluateBreakout } from "../lib/breakoutQuality";
 import { calculateBollingerBands } from "../indicators/bollingerBands";
@@ -3748,6 +3749,16 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const showPinBarsRef = useRef(showPinBars);
   showPinBarsRef.current = showPinBars;
   const pinSigRef = useRef('');
+  // Swap-Sweep Reversal (Martin's 3-candle pattern). Off by default. Drawn on the
+  // overlay canvas, NOT as series markers: the pin-bar indicator owns setMarkers,
+  // which replaces every marker on the series, so the two would erase each other.
+  const [showSwapSweep, setShowSwapSweep] = useState<boolean>(() => {
+    try { return localStorage.getItem('showSwapSweep') === 'true'; } catch (e) { return false; }
+  });
+  useEffect(() => { try { localStorage.setItem('showSwapSweep', String(showSwapSweep)); } catch (e) {} }, [showSwapSweep]);
+  const showSwapSweepRef = useRef(showSwapSweep);
+  showSwapSweepRef.current = showSwapSweep;
+  const ssCacheRef = useRef<{ key: string; signals: (SsSignal & { hi: number; lo: number })[] }>({ key: '', signals: [] });
   const pinSeriesRef = useRef<any>(null);          // markers live on a series; a rebuild makes a new one
   const pinPressureRef = useRef<Map<number, number>>(new Map());  // pressure proxy at each candle's close
   // BOS is the ordinary, frequent event; CHoCH is the interesting one. Being able
@@ -10496,6 +10507,45 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               // Market structure: a dashed line at the broken level running from the
               // swing that set it to the candle that closed through it, tagged BOS or
               // CHoCH. Index charts only, and recomputed only on a candle close.
+              // SWAP-SWEEP REVERSAL. Signals come from the shared definition in
+              // lib/swapSweep — the same one the backtest uses — over the chart's
+              // own closed candles, so any timeframe the chart shows works.
+              // Recomputed only when a candle closes; drawn every frame as a small
+              // triangle beyond C3's sweep wick with an "SS" tag.
+              if (showSwapSweepRef.current && !isOptionView && mainSeriesRef.current) {
+                try {
+                  const baseS = chartDataRef.current?.candles || [];
+                  const lastS = baseS.length ? baseS[baseS.length - 1].time : 0;
+                  const sinceS = liveClosedCandlesRef.current.filter((k: any) => k.time > lastS);
+                  const key = `${instrumentToken}|${timeframe}|${baseS.length}|${sinceS.length}|${sinceS.length ? sinceS[sinceS.length - 1].time : 0}`;
+                  if (ssCacheRef.current.key !== key) {
+                    const all = sinceS.length ? [...baseS, ...sinceS] : baseS;
+                    ssCacheRef.current = { key, signals: detectSwapSweep(all).map((sg) => ({ ...sg, hi: all[sg.idx].high, lo: all[sg.idx].low })) };
+                  }
+                  const upC = settingsRef.current.candleUpColor, dnC = settingsRef.current.candleDownColor;
+                  ctx.save();
+                  ctx.font = "bold 9px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif";
+                  ctx.textAlign = 'center';
+                  for (const sg of ssCacheRef.current.signals) {
+                    const x = mainChartRef.current?.timeScale()?.timeToCoordinate(sg.time as any);
+                    if (x === null || x === undefined || x < 0 || x > textAlignX) continue;
+                    const bear = sg.kind === 'bear';
+                    const yEdge = mainSeriesRef.current.priceToCoordinate(bear ? sg.hi : sg.lo);
+                    if (yEdge === null) continue;
+                    const col = bear ? dnC : upC;
+                    const tip = bear ? yEdge - 6 : yEdge + 6;            // just beyond the sweep wick
+                    const base = bear ? tip - 7 : tip + 7;
+                    ctx.fillStyle = col;
+                    ctx.beginPath();
+                    ctx.moveTo(x, tip); ctx.lineTo(x - 5, base); ctx.lineTo(x + 5, base); ctx.closePath();
+                    ctx.fill();
+                    ctx.textBaseline = bear ? 'bottom' : 'top';
+                    ctx.fillText('SS', x, bear ? base - 2 : base + 2);
+                  }
+                  ctx.restore();
+                } catch (e) { /* an indicator must never break the frame */ }
+              }
+
               // Reversal pins: recomputed only when a candle closes (or the series
               // is rebuilt), exactly like BOS-CHoCH. Index charts only — the levels
               // are index levels.
@@ -12122,6 +12172,27 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className={`p-1 transition-colors ${isFav('ReversalPinBars') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('ReversalPinBars') ? 'currentColor' : 'none'} />
+                    </button>
+                  </div>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('SwapSweepReversal', showSwapSweep)}`}>
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowSwapSweep(!showSwapSweep); }}
+                          aria-label={`Toggle Swap-Sweep Reversal`}
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showSwapSweep) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showSwapSweep) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none" title="3-candle reversal: C2 closes beyond C1's high/low (swap), C3 sweeps past C2's extreme and closes back inside C1's high/low. Marked SS on C3.">Swap-Sweep Reversal</span>
+                      </div>
+                    <span className="p-1 w-[22px] shrink-0" aria-hidden="true" />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('SwapSweepReversal'); }}
+                      title={isFav('SwapSweepReversal') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('SwapSweepReversal') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('SwapSweepReversal') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
 

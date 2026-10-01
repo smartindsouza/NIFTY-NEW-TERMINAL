@@ -3,6 +3,7 @@ import { Play, TrendingUp, Calendar, AlertTriangle, CheckCircle2 } from "lucide-
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import SwapSweepBacktest from "@/components/SwapSweepBacktest";
 
 export default function Backtesting() {
   const [strategy, setStrategy] = useState("Short Straddle");
@@ -85,6 +86,18 @@ export default function Backtesting() {
           </h1>
           
         </div>
+      </div>
+
+      {/* The one backtest on this screen that runs on real market data. */}
+      <SwapSweepBacktest />
+
+      {/* The strategies below have NEVER used market data: their win rates are
+          fixed numbers in this file and the daily P&L is Math.random(). They are
+          labelled as such until they are rebuilt on real data or removed — a
+          screen that looks like evidence and is not is worse than no screen. */}
+      <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-600">
+        <b>Simulated, not real data:</b> the option strategies below use fixed, assumed win rates and randomly generated
+        daily results. They do not reflect market history — do not use them to make trading decisions.
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
