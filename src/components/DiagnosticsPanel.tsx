@@ -6,6 +6,50 @@ import { Badge } from "@/components/ui/badge";
 
 // Injected by the `define` block in vite.config.ts at build time.
 declare const __BUILD_TIME__: string;
+declare const __BUILD_ID__: string;
+declare const __BUILD_SHA__: string;
+
+// Is this running copy the deployed one? The bundle carries its build ID; the
+// server's dist/version.json carries the deployed build's. Fetched uncached.
+// Different = an older copy is still running (an app left open across a deploy,
+// or a phone holding a cached copy).
+function useDeployedVersion() {
+  const [deployed, setDeployed] = useState<{ id: string; sha: string | null; builtAt: string } | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const check = async () => {
+      try {
+        const r = await fetch(`/version.json?ts=${Date.now()}`, { cache: 'no-store' });
+        if (!r.ok) throw new Error(String(r.status));
+        const d = await r.json();
+        if (alive && d?.id) { setDeployed(d); setFailed(false); }
+      } catch (e) { if (alive) setFailed(true); }
+    };
+    check();
+    const t = setInterval(check, 60000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+  return { deployed, failed };
+}
+
+// FORCE UPDATE: drop the service worker's cached files and reload past every
+// cache. Settings live in localStorage, which is deliberately not touched.
+async function forceUpdate() {
+  try {
+    const regs = (await navigator.serviceWorker?.getRegistrations?.()) || [];
+    await Promise.all(regs.map((r) => r.update().catch(() => {})));
+  } catch (e) {}
+  try {
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch (e) {}
+  const u = new URL(window.location.href);
+  u.searchParams.set('v', String(Date.now()));
+  window.location.replace(u.toString());
+}
 import { lastFrequencyDecision, isFrequencyExempt } from '../lib/apiInterceptor';
 import { zoomDiag } from '../lib/zoomDiag';
 
@@ -61,6 +105,8 @@ function useLayoutReadout() {
 
 export function DiagnosticsPanel() {
   const useLayoutReadoutValue = useLayoutReadout();
+  const { deployed, failed: versionCheckFailed } = useDeployedVersion();
+  const [updating, setUpdating] = useState(false);
   const [metrics, setMetrics] = useState(performanceTracker.getMetrics());
 
   useEffect(() => {
@@ -82,14 +128,44 @@ export function DiagnosticsPanel() {
             <Activity className="w-4 h-4 text-emerald-400 animate-pulse shrink-0" /> App Diagnostics
           </span>
           <span className="flex items-center gap-2 min-w-0">
-            <span className="text-[9px] font-mono normal-case tracking-normal text-muted-foreground whitespace-nowrap" title="When this UI bundle was built (IST). If this is older than the latest deploy, the phone is still on a cached bundle — hard-refresh.">
-              UI {new Date(__BUILD_TIME__).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })} IST
+            <span className="text-[9px] font-mono normal-case tracking-normal text-muted-foreground whitespace-nowrap" title="When this UI bundle was built (IST).">
+              {new Date(__BUILD_TIME__).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })} IST
             </span>
             <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-400 border-emerald-500/20 font-mono">
               SYS: OK
             </Badge>
           </span>
         </CardTitle>
+
+        {/* VERSION. The build this copy of the app is running, against the build
+            that is deployed — with a Force update for when they differ. */}
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 px-2.5 py-1.5">
+          <div className="flex items-center gap-2 min-w-0 text-[11px]">
+            <span className="text-muted-foreground">Version</span>
+            <span className="font-mono font-semibold text-foreground">{__BUILD_SHA__ || `build ${__BUILD_ID__}`}</span>
+            {deployed && deployed.id === __BUILD_ID__ && (
+              <span className="text-[10px] font-semibold text-emerald-500">✓ Latest</span>
+            )}
+            {deployed && deployed.id !== __BUILD_ID__ && (
+              <span className="text-[10px] font-semibold text-amber-500">
+                Update available{deployed.sha ? ` → ${deployed.sha}` : ''}
+              </span>
+            )}
+            {!deployed && versionCheckFailed && (
+              <span className="text-[10px] text-muted-foreground">couldn't check</span>
+            )}
+          </div>
+          <button
+            onClick={async () => { setUpdating(true); await forceUpdate(); }}
+            disabled={updating}
+            className={`shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-md border transition-colors disabled:opacity-50 ${
+              deployed && deployed.id !== __BUILD_ID__
+                ? 'border-amber-500/60 bg-amber-500/15 text-amber-600 hover:bg-amber-500/25'
+                : 'border-border text-foreground/80 hover:bg-muted'}`}
+          >
+            {updating ? 'Updating…' : 'Force update'}
+          </button>
+        </div>
 
         {/* The readout, full width under the heading. One line per fact, each
             label on its own row rather than a run-on paragraph — these are read
