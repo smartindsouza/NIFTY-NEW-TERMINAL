@@ -19,11 +19,7 @@
 // ============================================================================
 
 export type SsCandle = { time: number; open: number; high: number; low: number; close: number };
-// ext/from are set by patterns whose sweep is NOT on C3 (Push -> Stall -> Break,
-// where it is in the push candle's wick): ext = the pattern's extreme (also the
-// stop), from = the pattern's first candle. Absent for Swap-Sweep, whose
-// behaviour is therefore exactly as before.
-export type SsSignal = { idx: number; time: number; kind: 'bull' | 'bear'; ext?: number; from?: number };
+export type SsSignal = { idx: number; time: number; kind: 'bull' | 'bear' };
 
 /** Unix seconds from whatever the candle carries (seconds, ms or a date string). */
 export function ssTime(t: any): number {
@@ -54,147 +50,6 @@ export function detectSwapSweep(candles: any[], opts: { sameSession?: boolean } 
   return out;
 }
 
-// ============================================================================
-// PUSH -> STALL -> BREAK — the shape found at the three reversals Martin marked
-// (the classic evening / morning star, defined precisely). Bearish, signal at
-// C3's close:
-//   PUSH   C1 is a strong up candle: body at least 1.5x the average body of the
-//          10 candles before it, closing in the top third of its range
-//   STALL  C2 is small — body at most half of C1's — and makes NO new high
-//          (its high <= C1's high): momentum has died
-//   BREAK  C3 is a down candle closing below C2's low AND below the middle of
-//          C1's body, with a range at least 1.2x the recent average: expansion
-// Bullish is the mirror. The extreme of the pattern — the highest high of C1-C3
-// for a bearish one, usually C1's wick — is where the sweep happened, so it is
-// both the stop and what the liquidity filters test.
-// Not covered: the two-candle version (image 3, a bearish engulfing), which is a
-// different pattern and would need its own test.
-// ============================================================================
-export function detectPushStallBreak(candles: any[], opts: { sameSession?: boolean } = {}): SsSignal[] {
-  const sameSession = opts.sameSession !== false;
-  const out: SsSignal[] = [];
-  const LB = 10;
-  for (let i = LB + 2; i < (candles?.length || 0); i++) {
-    const c1 = candles[i - 2], c2 = candles[i - 1], c3 = candles[i];
-    const t3 = ssTime(c3.time);
-    if (sameSession) {
-      const d = ssIstDay(t3);
-      if (ssIstDay(ssTime(c1.time)) !== d || ssIstDay(ssTime(c2.time)) !== d) continue;
-    }
-    let avgBody = 0, avgRange = 0;
-    for (let j = i - 2 - LB; j < i - 2; j++) { avgBody += Math.abs(candles[j].close - candles[j].open); avgRange += candles[j].high - candles[j].low; }
-    avgBody /= LB; avgRange /= LB;
-    if (!(avgBody > 0) || !(avgRange > 0)) continue;
-    const b1 = Math.abs(c1.close - c1.open), r1 = c1.high - c1.low;
-    const b2 = Math.abs(c2.close - c2.open), r3 = c3.high - c3.low;
-    if (!(r1 > 0) || b1 < 1.5 * avgBody || b2 > 0.5 * b1 || r3 < 1.2 * avgRange) continue;
-    const mid1 = (c1.open + c1.close) / 2;
-    // bearish
-    if (c1.close > c1.open && c1.close >= c1.low + (2 / 3) * r1 && c2.high <= c1.high
-        && c3.close < c3.open && c3.close < c2.low && c3.close < mid1) {
-      out.push({ idx: i, time: t3, kind: 'bear', ext: Math.max(c1.high, c2.high, c3.high), from: i - 2 });
-      continue;
-    }
-    // bullish
-    if (c1.close < c1.open && c1.close <= c1.high - (2 / 3) * r1 && c2.low >= c1.low
-        && c3.close > c3.open && c3.close > c2.high && c3.close > mid1) {
-      out.push({ idx: i, time: t3, kind: 'bull', ext: Math.min(c1.low, c2.low, c3.low), from: i - 2 });
-    }
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
-// FILTERS — candidate improvements, each a switch, so the backtest can show
-// which ones actually earn their place. Baseline results on real NIFTY were
-// indistinguishable from random entries, and the chart study suggested the edge,
-// if any, is in WHERE the pattern forms. All are defined here once so the chart
-// can adopt exactly the ones that survive testing.
-//
-//   LIQUIDITY (any ticked level counts — real stops sit at these, not at one
-//   candle's high):
-//     extremeN   C3's sweep wick goes beyond the highest high (bearish) / lowest
-//                low (bullish) of the N candles before it
-//     dayExtreme C3 makes a new high / low of the day so far
-//     prevDay    C3 sweeps yesterday's high (and closes back below it) /
-//                yesterday's low (and closes back above it)
-//   decisiveClose  C3 closes in the far third of its own range
-//   skipOpening    no signal whose C3 starts before 09:30 IST
-//   trendGuard     skip signals against a STRONG trend: the 20-EMA has moved more
-//                  than one ATR(14) in the last 10 candles
-// ---------------------------------------------------------------------------
-export type SsFilters = {
-  extremeN?: number; dayExtreme?: boolean; prevDay?: boolean;
-  decisiveClose?: boolean; skipOpening?: boolean; trendGuard?: boolean;
-};
-export function filterSwapSweep(candles: any[], signals: SsSignal[], f: SsFilters): SsSignal[] {
-  const anyLevel = !!(f.extremeN && f.extremeN > 0) || !!f.dayExtreme || !!f.prevDay;
-  if (!anyLevel && !f.decisiveClose && !f.skipOpening && !f.trendGuard) return signals;
-  const n = candles.length;
-  const day = candles.map((c: any) => ssIstDay(ssTime(c.time)));
-  // previous trading day's high/low, per candle
-  const prevHi = new Array(n).fill(NaN), prevLo = new Array(n).fill(NaN);
-  { let curD = -1, curH = -Infinity, curL = Infinity, pH = NaN, pL = NaN;
-    for (let i = 0; i < n; i++) {
-      if (day[i] !== curD) { if (curD !== -1) { pH = curH; pL = curL; } curD = day[i]; curH = -Infinity; curL = Infinity; }
-      prevHi[i] = pH; prevLo[i] = pL;
-      curH = Math.max(curH, candles[i].high); curL = Math.min(curL, candles[i].low);
-    } }
-  // trend: EMA20 and ATR14, computed only if needed
-  let ema: number[] = [], atr: number[] = [];
-  if (f.trendGuard) {
-    const k = 2 / 21; ema = new Array(n);
-    for (let i = 0; i < n; i++) ema[i] = i === 0 ? candles[0].close : candles[i].close * k + ema[i - 1] * (1 - k);
-    atr = new Array(n).fill(NaN); let sum = 0; const tr: number[] = [];
-    for (let i = 0; i < n; i++) {
-      const pc = i > 0 ? candles[i - 1].close : candles[i].close;
-      tr[i] = Math.max(candles[i].high - candles[i].low, Math.abs(candles[i].high - pc), Math.abs(candles[i].low - pc));
-      sum += tr[i]; if (i >= 14) sum -= tr[i - 14];
-      if (i >= 13) atr[i] = sum / 14;
-    }
-  }
-  return signals.filter((s) => {
-    const i = s.idx, c3 = candles[i], bear = s.kind === 'bear';
-    // The sweep's price and where to look before it: C3's wick and the candles
-    // before C3 for Swap-Sweep (unchanged), the pattern's extreme and the candles
-    // before its first candle for patterns that set ext/from.
-    const sweep = s.ext ?? (bear ? c3.high : c3.low);
-    const before = s.from ?? i;
-    if (anyLevel) {
-      let hit = false;
-      if (f.extremeN && f.extremeN > 0 && before - f.extremeN >= 0) {
-        let ext = bear ? -Infinity : Infinity;
-        for (let j = before - f.extremeN; j < before; j++) ext = bear ? Math.max(ext, candles[j].high) : Math.min(ext, candles[j].low);
-        if (bear ? sweep > ext : sweep < ext) hit = true;
-      }
-      if (!hit && f.dayExtreme) {
-        let ext = bear ? -Infinity : Infinity, seen = false;
-        for (let j = before - 1; j >= 0 && day[j] === day[i]; j--) { seen = true; ext = bear ? Math.max(ext, candles[j].high) : Math.min(ext, candles[j].low); }
-        if (seen && (bear ? sweep > ext : sweep < ext)) hit = true;
-      }
-      if (!hit && f.prevDay && Number.isFinite(prevHi[i])) {
-        if (bear ? (sweep > prevHi[i] && c3.close < prevHi[i]) : (sweep < prevLo[i] && c3.close > prevLo[i])) hit = true;
-      }
-      if (!hit) return false;
-    }
-    if (f.decisiveClose) {
-      const r = c3.high - c3.low;
-      if (!(r > 0)) return false;
-      if (bear ? c3.close > c3.low + r / 3 : c3.close < c3.high - r / 3) return false;
-    }
-    if (f.skipOpening) {
-      const m = Math.floor(((ssTime(c3.time) + 19800) % 86400) / 60);
-      if (m < 9 * 60 + 30) return false;
-    }
-    if (f.trendGuard && i >= 10 && Number.isFinite(atr[i])) {
-      const slope = ema[i] - ema[i - 10];
-      if (bear && slope > atr[i]) return false;        // strong uptrend: no shorts
-      if (!bear && slope < -atr[i]) return false;      // strong downtrend: no longs
-    }
-    return true;
-  });
-}
-
 // ---------------------------------------------------------------------------
 // BACKTEST. Each signal is measured on its own, on the INDEX in points:
 //   entry  = C3's close (the signal is only known at the close)
@@ -214,37 +69,24 @@ export type SsTrade = {
   time: number; kind: 'bull' | 'bear'; entry: number; stop: number; target: number;
   exit: number; exitTime: number; outcome: 'WIN' | 'LOSS' | 'TIME'; r: number;
 };
-// confirm: instead of entering at C3's close, wait for the NEXT candle to break
-//   C3's low (bearish) / high (bullish) and enter there — a stop-entry, filled at
-//   the break or at that candle's open if it gapped through. No break, no trade.
-//   The stop stays beyond the sweep, so the risk is the whole of C3's range.
 // costPts: brokerage + slippage per round trip, in index points, deducted from
 //   every trade as a fraction of its risk.
-export function backtestSwapSweep(candles: any[], signals: SsSignal[],
-  opts: { rr: number; sessionExit?: boolean; confirm?: boolean; costPts?: number }): SsTrade[] {
+export function backtestSwapSweep(candles: any[], signals: SsSignal[], opts: { rr: number; sessionExit?: boolean; costPts?: number }): SsTrade[] {
   const rr = opts.rr, sessionExit = opts.sessionExit !== false;
   const cost = Math.max(0, Number(opts.costPts) || 0);
   const out: SsTrade[] = [];
   for (const s of signals) {
     const c3 = candles[s.idx];
+    const entry = c3.close;
     const bear = s.kind === 'bear';
-    const day = ssIstDay(s.time);
-    let entry = c3.close, startJ = s.idx + 1;
-    if (opts.confirm) {
-      const c4 = candles[s.idx + 1];
-      if (!c4 || (sessionExit && ssIstDay(ssTime(c4.time)) !== day)) continue;
-      const trig = bear ? c3.low : c3.high;
-      if (!(bear ? c4.low < trig : c4.high > trig)) continue;      // no break, no trade
-      entry = bear ? Math.min(trig, c4.open) : Math.max(trig, c4.open);
-      startJ = s.idx + 1;                                           // the entry candle itself is checked too
-    }
-    const stop = s.ext ?? (bear ? c3.high : c3.low);     // beyond the sweep
+    const stop = bear ? c3.high : c3.low;
     const risk = bear ? stop - entry : entry - stop;
     if (!(risk > 0)) continue;                       // closed at its own extreme: no defined risk
     const target = bear ? entry - rr * risk : entry + rr * risk;
+    const day = ssIstDay(s.time);
     let done: SsTrade | null = null;
     let lastClose = entry, lastTime = s.time;
-    for (let j = startJ; j < candles.length; j++) {
+    for (let j = s.idx + 1; j < candles.length; j++) {
       const b = candles[j];
       const bt = ssTime(b.time);
       if (sessionExit && ssIstDay(bt) !== day) break; // session over: exit at its last close
