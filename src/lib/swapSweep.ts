@@ -19,7 +19,11 @@
 // ============================================================================
 
 export type SsCandle = { time: number; open: number; high: number; low: number; close: number };
-export type SsSignal = { idx: number; time: number; kind: 'bull' | 'bear' };
+// ext/from are set by patterns whose sweep is NOT on C3 (Push -> Stall -> Break,
+// where it is in the push candle's wick): ext = the pattern's extreme (also the
+// stop), from = the pattern's first candle. Absent for Swap-Sweep, whose
+// behaviour is therefore exactly as before.
+export type SsSignal = { idx: number; time: number; kind: 'bull' | 'bear'; ext?: number; from?: number };
 
 /** Unix seconds from whatever the candle carries (seconds, ms or a date string). */
 export function ssTime(t: any): number {
@@ -46,6 +50,56 @@ export function detectSwapSweep(candles: any[], opts: { sameSession?: boolean } 
     }
     if (c2.close > c1.high && c3.high > c2.high && c3.close < c1.high) out.push({ idx: i, time: t3, kind: 'bear' });
     else if (c2.close < c1.low && c3.low < c2.low && c3.close > c1.low) out.push({ idx: i, time: t3, kind: 'bull' });
+  }
+  return out;
+}
+
+// ============================================================================
+// PUSH -> STALL -> BREAK — the shape found at the three reversals Martin marked
+// (the classic evening / morning star, defined precisely). Bearish, signal at
+// C3's close:
+//   PUSH   C1 is a strong up candle: body at least 1.5x the average body of the
+//          10 candles before it, closing in the top third of its range
+//   STALL  C2 is small — body at most half of C1's — and makes NO new high
+//          (its high <= C1's high): momentum has died
+//   BREAK  C3 is a down candle closing below C2's low AND below the middle of
+//          C1's body, with a range at least 1.2x the recent average: expansion
+// Bullish is the mirror. The extreme of the pattern — the highest high of C1-C3
+// for a bearish one, usually C1's wick — is where the sweep happened, so it is
+// both the stop and what the liquidity filters test.
+// Not covered: the two-candle version (image 3, a bearish engulfing), which is a
+// different pattern and would need its own test.
+// ============================================================================
+export function detectPushStallBreak(candles: any[], opts: { sameSession?: boolean } = {}): SsSignal[] {
+  const sameSession = opts.sameSession !== false;
+  const out: SsSignal[] = [];
+  const LB = 10;
+  for (let i = LB + 2; i < (candles?.length || 0); i++) {
+    const c1 = candles[i - 2], c2 = candles[i - 1], c3 = candles[i];
+    const t3 = ssTime(c3.time);
+    if (sameSession) {
+      const d = ssIstDay(t3);
+      if (ssIstDay(ssTime(c1.time)) !== d || ssIstDay(ssTime(c2.time)) !== d) continue;
+    }
+    let avgBody = 0, avgRange = 0;
+    for (let j = i - 2 - LB; j < i - 2; j++) { avgBody += Math.abs(candles[j].close - candles[j].open); avgRange += candles[j].high - candles[j].low; }
+    avgBody /= LB; avgRange /= LB;
+    if (!(avgBody > 0) || !(avgRange > 0)) continue;
+    const b1 = Math.abs(c1.close - c1.open), r1 = c1.high - c1.low;
+    const b2 = Math.abs(c2.close - c2.open), r3 = c3.high - c3.low;
+    if (!(r1 > 0) || b1 < 1.5 * avgBody || b2 > 0.5 * b1 || r3 < 1.2 * avgRange) continue;
+    const mid1 = (c1.open + c1.close) / 2;
+    // bearish
+    if (c1.close > c1.open && c1.close >= c1.low + (2 / 3) * r1 && c2.high <= c1.high
+        && c3.close < c3.open && c3.close < c2.low && c3.close < mid1) {
+      out.push({ idx: i, time: t3, kind: 'bear', ext: Math.max(c1.high, c2.high, c3.high), from: i - 2 });
+      continue;
+    }
+    // bullish
+    if (c1.close < c1.open && c1.close <= c1.high - (2 / 3) * r1 && c2.low >= c1.low
+        && c3.close > c3.open && c3.close > c2.high && c3.close > mid1) {
+      out.push({ idx: i, time: t3, kind: 'bull', ext: Math.min(c1.low, c2.low, c3.low), from: i - 2 });
+    }
   }
   return out;
 }
@@ -101,20 +155,25 @@ export function filterSwapSweep(candles: any[], signals: SsSignal[], f: SsFilter
   }
   return signals.filter((s) => {
     const i = s.idx, c3 = candles[i], bear = s.kind === 'bear';
+    // The sweep's price and where to look before it: C3's wick and the candles
+    // before C3 for Swap-Sweep (unchanged), the pattern's extreme and the candles
+    // before its first candle for patterns that set ext/from.
+    const sweep = s.ext ?? (bear ? c3.high : c3.low);
+    const before = s.from ?? i;
     if (anyLevel) {
       let hit = false;
-      if (f.extremeN && f.extremeN > 0 && i - f.extremeN >= 0) {
+      if (f.extremeN && f.extremeN > 0 && before - f.extremeN >= 0) {
         let ext = bear ? -Infinity : Infinity;
-        for (let j = i - f.extremeN; j < i; j++) ext = bear ? Math.max(ext, candles[j].high) : Math.min(ext, candles[j].low);
-        if (bear ? c3.high > ext : c3.low < ext) hit = true;
+        for (let j = before - f.extremeN; j < before; j++) ext = bear ? Math.max(ext, candles[j].high) : Math.min(ext, candles[j].low);
+        if (bear ? sweep > ext : sweep < ext) hit = true;
       }
       if (!hit && f.dayExtreme) {
         let ext = bear ? -Infinity : Infinity, seen = false;
-        for (let j = i - 1; j >= 0 && day[j] === day[i]; j--) { seen = true; ext = bear ? Math.max(ext, candles[j].high) : Math.min(ext, candles[j].low); }
-        if (seen && (bear ? c3.high > ext : c3.low < ext)) hit = true;
+        for (let j = before - 1; j >= 0 && day[j] === day[i]; j--) { seen = true; ext = bear ? Math.max(ext, candles[j].high) : Math.min(ext, candles[j].low); }
+        if (seen && (bear ? sweep > ext : sweep < ext)) hit = true;
       }
       if (!hit && f.prevDay && Number.isFinite(prevHi[i])) {
-        if (bear ? (c3.high > prevHi[i] && c3.close < prevHi[i]) : (c3.low < prevLo[i] && c3.close > prevLo[i])) hit = true;
+        if (bear ? (sweep > prevHi[i] && c3.close < prevHi[i]) : (sweep < prevLo[i] && c3.close > prevLo[i])) hit = true;
       }
       if (!hit) return false;
     }
@@ -179,7 +238,7 @@ export function backtestSwapSweep(candles: any[], signals: SsSignal[],
       entry = bear ? Math.min(trig, c4.open) : Math.max(trig, c4.open);
       startJ = s.idx + 1;                                           // the entry candle itself is checked too
     }
-    const stop = bear ? c3.high : c3.low;
+    const stop = s.ext ?? (bear ? c3.high : c3.low);     // beyond the sweep
     const risk = bear ? stop - entry : entry - stop;
     if (!(risk > 0)) continue;                       // closed at its own extreme: no defined risk
     const target = bear ? entry - rr * risk : entry + rr * risk;

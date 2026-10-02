@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Play, Info } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
-import { detectSwapSweep, filterSwapSweep, backtestSwapSweep, ssStats, ssTime, ssIstDay, type SsTrade, type SsStats, type SsFilters } from "../lib/swapSweep";
+import { detectSwapSweep, detectPushStallBreak, filterSwapSweep, backtestSwapSweep, ssStats, ssTime, ssIstDay, type SsTrade, type SsStats, type SsFilters } from "../lib/swapSweep";
 
 // A REAL backtest of the Swap-Sweep Reversal on NIFTY 50 candles from the app's
 // own history endpoint — the same candles the chart draws — using the same
@@ -17,6 +17,9 @@ const fmtDay = (sec: number) => new Date(sec * 1000).toLocaleDateString('en-IN',
   timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' });
 
 export default function SwapSweepBacktest() {
+  // Which reversal pattern to test. Same filters, costs, hold-out and engine for
+  // both, so they can be compared head to head on identical data.
+  const [pattern, setPattern] = useState<'ss' | 'psb'>('ss');
   const [tf, setTf] = useState(5);
   const [rr, setRr] = useState(2);
   const [sameSession, setSameSession] = useState(true);
@@ -39,7 +42,7 @@ export default function SwapSweepBacktest() {
   const [res, setRes] = useState<null | {
     tf: number; rr: number; first: number; last: number; days: number; candles: number;
     trades: SsTrade[]; stats: SsStats; byRr: { rr: number; s: SsStats }[];
-    raw: SsStats; periodLabel: string; filtersOn: string[];
+    raw: SsStats; periodLabel: string; filtersOn: string[]; patternName: string;
   }>(null);
 
   const run = async () => {
@@ -49,7 +52,7 @@ export default function SwapSweepBacktest() {
       const d = await r.json();
       const candles = (d?.candles || []).filter((c: any) => [c.open, c.high, c.low, c.close].every(Number.isFinite));
       if (candles.length < 50) throw new Error('Not enough history came back — is the Kite session live?');
-      const allSignals = detectSwapSweep(candles, { sameSession });
+      const allSignals = pattern === 'psb' ? detectPushStallBreak(candles, { sameSession }) : detectSwapSweep(candles, { sameSession });
       // Period split by trading day: hold-out = the last 25, in-sample = the rest.
       const dayOf = (sec: number) => ssIstDay(sec);
       const dayList = Array.from(new Set(candles.map((c: any) => dayOf(ssTime(c.time))))).sort((a: any, b: any) => a - b) as number[];
@@ -76,7 +79,8 @@ export default function SwapSweepBacktest() {
       const periodLabel = period === 'in' ? `In-sample — the hold-out (last 25 days) is excluded`
         : period === 'hold' ? `HOLD-OUT — the last 25 trading days only` : `All data, including the hold-out`;
       setRes({ tf, rr, first, last, days, candles: inP.length, trades, stats: ssStats(trades), byRr,
-               raw: ssStats(rawTrades), periodLabel, filtersOn });
+               raw: ssStats(rawTrades), periodLabel, filtersOn,
+               patternName: pattern === 'psb' ? 'Push → Stall → Break' : 'Swap-Sweep' });
     } catch (e: any) {
       setErr(e?.message || String(e));
     } finally { setRunning(false); }
@@ -92,10 +96,16 @@ export default function SwapSweepBacktest() {
     <Card className="bg-card/60 border border-primary/40">
       <CardHeader>
         <CardTitle className="text-sm font-semibold tracking-wide text-foreground flex items-center gap-2">
-          Swap-Sweep Reversal <span className="text-[10px] font-medium text-emerald-500 border border-emerald-500/40 rounded px-1.5 py-0.5">REAL NIFTY DATA</span>
+          Reversal Pattern Backtest <span className="text-[10px] font-medium text-emerald-500 border border-emerald-500/40 rounded px-1.5 py-0.5">REAL NIFTY DATA</span>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        <label className="block space-y-1 text-xs text-muted-foreground">Pattern
+          <select value={pattern} onChange={(e) => { setPattern(e.target.value as any); setRes(null); }} className={sel}>
+            <option value="ss">Swap-Sweep — C2 closes beyond C1, C3 sweeps C2 and closes back</option>
+            <option value="psb">Push → Stall → Break — strong candle, small stall, big break</option>
+          </select>
+        </label>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <label className="space-y-1 text-xs text-muted-foreground">Timeframe
             <select value={tf} onChange={(e) => setTf(Number(e.target.value))} className={sel}>
@@ -170,7 +180,7 @@ export default function SwapSweepBacktest() {
         {res && s && (
           <div className="space-y-4">
             <div className="text-[11px] text-muted-foreground">
-              NIFTY 50 · {res.tf < 60 ? `${res.tf}-min` : '1-hour'} · {fmtDay(res.first)} – {fmtDay(res.last)} · {res.days} trading days · {res.candles.toLocaleString('en-IN')} candles
+              <b className="text-foreground">{res.patternName}</b> · NIFTY 50 · {res.tf < 60 ? `${res.tf}-min` : '1-hour'} · {fmtDay(res.first)} – {fmtDay(res.last)} · {res.days} trading days · {res.candles.toLocaleString('en-IN')} candles
             </div>
             <div className={`text-[11px] font-semibold ${res.periodLabel.startsWith('HOLD') ? 'text-amber-600' : 'text-foreground/80'}`}>{res.periodLabel}</div>
 
@@ -279,7 +289,7 @@ export default function SwapSweepBacktest() {
         <div className="flex gap-2 text-[10px] text-muted-foreground leading-relaxed border-t border-border pt-3">
           <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
           <div>
-            How it is measured: entry at C3's close; stop beyond the sweep (C3's high for a short, C3's low for a long); target = risk × the chosen R.
+            How it is measured: entry at C3's close; stop beyond the sweep — for Swap-Sweep C3's high (short) / low (long), for Push → Stall → Break the pattern's highest high / lowest low, normally the push candle's wick; target = risk × the chosen R.
             Whichever is touched first decides it — if both fall inside one candle it is counted as a <b>loss</b>, since the order inside a candle is unknown.
             Results are on the <b>NIFTY index in points</b>: brokerage, slippage and option premium effects (theta, IV) are not included, and expired option contracts'
             history is not available from Zerodha to test premiums directly. Each signal is measured on its own. The history window is what the app holds:
