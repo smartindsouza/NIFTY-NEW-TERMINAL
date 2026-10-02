@@ -69,17 +69,21 @@ export type SsTrade = {
   time: number; kind: 'bull' | 'bear'; entry: number; stop: number; target: number;
   exit: number; exitTime: number; outcome: 'WIN' | 'LOSS' | 'TIME'; r: number;
 };
+// An entry to be simulated: which candle's close triggers it, the side, the entry
+// price and the stop. For a single timeframe this is C3's close and C3's own
+// extreme (the wrapper below builds exactly that); the confluence test supplies
+// its own. 'time' is the start of the candle whose close triggers the entry.
+export type SsEntry = { idx: number; time: number; kind: 'bull' | 'bear'; entry: number; stop: number };
+
 // costPts: brokerage + slippage per round trip, in index points, deducted from
 //   every trade as a fraction of its risk.
-export function backtestSwapSweep(candles: any[], signals: SsSignal[], opts: { rr: number; sessionExit?: boolean; costPts?: number }): SsTrade[] {
+export function backtestEntries(candles: any[], entries: SsEntry[], opts: { rr: number; sessionExit?: boolean; costPts?: number }): SsTrade[] {
   const rr = opts.rr, sessionExit = opts.sessionExit !== false;
   const cost = Math.max(0, Number(opts.costPts) || 0);
   const out: SsTrade[] = [];
-  for (const s of signals) {
-    const c3 = candles[s.idx];
-    const entry = c3.close;
+  for (const s of entries) {
+    const entry = s.entry, stop = s.stop;
     const bear = s.kind === 'bear';
-    const stop = bear ? c3.high : c3.low;
     const risk = bear ? stop - entry : entry - stop;
     if (!(risk > 0)) continue;                       // closed at its own extreme: no defined risk
     const target = bear ? entry - rr * risk : entry + rr * risk;
@@ -104,6 +108,68 @@ export function backtestSwapSweep(candles: any[], signals: SsSignal[], opts: { r
     out.push(done);
   }
   return out;
+}
+
+// Single timeframe: enter at C3's close, stop beyond C3's own sweep.
+export function backtestSwapSweep(candles: any[], signals: SsSignal[], opts: { rr: number; sessionExit?: boolean; costPts?: number }): SsTrade[] {
+  const entries: SsEntry[] = signals.map((s) => {
+    const c3 = candles[s.idx];
+    return { idx: s.idx, time: s.time, kind: s.kind, entry: c3.close, stop: s.kind === 'bear' ? c3.high : c3.low };
+  });
+  return backtestEntries(candles, entries, opts);
+}
+
+// ---------------------------------------------------------------------------
+// 5-MIN + 15-MIN CONFLUENCE. The trade is taken only when BOTH timeframes show a
+// Swap-Sweep signal in the same direction at the same time.
+//
+// "At the same time": a 15-min signal's C3 candle spans exactly three 5-min
+// candles (starts S, S+5m, S+10m). The 5-min signal must have its own C3 among
+// those three, so both signals are known when the 15-min candle closes — at the
+// close of the last of those 5-min candles, which is the entry. A 5-min signal
+// from before that 15-min candle began, or after it ended, does not count.
+//
+// Everything is simulated on the 5-MIN candles, so a stop and a target inside one
+// 15-min bar are ordered properly instead of being counted as a loss by default.
+// stop '15': beyond the 15-min C3's sweep (the wider structure, the default);
+// stop '5' : beyond the 5-min sweep — the highest high / lowest low of the
+//            matching 5-min C3s (tighter, so costs weigh more).
+// Returns three entry lists measured the same way, for a fair comparison:
+//   five     every 5-min signal, entered at its C3's close, stopped at its C3's extreme
+//   fifteen  every 15-min signal, entered at the close of its last 5-min candle,
+//            stopped beyond the 15-min sweep
+//   both     the 15-min signals that a same-direction 5-min signal confirms
+// ---------------------------------------------------------------------------
+export function confluenceSwapSweep(c5: any[], c15: any[], opts: { sameSession?: boolean; stop?: '15' | '5' } = {}): { five: SsEntry[]; fifteen: SsEntry[]; both: SsEntry[] } {
+  const sig5 = detectSwapSweep(c5, { sameSession: opts.sameSession });
+  const sig15 = detectSwapSweep(c15, { sameSession: opts.sameSession });
+  const five: SsEntry[] = sig5.map((s) => {
+    const c3 = c5[s.idx];
+    return { idx: s.idx, time: s.time, kind: s.kind, entry: c3.close, stop: s.kind === 'bear' ? c3.high : c3.low };
+  });
+  const at5 = new Map<number, number>();                      // 5-min candle start -> index
+  c5.forEach((c: any, i: number) => at5.set(ssTime(c.time), i));
+  const sigAt5 = new Map<string, SsSignal>();                 // `${kind}|${start}` -> 5-min signal
+  for (const s of sig5) sigAt5.set(`${s.kind}|${s.time}`, s);
+  const fifteen: SsEntry[] = [], both: SsEntry[] = [];
+  for (const s of sig15) {
+    const i5 = at5.get(s.time + 600);                          // the last 5-min candle of the 15-min C3
+    if (i5 === undefined) continue;                            // 5-min data missing there
+    const bear = s.kind === 'bear';
+    const k = c15[s.idx];
+    const stop15 = bear ? k.high : k.low;
+    const base = { idx: i5, time: ssTime(c5[i5].time), kind: s.kind, entry: c5[i5].close };
+    fifteen.push({ ...base, stop: stop15 });
+    const matched = [0, 300, 600].map((d) => sigAt5.get(`${s.kind}|${s.time + d}`)).filter(Boolean) as SsSignal[];
+    if (!matched.length) continue;
+    let stop = stop15;
+    if (opts.stop === '5') {
+      const ex = matched.map((m) => (bear ? c5[m.idx].high : c5[m.idx].low));
+      stop = bear ? Math.max(...ex) : Math.min(...ex);
+    }
+    both.push({ ...base, stop });
+  }
+  return { five, fifteen, both };
 }
 
 export type SsStats = {

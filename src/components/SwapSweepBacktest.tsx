@@ -2,13 +2,15 @@ import { useState } from "react";
 import { Play, Info } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
-import { detectSwapSweep, backtestSwapSweep, ssStats, ssTime, ssIstDay, type SsTrade, type SsStats } from "../lib/swapSweep";
+import { detectSwapSweep, backtestSwapSweep, backtestEntries, confluenceSwapSweep, ssStats, ssTime, ssIstDay, type SsTrade, type SsStats } from "../lib/swapSweep";
 
 // A REAL backtest of the Swap-Sweep Reversal on NIFTY 50 candles from the app's
 // own history endpoint — the same candles the chart draws — using the same
 // pattern definition as the chart indicator (lib/swapSweep). Measured in index
 // points and R; the on-screen notes say exactly what is and is not modelled.
 // Only Martin's three-candle rules are tested: no filters, no second pattern.
+// Two modes: the pattern on one timeframe, or on 5-min AND 15-min together — a
+// trade only when both show a signal in the same direction at the same time.
 
 const TFS = [1, 3, 5, 15, 30, 60];
 const RRS = [1, 1.5, 2, 3];
@@ -18,6 +20,8 @@ const fmtDay = (sec: number) => new Date(sec * 1000).toLocaleDateString('en-IN',
   timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' });
 
 export default function SwapSweepBacktest() {
+  const [mode, setMode] = useState<'single' | 'both'>('single');
+  const [stopMode, setStopMode] = useState<'15' | '5'>('15');   // confluence only: whose sweep the stop sits beyond
   const [tf, setTf] = useState(5);
   const [rr, setRr] = useState(2);
   const [sameSession, setSameSession] = useState(true);
@@ -32,32 +36,67 @@ export default function SwapSweepBacktest() {
   const [res, setRes] = useState<null | {
     tf: number; rr: number; first: number; last: number; days: number; candles: number;
     trades: SsTrade[]; stats: SsStats; byRr: { rr: number; s: SsStats }[]; periodLabel: string;
+    tfLabel: string;
+    conf: null | { five: SsStats; fifteen: SsStats; stop: '15' | '5' };   // set only in the 5 + 15 mode
   }>(null);
 
   const run = async () => {
     setRunning(true); setErr(null); setRes(null);
     try {
-      const r = await fetch(`/api/ta?timeframe=${tf}&token=256265&symbol=${encodeURIComponent('NIFTY 50')}`);
-      const d = await r.json();
-      const candles = (d?.candles || []).filter((c: any) => [c.open, c.high, c.low, c.close].every(Number.isFinite));
+      const fetchCandles = async (t: number) => {
+        const r = await fetch(`/api/ta?timeframe=${t}&token=256265&symbol=${encodeURIComponent('NIFTY 50')}`);
+        const d = await r.json();
+        return (d?.candles || []).filter((c: any) => [c.open, c.high, c.low, c.close].every(Number.isFinite));
+      };
+      const dayOf = (sec: number) => ssIstDay(sec);
+      const cost = Math.max(0, parseFloat(costPts) || 0);
+      // Period split by trading day: hold-out = the last 25, in-sample = the rest.
+      // Cut from the series the trades are scanned on.
+      const periodOf = (candles: any[]) => {
+        const dayList = Array.from(new Set(candles.map((c: any) => dayOf(ssTime(c.time))))).sort((a: any, b: any) => a - b) as number[];
+        const hold = new Set(dayList.slice(-25));
+        return (sig: { time: number }) => period === 'all' ? true : period === 'hold' ? hold.has(dayOf(sig.time)) : !hold.has(dayOf(sig.time));
+      };
+      const periodLabel = period === 'in' ? `In-sample — the hold-out (last 25 days) is excluded`
+        : period === 'hold' ? `HOLD-OUT — the last 25 trading days only` : `All data, including the hold-out`;
+      const opt = { sessionExit, costPts: cost };
+
+      if (mode === 'both') {
+        // 5-min + 15-min together. The 5-min history is the shorter of the two, so
+        // only the days it covers are tested; every trade is then simulated on the
+        // 5-min candles, so a stop and a target inside one 15-min bar are ordered
+        // properly instead of defaulting to a loss.
+        const c5 = await fetchCandles(5);
+        const all15 = await fetchCandles(15);
+        if (c5.length < 50 || all15.length < 50) throw new Error('Not enough history came back — is the Kite session live?');
+        const firstDay = dayOf(ssTime(c5[0].time));
+        const c15 = all15.filter((c: any) => dayOf(ssTime(c.time)) >= firstDay);
+        const C = confluenceSwapSweep(c5, c15, { sameSession, stop: stopMode });
+        const inPeriod = periodOf(c5);
+        const run1 = (list: typeof C.both, x = rr) => backtestEntries(c5, list.filter(inPeriod), { rr: x, ...opt });
+        const trades = run1(C.both);
+        const inP = c5.filter((c: any) => inPeriod({ time: ssTime(c.time) }));
+        const first = ssTime((inP[0] || c5[0]).time), last = ssTime((inP[inP.length - 1] || c5[c5.length - 1]).time);
+        const days = new Set(inP.map((c: any) => dayOf(ssTime(c.time)))).size;
+        setRes({ tf: 5, rr, first, last, days, candles: inP.length, trades, stats: ssStats(trades),
+                 byRr: RRS.map((x) => ({ rr: x, s: ssStats(run1(C.both, x)) })), periodLabel,
+                 tfLabel: '5-min + 15-min together',
+                 conf: { five: ssStats(run1(C.five)), fifteen: ssStats(run1(C.fifteen)), stop: stopMode } });
+        return;
+      }
+
+      const candles = await fetchCandles(tf);
       if (candles.length < 50) throw new Error('Not enough history came back — is the Kite session live?');
       const allSignals = detectSwapSweep(candles, { sameSession });
-      // Period split by trading day: hold-out = the last 25, in-sample = the rest.
-      const dayOf = (sec: number) => ssIstDay(sec);
-      const dayList = Array.from(new Set(candles.map((c: any) => dayOf(ssTime(c.time))))).sort((a: any, b: any) => a - b) as number[];
-      const hold = new Set(dayList.slice(-25));
-      const inPeriod = (sig: { time: number }) => period === 'all' ? true : period === 'hold' ? hold.has(dayOf(sig.time)) : !hold.has(dayOf(sig.time));
-      const cost = Math.max(0, parseFloat(costPts) || 0);
+      const inPeriod = periodOf(candles);
       const signals = allSignals.filter(inPeriod);
-      const opt = { sessionExit, costPts: cost };
       const trades = backtestSwapSweep(candles, signals, { rr, ...opt });
       const inP = candles.filter((c: any) => inPeriod({ time: ssTime(c.time) }));
       const first = ssTime((inP[0] || candles[0]).time), last = ssTime((inP[inP.length - 1] || candles[candles.length - 1]).time);
       const days = new Set(inP.map((c: any) => dayOf(ssTime(c.time)))).size;
       const byRr = RRS.map((x) => ({ rr: x, s: ssStats(backtestSwapSweep(candles, signals, { rr: x, ...opt })) }));
-      const periodLabel = period === 'in' ? `In-sample — the hold-out (last 25 days) is excluded`
-        : period === 'hold' ? `HOLD-OUT — the last 25 trading days only` : `All data, including the hold-out`;
-      setRes({ tf, rr, first, last, days, candles: inP.length, trades, stats: ssStats(trades), byRr, periodLabel });
+      setRes({ tf, rr, first, last, days, candles: inP.length, trades, stats: ssStats(trades), byRr, periodLabel,
+               tfLabel: tf < 60 ? `${tf}-min` : '1-hour', conf: null });
     } catch (e: any) {
       setErr(e?.message || String(e));
     } finally { setRunning(false); }
@@ -77,12 +116,27 @@ export default function SwapSweepBacktest() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        <label className="block space-y-1 text-xs text-muted-foreground">Test
+          <select value={mode} onChange={(e) => { setMode(e.target.value as any); setRes(null); }} className={sel}>
+            <option value="single">One timeframe — the pattern on its own</option>
+            <option value="both">5-min + 15-min together — trade only when both show a signal</option>
+          </select>
+        </label>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <label className="space-y-1 text-xs text-muted-foreground">Timeframe
-            <select value={tf} onChange={(e) => setTf(Number(e.target.value))} className={sel}>
-              {TFS.map((x) => <option key={x} value={x}>{x < 60 ? `${x} min` : '1 hour'}</option>)}
-            </select>
-          </label>
+          {mode === 'single' ? (
+            <label className="space-y-1 text-xs text-muted-foreground">Timeframe
+              <select value={tf} onChange={(e) => setTf(Number(e.target.value))} className={sel}>
+                {TFS.map((x) => <option key={x} value={x}>{x < 60 ? `${x} min` : '1 hour'}</option>)}
+              </select>
+            </label>
+          ) : (
+            <label className="space-y-1 text-xs text-muted-foreground">Stop beyond
+              <select value={stopMode} onChange={(e) => setStopMode(e.target.value as any)} className={sel}>
+                <option value="15">The 15-min sweep (wider)</option>
+                <option value="5">The 5-min sweep (tighter)</option>
+              </select>
+            </label>
+          )}
           <label className="space-y-1 text-xs text-muted-foreground">Target
             <select value={rr} onChange={(e) => setRr(Number(e.target.value))} className={sel}>
               {RRS.map((x) => <option key={x} value={x}>{x}R (1:{x})</option>)}
@@ -123,12 +177,51 @@ export default function SwapSweepBacktest() {
         {res && s && (
           <div className="space-y-4">
             <div className="text-[11px] text-muted-foreground">
-              NIFTY 50 · {res.tf < 60 ? `${res.tf}-min` : '1-hour'} · {fmtDay(res.first)} – {fmtDay(res.last)} · {res.days} trading days · {res.candles.toLocaleString('en-IN')} candles
+              <b className="text-foreground">{res.tfLabel}</b> · NIFTY 50 · {fmtDay(res.first)} – {fmtDay(res.last)} · {res.days} trading days · {res.candles.toLocaleString('en-IN')} candles
             </div>
             <div className={`text-[11px] font-semibold ${res.periodLabel.startsWith('HOLD') ? 'text-amber-600' : 'text-foreground/80'}`}>{res.periodLabel}</div>
+            {res.conf && (
+              <div className="text-[11px] text-muted-foreground">
+                The 5-minute history is the shorter of the two, so only the days it covers are tested. Entry is at the close of the 15-min candle
+                that completes the signal; every trade is simulated on 5-min candles.
+              </div>
+            )}
             {s.trades < 30 && (
               <div className="text-[11px] rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-600 px-2.5 py-1.5">
-                Only {s.trades} trade{s.trades === 1 ? '' : 's'} — too few to tell an edge from luck. Use a shorter timeframe or more days before drawing conclusions.
+                Only {s.trades} trade{s.trades === 1 ? '' : 's'} — too few to tell an edge from luck.{' '}
+                {res.conf ? 'Both timeframes agreeing is rare and the 5-minute history is short, so treat this as a first look only.' : 'Use a shorter timeframe or more days before drawing conclusions.'}
+              </div>
+            )}
+            {res.conf && (
+              <div>
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full text-[11px] font-mono">
+                    <thead><tr className="text-muted-foreground text-left border-b border-border">
+                      <th className="py-1.5 px-2"></th><th className="px-2">5-min alone</th><th className="px-2">15-min alone</th><th className="px-2 text-foreground">Both agree</th>
+                    </tr></thead>
+                    <tbody>
+                      {([
+                        ['Trades', (x: SsStats) => `${x.trades}`],
+                        ['Win rate', (x: SsStats) => pct(x.winRate)],
+                        ['Avg per trade', (x: SsStats) => `${x.avgR >= 0 ? '+' : ''}${x.avgR.toFixed(2)}R`],
+                        ['Total', (x: SsStats) => `${x.totalR >= 0 ? '+' : ''}${x.totalR.toFixed(1)}R`],
+                        ['Profit factor', (x: SsStats) => x.profitFactor === null ? '∞' : x.profitFactor.toFixed(2)],
+                        ['Worst losing run', (x: SsStats) => `${x.maxLossStreak}`],
+                      ] as const).map(([k, fmt]) => (
+                        <tr key={k} className="border-t border-border/40">
+                          <td className="py-1 px-2 text-muted-foreground">{k}</td>
+                          <td className="px-2 text-muted-foreground">{fmt(res.conf!.five)}</td>
+                          <td className="px-2 text-muted-foreground">{fmt(res.conf!.fifteen)}</td>
+                          <td className="px-2 text-foreground font-semibold">{fmt(s)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="text-[10px] text-muted-foreground mt-1">
+                  Same days, target and costs in every column. The 5-min column uses the 5-min sweep for its stop; 15-min alone uses the 15-min sweep;
+                  Both uses the {res.conf.stop === '15' ? '15-min' : '5-min'} sweep. The question is whether Both beats each alone.
+                </div>
               </div>
             )}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -204,7 +297,9 @@ export default function SwapSweepBacktest() {
         <div className="flex gap-2 text-[10px] text-muted-foreground leading-relaxed border-t border-border pt-3">
           <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
           <div>
-            How it is measured: entry at C3's close; stop beyond the sweep (C3's high for a short, C3's low for a long); target = risk × the chosen R.
+            {mode === 'both'
+              ? "How it is measured: a 15-min signal counts when a same-direction 5-min signal has its own C3 inside that 15-min candle, so both are known when it closes; entry at that close; stop beyond the sweep you chose; target = risk × the chosen R."
+              : "How it is measured: entry at C3's close; stop beyond the sweep (C3's high for a short, C3's low for a long); target = risk × the chosen R."}
             Whichever is touched first decides it — if both fall inside one candle it is counted as a <b>loss</b>, since the order inside a candle is unknown.
             Results are on the <b>NIFTY index in points</b>. Brokerage and slippage are included only as the per-trade cost you enter above (0 by default);
             option premium effects (theta, IV) are not, and expired option contracts' history is not available from Zerodha to test premiums directly.
