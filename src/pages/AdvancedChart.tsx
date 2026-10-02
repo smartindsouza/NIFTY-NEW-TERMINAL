@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { useUserSettings, useResolvedTheme } from "../hooks/useUserSettings";
 import { zoomDiag } from "../lib/zoomDiag";
-import { detectSwapSweep, ssTime, type SsSignal } from "../lib/swapSweep";
+import { detectSwapSweep, ssTime, ssIstDay, type SsSignal } from "../lib/swapSweep";
 import { getDivergences } from "../lib/divergence";
 import { evaluateBreakout } from "../lib/breakoutQuality";
 import { calculateBollingerBands } from "../indicators/bollingerBands";
@@ -2270,6 +2270,75 @@ function deriveZoneFvgs(zones: { top: number; bottom: number; time: number; endT
   return out;
 }
 
+// SESSION BREAKS — where one trading day ends and the next begins.
+// Returns, for each IST trading day after the first one in the data, the time of
+// the previous day's LAST candle and this day's FIRST candle; the line is drawn
+// between the two. Days are IST calendar days — the market's own — whatever time
+// zone the phone is in. The first day in the data gets no line: nothing precedes
+// it, so there is nothing to separate it from.
+type SbSettings = { on: boolean; color: string; opacity: number; thickness: number; lineStyle: number };
+const SB_DEFAULTS: SbSettings = { on: false, color: '#94a3b8', opacity: 55, thickness: 1, lineStyle: 1 };
+function deriveSessionBreaks(candles: any[]): { prevTime: number; time: number }[] {
+  const out: { prevTime: number; time: number }[] = [];
+  let prevDay = -1, prevTime = 0;
+  for (const c of candles || []) {
+    const t = toUnixSeconds(c.time);
+    if (!Number.isFinite(t)) continue;
+    const d = ssIstDay(t);
+    if (prevDay !== -1 && d !== prevDay) out.push({ prevTime, time: t });
+    prevDay = d; prevTime = t;
+  }
+  return out;
+}
+
+function SessionBreaksEditorModal({ onClose, value, onChange, onApply }: {
+  onClose: () => void,
+  value: SbSettings,
+  onChange: (v: SbSettings) => void,
+  onApply: () => void,
+}) {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-transparent p-4 animate-in fade-in duration-250" onClick={onClose}>
+      <div className="bg-card border border-0 rounded-lg w-full max-w-[320px] overflow-visible flex flex-col pt-1 relative" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-0">
+          <h2 className="text-lg font-medium text-foreground">Session Breaks</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="p-4 space-y-5">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium text-foreground/80">Line</div>
+            <TVStylePicker
+              color={value.color}
+              opacity={value.opacity}
+              thickness={value.thickness}
+              lineStyle={value.lineStyle}
+              onColorChange={(c) => onChange({ ...value, color: c })}
+              onOpacityChange={(o) => onChange({ ...value, opacity: o })}
+              onThicknessChange={(t) => onChange({ ...value, thickness: t })}
+              onLineStyleChange={(l) => onChange({ ...value, lineStyle: l })}
+            />
+          </div>
+          <div className="text-[11px] text-muted-foreground leading-relaxed">
+            A vertical line between the last candle of one trading day and the first of the next (IST). Shown on intraday timeframes; hidden on 1D and above, where every candle is its own day.
+          </div>
+          <button
+            onClick={() => onChange({ ...SB_DEFAULTS, on: value.on })}
+            className="text-[11px] text-muted-foreground hover:text-foreground transition-colors underline"
+          >
+            Reset to default
+          </button>
+        </div>
+        <div className="flex items-center justify-end p-4 border-t border-0 bg-muted gap-2 mt-2">
+          <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
+          <button onClick={onApply} className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium">Ok</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DirectionalZonesEditorModal({
   onClose,
   initialStyle,
@@ -3759,6 +3828,23 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const showSwapSweepRef = useRef(showSwapSweep);
   showSwapSweepRef.current = showSwapSweep;
   const ssCacheRef = useRef<{ key: string; signals: (SsSignal & { hi: number; lo: number })[] }>({ key: '', signals: [] });
+
+  // Session Breaks: off by default; colour, opacity, thickness and line style are
+  // remembered. Read through a ref by the canvas loop, like the other overlays.
+  const [sessionBreak, setSessionBreak] = useState<SbSettings>(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem('sessionBreaks') || 'null');
+      if (v && typeof v.on === 'boolean' && typeof v.color === 'string' && Number.isFinite(v.opacity)
+          && Number.isFinite(v.thickness) && Number.isFinite(v.lineStyle)) return { ...SB_DEFAULTS, ...v };
+    } catch (e) {}
+    return SB_DEFAULTS;
+  });
+  useEffect(() => { try { localStorage.setItem('sessionBreaks', JSON.stringify(sessionBreak)); } catch (e) {} }, [sessionBreak]);
+  const sessionBreakRef = useRef(sessionBreak);
+  sessionBreakRef.current = sessionBreak;
+  const sbSnapshotRef = useRef(sessionBreak);            // for Cancel in the settings box
+  const [isEditingSb, setIsEditingSb] = useState(false);
+  const sbCacheRef = useRef<{ key: string; breaks: { prevTime: number; time: number }[] }>({ key: '', breaks: [] });
   const pinSeriesRef = useRef<any>(null);          // markers live on a series; a rebuild makes a new one
   const pinPressureRef = useRef<Map<number, number>>(new Map());  // pressure proxy at each candle's close
   // BOS is the ordinary, frequent event; CHoCH is the interesting one. Being able
@@ -10507,6 +10593,42 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               // Market structure: a dashed line at the broken level running from the
               // swing that set it to the candle that closed through it, tagged BOS or
               // CHoCH. Index charts only, and recomputed only on a candle close.
+              // SESSION BREAKS. One vertical line in the gap between a day's last
+              // candle and the next day's first, from the top of the plot to the time
+              // axis (this canvas already stops above it). Drawn first so every
+              // other overlay sits on top. Intraday timeframes only: at 1D and above
+              // every candle is its own day and the lines would be noise. Not on the
+              // GIFT NIFTY reference chart, which trades through IST midnight — a
+              // break there would fall in the middle of a session.
+              if (sessionBreakRef.current.on && mainSeriesRef.current && !isReferenceChartRef.current && (parseInt(timeframe) || 5) < 1440) {
+                try {
+                  const baseB = chartDataRef.current?.candles || [];
+                  const lastBT = baseB.length ? toUnixSeconds(baseB[baseB.length - 1].time) : 0;
+                  const extraB = liveClosedCandlesRef.current.filter((k: any) => toUnixSeconds(k.time) > lastBT);
+                  const formingB = lastCandleDataRef.current;
+                  const tailB = formingB && toUnixSeconds(formingB.time) > Math.max(lastBT, extraB.length ? toUnixSeconds(extraB[extraB.length - 1].time) : 0) ? [formingB] : [];
+                  const keyB = `${instrumentToken}|${timeframe}|${baseB.length}|${lastBT}|${extraB.length}|${tailB.length ? toUnixSeconds(tailB[0].time) : 0}`;
+                  if (sbCacheRef.current.key !== keyB) {
+                    sbCacheRef.current = { key: keyB, breaks: deriveSessionBreaks([...baseB, ...extraB, ...tailB]) };
+                  }
+                  const sb = sessionBreakRef.current;
+                  const tsB = mainChartRef.current?.timeScale();
+                  ctx.save();
+                  ctx.strokeStyle = hexToRgba(sb.color, Math.min(1, Math.max(0, sb.opacity / 100)));
+                  ctx.lineWidth = Math.max(1, sb.thickness);
+                  ctx.setLineDash(sb.lineStyle === 0 ? [] : sb.lineStyle === 1 ? [6, 4] : [1.5, 3]);
+                  for (const b of sbCacheRef.current.breaks) {
+                    const xa = tsB?.timeToCoordinate(b.prevTime as any);
+                    const xb = tsB?.timeToCoordinate(b.time as any);
+                    if (xa === null || xa === undefined || xb === null || xb === undefined) continue;
+                    const x = Math.round((xa + xb) / 2) + 0.5;           // centred in the gap, pixel-crisp
+                    if (x < 0 || x > textAlignX) continue;
+                    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ch); ctx.stroke();
+                  }
+                  ctx.restore();
+                } catch (e) { /* an indicator must never break the frame */ }
+              }
+
               // SWAP-SWEEP REVERSAL. Signals come from the shared definition in
               // lib/swapSweep — the same one the backtest uses — over the chart's
               // own closed candles, so any timeframe the chart shows works.
@@ -12195,6 +12317,42 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       <Star size={14} fill={isFav('SwapSweepReversal') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('SessionBreaks', sessionBreak.on)}`}>
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setSessionBreak(v => ({ ...v, on: !v.on })); }}
+                          aria-label="Toggle Session Breaks"
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(sessionBreak.on) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(sessionBreak.on) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none" title="A vertical line between each trading day (IST). Intraday timeframes only.">Session Breaks</span>
+                      </div>
+                    {sessionBreak.on ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          sbSnapshotRef.current = sessionBreak;   // for Cancel
+                          setIsEditingSb(true);
+                          setIsIndicatorsOpen(false);
+                        }}
+                        className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+                        title="Session Breaks Settings"
+                      >
+                        <Settings size={14} />
+                      </button>
+                    ) : (
+                      <span className="p-1 w-[22px] shrink-0" aria-hidden="true" />
+                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('SessionBreaks'); }}
+                      title={isFav('SessionBreaks') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('SessionBreaks') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('SessionBreaks') ? 'currentColor' : 'none'} />
+                    </button>
+                  </div>
 
 
                   {/* Support/Resistance Lines */}
@@ -13111,6 +13269,15 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           onChange={(style) => setDzStyle(style)}
           fvg={dzFvg}
           onFvgChange={setDzFvg}
+        />
+      )}
+
+      {isEditingSb && (
+        <SessionBreaksEditorModal
+          value={sessionBreak}
+          onChange={setSessionBreak}
+          onClose={() => { setSessionBreak(sbSnapshotRef.current); setIsEditingSb(false); }}
+          onApply={() => setIsEditingSb(false)}
         />
       )}
 
