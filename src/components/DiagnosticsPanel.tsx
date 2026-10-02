@@ -8,13 +8,14 @@ import { Badge } from "@/components/ui/badge";
 declare const __BUILD_TIME__: string;
 declare const __BUILD_ID__: string;
 declare const __BUILD_SHA__: string;
+declare const __APP_VERSION__: string;
 
 // Is this running copy the deployed one? The bundle carries its build ID; the
 // server's dist/version.json carries the deployed build's. Fetched uncached.
 // Different = an older copy is still running (an app left open across a deploy,
 // or a phone holding a cached copy).
 function useDeployedVersion() {
-  const [deployed, setDeployed] = useState<{ id: string; sha: string | null; builtAt: string } | null>(null);
+  const [deployed, setDeployed] = useState<{ id: string; version?: string | null; sha: string | null; builtAt: string } | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     let alive = true;
@@ -142,13 +143,13 @@ export function DiagnosticsPanel() {
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 px-2.5 py-1.5">
           <div className="flex items-center gap-2 min-w-0 text-[11px]">
             <span className="text-muted-foreground">Version</span>
-            <span className="font-mono font-semibold text-foreground">{__BUILD_SHA__ || `build ${__BUILD_ID__}`}</span>
+            <span className="font-mono font-semibold text-foreground">{__APP_VERSION__ ? `v${__APP_VERSION__}` : (__BUILD_SHA__ || `build ${__BUILD_ID__}`)}</span>
             {deployed && deployed.id === __BUILD_ID__ && (
               <span className="text-[10px] font-semibold text-emerald-500">✓ Latest</span>
             )}
             {deployed && deployed.id !== __BUILD_ID__ && (
               <span className="text-[10px] font-semibold text-amber-500">
-                Update available{deployed.sha ? ` → ${deployed.sha}` : ''}
+                Update available{deployed.version ? ` → v${deployed.version}` : deployed.sha ? ` → ${deployed.sha}` : ''}
               </span>
             )}
             {!deployed && versionCheckFailed && (

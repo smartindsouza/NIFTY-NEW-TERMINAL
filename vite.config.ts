@@ -13,6 +13,14 @@ import fs from 'fs';
 const BUILD_TIME = new Date().toISOString();
 const BUILD_SHA = (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 8);
 const BUILD_ID = BUILD_SHA || BUILD_TIME.replace(/[-:TZ.]/g, '').slice(0, 14);
+// THE VERSION NUMBER Martin sees: set by hand in /VERSION and bumped with every
+// deploy, so the number quoted after a deploy is exactly what App Diagnostics
+// shows. (The commit code above depends on Railway providing it at build time,
+// which is not guaranteed.) BUILD_ID still decides 'Latest' vs 'Update
+// available', because it changes on every build even if VERSION was not bumped.
+const APP_VERSION = (() => {
+  try { return fs.readFileSync(path.resolve(__dirname, 'VERSION'), 'utf8').trim(); } catch (e) { return ''; }
+})();
 
 export default defineConfig(() => {
   return {
@@ -24,7 +32,7 @@ export default defineConfig(() => {
       closeBundle() {
         try {
           fs.writeFileSync(path.resolve(__dirname, 'dist', 'version.json'),
-            JSON.stringify({ id: BUILD_ID, sha: BUILD_SHA || null, builtAt: BUILD_TIME }));
+            JSON.stringify({ id: BUILD_ID, version: APP_VERSION || null, sha: BUILD_SHA || null, builtAt: BUILD_TIME }));
         } catch (e) { console.warn('[build-version-file] could not write version.json', e); }
       },
     }],
@@ -35,6 +43,7 @@ export default defineConfig(() => {
       __BUILD_TIME__: JSON.stringify(BUILD_TIME),
       __BUILD_ID__: JSON.stringify(BUILD_ID),
       __BUILD_SHA__: JSON.stringify(BUILD_SHA),
+      __APP_VERSION__: JSON.stringify(APP_VERSION),
     },
     resolve: {
       alias: [
