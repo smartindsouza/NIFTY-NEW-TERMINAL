@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Play, Info } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
-import { detectSwapSweep, backtestSwapSweep, ssStats, ssTime, ssIstDay, type SsTrade, type SsStats } from "../lib/swapSweep";
+import { detectSwapSweep, filterSwapSweep, backtestSwapSweep, ssStats, ssTime, ssIstDay, type SsTrade, type SsStats, type SsFilters } from "../lib/swapSweep";
 
 // A REAL backtest of the Swap-Sweep Reversal on NIFTY 50 candles from the app's
 // own history endpoint — the same candles the chart draws — using the same
@@ -21,11 +21,25 @@ export default function SwapSweepBacktest() {
   const [rr, setRr] = useState(2);
   const [sameSession, setSameSession] = useState(true);
   const [sessionExit, setSessionExit] = useState(true);
+  // Filters under test. Liquidity levels count if ANY ticked one is swept.
+  const [fExtreme, setFExtreme] = useState(false);
+  const [fDay, setFDay] = useState(false);
+  const [fPrevDay, setFPrevDay] = useState(false);
+  const [fDecisive, setFDecisive] = useState(false);
+  const [fSkipOpen, setFSkipOpen] = useState(false);
+  const [fTrend, setFTrend] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const [costPts, setCostPts] = useState('0');
+  // HOLD-OUT: the last 25 trading days are kept unseen while filters are chosen,
+  // then checked once at the end. Tuning on all 105 days would find filters that
+  // fit the past and fail going forward; this is how that gets caught.
+  const [period, setPeriod] = useState<'in' | 'hold' | 'all'>('in');
   const [running, setRunning] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [res, setRes] = useState<null | {
     tf: number; rr: number; first: number; last: number; days: number; candles: number;
     trades: SsTrade[]; stats: SsStats; byRr: { rr: number; s: SsStats }[];
+    raw: SsStats; periodLabel: string; filtersOn: string[];
   }>(null);
 
   const run = async () => {
@@ -35,12 +49,34 @@ export default function SwapSweepBacktest() {
       const d = await r.json();
       const candles = (d?.candles || []).filter((c: any) => [c.open, c.high, c.low, c.close].every(Number.isFinite));
       if (candles.length < 50) throw new Error('Not enough history came back — is the Kite session live?');
-      const signals = detectSwapSweep(candles, { sameSession });
-      const trades = backtestSwapSweep(candles, signals, { rr, sessionExit });
-      const first = ssTime(candles[0].time), last = ssTime(candles[candles.length - 1].time);
-      const days = new Set(candles.map((c: any) => ssIstDay(ssTime(c.time)))).size;
-      const byRr = RRS.map((x) => ({ rr: x, s: ssStats(backtestSwapSweep(candles, signals, { rr: x, sessionExit })) }));
-      setRes({ tf, rr, first, last, days, candles: candles.length, trades, stats: ssStats(trades), byRr });
+      const allSignals = detectSwapSweep(candles, { sameSession });
+      // Period split by trading day: hold-out = the last 25, in-sample = the rest.
+      const dayOf = (sec: number) => ssIstDay(sec);
+      const dayList = Array.from(new Set(candles.map((c: any) => dayOf(ssTime(c.time))))).sort((a: any, b: any) => a - b) as number[];
+      const hold = new Set(dayList.slice(-25));
+      const inPeriod = (sig: { time: number }) => period === 'all' ? true : period === 'hold' ? hold.has(dayOf(sig.time)) : !hold.has(dayOf(sig.time));
+      const filters: SsFilters = { extremeN: fExtreme ? 20 : 0, dayExtreme: fDay, prevDay: fPrevDay,
+        decisiveClose: fDecisive, skipOpening: fSkipOpen, trendGuard: fTrend };
+      const cost = Math.max(0, parseFloat(costPts) || 0);
+      // RAW = the pattern alone (no filters, enter at C3's close); FILTERED = every
+      // choice above. Same period, same costs — so the difference is the filters.
+      const rawTrades = backtestSwapSweep(candles, allSignals.filter(inPeriod), { rr, sessionExit, costPts: cost });
+      const signals = filterSwapSweep(candles, allSignals, filters).filter(inPeriod);
+      const opt = { sessionExit, confirm, costPts: cost };
+      const trades = backtestSwapSweep(candles, signals, { rr, ...opt });
+      const inP = candles.filter((c: any) => inPeriod({ time: ssTime(c.time) }));
+      const first = ssTime((inP[0] || candles[0]).time), last = ssTime((inP[inP.length - 1] || candles[candles.length - 1]).time);
+      const days = new Set(inP.map((c: any) => dayOf(ssTime(c.time)))).size;
+      const byRr = RRS.map((x) => ({ rr: x, s: ssStats(backtestSwapSweep(candles, signals, { rr: x, ...opt })) }));
+      const filtersOn = [
+        fExtreme && '20-candle extreme', fDay && "day's high/low", fPrevDay && 'PDH/PDL',
+        fDecisive && 'decisive close', fSkipOpen && 'skip opening', fTrend && 'trend guard',
+        confirm && 'confirmation entry',
+      ].filter(Boolean) as string[];
+      const periodLabel = period === 'in' ? `In-sample — the hold-out (last 25 days) is excluded`
+        : period === 'hold' ? `HOLD-OUT — the last 25 trading days only` : `All data, including the hold-out`;
+      setRes({ tf, rr, first, last, days, candles: inP.length, trades, stats: ssStats(trades), byRr,
+               raw: ssStats(rawTrades), periodLabel, filtersOn });
     } catch (e: any) {
       setErr(e?.message || String(e));
     } finally { setRunning(false); }
@@ -80,6 +116,51 @@ export default function SwapSweepBacktest() {
             Exit at day's close
           </label>
         </div>
+        <div className="rounded-lg border border-border p-3 space-y-2.5">
+          <div className="text-xs font-semibold text-foreground">Filters to test</div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">The sweep must take out real liquidity — any of these</div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-1.5">
+            {([
+              [fExtreme, setFExtreme, 'A 20-candle high / low'],
+              [fDay, setFDay, "The day's high / low so far"],
+              [fPrevDay, setFPrevDay, "Yesterday's high / low (PDH/PDL)"],
+            ] as const).map(([v, set, label]) => (
+              <label key={label} className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input type="checkbox" checked={v} onChange={(e) => set(e.target.checked)} /> {label}
+              </label>
+            ))}
+          </div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground pt-1">And</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+            {([
+              [fDecisive, setFDecisive, 'Decisive close — C3 closes in the far third of its range'],
+              [fSkipOpen, setFSkipOpen, 'Skip the first 15 minutes (C3 before 9:30)'],
+              [fTrend, setFTrend, 'Skip signals against a strong trend'],
+              [confirm, setConfirm, 'Wait for confirmation — next candle breaks C3'],
+            ] as const).map(([v, set, label]) => (
+              <label key={label} className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input type="checkbox" checked={v} onChange={(e) => set(e.target.checked)} /> {label}
+              </label>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-3 pt-1">
+            <label className="space-y-1 text-xs text-muted-foreground">Costs per trade (index points)
+              <input type="number" inputMode="decimal" min={0} step={0.5} value={costPts} onChange={(e) => setCostPts(e.target.value)} className={sel} />
+            </label>
+            <label className="space-y-1 text-xs text-muted-foreground">Period
+              <select value={period} onChange={(e) => setPeriod(e.target.value as any)} className={sel}>
+                <option value="in">In-sample (hold-out kept unseen)</option>
+                <option value="hold">Hold-out — last 25 days</option>
+                <option value="all">All data</option>
+              </select>
+            </label>
+          </div>
+          <div className="text-[10px] text-muted-foreground leading-relaxed">
+            Choose filters on <b>In-sample</b>. Only when you have settled on a combination, run it <b>once</b> on the Hold-out:
+            if it still holds up on days it was never tuned on, it is more likely real. Re-tuning after looking at the hold-out spoils it.
+          </div>
+        </div>
+
         <button onClick={run} disabled={running}
           className="w-full md:w-auto bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold py-2.5 px-6 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50">
           <Play className="w-3.5 h-3.5" /> {running ? 'Running on real candles…' : 'Run backtest'}
@@ -91,6 +172,40 @@ export default function SwapSweepBacktest() {
             <div className="text-[11px] text-muted-foreground">
               NIFTY 50 · {res.tf < 60 ? `${res.tf}-min` : '1-hour'} · {fmtDay(res.first)} – {fmtDay(res.last)} · {res.days} trading days · {res.candles.toLocaleString('en-IN')} candles
             </div>
+            <div className={`text-[11px] font-semibold ${res.periodLabel.startsWith('HOLD') ? 'text-amber-600' : 'text-foreground/80'}`}>{res.periodLabel}</div>
+
+            {/* RAW vs FILTERED, same period and costs: the difference IS the filters. */}
+            <div className="overflow-x-auto rounded-lg border border-border">
+              <table className="w-full text-[11px] font-mono">
+                <thead><tr className="text-muted-foreground text-left border-b border-border">
+                  <th className="py-1.5 px-2"></th><th className="px-2">Raw pattern</th><th className="px-2">Filtered</th>
+                </tr></thead>
+                <tbody>
+                  {([
+                    ['Trades', (x: SsStats) => `${x.trades}`],
+                    ['Win rate', (x: SsStats) => pct(x.winRate)],
+                    ['Avg per trade', (x: SsStats) => `${x.avgR >= 0 ? '+' : ''}${x.avgR.toFixed(2)}R`],
+                    ['Total', (x: SsStats) => `${x.totalR >= 0 ? '+' : ''}${x.totalR.toFixed(1)}R`],
+                    ['Profit factor', (x: SsStats) => x.profitFactor === null ? '∞' : x.profitFactor.toFixed(2)],
+                    ['Worst losing run', (x: SsStats) => `${x.maxLossStreak}`],
+                  ] as const).map(([k, fmt]) => (
+                    <tr key={k} className="border-t border-border/40">
+                      <td className="py-1 px-2 text-muted-foreground">{k}</td>
+                      <td className="px-2 text-muted-foreground">{fmt(res.raw)}</td>
+                      <td className="px-2 text-foreground font-semibold">{fmt(s)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="text-[10px] text-muted-foreground">
+              Filters: {res.filtersOn.length ? res.filtersOn.join(' · ') : 'none — both columns are the raw pattern'}
+            </div>
+            {s.trades < 30 && (
+              <div className="text-[11px] rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-600 px-2.5 py-1.5">
+                Only {s.trades} trade{s.trades === 1 ? '' : 's'} — too few to tell an edge from luck. Use a shorter timeframe or fewer filters before drawing conclusions.
+              </div>
+            )}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {[
                 ['Signals traded', `${s.trades}`, `${s.bull} bull · ${s.bear} bear`],
