@@ -12,7 +12,7 @@ import { detectSwapSweep, backtestSwapSweep, backtestEntries, backtestSignalExit
 // Two modes: the pattern on one timeframe, or on 5-min AND 15-min together — a
 // trade only when both show a signal in the same direction at the same time.
 // On one timeframe the entry can be at the signal candle's close (original) or a
-// pending order at its high / low with the stop at its midpoint.
+// pending order at its high / low with the stop at the candle's far extreme.
 
 const TFS = [1, 3, 5, 15, 30, 60];
 const RRS = [1, 1.5, 2, 3];
@@ -30,7 +30,7 @@ export default function SwapSweepBacktest() {
   const [mode, setMode] = useState<'single' | 'both'>('single');
   const [stopMode, setStopMode] = useState<'15' | '5'>('15');   // confluence only: whose sweep the stop sits beyond
   // Entry style (one timeframe only): at the signal candle's close, or a pending
-  // order at its high (bull) / low (bear) with the stop at its midpoint; and how
+  // order at its high (bull) / low (bear) with the stop at the candle's far extreme; and how
   // many candles that order stays live.
   const [entryMode, setEntryMode] = useState<'close' | 'break'>('close');
   const [validFor, setValidFor] = useState<'1' | '3' | 'day'>('1');   // default: the next candle only
@@ -115,7 +115,7 @@ export default function SwapSweepBacktest() {
 
       if (entryMode === 'break') {
         // Pending order at the signal candle's high / low for the chosen window, stop at its
-        // midpoint. Exit: the next CONFIRMED opposite signal, or a fixed target. All four
+        // far extreme (low for a long, high for a short). Exit: the next CONFIRMED opposite signal, or a fixed target. All four
         // exit styles run on the same entries, days and costs so they compare directly.
         const list = breakEntries(candles, signals, { validFor: validFor === 'day' ? Infinity : Number(validFor) });
         // Optimistic bound: where the fill candle also reached the stop and the order of events
@@ -171,7 +171,7 @@ export default function SwapSweepBacktest() {
             <label className="space-y-1 text-xs text-muted-foreground">Entry
               <select value={entryMode} onChange={(e) => { setEntryMode(e.target.value as any); setRes(null); }} className={sel}>
                 <option value="close">At the signal candle's close — stop beyond its extreme</option>
-                <option value="break">On a break — entry at its high (long) / low (short), stop at its midpoint</option>
+                <option value="break">On a break — entry at its high (long) / low (short), stop at its low (long) / high (short)</option>
               </select>
             </label>
             {entryMode === 'break' && (
@@ -305,7 +305,7 @@ export default function SwapSweepBacktest() {
                 <div className="text-[10px] text-muted-foreground mt-1 leading-relaxed">
                   Same orders, days and costs in every column; the bold column feeds the figures below. <b>Opposite signal</b> holds the trade until the next
                   opposite signal — but only once the candle after it breaks that signal candle's low (long) or high (short); if it does not, the signal is
-                  treated as fake and the trade carries on. The stop at the signal candle's midpoint stays active throughout. The last row is the other
+                  treated as fake and the trade carries on. The stop at the signal candle's low (long) / high (short) stays active throughout. The last row is the other
                   extreme: the main figures count a fill candle that also reached the stop as a <b>loss</b> (cautious), this row assumes they survived.
                   The real answer lies between the two.
                 </div>
@@ -419,7 +419,7 @@ export default function SwapSweepBacktest() {
           <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
           <div>
             {mode === 'single' && entryMode === 'break'
-              ? "How it is measured (break entry): when the signal candle closes, a stop order sits at its high (long) or low (short) for the chosen window. If a candle trades through it you are in — at the level, or at the candle's open if it gapped through; otherwise no trade, and it never carries overnight. The stop is the signal candle's midpoint, so the risk is half its range. Exit: a fixed target (risk × 1, 2 or 3), or the next OPPOSITE signal, taken only once the candle after it breaks its low (for a long) / high (for a short) — if it does not, the signal is treated as fake and the trade carries on. The stop stays active throughout, and with 'Exit at day's close' ticked an open trade closes at that day's last close. Where one candle reaches both the stop and an exit level, the nearer one is taken as hit first. A fill candle that also reaches the stop is counted as a loss (cautious); the last table row shows the optimistic bound."
+              ? "How it is measured (break entry): when the signal candle closes, a stop order sits at its high (long) or low (short) for the chosen window. If a candle trades through it you are in — at the level, or at the candle's open if it gapped through; otherwise no trade, and it never carries overnight. The stop is the signal candle's low (long) or high (short), so the risk is its full range. Exit: a fixed target (risk × 1, 2 or 3), or the next OPPOSITE signal, taken only once the candle after it breaks its low (for a long) / high (for a short) — if it does not, the signal is treated as fake and the trade carries on. The stop stays active throughout, and with 'Exit at day's close' ticked an open trade closes at that day's last close. Where one candle reaches both the stop and an exit level, the nearer one is taken as hit first. A fill candle that also reaches the stop is counted as a loss (cautious); the last table row shows the optimistic bound."
               : mode === 'both'
               ? "How it is measured: a 15-min signal counts when a same-direction 5-min signal has its own C3 inside that 15-min candle, so both are known when it closes; entry at that close; stop beyond the sweep you chose; target = risk × the chosen R."
               : "How it is measured: entry at C3's close; stop beyond the sweep (C3's high for a short, C3's low for a long); target = risk × the chosen R."}

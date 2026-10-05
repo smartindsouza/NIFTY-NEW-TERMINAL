@@ -180,8 +180,9 @@ export function confluenceSwapSweep(c5: any[], c15: any[], opts: { sameSession?:
 // BREAK ENTRY — an alternative way to enter the same signals. Instead of entering
 // at the signal candle's close, a pending STOP order is placed when it closes:
 //   bullish: buy at the signal candle's HIGH      bearish: sell at its LOW
-//   stop   : the signal candle's MIDPOINT, (high + low) / 2 — half its range, so
-//            the risk is half the candle's range (measured from the actual fill).
+//   stop   : the signal candle's far extreme — its LOW for a long, its HIGH for a
+//            short — so the risk is the candle's full range, measured from the
+//            actual fill (the order level, or the open if it gapped through).
 // The order fills on the first candle after the signal that trades through the
 // level, within 'validFor' candles (Infinity = the rest of that trading day; an
 // unfilled order never carries overnight). It fills AT the level, or at that
@@ -191,8 +192,9 @@ export function confluenceSwapSweep(c5: any[], c15: any[], opts: { sameSession?:
 // The fill candle is itself checked for the stop and the target. The order inside
 // a candle is unknown, so a fill candle that touches the stop too is counted as a
 // LOSS — the same conservative rule the rest of the backtest uses. (If price first
-// dipped to the midpoint and only then rose to the order level, that really would
-// have filled and survived; counting it a loss is the cautious side.)
+// dipped to the stop and only then rose to the order level, that really would
+// have filled and survived; counting it a loss is the cautious side.) With the
+// stop at the candle's far extreme this is rarer than it was with a midpoint stop.
 //
 // Returns entries for backtestEntries: idx is the candle BEFORE the fill, so the
 // engine's forward scan starts on the fill candle itself; 'time' stays the signal
@@ -202,10 +204,10 @@ export function breakEntries(candles: any[], signals: SsSignal[], opts: { validF
   const out: SsEntry[] = [];
   for (const s of signals) {
     const c3 = candles[s.idx];
-    if (!c3 || !(c3.high > c3.low)) continue;               // a zero-range candle has no midpoint to stop at
+    if (!c3 || !(c3.high > c3.low)) continue;               // a zero-range candle has no range to put a stop beyond
     const bull = s.kind === 'bull';
     const trig = bull ? c3.high : c3.low;
-    const stop = (c3.high + c3.low) / 2;
+    const stop = bull ? c3.low : c3.high;                   // the far extreme: low for a long, high for a short
     const day = ssIstDay(s.time);
     for (let j = s.idx + 1; j < candles.length && j - s.idx <= opts.validFor; j++) {
       const b = candles[j];
