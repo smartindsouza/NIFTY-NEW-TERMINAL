@@ -67,7 +67,7 @@ export function detectSwapSweep(candles: any[], opts: { sameSession?: boolean } 
 // ---------------------------------------------------------------------------
 export type SsTrade = {
   time: number; kind: 'bull' | 'bear'; entry: number; stop: number; target: number;
-  exit: number; exitTime: number; outcome: 'WIN' | 'LOSS' | 'TIME'; r: number;
+  exit: number; exitTime: number; outcome: 'WIN' | 'LOSS' | 'TIME' | 'SIGNAL'; r: number;
 };
 // An entry to be simulated: which candle's close triggers it, the side, the entry
 // price and the stop. For a single timeframe this is C3's close and C3's own
@@ -224,20 +224,93 @@ export function breakEntries(candles: any[], signals: SsSignal[], opts: { validF
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// SIGNAL EXIT — hold the trade until the next OPPOSITE signal, but only once that
+// signal is CONFIRMED. A signal can be fake and the trend can simply continue, so
+// an opposite signal does not close the trade by itself: the candle right after
+// it must break its extreme — below the opposite (bearish) signal candle's LOW for
+// a long, above the opposite (bullish) signal candle's HIGH for a short — the
+// mirror of the entry rule. If that next candle does not break it, the signal is
+// treated as fake and the trade carries on.
+//
+// The stop stays active throughout. Where one candle reaches both the stop and the
+// exit level they lie on the same side of price, so the NEARER one is reached
+// first (the higher of the two for a long, the lower for a short); a tie goes to
+// the stop. An exit fills at the level, or at the candle's open if it gapped
+// through — but never worse than the stop, the same simplification stops already
+// carry in every other mode. With sessionExit a trade still open at the end of its
+// trading day closes at that day's last close.
+//
+// 'signals' are ALL the signals on the series (they are the exit triggers),
+// whatever period the entries were filtered to. Entries are scanned from idx + 1,
+// as in backtestEntries, so the optimistic bound (idx + 1) also works here; an
+// opposite signal on the candle just before the first scanned one is honoured.
+// ---------------------------------------------------------------------------
+export function backtestSignalExit(candles: any[], entries: SsEntry[], signals: SsSignal[], opts: { sessionExit?: boolean; costPts?: number }): SsTrade[] {
+  const sessionExit = opts.sessionExit !== false;
+  const cost = Math.max(0, Number(opts.costPts) || 0);
+  const sigAt = new Map<number, 'bull' | 'bear'>();
+  for (const g of signals) sigAt.set(g.idx, g.kind);
+  const out: SsTrade[] = [];
+  for (const e of entries) {
+    const short = e.kind === 'bear';
+    const opp = short ? 'bull' : 'bear';
+    const risk = short ? e.stop - e.entry : e.entry - e.stop;
+    if (!(risk > 0)) continue;
+    const day = ssIstDay(e.time);
+    const j0 = e.idx + 1;
+    // The exit level carried by an opposite signal on the previous candle, waiting
+    // for THIS candle to confirm it. A short exits above a bullish candle's high.
+    let pending: number | null = sigAt.get(j0 - 1) === opp ? (short ? candles[j0 - 1].high : candles[j0 - 1].low) : null;
+    let done: SsTrade | null = null;
+    let lastClose = e.entry, lastTime = e.time;
+    for (let j = j0; j < candles.length; j++) {
+      const b = candles[j];
+      const bt = ssTime(b.time);
+      if (sessionExit && ssIstDay(bt) !== day) break;        // session over: exit at its last close
+      const stopHit = short ? b.high >= e.stop : b.low <= e.stop;
+      const sigHit = pending !== null && (short ? b.high >= pending : b.low <= pending);
+      if (stopHit || sigHit) {
+        const stopFirst = stopHit && (!sigHit || (short ? e.stop <= (pending as number) : e.stop >= (pending as number)));
+        if (stopFirst) {
+          done = { time: e.time, kind: e.kind, entry: e.entry, stop: e.stop, target: NaN, exit: e.stop, exitTime: bt, outcome: 'LOSS', r: -1 };
+        } else {
+          const lvl = pending as number;
+          // at the level, or the open if it gapped through; never worse than the stop
+          const px = short ? Math.min(e.stop, Math.max(lvl, b.open)) : Math.max(e.stop, Math.min(lvl, b.open));
+          done = { time: e.time, kind: e.kind, entry: e.entry, stop: e.stop, target: NaN, exit: px, exitTime: bt, outcome: 'SIGNAL',
+                   r: (short ? e.entry - px : px - e.entry) / risk };
+        }
+        break;
+      }
+      pending = null;                                        // an unconfirmed signal does not carry over
+      if (sigAt.get(j) === opp) pending = short ? b.high : b.low;
+      lastClose = b.close; lastTime = bt;
+    }
+    if (!done) {
+      const move = short ? e.entry - lastClose : lastClose - e.entry;
+      done = { time: e.time, kind: e.kind, entry: e.entry, stop: e.stop, target: NaN, exit: lastClose, exitTime: lastTime, outcome: 'TIME', r: move / risk };
+    }
+    if (cost > 0) done.r -= cost / risk;
+    out.push(done);
+  }
+  return out;
+}
+
 export type SsStats = {
-  trades: number; bull: number; bear: number; wins: number; losses: number; timeExits: number;
+  trades: number; bull: number; bear: number; wins: number; losses: number; timeExits: number; signalExits: number;
   winRate: number; avgR: number; totalR: number; profitFactor: number | null; maxLossStreak: number;
 };
 export function ssStats(trades: SsTrade[]): SsStats {
-  let wins = 0, losses = 0, timeExits = 0, gain = 0, loss = 0, streak = 0, maxStreak = 0, totalR = 0, bull = 0, bear = 0;
+  let wins = 0, losses = 0, timeExits = 0, signalExits = 0, gain = 0, loss = 0, streak = 0, maxStreak = 0, totalR = 0, bull = 0, bear = 0;
   for (const t of trades) {
     totalR += t.r;
     if (t.kind === 'bull') bull++; else bear++;
-    if (t.outcome === 'WIN') wins++; else if (t.outcome === 'LOSS') losses++; else timeExits++;
+    if (t.outcome === 'WIN') wins++; else if (t.outcome === 'LOSS') losses++; else if (t.outcome === 'SIGNAL') signalExits++; else timeExits++;
     if (t.r > 0) { gain += t.r; streak = 0; } else { loss += -t.r; if (t.r < 0) { streak++; maxStreak = Math.max(maxStreak, streak); } }
   }
   const n = trades.length;
-  return { trades: n, bull, bear, wins, losses, timeExits,
+  return { trades: n, bull, bear, wins, losses, timeExits, signalExits,
     winRate: n ? (trades.filter(t => t.r > 0).length / n) : 0,
     avgR: n ? totalR / n : 0, totalR, profitFactor: loss > 0 ? gain / loss : (gain > 0 ? null : 0), maxLossStreak: maxStreak };
 }
