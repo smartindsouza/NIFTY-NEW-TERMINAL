@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Play, Info } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine } from "recharts";
-import { detectSwapSweep, backtestSwapSweep, backtestEntries, confluenceSwapSweep, ssStats, ssTime, ssIstDay, type SsTrade, type SsStats } from "../lib/swapSweep";
+import { detectSwapSweep, backtestSwapSweep, backtestEntries, breakEntries, confluenceSwapSweep, ssStats, ssTime, ssIstDay, type SsTrade, type SsStats } from "../lib/swapSweep";
 
 // A REAL backtest of the Swap-Sweep Reversal on NIFTY 50 candles from the app's
 // own history endpoint — the same candles the chart draws — using the same
@@ -11,6 +11,8 @@ import { detectSwapSweep, backtestSwapSweep, backtestEntries, confluenceSwapSwee
 // Only Martin's three-candle rules are tested: no filters, no second pattern.
 // Two modes: the pattern on one timeframe, or on 5-min AND 15-min together — a
 // trade only when both show a signal in the same direction at the same time.
+// On one timeframe the entry can be at the signal candle's close (original) or a
+// pending order at its high / low with the stop at its midpoint.
 
 const TFS = [1, 3, 5, 15, 30, 60];
 const RRS = [1, 1.5, 2, 3];
@@ -19,9 +21,19 @@ const fmtIst = (sec: number) => new Date(sec * 1000).toLocaleString('en-IN', {
 const fmtDay = (sec: number) => new Date(sec * 1000).toLocaleDateString('en-IN', {
   timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' });
 
+// One order lifetime's results: the cautious figures (a fill candle that also reaches
+// the stop counts as a loss), how many fills that applies to, and the optimistic
+// figures (those fills are assumed to survive). The truth lies between the two.
+type BrkWin = { s: SsStats; opt: SsStats; amb: number };
+
 export default function SwapSweepBacktest() {
   const [mode, setMode] = useState<'single' | 'both'>('single');
-  const [stopMode, setStopMode] = useState<'15' | '5'>('15');   // confluence only: whose sweep the stop sits beyond
+  const [stopMode, setStopMode] = useState<'15' | '5'>('15');
+  // Entry style (one timeframe only): at the signal candle's close, or a pending
+  // order at its high (bull) / low (bear) with the stop at its midpoint; and how
+  // many candles that order stays live.
+  const [entryMode, setEntryMode] = useState<'close' | 'break'>('close');
+  const [validFor, setValidFor] = useState<'1' | '3' | 'day'>('3');   // confluence only: whose sweep the stop sits beyond
   const [tf, setTf] = useState(5);
   const [rr, setRr] = useState(2);
   const [sameSession, setSameSession] = useState(true);
@@ -38,6 +50,7 @@ export default function SwapSweepBacktest() {
     trades: SsTrade[]; stats: SsStats; byRr: { rr: number; s: SsStats }[]; periodLabel: string;
     tfLabel: string;
     conf: null | { five: SsStats; fifteen: SsStats; stop: '15' | '5' };   // set only in the 5 + 15 mode
+    brk: null | { original: SsStats; one: BrkWin; three: BrkWin; day: BrkWin; valid: '1' | '3' | 'day' };   // set only for break entry
   }>(null);
 
   const run = async () => {
@@ -81,7 +94,7 @@ export default function SwapSweepBacktest() {
         setRes({ tf: 5, rr, first, last, days, candles: inP.length, trades, stats: ssStats(trades),
                  byRr: RRS.map((x) => ({ rr: x, s: ssStats(run1(C.both, x)) })), periodLabel,
                  tfLabel: '5-min + 15-min together',
-                 conf: { five: ssStats(run1(C.five)), fifteen: ssStats(run1(C.fifteen)), stop: stopMode } });
+                 conf: { five: ssStats(run1(C.five)), fifteen: ssStats(run1(C.fifteen)), stop: stopMode }, brk: null });
         return;
       }
 
@@ -90,13 +103,42 @@ export default function SwapSweepBacktest() {
       const allSignals = detectSwapSweep(candles, { sameSession });
       const inPeriod = periodOf(candles);
       const signals = allSignals.filter(inPeriod);
-      const trades = backtestSwapSweep(candles, signals, { rr, ...opt });
       const inP = candles.filter((c: any) => inPeriod({ time: ssTime(c.time) }));
       const first = ssTime((inP[0] || candles[0]).time), last = ssTime((inP[inP.length - 1] || candles[candles.length - 1]).time);
       const days = new Set(inP.map((c: any) => dayOf(ssTime(c.time)))).size;
+      const tfName = tf < 60 ? `${tf}-min` : '1-hour';
+
+      if (entryMode === 'break') {
+        // Pending order at the signal candle's high / low, stop at its midpoint.
+        // The original close-entry and all three order lifetimes are computed on the
+        // same signals, target and costs, so they compare directly.
+        const listB = (v: number) => breakEntries(candles, signals, { validFor: v });
+        const runB = (v: number, x = rr) => backtestEntries(candles, listB(v), { rr: x, ...opt });
+        const win = (v: number): BrkWin => {
+          const list = listB(v);
+          return {
+            s: ssStats(backtestEntries(candles, list, { rr, ...opt })),
+            // Optimistic bound: where the fill candle also reached the stop and the order
+            // of events is unknown, assume the stop came BEFORE the fill, i.e. scan from
+            // the next candle instead of from the fill candle.
+            opt: ssStats(backtestEntries(candles, list.map((e) => e.amb ? { ...e, idx: e.idx + 1 } : e), { rr, ...opt })),
+            amb: list.filter((e) => e.amb).length,
+          };
+        };
+        const vf = validFor === 'day' ? Infinity : Number(validFor);
+        const trades = runB(vf);
+        setRes({ tf, rr, first, last, days, candles: inP.length, trades, stats: ssStats(trades),
+                 byRr: RRS.map((x) => ({ rr: x, s: ssStats(runB(vf, x)) })), periodLabel,
+                 tfLabel: `${tfName} · break entry`, conf: null,
+                 brk: { original: ssStats(backtestSwapSweep(candles, signals, { rr, ...opt })),
+                        one: win(1), three: win(3), day: win(Infinity), valid: validFor } });
+        return;
+      }
+
+      const trades = backtestSwapSweep(candles, signals, { rr, ...opt });
       const byRr = RRS.map((x) => ({ rr: x, s: ssStats(backtestSwapSweep(candles, signals, { rr: x, ...opt })) }));
       setRes({ tf, rr, first, last, days, candles: inP.length, trades, stats: ssStats(trades), byRr, periodLabel,
-               tfLabel: tf < 60 ? `${tf}-min` : '1-hour', conf: null });
+               tfLabel: tfName, conf: null, brk: null });
     } catch (e: any) {
       setErr(e?.message || String(e));
     } finally { setRunning(false); }
@@ -122,6 +164,25 @@ export default function SwapSweepBacktest() {
             <option value="both">5-min + 15-min together — trade only when both show a signal</option>
           </select>
         </label>
+        {mode === 'single' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label className="space-y-1 text-xs text-muted-foreground">Entry
+              <select value={entryMode} onChange={(e) => { setEntryMode(e.target.value as any); setRes(null); }} className={sel}>
+                <option value="close">At the signal candle's close — stop beyond its extreme</option>
+                <option value="break">On a break — entry at its high (long) / low (short), stop at its midpoint</option>
+              </select>
+            </label>
+            {entryMode === 'break' && (
+              <label className="space-y-1 text-xs text-muted-foreground">Entry order valid for
+                <select value={validFor} onChange={(e) => setValidFor(e.target.value as any)} className={sel}>
+                  <option value="1">The next candle only</option>
+                  <option value="3">The next 3 candles</option>
+                  <option value="day">The rest of that day</option>
+                </select>
+              </label>
+            )}
+          </div>
+        )}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {mode === 'single' ? (
             <label className="space-y-1 text-xs text-muted-foreground">Timeframe
@@ -190,6 +251,62 @@ export default function SwapSweepBacktest() {
               <div className="text-[11px] rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-600 px-2.5 py-1.5">
                 Only {s.trades} trade{s.trades === 1 ? '' : 's'} — too few to tell an edge from luck.{' '}
                 {res.conf ? 'Both timeframes agreeing is rare and the 5-minute history is short, so treat this as a first look only.' : 'Use a shorter timeframe or more days before drawing conclusions.'}
+              </div>
+            )}
+            {res.brk && (
+              <div>
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full text-[11px] font-mono">
+                    <thead><tr className="text-muted-foreground text-left border-b border-border">
+                      <th className="py-1.5 px-2"></th><th className="px-2">Enter at close</th>
+                      {([['1', 'Break · 1 candle'], ['3', 'Break · 3 candles'], ['day', 'Break · day']] as const).map(([k, label]) => (
+                        <th key={k} className={`px-2 ${res.brk!.valid === k ? 'text-foreground' : ''}`}>{label}</th>
+                      ))}
+                    </tr></thead>
+                    <tbody>
+                      {([
+                        ['Trades', (x: SsStats) => `${x.trades}`],
+                        ['Win rate', (x: SsStats) => pct(x.winRate)],
+                        ['Avg per trade', (x: SsStats) => `${x.avgR >= 0 ? '+' : ''}${x.avgR.toFixed(2)}R`],
+                        ['Total', (x: SsStats) => `${x.totalR >= 0 ? '+' : ''}${x.totalR.toFixed(1)}R`],
+                        ['Profit factor', (x: SsStats) => x.profitFactor === null ? '∞' : x.profitFactor.toFixed(2)],
+                        ['Worst losing run', (x: SsStats) => `${x.maxLossStreak}`],
+                      ] as const).map(([k, fmt]) => (
+                        <tr key={k} className="border-t border-border/40">
+                          <td className="py-1 px-2 text-muted-foreground">{k}</td>
+                          <td className="px-2 text-muted-foreground">{fmt(res.brk!.original)}</td>
+                          {(['1', '3', 'day'] as const).map((v) => (
+                            <td key={v} className={`px-2 ${res.brk!.valid === v ? 'text-foreground font-semibold' : 'text-muted-foreground'}`}>
+                              {fmt((v === '1' ? res.brk!.one : v === '3' ? res.brk!.three : res.brk!.day).s)}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                      <tr className="border-t border-border bg-muted/30">
+                        <td className="py-1 px-2 text-muted-foreground">Fills, order unknown</td>
+                        <td className="px-2 text-muted-foreground">—</td>
+                        {(['1', '3', 'day'] as const).map((v) => {
+                          const w = v === '1' ? res.brk!.one : v === '3' ? res.brk!.three : res.brk!.day;
+                          return <td key={v} className={`px-2 ${res.brk!.valid === v ? 'text-foreground font-semibold' : 'text-muted-foreground'}`}>{w.amb} of {w.s.trades}</td>;
+                        })}
+                      </tr>
+                      <tr className="border-t border-border/40 bg-muted/30">
+                        <td className="py-1 px-2 text-muted-foreground">Avg if those survive</td>
+                        <td className="px-2 text-muted-foreground">—</td>
+                        {(['1', '3', 'day'] as const).map((v) => {
+                          const w = v === '1' ? res.brk!.one : v === '3' ? res.brk!.three : res.brk!.day;
+                          return <td key={v} className={`px-2 ${res.brk!.valid === v ? 'text-foreground font-semibold' : 'text-muted-foreground'}`}>{w.opt.avgR >= 0 ? '+' : ''}{w.opt.avgR.toFixed(2)}R</td>;
+                        })}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div className="text-[10px] text-muted-foreground mt-1 leading-relaxed">
+                  Same signals, days, target and costs in every column; the bold column feeds the figures below. Break entry = a pending order at the signal
+                  candle's high (long) or low (short), stop at its midpoint, so the risk is half its range. <b>Read the last two rows together:</b> a fill candle is
+                  often large and also reaches the stop, and a candle's inner order of events is not in the data. The main figures count those fills as
+                  <b> losses</b> (cautious); the last row shows the result if they all survived. The real answer lies between the two.
+                </div>
               </div>
             )}
             {res.conf && (
@@ -297,7 +414,9 @@ export default function SwapSweepBacktest() {
         <div className="flex gap-2 text-[10px] text-muted-foreground leading-relaxed border-t border-border pt-3">
           <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
           <div>
-            {mode === 'both'
+            {mode === 'single' && entryMode === 'break'
+              ? "How it is measured: when the signal candle closes, a stop order is placed at its high (long) or low (short). It fills on the first candle within the chosen window that trades through that level — at the level, or at the candle's open if it gapped through — and no fill means no trade; it never carries overnight. The stop is the candle's midpoint, so the risk is half its range; target = risk × the chosen R. A fill candle that also touches the stop is counted as a loss."
+              : mode === 'both'
               ? "How it is measured: a 15-min signal counts when a same-direction 5-min signal has its own C3 inside that 15-min candle, so both are known when it closes; entry at that close; stop beyond the sweep you chose; target = risk × the chosen R."
               : "How it is measured: entry at C3's close; stop beyond the sweep (C3's high for a short, C3's low for a long); target = risk × the chosen R."}
             Whichever is touched first decides it — if both fall inside one candle it is counted as a <b>loss</b>, since the order inside a candle is unknown.

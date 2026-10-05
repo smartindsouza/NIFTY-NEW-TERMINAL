@@ -73,7 +73,11 @@ export type SsTrade = {
 // price and the stop. For a single timeframe this is C3's close and C3's own
 // extreme (the wrapper below builds exactly that); the confluence test supplies
 // its own. 'time' is the start of the candle whose close triggers the entry.
-export type SsEntry = { idx: number; time: number; kind: 'bull' | 'bear'; entry: number; stop: number };
+// amb (break entries only): the fill candle ALSO reached the stop and did not open
+// beyond the order level, so whether price dipped to the stop before or after the
+// fill is unknown from candle data. The default scan counts it a loss; an
+// optimistic bound is obtained by scanning from the NEXT candle instead.
+export type SsEntry = { idx: number; time: number; kind: 'bull' | 'bear'; entry: number; stop: number; amb?: boolean };
 
 // costPts: brokerage + slippage per round trip, in index points, deducted from
 //   every trade as a fraction of its risk.
@@ -170,6 +174,54 @@ export function confluenceSwapSweep(c5: any[], c15: any[], opts: { sameSession?:
     both.push({ ...base, stop });
   }
   return { five, fifteen, both };
+}
+
+// ---------------------------------------------------------------------------
+// BREAK ENTRY — an alternative way to enter the same signals. Instead of entering
+// at the signal candle's close, a pending STOP order is placed when it closes:
+//   bullish: buy at the signal candle's HIGH      bearish: sell at its LOW
+//   stop   : the signal candle's MIDPOINT, (high + low) / 2 — half its range, so
+//            the risk is half the candle's range (measured from the actual fill).
+// The order fills on the first candle after the signal that trades through the
+// level, within 'validFor' candles (Infinity = the rest of that trading day; an
+// unfilled order never carries overnight). It fills AT the level, or at that
+// candle's open when it gapped through — the worse price, as in real trading. No
+// fill, no trade.
+//
+// The fill candle is itself checked for the stop and the target. The order inside
+// a candle is unknown, so a fill candle that touches the stop too is counted as a
+// LOSS — the same conservative rule the rest of the backtest uses. (If price first
+// dipped to the midpoint and only then rose to the order level, that really would
+// have filled and survived; counting it a loss is the cautious side.)
+//
+// Returns entries for backtestEntries: idx is the candle BEFORE the fill, so the
+// engine's forward scan starts on the fill candle itself; 'time' stays the signal
+// candle's start, as it does for every other mode.
+// ---------------------------------------------------------------------------
+export function breakEntries(candles: any[], signals: SsSignal[], opts: { validFor: number }): SsEntry[] {
+  const out: SsEntry[] = [];
+  for (const s of signals) {
+    const c3 = candles[s.idx];
+    if (!c3 || !(c3.high > c3.low)) continue;               // a zero-range candle has no midpoint to stop at
+    const bull = s.kind === 'bull';
+    const trig = bull ? c3.high : c3.low;
+    const stop = (c3.high + c3.low) / 2;
+    const day = ssIstDay(s.time);
+    for (let j = s.idx + 1; j < candles.length && j - s.idx <= opts.validFor; j++) {
+      const b = candles[j];
+      if (ssIstDay(ssTime(b.time)) !== day) break;           // the order does not survive the session
+      if (bull ? b.high >= trig : b.low <= trig) {
+        // Opened beyond the level: filled at the open, so any move to the stop came
+        // AFTER the fill — a certain loss, not an unknown order.
+        const gapped = bull ? b.open >= trig : b.open <= trig;
+        const reachedStop = bull ? b.low <= stop : b.high >= stop;
+        out.push({ idx: j - 1, time: s.time, kind: s.kind, entry: bull ? Math.max(trig, b.open) : Math.min(trig, b.open), stop,
+                   ...(reachedStop && !gapped ? { amb: true } : {}) });
+        break;
+      }
+    }
+  }
+  return out;
 }
 
 export type SsStats = {
