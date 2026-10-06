@@ -4,6 +4,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import SwapSweepBacktest from "../components/SwapSweepBacktest";
+import SwapSweepResearch from "../components/SwapSweepResearch";
 
 export default function Backtesting() {
   const [strategy, setStrategy] = useState("Short Straddle");
@@ -90,6 +91,9 @@ export default function Backtesting() {
 
       {/* The one backtest on this screen that runs on real market data. */}
       <SwapSweepBacktest />
+
+      {/* Filter research for the 5m + 15m signals, ~2 years, server-side. */}
+      <SwapSweepResearch />
 
       {/* The strategies below have NEVER used market data: their win rates are
           fixed numbers in this file and the daily P&L is Math.random(). They are
