@@ -91,6 +91,13 @@ function entriesFor(key: string, c5: C[], sigs: Sig[], keys?: string[]): SsEntry
       const risk = Math.abs(s.stop - s.entry);
       const kind = s.kind === 'bear' ? 'bull' : 'bear';
       out.push({ ...base, kind, stop: kind === 'bull' ? s.entry - risk : s.entry + risk });
+    } else if (key === 'dayExtremeCont') {
+      // FROZEN continuation rule (see SS_CONT_RULE): the sweep set the day's high/low,
+      // so trade WITH the sweep instead of against it. Same risk distance, mirrored.
+      if (!s.f.dayExtreme) continue;
+      const risk = Math.abs(s.stop - s.entry);
+      const kind = s.kind === 'bear' ? 'bull' : 'bear';
+      out.push({ ...base, kind, stop: kind === 'bull' ? s.entry - risk : s.entry + risk });
     } else if ((s.f as any)[key]) out.push(base);
   }
   return out;
@@ -153,4 +160,41 @@ export function runSsResearch(c5in: any[], c15in: any[], opts: { costPts?: numbe
     holdout: { baseline: baseHold, chosen: chosenHold },
     verdict: !chosen ? 'NONE_BETTER' : pass ? 'PASS' : 'NOT_PROVEN',
   };
+}
+
+// ---------------------------------------------------------------------------
+// FORWARD TEST — "the sweep made the day's high/low, so it CONTINUES". FROZEN on
+// 6 Oct 2026. Spotted in the research's choosing period (the worst filter as a
+// reversal: 30% wins, -0.29R over 60 trades), so it may only be judged on days it
+// was never seen on: once on the research hold-out (26 Feb - 6 Oct 2026), and
+// live from 7 Oct 2026. Nothing below may be changed while the test runs.
+// ---------------------------------------------------------------------------
+export const SS_CONT_RULE = {
+  frozenOn: '2026-10-06',
+  text: [
+    'A 5-min + 15-min Swap-Sweep fires (same-day candles), exactly as on the chart.',
+    'Its 15-min sweep candle made a new high of the day (a "bearish" SS) or a new low of the day (a "bullish" SS).',
+    'Trade the OTHER way: BUY after a bearish SS at the day high, SELL after a bullish SS at the day low.',
+    'Entry at the close of the 15-min candle that completes the signal.',
+    'Stop the same distance away as the 5-min sweep, on the other side. Target 2R. Exit by the day\'s close. 2 points cost per trade.',
+  ],
+  rr: 2, costPts: 2, liveFrom: 20261007, holdoutFrom: 20260226, holdoutTo: 20261006, minSignals: 30,
+} as const;
+
+export function ssContinuationTrades(c5in: any[], c15in: any[]): SsTrade[] {
+  const { c5, sigs } = ssResearchSignals(c5in, c15in);
+  return backtestEntries(c5, entriesFor('dayExtremeCont', c5, sigs), { rr: SS_CONT_RULE.rr, sessionExit: true, costPts: SS_CONT_RULE.costPts });
+}
+
+export function ssContScore(rs: number[]) {
+  const n = rs.length;
+  const avg = n ? rs.reduce((a, b) => a + b, 0) / n : 0;
+  const sd = n > 1 ? Math.sqrt(rs.reduce((a, r) => a + (r - avg) ** 2, 0) / (n - 1)) : 0;
+  const luck = n > 1 ? 1.96 * sd / Math.sqrt(n) : 0;
+  const r2 = (x: number) => Math.round(x * 100) / 100;
+  // Verdict bar, fixed in advance: after 30 signals, PASS only if the average is
+  // above zero by more than its luck range.
+  const verdict = n < SS_CONT_RULE.minSignals ? 'TOO_EARLY' : avg - luck > 0 ? 'PASS' : avg > 0 ? 'POSITIVE_BUT_LUCK' : 'FAIL';
+  return { trades: n, winRate: n ? Math.round(rs.filter((r) => r > 0).length / n * 1000) / 10 : 0,
+    avgR: r2(avg), totalR: Math.round(rs.reduce((a, b) => a + b, 0) * 10) / 10, luck: r2(luck), verdict };
 }

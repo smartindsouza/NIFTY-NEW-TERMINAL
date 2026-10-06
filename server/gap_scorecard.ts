@@ -18,6 +18,7 @@ import { registerPaSearch } from './pa_search';
 import { registerInsideBar } from './inside_bar';
 import { registerConfluence } from './confluence';
 import { registerSsResearch } from './ss_research';
+import { registerSsContinuation } from './ss_continuation';
 import { registerRecorder } from './recorder';
 
 type AnyDb = any; // better-sqlite3 Database (typed loosely to avoid a hard dep here)
@@ -506,6 +507,7 @@ export function registerGapScorecard(app: any, db: AnyDb) {
   registerInsideBar(app, db, guard);
   registerConfluence(app, db, guard);
   registerSsResearch(app, db, guard);
+  registerSsContinuation(app, db, guard);
   registerRecorder(app, db, guard);
 
   console.log('[gap] scorecard registered: snapshot 15:15 IST, outcome 09:16 IST, reco price 09:21 IST');
