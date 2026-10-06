@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { useUserSettings, useResolvedTheme } from "../hooks/useUserSettings";
 import { zoomDiag } from "../lib/zoomDiag";
-import { detectSwapSweep, ssTime, ssIstDay, type SsSignal } from "../lib/swapSweep";
+import { confluenceSignals, ssIstDay, type SsConfluence } from "../lib/swapSweep";
 import { getDivergences } from "../lib/divergence";
 import { evaluateBreakout } from "../lib/breakoutQuality";
 import { calculateBollingerBands } from "../indicators/bollingerBands";
@@ -3827,7 +3827,9 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   useEffect(() => { try { localStorage.setItem('showSwapSweep', String(showSwapSweep)); } catch (e) {} }, [showSwapSweep]);
   const showSwapSweepRef = useRef(showSwapSweep);
   showSwapSweepRef.current = showSwapSweep;
-  const ssCacheRef = useRef<{ key: string; signals: (SsSignal & { hi: number; lo: number })[] }>({ key: '', signals: [] });
+  // Swap-Sweep marks that passed the 5-min + 15-min agreement test. Written by the
+  // memo further down (it needs the index token), read by the canvas loop.
+  const ssConfRef = useRef<SsConfluence[]>([]);
 
   // Session Breaks: off by default; colour, opacity, thickness and line style are
   // remembered. Read through a ref by the canvas loop, like the other overlays.
@@ -7615,6 +7617,50 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // On the traded OPTION's chart only RSI stays on; index overlays (BB, S&R,
   // PDH/PDL, levels, OI bars, opening range, D/S zones, FVG) are hidden there.
   const isOptionView = !!selectedInstrument && (indexToken === null || instrumentToken !== indexToken);
+
+  // SWAP-SWEEP, 5-MIN + 15-MIN AGREEMENT ONLY. A mark (and an alert) exists only when
+  // the 15-minute chart AND the 5-minute chart both show the pattern, same direction,
+  // the 5-minute one inside that 15-minute C3. Both timeframes are fetched here,
+  // whatever timeframe the chart is showing, so the answer never depends on the view.
+  // Closed candles only. Index charts only; the option pane and GIFT are excluded.
+  const ssConfOn = showSwapSweep && !!indexToken && !isReferenceChart && paneRole !== 'option';
+  const ssFetch = (tf: number) => async () => {
+    const r = await fetch(`/api/ta?timeframe=${tf}&token=${indexToken}&symbol=${encodeURIComponent(indexLabel)}`);
+    if (!r.ok) throw new Error('swap-sweep candles');
+    return r.json();
+  };
+  const { data: ss5Data } = useQuery({ queryKey: ['ss-conf-ta', 5, indexToken], queryFn: ssFetch(5), enabled: ssConfOn, refetchInterval: 60000, staleTime: 20000, refetchOnWindowFocus: true });
+  const { data: ss15Data } = useQuery({ queryKey: ['ss-conf-ta', 15, indexToken], queryFn: ssFetch(15), enabled: ssConfOn, refetchInterval: 60000, staleTime: 20000, refetchOnWindowFocus: true });
+  const ssConf = useMemo<SsConfluence[]>(() => {
+    const c5 = ss5Data?.candles, c15 = ss15Data?.candles;
+    if (!ssConfOn || !Array.isArray(c5) || !Array.isArray(c15)) return [];
+    try { return confluenceSignals(c5, c15, { nowSec: Math.floor(Date.now() / 1000) }); } catch (e) { return []; }
+  }, [ss5Data, ss15Data, ssConfOn]);
+  ssConfRef.current = ssConf;
+
+  // Alert ONCE per signal (index + direction + the 15-min candle), remembered across
+  // reloads. A signal is known when its 15-min C3 closes; one older than 10 minutes
+  // is history and is recorded silently, so switching the indicator on, or opening the
+  // app in the evening, does not replay the day.
+  useEffect(() => {
+    if (!ssConfOn || !ssConf.length) return;
+    let seen: string[] = [];
+    try { const v = JSON.parse(localStorage.getItem('ssConfluenceAlerted') || '[]'); if (Array.isArray(v)) seen = v; } catch (e) {}
+    const nowS = Math.floor(Date.now() / 1000);
+    let changed = false;
+    for (const sg of ssConf) {
+      const id = `${indexLabel}|${sg.kind}|${sg.time}`;
+      if (seen.includes(id)) continue;
+      seen.push(id); changed = true;
+      if (nowS - sg.knownAt > 600) continue;
+      const hhmm = new Date(sg.knownAt * 1000).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
+      const title = `Swap-Sweep ${sg.kind === 'bear' ? 'bearish' : 'bullish'} on 5m + 15m: ${indexLabel} @ ${hhmm}`;
+      const body = `Both the 15-min and the 5-min chart show the pattern. 15-min candle high ${sg.hi}, low ${sg.lo}, close ${sg.close}.`;
+      try { toast.success(title, { description: body }); } catch (e) {}
+      try { notificationService.add('divergence', title, body, { ephemeral: true, source: 'ss-confluence', key: id }); } catch (e) {}
+    }
+    if (changed) { try { localStorage.setItem('ssConfluenceAlerted', JSON.stringify(seen.slice(-200))); } catch (e) {} }
+  }, [ssConf, ssConfOn, indexLabel]);
   // Read inside the chart effect's click handler, which is created once per chart
   // rebuild — a ref keeps it correct even if the view changes without a rebuild.
   // PDH/PDL and S&R are intraday levels: the previous day's extremes and the
@@ -10629,27 +10675,22 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                 } catch (e) { /* an indicator must never break the frame */ }
               }
 
-              // SWAP-SWEEP REVERSAL. Signals come from the shared definition in
-              // lib/swapSweep — the same one the backtest uses — over the chart's
-              // own closed candles, so any timeframe the chart shows works.
-              // Recomputed only when a candle closes; drawn every frame as a small
-              // triangle beyond C3's sweep wick with an "SS" tag.
+              // SWAP-SWEEP REVERSAL, drawn only where the 15-min AND 5-min charts agree
+              // (see ssConf above). Each mark belongs to a 15-min C3. It is drawn on the
+              // chart's bar that CLOSES that candle: the 15-min bar itself, or the last
+              // 1/3/5-min bar inside it. Above 15 minutes there is no such bar, so
+              // nothing is drawn. A small triangle beyond the 15-min candle's sweep
+              // extreme, tagged "SS".
               if (showSwapSweepRef.current && !isOptionView && mainSeriesRef.current) {
                 try {
-                  const baseS = chartDataRef.current?.candles || [];
-                  const lastS = baseS.length ? baseS[baseS.length - 1].time : 0;
-                  const sinceS = liveClosedCandlesRef.current.filter((k: any) => k.time > lastS);
-                  const key = `${instrumentToken}|${timeframe}|${baseS.length}|${sinceS.length}|${sinceS.length ? sinceS[sinceS.length - 1].time : 0}`;
-                  if (ssCacheRef.current.key !== key) {
-                    const all = sinceS.length ? [...baseS, ...sinceS] : baseS;
-                    ssCacheRef.current = { key, signals: detectSwapSweep(all).map((sg) => ({ ...sg, hi: all[sg.idx].high, lo: all[sg.idx].low })) };
-                  }
+                  const tfM = parseInt(String(timeframe), 10) || 0;
+                  const marks = (tfM >= 1 && tfM <= 15 && 15 % tfM === 0) ? ssConfRef.current : [];
                   const upC = settingsRef.current.candleUpColor, dnC = settingsRef.current.candleDownColor;
                   ctx.save();
                   ctx.font = "bold 9px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif";
                   ctx.textAlign = 'center';
-                  for (const sg of ssCacheRef.current.signals) {
-                    const x = mainChartRef.current?.timeScale()?.timeToCoordinate(sg.time as any);
+                  for (const sg of marks) {
+                    const x = mainChartRef.current?.timeScale()?.timeToCoordinate((sg.knownAt - tfM * 60) as any);
                     if (x === null || x === undefined || x < 0 || x > textAlignX) continue;
                     const bear = sg.kind === 'bear';
                     const yEdge = mainSeriesRef.current.priceToCoordinate(bear ? sg.hi : sg.lo);
@@ -12305,7 +12346,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                         >
                           <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showSwapSweep) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showSwapSweep) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                         </button>
-                        <span className="truncate select-none" title="3-candle reversal: C2 closes beyond C1's high/low (swap), C3 sweeps past C2's extreme and closes back inside C1's high/low. Marked SS on C3.">Swap-Sweep Reversal</span>
+                        <span className="truncate select-none" title="3-candle reversal (C2 closes beyond C1's high/low, C3 sweeps past C2's extreme and closes back inside C1). Shown ONLY when the 15-min and 5-min charts both show it in the same direction, with an alert. Visible on 1, 3, 5 and 15-min charts.">Swap-Sweep Reversal (5m + 15m)</span>
                       </div>
                     <span className="p-1 w-[22px] shrink-0" aria-hidden="true" />
                     <button

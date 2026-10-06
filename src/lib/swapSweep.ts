@@ -177,6 +177,33 @@ export function confluenceSwapSweep(c5: any[], c15: any[], opts: { sameSession?:
 }
 
 // ---------------------------------------------------------------------------
+// 5-MIN + 15-MIN AGREEMENT, for the chart. A signal exists only when a 15-minute
+// swap-sweep AND a same-direction 5-minute swap-sweep (its C3 being one of the three
+// 5-minute candles that make up the 15-minute C3) both fire. It is known the moment
+// the 15-minute C3 closes, so 'time' is that candle's START and 'knownAt' its close.
+// Candles still forming are dropped first (pass nowSec): a half-built candle must
+// never produce, or cancel, a signal. This reuses confluenceSwapSweep's matching, so
+// the chart and the backtest's "Both agree" column are the same definition.
+// ---------------------------------------------------------------------------
+export type SsConfluence = { kind: 'bull' | 'bear'; time: number; knownAt: number; hi: number; lo: number; close: number };
+export function confluenceSignals(c5: any[], c15: any[], opts: { sameSession?: boolean; nowSec?: number } = {}): SsConfluence[] {
+  const now = opts.nowSec;
+  const keep = (c: any[], len: number) => (now === undefined ? c : (c || []).filter((k: any) => ssTime(k.time) + len <= now));
+  const a5 = keep(c5, 300), a15 = keep(c15, 900);
+  if (!a5.length || !a15.length) return [];
+  const at15 = new Map<number, any>();
+  for (const k of a15) at15.set(ssTime(k.time), k);
+  const out: SsConfluence[] = [];
+  for (const e of confluenceSwapSweep(a5, a15, { sameSession: opts.sameSession }).both) {
+    const start = e.time - 600;                               // entry time is the last 5-min candle of the 15-min C3
+    const k = at15.get(start);
+    if (!k) continue;
+    out.push({ kind: e.kind, time: start, knownAt: start + 900, hi: k.high, lo: k.low, close: k.close });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // BREAK ENTRY — an alternative way to enter the same signals. Instead of entering
 // at the signal candle's close, a pending STOP order is placed when it closes:
 //   bullish: buy at the signal candle's HIGH      bearish: sell at its LOW
