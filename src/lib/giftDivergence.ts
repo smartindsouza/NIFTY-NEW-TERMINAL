@@ -1,9 +1,11 @@
 // GIFT NIFTY ↔ NIFTY 50 divergence (replaces the RSI divergence on the chart).
 //
-// Bearish: GIFT NIFTY makes a HIGHER HIGH — a closed candle trades above GIFT's
+// GIFT NIFTY LEADS, so the signal points the way GIFT went (Martin, 7 Oct 2026):
+// Bullish: GIFT NIFTY makes a HIGHER HIGH — a closed candle trades above GIFT's
 //          last swing high — while NIFTY 50 does NOT: no NIFTY candle since that
 //          swing has traded above NIFTY's high at the same swing candle.
-// Bullish: the mirror — GIFT makes a LOWER LOW, NIFTY does not.
+// Bearish: GIFT makes a LOWER LOW while NIFTY does not (NIFTY holds a higher low).
+// 'extreme' says which side the divergence is on (highs or lows).
 //
 // Details:
 //   * Only candles both charts have (same start time) are compared, i.e. the NIFTY
@@ -19,7 +21,7 @@
 import { ssTime, ssIstDay } from './swapSweep';
 
 export type GiftDiv = {
-  kind: 'bear' | 'bull'; time: number; swingTime: number;
+  kind: 'bear' | 'bull'; extreme: 'high' | 'low'; time: number; swingTime: number;
   niftySwing: number; niftyNow: number; giftSwing: number; giftNow: number;
 };
 type C = { time: number; high: number; low: number };
@@ -34,8 +36,8 @@ export function detectGiftDivergence(niftyIn: any[], giftIn: any[], opts: { tfSe
   for (const c of nSorted) { const gc = gMap.get(c.time); if (gc) { n.push(c); g.push(gc); } }
 
   const out: GiftDiv[] = [];
-  for (const side of ['bear', 'bull'] as const) {
-    const hi = side === 'bear';
+  for (const side of ['high', 'low'] as const) {
+    const hi = side === 'high';
     const v = (c: C) => (hi ? c.high : c.low);
     const beyond = (a: number, b: number) => (hi ? a > b : a < b);       // a is past b in this side's direction
     for (let p = L; p < g.length - L; p++) {
@@ -54,7 +56,7 @@ export function detectGiftDivergence(niftyIn: any[], giftIn: any[], opts: { tfSe
       let niftyFailed = true;
       for (let j = p + 1; j <= i; j++) if (beyond(v(n[j]), v(n[p]))) { niftyFailed = false; break; }
       if (!niftyFailed) continue;
-      out.push({ kind: side, time: n[i].time, swingTime: n[p].time, niftySwing: v(n[p]), niftyNow: v(n[i]), giftSwing: v(g[p]), giftNow: v(g[i]) });
+      out.push({ kind: hi ? 'bull' : 'bear', extreme: side, time: n[i].time, swingTime: n[p].time, niftySwing: v(n[p]), niftyNow: v(n[i]), giftSwing: v(g[p]), giftNow: v(g[i]) });
     }
   }
   return out.sort((a, b) => a.time - b.time);

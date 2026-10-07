@@ -7719,7 +7719,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         const hhmm = new Date((d.time + tf * 60) * 1000).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
         const bear = d.kind === 'bear';
         const title = `${bear ? 'Bearish' : 'Bullish'} GIFT divergence · ${tf}m @ ${hhmm}`;
-        const body = bear
+        const body = d.extreme === 'high'
           ? `GIFT NIFTY made a higher high (${d.giftNow} > ${d.giftSwing}); NIFTY 50 did not (${d.niftyNow} vs ${d.niftySwing}).`
           : `GIFT NIFTY made a lower low (${d.giftNow} < ${d.giftSwing}); NIFTY 50 did not (${d.niftyNow} vs ${d.niftySwing}).`;
         try { toast(title, { description: body, duration: 10000, closeButton: true }); } catch (e) {}
@@ -10796,7 +10796,10 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     const ts = mainChartRef.current?.timeScale();
                     const x = ts?.timeToCoordinate(d.time as any);
                     if (x === null || x === undefined || x < 0 || x > textAlignX) continue;
-                    const bear = d.kind === 'bear';
+                    // Colour and arrow follow the direction (red/down = bearish);
+                    // position follows the side it formed on (above the highs or
+                    // below the lows, where the dashed line is).
+                    const bear = d.kind === 'bear', onHigh = d.extreme === 'high';
                     const y = mainSeriesRef.current.priceToCoordinate(d.niftyNow);
                     if (y === null) continue;
                     const col = bear ? dnC : upC;
@@ -10807,11 +10810,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x, y); ctx.stroke();
                       ctx.setLineDash([]);
                     }
-                    const tip = bear ? y - 6 : y + 6, base = bear ? tip - 7 : tip + 7;
+                    // triangle sits just beyond the extreme: above a high, below a low
+                    const near = onHigh ? y - 6 : y + 6, far = onHigh ? y - 13 : y + 13;
+                    const tip = bear ? Math.max(near, far) : Math.min(near, far);   // down-arrow tip at the bottom, up-arrow tip at the top
+                    const base = bear ? Math.min(near, far) : Math.max(near, far);
                     ctx.fillStyle = col;
                     ctx.beginPath(); ctx.moveTo(x, tip); ctx.lineTo(x - 5, base); ctx.lineTo(x + 5, base); ctx.closePath(); ctx.fill();
-                    ctx.textBaseline = bear ? 'bottom' : 'top';
-                    ctx.fillText('GIFT Div', x, bear ? base - 2 : base + 2);
+                    ctx.textBaseline = onHigh ? 'bottom' : 'top';
+                    ctx.fillText('GIFT Div', x, onHigh ? far - 2 : far + 2);
                   }
                   ctx.restore();
                 } catch (e) { /* an indicator must never break the frame */ }
@@ -12475,7 +12481,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                         >
                           <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showGiftDiv) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showGiftDiv) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                         </button>
-                        <span className="truncate select-none" title="GIFT NIFTY makes a higher high (or lower low) that NIFTY 50 does not. NIFTY chart, 5 and 15-min, with alerts. Replaces the RSI divergence.">GIFT Divergence</span>
+                        <span className="truncate select-none" title="GIFT NIFTY leads: GIFT higher high that NIFTY 50 does not make = bullish (green); GIFT lower low that NIFTY does not make = bearish (red). NIFTY chart, 5 and 15-min, with alerts. Replaces the RSI divergence.">GIFT Divergence</span>
                       </div>
                     <span className="p-1 w-[22px] shrink-0" aria-hidden="true" />
                     <button
