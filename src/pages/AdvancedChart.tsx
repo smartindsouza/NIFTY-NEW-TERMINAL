@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { useUserSettings, useResolvedTheme } from "../hooks/useUserSettings";
 import { zoomDiag } from "../lib/zoomDiag";
-import { confluenceSignals, ssIstDay, type SsConfluence } from "../lib/swapSweep";
+import { confluenceSignals, detectSwapSweep, ssIstDay, type SsConfluence, type SsSignal } from "../lib/swapSweep";
 import { detectGiftDivergence, type GiftDiv } from "../lib/giftDivergence";
 import { getDivergences } from "../lib/divergence";
 import { evaluateBreakout } from "../lib/breakoutQuality";
@@ -3831,6 +3831,16 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // Swap-Sweep marks that passed the 5-min + 15-min agreement test. Written by the
   // memo further down (it needs the index token), read by the canvas loop.
   const ssConfRef = useRef<SsConfluence[]>([]);
+  // SS mode (gear on the indicator row): 'combined' = only where 5m AND 15m agree
+  // (with alerts); 'single' = the pattern on the timeframe shown, up to 1 hour.
+  const [ssMode, setSsMode] = useState<'combined' | 'single'>(() => {
+    try { return localStorage.getItem('swapSweepMode') === 'single' ? 'single' : 'combined'; } catch (e) { return 'combined'; }
+  });
+  useEffect(() => { try { localStorage.setItem('swapSweepMode', ssMode); } catch (e) {} }, [ssMode]);
+  const ssModeRef = useRef(ssMode);
+  ssModeRef.current = ssMode;
+  const [ssSettingsOpen, setSsSettingsOpen] = useState(false);
+  const ssCacheRef = useRef<{ key: string; signals: (SsSignal & { hi: number; lo: number })[] }>({ key: '', signals: [] });
   // GIFT divergence (replaces the RSI divergence): GIFT NIFTY makes a higher high
   // (lower low) that NIFTY 50 does not. NIFTY chart only, 5 and 15 minutes. On by
   // default — it takes the old divergence signal's place — and can be switched off.
@@ -7634,7 +7644,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // the 5-minute one inside that 15-minute C3. Both timeframes are fetched here,
   // whatever timeframe the chart is showing, so the answer never depends on the view.
   // Closed candles only. Index charts only; the option pane and GIFT are excluded.
-  const ssConfOn = showSwapSweep && !!indexToken && !isReferenceChart && paneRole !== 'option';
+  const ssConfOn = showSwapSweep && ssMode === 'combined' && !!indexToken && !isReferenceChart && paneRole !== 'option';
   const gdOn = showGiftDiv && underlying === 'NIFTY' && !!indexToken && paneRole !== 'option';
   const ssFetch = (tf: number) => async () => {
     const r = await fetch(`/api/ta?timeframe=${tf}&token=${indexToken}&symbol=${encodeURIComponent(indexLabel)}`);
@@ -10755,13 +10765,31 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               if (showSwapSweepRef.current && !isOptionView && mainSeriesRef.current) {
                 try {
                   const tfM = parseInt(String(timeframe), 10) || 0;
-                  const marks = (tfM >= 1 && tfM <= 15 && 15 % tfM === 0) ? ssConfRef.current : [];
+                  let pts: { kind: 'bull' | 'bear'; time: number; hi: number; lo: number }[] = [];
+                  if (ssModeRef.current === 'single') {
+                    // This timeframe only, up to 1 hour: the chart's own closed candles,
+                    // recomputed only when a candle closes; mark on C3.
+                    if (tfM >= 1 && tfM <= 60) {
+                      const baseS = chartDataRef.current?.candles || [];
+                      const lastS = baseS.length ? baseS[baseS.length - 1].time : 0;
+                      const sinceS = liveClosedCandlesRef.current.filter((k: any) => k.time > lastS);
+                      const key = `${instrumentToken}|${timeframe}|${baseS.length}|${sinceS.length}|${sinceS.length ? sinceS[sinceS.length - 1].time : 0}`;
+                      if (ssCacheRef.current.key !== key) {
+                        const all = sinceS.length ? [...baseS, ...sinceS] : baseS;
+                        ssCacheRef.current = { key, signals: detectSwapSweep(all).map((sg) => ({ ...sg, hi: all[sg.idx].high, lo: all[sg.idx].low })) };
+                      }
+                      pts = ssCacheRef.current.signals;
+                    }
+                  } else if (tfM >= 1 && tfM <= 15 && 15 % tfM === 0) {
+                    pts = ssConfRef.current.map((c) => ({ kind: c.kind, time: c.knownAt - tfM * 60, hi: c.hi, lo: c.lo }));
+                  }
+                  const marks = pts;
                   const upC = settingsRef.current.candleUpColor, dnC = settingsRef.current.candleDownColor;
                   ctx.save();
                   ctx.font = "bold 9px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif";
                   ctx.textAlign = 'center';
                   for (const sg of marks) {
-                    const x = mainChartRef.current?.timeScale()?.timeToCoordinate((sg.knownAt - tfM * 60) as any);
+                    const x = mainChartRef.current?.timeScale()?.timeToCoordinate(sg.time as any);
                     if (x === null || x === undefined || x < 0 || x > textAlignX) continue;
                     const bear = sg.kind === 'bear';
                     const yEdge = mainSeriesRef.current.priceToCoordinate(bear ? sg.hi : sg.lo);
@@ -12460,9 +12488,19 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                         >
                           <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showSwapSweep) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showSwapSweep) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                         </button>
-                        <span className="truncate select-none" title="3-candle reversal (C2 closes beyond C1's high/low, C3 sweeps past C2's extreme and closes back inside C1). Shown ONLY when the 15-min and 5-min charts both show it in the same direction, with an alert. Visible on 1, 3, 5 and 15-min charts.">Swap-Sweep Reversal (5m + 15m)</span>
+                        <span className="truncate select-none" title="3-candle reversal (C2 closes beyond C1's high/low, C3 sweeps past C2's extreme and closes back inside C1). Gear: either the timeframe shown (up to 1 hour), or only where the 15-min and 5-min charts agree (with alerts; shown on 1, 3, 5 and 15-min charts).">{ssMode === 'combined' ? 'Swap-Sweep Reversal (5m + 15m)' : 'Swap-Sweep Reversal'}</span>
                       </div>
-                    <span className="p-1 w-[22px] shrink-0" aria-hidden="true" />
+                    {showSwapSweep ? (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setSsSettingsOpen((v) => !v); }}
+                        className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+                        title="Swap-Sweep Settings"
+                      >
+                        <Settings size={14} />
+                      </button>
+                    ) : (
+                      <span className="p-1 w-[22px] shrink-0" aria-hidden="true" />
+                    )}
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleFav('SwapSweepReversal'); }}
                       title={isFav('SwapSweepReversal') ? 'Remove from favourites' : 'Mark as favourite'}
@@ -12472,6 +12510,18 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       <Star size={14} fill={isFav('SwapSweepReversal') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
+                  {showSwapSweep && ssSettingsOpen && (
+                    <div className={`pl-9 pr-3 pb-2 space-y-1 text-xs ${rowOrder('SwapSweepReversal', showSwapSweep)}`} onClick={(e) => e.stopPropagation()}>
+                      {([['single', 'This timeframe only (up to 1 hour)'], ['combined', '5 min + 15 min together (with alerts)']] as const).map(([v, label]) => (
+                        <button key={v} onClick={() => setSsMode(v)} className="flex items-center gap-2 w-full text-left py-1 text-foreground/80 hover:text-foreground">
+                          <span className={`w-3 h-3 rounded-full border flex items-center justify-center ${ssMode === v ? 'border-emerald-500' : 'border-muted-foreground/40'}`}>
+                            {ssMode === v && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                          </span>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('GiftDivergence', showGiftDiv)}`}>
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
                         <button
