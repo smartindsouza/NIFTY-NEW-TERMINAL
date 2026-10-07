@@ -6,6 +6,7 @@ import { notificationService } from "../lib/notificationService";
 import { useUserSettings, useResolvedTheme } from "../hooks/useUserSettings";
 import { zoomDiag } from "../lib/zoomDiag";
 import { confluenceSignals, ssIstDay, type SsConfluence } from "../lib/swapSweep";
+import { detectGiftDivergence, type GiftDiv } from "../lib/giftDivergence";
 import { getDivergences } from "../lib/divergence";
 import { evaluateBreakout } from "../lib/breakoutQuality";
 import { calculateBollingerBands } from "../indicators/bollingerBands";
@@ -3830,6 +3831,16 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // Swap-Sweep marks that passed the 5-min + 15-min agreement test. Written by the
   // memo further down (it needs the index token), read by the canvas loop.
   const ssConfRef = useRef<SsConfluence[]>([]);
+  // GIFT divergence (replaces the RSI divergence): GIFT NIFTY makes a higher high
+  // (lower low) that NIFTY 50 does not. NIFTY chart only, 5 and 15 minutes. On by
+  // default — it takes the old divergence signal's place — and can be switched off.
+  const [showGiftDiv, setShowGiftDiv] = useState<boolean>(() => {
+    try { return localStorage.getItem('showGiftDivergence') !== 'false'; } catch (e) { return true; }
+  });
+  useEffect(() => { try { localStorage.setItem('showGiftDivergence', String(showGiftDiv)); } catch (e) {} }, [showGiftDiv]);
+  const showGiftDivRef = useRef(showGiftDiv);
+  showGiftDivRef.current = showGiftDiv;
+  const giftDivRef = useRef<{ 5: GiftDiv[]; 15: GiftDiv[] }>({ 5: [], 15: [] });
 
   // Session Breaks: off by default; colour, opacity, thickness and line style are
   // remembered. Read through a ref by the canvas loop, like the other overlays.
@@ -7624,13 +7635,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // whatever timeframe the chart is showing, so the answer never depends on the view.
   // Closed candles only. Index charts only; the option pane and GIFT are excluded.
   const ssConfOn = showSwapSweep && !!indexToken && !isReferenceChart && paneRole !== 'option';
+  const gdOn = showGiftDiv && underlying === 'NIFTY' && !!indexToken && paneRole !== 'option';
   const ssFetch = (tf: number) => async () => {
     const r = await fetch(`/api/ta?timeframe=${tf}&token=${indexToken}&symbol=${encodeURIComponent(indexLabel)}`);
     if (!r.ok) throw new Error('swap-sweep candles');
     return r.json();
   };
-  const { data: ss5Data } = useQuery({ queryKey: ['ss-conf-ta', 5, indexToken], queryFn: ssFetch(5), enabled: ssConfOn, refetchInterval: 60000, staleTime: 20000, refetchOnWindowFocus: true });
-  const { data: ss15Data } = useQuery({ queryKey: ['ss-conf-ta', 15, indexToken], queryFn: ssFetch(15), enabled: ssConfOn, refetchInterval: 60000, staleTime: 20000, refetchOnWindowFocus: true });
+  const { data: ss5Data } = useQuery({ queryKey: ['ss-conf-ta', 5, indexToken], queryFn: ssFetch(5), enabled: ssConfOn || gdOn, refetchInterval: 60000, staleTime: 20000, refetchOnWindowFocus: true });
+  const { data: ss15Data } = useQuery({ queryKey: ['ss-conf-ta', 15, indexToken], queryFn: ssFetch(15), enabled: ssConfOn || gdOn, refetchInterval: 60000, staleTime: 20000, refetchOnWindowFocus: true });
   const ssConf = useMemo<SsConfluence[]>(() => {
     const c5 = ss5Data?.candles, c15 = ss15Data?.candles;
     if (!ssConfOn || !Array.isArray(c5) || !Array.isArray(c15)) return [];
@@ -7661,6 +7673,61 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     }
     if (changed) { try { localStorage.setItem('ssConfluenceAlerted', JSON.stringify(seen.slice(-200))); } catch (e) {} }
   }, [ssConf, ssConfOn, indexLabel]);
+
+  // GIFT NIFTY candles for the divergence. The NIFTY 5/15-min candles are the ones
+  // fetched just above (same query, shared cache). Both timeframes are watched so
+  // the alerts do not depend on the timeframe on screen; the chart draws the one
+  // matching the timeframe shown.
+  const { data: gdTokenData } = useQuery({
+    queryKey: ['index-token', 'GIFT'],
+    queryFn: async () => { const res = await fetch('/api/index-token?symbol=GIFT'); if (!res.ok) throw new Error('gift token fetch failed'); return res.json(); },
+    enabled: gdOn, staleTime: Infinity, gcTime: Infinity, retry: 2,
+  });
+  const gdGiftToken = gdTokenData?.token ? String(gdTokenData.token) : null;
+  const gdFetch = (tf: number) => async () => {
+    const r = await fetch(`/api/ta?timeframe=${tf}&token=${gdGiftToken}&symbol=${encodeURIComponent('GIFT NIFTY')}`);
+    if (!r.ok) throw new Error('gift candles');
+    return r.json();
+  };
+  const { data: gd5Data } = useQuery({ queryKey: ['gd-gift-ta', 5, gdGiftToken], queryFn: gdFetch(5), enabled: gdOn && !!gdGiftToken, refetchInterval: 60000, staleTime: 20000, refetchOnWindowFocus: true });
+  const { data: gd15Data } = useQuery({ queryKey: ['gd-gift-ta', 15, gdGiftToken], queryFn: gdFetch(15), enabled: gdOn && !!gdGiftToken, refetchInterval: 60000, staleTime: 20000, refetchOnWindowFocus: true });
+  const giftDiv = useMemo<{ 5: GiftDiv[]; 15: GiftDiv[] }>(() => {
+    if (!gdOn) return { 5: [], 15: [] };
+    const now = Math.floor(Date.now() / 1000);
+    const run = (n: any, g: any, tf: number) => {
+      if (!Array.isArray(n?.candles) || !Array.isArray(g?.candles)) return [];
+      try { return detectGiftDivergence(n.candles, g.candles, { tfSec: tf * 60, nowSec: now }); } catch (e) { return []; }
+    };
+    return { 5: run(ss5Data, gd5Data, 5), 15: run(ss15Data, gd15Data, 15) };
+  }, [gdOn, ss5Data, ss15Data, gd5Data, gd15Data]);
+  giftDivRef.current = giftDiv;
+
+  // Alert ONCE per signal, remembered across reloads; only a signal whose candle
+  // closed in the last 10 minutes alerts, so a reload never replays the day.
+  useEffect(() => {
+    if (!gdOn) return;
+    let seen: string[] = [];
+    try { const v = JSON.parse(localStorage.getItem('giftDivAlerted') || '[]'); if (Array.isArray(v)) seen = v; } catch (e) {}
+    const nowS = Math.floor(Date.now() / 1000);
+    let changed = false;
+    for (const tf of [5, 15] as const) {
+      for (const d of giftDiv[tf]) {
+        const id = `${tf}|${d.kind}|${d.time}`;
+        if (seen.includes(id)) continue;
+        seen.push(id); changed = true;
+        if (nowS - (d.time + tf * 60) > 600) continue;
+        const hhmm = new Date((d.time + tf * 60) * 1000).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
+        const bear = d.kind === 'bear';
+        const title = `${bear ? 'Bearish' : 'Bullish'} GIFT divergence · ${tf}m @ ${hhmm}`;
+        const body = bear
+          ? `GIFT NIFTY made a higher high (${d.giftNow} > ${d.giftSwing}); NIFTY 50 did not (${d.niftyNow} vs ${d.niftySwing}).`
+          : `GIFT NIFTY made a lower low (${d.giftNow} < ${d.giftSwing}); NIFTY 50 did not (${d.niftyNow} vs ${d.niftySwing}).`;
+        try { toast(title, { description: body, duration: 10000, closeButton: true }); } catch (e) {}
+        try { notificationService.add('divergence', title, body, { ephemeral: true, source: 'gift-divergence', key: id }); } catch (e) {}
+      }
+    }
+    if (changed) { try { localStorage.setItem('giftDivAlerted', JSON.stringify(seen.slice(-300))); } catch (e) {} }
+  }, [giftDiv, gdOn]);
   // Read inside the chart effect's click handler, which is created once per chart
   // rebuild — a ref keeps it correct even if the view changes without a rebuild.
   // PDH/PDL and S&R are intraday levels: the previous day's extremes and the
@@ -8700,7 +8767,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     }
   }, [chartData]);
 
+  // RSI divergence RETIRED (Oct 7 2026): replaced by the GIFT divergence above, at
+  // Martin's request ("forget RSI"). Kept as an always-empty list so the marker,
+  // RSI-trendline and alert paths that read it simply do nothing.
   const divergences = useMemo(() => {
+    if (true as boolean) return [] as any[];
     if (!chartData || !chartData.candles || parseInt(timeframe) < 15) return [];
     // Args: (candles, maxDistance between the two pivots, minRSIDiff, timeframe, pivotLookback)
     // maxDistance is now measured pivot-to-pivot (swing to swing), so it needs to be
@@ -10709,6 +10780,43 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                 } catch (e) { /* an indicator must never break the frame */ }
               }
 
+              // GIFT DIVERGENCE: on the NIFTY 5 or 15-min chart, a triangle on the
+              // candle where GIFT broke its swing but NIFTY did not, and a dashed
+              // line on NIFTY from its swing to that candle (the missing higher high /
+              // lower low). Index view only.
+              if (showGiftDivRef.current && !isOptionView && mainSeriesRef.current) {
+                try {
+                  const tfG = parseInt(String(timeframe), 10) || 0;
+                  const list = tfG === 5 ? giftDivRef.current[5] : tfG === 15 ? giftDivRef.current[15] : [];
+                  const upC = settingsRef.current.candleUpColor, dnC = settingsRef.current.candleDownColor;
+                  ctx.save();
+                  ctx.font = "bold 9px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif";
+                  ctx.textAlign = 'center';
+                  for (const d of list) {
+                    const ts = mainChartRef.current?.timeScale();
+                    const x = ts?.timeToCoordinate(d.time as any);
+                    if (x === null || x === undefined || x < 0 || x > textAlignX) continue;
+                    const bear = d.kind === 'bear';
+                    const y = mainSeriesRef.current.priceToCoordinate(d.niftyNow);
+                    if (y === null) continue;
+                    const col = bear ? dnC : upC;
+                    const x0 = ts?.timeToCoordinate(d.swingTime as any);
+                    const y0 = mainSeriesRef.current.priceToCoordinate(d.niftySwing);
+                    if (x0 !== null && x0 !== undefined && y0 !== null) {
+                      ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
+                      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x, y); ctx.stroke();
+                      ctx.setLineDash([]);
+                    }
+                    const tip = bear ? y - 6 : y + 6, base = bear ? tip - 7 : tip + 7;
+                    ctx.fillStyle = col;
+                    ctx.beginPath(); ctx.moveTo(x, tip); ctx.lineTo(x - 5, base); ctx.lineTo(x + 5, base); ctx.closePath(); ctx.fill();
+                    ctx.textBaseline = bear ? 'bottom' : 'top';
+                    ctx.fillText('GIFT Div', x, bear ? base - 2 : base + 2);
+                  }
+                  ctx.restore();
+                } catch (e) { /* an indicator must never break the frame */ }
+              }
+
               // Reversal pins: recomputed only when a candle closes (or the series
               // is rebuilt), exactly like BOS-CHoCH. Index charts only — the levels
               // are index levels.
@@ -12356,6 +12464,27 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       className={`p-1 transition-colors ${isFav('SwapSweepReversal') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('SwapSweepReversal') ? 'currentColor' : 'none'} />
+                    </button>
+                  </div>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('GiftDivergence', showGiftDiv)}`}>
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowGiftDiv(!showGiftDiv); }}
+                          aria-label="Toggle GIFT Divergence"
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showGiftDiv) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showGiftDiv) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none" title="GIFT NIFTY makes a higher high (or lower low) that NIFTY 50 does not. NIFTY chart, 5 and 15-min, with alerts. Replaces the RSI divergence.">GIFT Divergence</span>
+                      </div>
+                    <span className="p-1 w-[22px] shrink-0" aria-hidden="true" />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('GiftDivergence'); }}
+                      title={isFav('GiftDivergence') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('GiftDivergence') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('GiftDivergence') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('SessionBreaks', sessionBreak.on)}`}>
