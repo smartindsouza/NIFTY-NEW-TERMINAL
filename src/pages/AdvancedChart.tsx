@@ -7725,13 +7725,13 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
         const id = `${tf}|${d.kind}|${d.time}`;
         if (seen.includes(id)) continue;
         seen.push(id); changed = true;
-        if (nowS - (d.time + tf * 60) > 600) continue;
-        const hhmm = new Date((d.time + tf * 60) * 1000).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
+        if (nowS - (d.knownAt + tf * 60) > 600) continue;
+        const hhmm = new Date((d.knownAt + tf * 60) * 1000).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
         const bear = d.kind === 'bear';
         const title = `${bear ? 'Bearish' : 'Bullish'} GIFT divergence · ${tf}m @ ${hhmm}`;
         const body = d.extreme === 'high'
-          ? `GIFT NIFTY made a higher high (${d.giftNow} > ${d.giftSwing}); NIFTY 50 did not (${d.niftyNow} vs ${d.niftySwing}).`
-          : `GIFT NIFTY made a lower low (${d.giftNow} < ${d.giftSwing}); NIFTY 50 did not (${d.niftyNow} vs ${d.niftySwing}).`;
+          ? `GIFT NIFTY made a higher swing high (${d.giftNow} > ${d.giftSwing}); NIFTY 50 made a lower one (${d.niftyNow} < ${d.niftySwing}).`
+          : `GIFT NIFTY made a lower swing low (${d.giftNow} < ${d.giftSwing}); NIFTY 50 made a higher one (${d.niftyNow} > ${d.niftySwing}).`;
         try { toast(title, { description: body, duration: 10000, closeButton: true }); } catch (e) {}
         try { notificationService.add('divergence', title, body, { ephemeral: true, source: 'gift-divergence', key: id }); } catch (e) {}
       }
