@@ -3831,6 +3831,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // Swap-Sweep marks that passed the 5-min + 15-min agreement test. Written by the
   // memo further down (it needs the index token), read by the canvas loop.
   const ssConfRef = useRef<SsConfluence[]>([]);
+  const ssOptConfRef = useRef<SsConfluence[]>([]);   // same, on an OPTION chart's own candles
   // SS mode (gear on the indicator row): 'combined' = only where 5m AND 15m agree
   // (with alerts); 'single' = the pattern on the timeframe shown, up to 1 hour.
   const [ssMode, setSsMode] = useState<'combined' | 'single'>(() => {
@@ -7660,6 +7661,22 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   }, [ss5Data, ss15Data, ssConfOn]);
   ssConfRef.current = ssConf;
 
+  // On an OPTION (premium) chart the 5m + 15m mode uses the option's OWN 5 and
+  // 15-minute candles. Marks only — no alerts on option charts.
+  const ssOptOn = showSwapSweep && ssMode === 'combined' && isOptionView && !!instrumentToken;
+  const ssOptFetch = (tf: number) => async () => {
+    const r = await fetch(`/api/ta?timeframe=${tf}&token=${instrumentToken}&symbol=${encodeURIComponent(selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel)}`);
+    if (!r.ok) throw new Error('swap-sweep option candles');
+    return r.json();
+  };
+  const { data: ssOpt5 } = useQuery({ queryKey: ['ss-conf-ta', 5, instrumentToken], queryFn: ssOptFetch(5), enabled: ssOptOn, refetchInterval: 60000, staleTime: 20000, refetchOnWindowFocus: true });
+  const { data: ssOpt15 } = useQuery({ queryKey: ['ss-conf-ta', 15, instrumentToken], queryFn: ssOptFetch(15), enabled: ssOptOn, refetchInterval: 60000, staleTime: 20000, refetchOnWindowFocus: true });
+  ssOptConfRef.current = useMemo<SsConfluence[]>(() => {
+    const c5 = ssOpt5?.candles, c15 = ssOpt15?.candles;
+    if (!ssOptOn || !Array.isArray(c5) || !Array.isArray(c15)) return [];
+    try { return confluenceSignals(c5, c15, { nowSec: Math.floor(Date.now() / 1000) }); } catch (e) { return []; }
+  }, [ssOpt5, ssOpt15, ssOptOn]);
+
   // Alert ONCE per signal (index + direction + the 15-min candle), remembered across
   // reloads. A signal is known when its 15-min C3 closes; one older than 10 minutes
   // is history and is recorded silently, so switching the indicator on, or opening the
@@ -10762,7 +10779,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               // 1/3/5-min bar inside it. Above 15 minutes there is no such bar, so
               // nothing is drawn. A small triangle beyond the 15-min candle's sweep
               // extreme, tagged "SS".
-              if (showSwapSweepRef.current && !isOptionView && mainSeriesRef.current) {
+              if (showSwapSweepRef.current && mainSeriesRef.current) {
                 try {
                   const tfM = parseInt(String(timeframe), 10) || 0;
                   let pts: { kind: 'bull' | 'bear'; time: number; hi: number; lo: number }[] = [];
@@ -10781,7 +10798,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                       pts = ssCacheRef.current.signals;
                     }
                   } else if (tfM >= 1 && tfM <= 15 && 15 % tfM === 0) {
-                    pts = ssConfRef.current.map((c) => ({ kind: c.kind, time: c.knownAt - tfM * 60, hi: c.hi, lo: c.lo }));
+                    pts = (isOptionView ? ssOptConfRef.current : ssConfRef.current).map((c) => ({ kind: c.kind, time: c.knownAt - tfM * 60, hi: c.hi, lo: c.lo }));
                   }
                   const marks = pts;
                   const upC = settingsRef.current.candleUpColor, dnC = settingsRef.current.candleDownColor;
