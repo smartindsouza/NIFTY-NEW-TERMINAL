@@ -6,7 +6,8 @@
 import express from 'express';
 import { getKiteClient } from './kite_service';
 import { toISTString } from './gap_scorecard';
-import { analyzeExample, PATTERN_DRAFT, RULE_LABEL, type PC } from '../src/lib/patternLab';
+import { analyzeExample, runPatternTest, PATTERN_DRAFT, PATTERN_TEST, RULE_LABEL, type PC } from '../src/lib/patternLab';
+import { kiteFiveMin } from './sweep_reclaim';
 import { ssIstDay } from '../src/lib/swapSweep';
 
 // The 11 bearish examples Martin sent on 13-14 Oct 2026 (seeded ONCE; deleting one
@@ -67,6 +68,22 @@ async function candlesFor(days: string[]): Promise<PC[]> {
   return all;
 }
 
+// The 2-year test of the approved rules (draft 2). Server job; the result is stored.
+const testJob: { status: string; progress: string; error: string | null } = { status: 'idle', progress: '', error: null };
+async function runTestJob(db: any) {
+  testJob.status = 'running'; testJob.error = null;
+  try {
+    testJob.progress = 'fetching ~2 years of NIFTY 5-min candles…';
+    const raw = await kiteFiveMin(256265, 730);
+    testJob.progress = 'testing the rules…';
+    const c: PC[] = raw.map((k: any) => ({ time: Math.floor(k.t / 1000), open: k.open, high: k.high, low: k.low, close: k.close }));
+    const result = { generatedAt: Date.now(), rulesVersion: PATTERN_DRAFT.version, ...runPatternTest(c) };
+    db.prepare('INSERT INTO gap_stats (key, json, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at')
+      .run('pattern_test', JSON.stringify(result), Date.now());
+    testJob.status = 'done'; testJob.progress = '';
+  } catch (e: any) { testJob.status = 'error'; testJob.error = e?.message || String(e); }
+}
+
 export function registerPatternLab(app: any, db: any, guard: any) {
   db.exec(`CREATE TABLE IF NOT EXISTS pattern_examples (
     id INTEGER PRIMARY KEY AUTOINCREMENT, side TEXT NOT NULL, day TEXT NOT NULL, time TEXT NOT NULL,
@@ -120,5 +137,13 @@ export function registerPatternLab(app: any, db: any, guard: any) {
     res.json({ ok: true });
   });
 
+  app.post('/api/patterns/test/start', guard, (_req: any, res: any) => {
+    if (testJob.status === 'running') return res.json({ started: false, job: testJob });
+    runTestJob(db); res.json({ started: true });
+  });
+  app.get('/api/patterns/test/status', (_req: any, res: any) => {
+    const r: any = db.prepare('SELECT json FROM gap_stats WHERE key = ?').get('pattern_test');
+    res.json({ job: testJob, result: r ? JSON.parse(r.json) : null, config: PATTERN_TEST });
+  });
   console.log('[pattern-lab] registered');
 }

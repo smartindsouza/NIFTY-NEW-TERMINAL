@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChartCandlestick, Loader2, Plus, Trash2 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -49,6 +49,82 @@ function MiniChart({ a }: { a: Analysis }) {
         );
       })}
     </svg>
+  );
+}
+
+type TestRow = { key: string; label: string; signals: number; perDay: number; fallFirst: number; fallFirstLuck: number; decided: number; net60Atr: number;
+  trade: { trades: number; winRate: number; avgR: number; luck: number }; beatsRandom: boolean; pays: boolean; verdict: 'PASS' | 'NO_EDGE' | 'TOO_FEW' };
+type TestRes = { generatedAt: number; rulesVersion: string; period: { from: string; to: string; days: number }; random: { fallFirst: number; net60Atr: number; candles: number }; rules: TestRow[] };
+
+// THE 2-YEAR TEST of the approved rules, judged only on days BEFORE Sep 2026
+// (the examples' period). Pass bar fixed in lib/patternLab before any result.
+function PatternTest() {
+  const [res, setRes] = useState<TestRes | null>(null);
+  const [job, setJob] = useState<{ status: string; progress: string; error: string | null } | null>(null);
+  const timer = useRef<any>(null);
+  const poll = async () => {
+    try {
+      const j = await (await fetch('/api/patterns/test/status')).json();
+      setJob(j.job); if (j.result) setRes(j.result);
+      if (j.job?.status === 'running') timer.current = setTimeout(poll, 3000);
+    } catch (e) { timer.current = setTimeout(poll, 5000); }
+  };
+  useEffect(() => { poll(); return () => clearTimeout(timer.current); }, []);
+  const start = async () => {
+    clearTimeout(timer.current); setJob({ status: 'running', progress: 'starting…', error: null });
+    try { await fetch('/api/patterns/test/start', { method: 'POST' }); } catch (e) {}
+    timer.current = setTimeout(poll, 1500);
+  };
+  const running = job?.status === 'running';
+  const sg = (x: number) => `${x > 0 ? '+' : ''}${x.toFixed(2)}`;
+  return (
+    <div className="rounded-lg border border-border p-3 space-y-3">
+      <div className="font-semibold">2-year test of the approved rules</div>
+      <p className="text-[11px] text-muted-foreground">
+        Judged only on days <b>before September 2026</b> — your examples come from Sep–Oct 2026, so they cannot grade themselves.
+        For every signal: does NIFTY fall 1 × ATR before rising 1 × ATR within the next hour, compared with any ordinary candle;
+        and a plain short (stop above the pattern, 2R target, out by the close, 2 pts cost).
+        A rule passes only if it beats ordinary candles AND the short pays, both by more than luck, with at least 60 signals.
+      </p>
+      <button onClick={start} disabled={running} className="w-full h-10 rounded-full bg-primary text-primary-foreground font-semibold flex items-center justify-center gap-2 disabled:opacity-60">
+        {running ? <><Loader2 className="w-4 h-4 animate-spin" /> {job?.progress || 'running…'}</> : res ? 'Run again' : 'Run the 2-year test (about 30 seconds)'}
+      </button>
+      {job?.status === 'error' && <div className="text-red-500 text-xs">Failed: {job.error}</div>}
+      {res && (
+        <>
+          <div className="text-[11px] text-muted-foreground">{res.period.from} – {res.period.to} · {res.period.days} trading days · ordinary candles fall-first {res.random.fallFirst}% (the bar to beat)</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px]">
+              <thead><tr className="text-muted-foreground border-b border-border">
+                <th className="text-left py-1 font-medium">Rule</th><th className="text-right font-medium">Signals</th><th className="text-right font-medium">Fall first</th>
+                <th className="text-right font-medium">Short: win</th><th className="text-right font-medium">Avg R</th>
+              </tr></thead>
+              <tbody>
+                {res.rules.map((r) => (
+                  <tr key={r.key} className="border-b border-border/50 align-top">
+                    <td className="py-1.5 pr-1">{r.label}<div className="text-muted-foreground">{r.perDay} a day</div></td>
+                    <td className="text-right tabular-nums">{r.signals}</td>
+                    <td className={`text-right tabular-nums ${r.beatsRandom ? 'text-emerald-500' : ''}`}>{r.fallFirst}%<div className="text-muted-foreground">±{r.fallFirstLuck}</div></td>
+                    <td className="text-right tabular-nums">{r.trade.winRate}%</td>
+                    <td className={`text-right tabular-nums ${r.trade.avgR > 0 ? 'text-emerald-500' : 'text-red-500'}`}>{sg(r.trade.avgR)}<div className="text-muted-foreground">±{r.trade.luck}</div></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="space-y-1">
+            {res.rules.map((r) => (
+              <div key={r.key} className={`rounded-md border px-2 py-1.5 text-[11px] ${r.verdict === 'PASS' ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-600' : 'border-amber-500/40 bg-amber-500/10 text-amber-600'}`}>
+                <b>{r.label}: {r.verdict === 'PASS' ? 'passed' : r.verdict === 'TOO_FEW' ? 'too few signals to judge' : 'no proven edge'}.</b>{' '}
+                {r.verdict === 'PASS' ? 'It led to falls more often than ordinary candles and the short paid after costs, both beyond luck.'
+                  : r.verdict === 'TOO_FEW' ? `Only ${r.signals} signals in the test period (needs 60).`
+                  : `${r.beatsRandom ? 'Falls followed more often than usual, ' : 'Falls did not follow more often than after ordinary candles, '}${r.pays ? 'and the short paid.' : 'and the short did not pay after costs beyond luck.'}`}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -113,7 +189,7 @@ export default function PatternLab() {
       <CardContent className="space-y-4 text-sm">
         <p className="text-muted-foreground">
           Your examples with the exact 5-minute candles (NIFTY 50), what happened in the next 30 and 60 minutes, and whether the
-          <b> draft rules</b> catch each one — and if not, which check failed. Nothing is tested for profit here: that runs only after you approve the rules.
+          <b> approved rules</b> catch each one — and if not, which check failed. The 2-year test of those rules is further down.
         </p>
 
         {isLoading && <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Fetching exact candles from Zerodha…</div>}
@@ -122,7 +198,7 @@ export default function PatternLab() {
         {data && (
           <>
             <div className="rounded-lg border border-border p-3 space-y-1.5">
-              <div className="font-semibold">Draft rules <span className="text-muted-foreground font-normal text-xs">({data.draft.version})</span> — catch {data.caught} of {data.total}</div>
+              <div className="font-semibold">Rules <span className="text-muted-foreground font-normal text-xs">({data.draft.version})</span> — catch {data.caught} of {data.total}</div>
               <ol className="list-decimal pl-5 space-y-1 text-xs text-muted-foreground">
                 {data.draft.text.map((t, i) => <li key={i}>{t}</li>)}
               </ol>
@@ -172,9 +248,9 @@ export default function PatternLab() {
                           {!a.hit && a.tries.length > 0 && (
                             <div className="pt-1">Why not caught:
                               <ul className="list-disc pl-5">
-                                <li>Push ending at candle 1 → {a.tries[0].reason}</li>
-                                <li>Push ending at candle 2 → {a.tries[1].reason}</li>
-                                <li>Opening drop → {a.tries[2].reason}</li>
+                                {a.tries.map((t, i) => (
+                                  <li key={i}>{t.kind === 'opening' || i === a.tries.length - 1 ? 'Opening drop' : `Candle at ${t.time ? hhmm(t.time) : '?'}`} → {t.reason}</li>
+                                ))}
                               </ul>
                             </div>
                           )}
@@ -189,6 +265,8 @@ export default function PatternLab() {
             </div>
           </>
         )}
+
+        <PatternTest />
 
         <div className="rounded-lg border border-border p-3 space-y-2">
           <div className="font-semibold">Add a bearish example</div>
