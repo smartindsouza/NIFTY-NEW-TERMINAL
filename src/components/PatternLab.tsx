@@ -58,6 +58,8 @@ export default function PatternLab() {
   const [note, setNote] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [copyText, setCopyText] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const { data, isLoading, refetch } = useQuery<Resp>({
     queryKey: ['pattern-examples', 'bear'],
     queryFn: async () => (await fetch('/api/patterns/examples?side=bear')).json(),
@@ -72,6 +74,28 @@ export default function PatternLab() {
       if (!j.ok) setMsg(j.error || 'Could not add'); else { setDay(''); setTime(''); setNote(''); await refetch(); }
     } catch (e) { setMsg('Could not add'); }
     setBusy(false);
+  };
+  // One tap: every example's exact candles + why each draft rule missed, as plain
+  // text Martin pastes into the chat — so the rules are revised on real numbers.
+  const buildCopy = (d: Resp) => {
+    const L: string[] = [`PATTERN LAB · bearish · ${d.draft.version} · caught ${d.caught}/${d.total}`];
+    for (const e of d.examples) {
+      L.push('', `## ${e.day} ${e.time}${e.note && e.note !== 'sent as a screenshot' ? ` (${e.note})` : ''}`);
+      const a = e.analysis;
+      if (!a) { L.push(e.found ? 'no analysis' : 'no candle at that time'); continue; }
+      L.push(`ATR ${a.atr ?? '-'} | caught: ${a.hit ? `${a.hit.kind} at ${a.hit.time ? hhmm(a.hit.time) : '?'}` : 'NO'}`);
+      for (const c of a.window) L.push(`${hhmm(c.time)}${c.time === a.markedTime ? '*' : ' '} O ${n2(c.open)} H ${n2(c.high)} L ${n2(c.low)} C ${n2(c.close)}`);
+      if (a.after30) L.push(`next30: fall ${a.after30.maxFall} rise ${a.after30.maxRise} net ${a.after30.net}`);
+      if (a.after60) L.push(`next60: fall ${a.after60.maxFall} rise ${a.after60.maxRise} net ${a.after60.net}`);
+      if (!a.hit) a.tries.forEach((t, i) => L.push(`miss${i + 1}: ${t.reason}`));
+    }
+    return L.join('\n');
+  };
+  const copyAll = async () => {
+    if (!data) return;
+    const t = buildCopy(data);
+    setCopyText(t);
+    try { await navigator.clipboard.writeText(t); setCopied(true); setTimeout(() => setCopied(false), 3000); } catch (e) { setCopied(false); }
   };
   const del = async (id: number, label: string) => {
     if (!window.confirm(`Remove the example ${label}?`)) return;
@@ -102,6 +126,13 @@ export default function PatternLab() {
               <ol className="list-decimal pl-5 space-y-1 text-xs text-muted-foreground">
                 {data.draft.text.map((t, i) => <li key={i}>{t}</li>)}
               </ol>
+              <button onClick={copyAll} className="mt-2 w-full h-10 rounded-full bg-primary text-primary-foreground font-semibold">
+                {copied ? 'Copied — paste it to Claude' : 'Copy details for Claude'}
+              </button>
+              {copyText && !copied && (
+                <textarea readOnly value={copyText} onFocus={(e) => e.currentTarget.select()}
+                  className="mt-2 w-full h-32 text-[10px] font-mono rounded-md border border-border bg-background p-2" />
+              )}
             </div>
 
             <div className="space-y-3">
