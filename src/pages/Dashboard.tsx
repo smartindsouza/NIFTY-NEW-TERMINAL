@@ -231,9 +231,23 @@ export function Dashboard() {
   const cePercent = totalOi > 0 ? (totalCeOi / totalOi) * 100 : 50;
   const pePercent = totalOi > 0 ? (totalPeOi / totalOi) * 100 : 50;
 
-  const decision = computeMasterSignal({ ...analytics, spot }, taData, fiiDiiData);
+  const computed = computeMasterSignal({ ...analytics, spot }, taData, fiiDiiData);
 
-  if (!decision) return null;
+  if (!computed) return null;
+
+  // Never show a decision built on PLACEHOLDER data. The server serves simulated
+  // numbers only when Zerodha has given it nothing real to hold (a real outage or
+  // no login); a decision from those would be random. Paused instead, and it
+  // resumes by itself on the next real update. Brief failed fetches are covered
+  // server-side by holding the last real data, flagged with how old it is.
+  const feedIssue: string | null = chain?.isMock ? 'option chain' : taData?.isMock ? 'chart data' : null;
+  const delaySec = Math.max(Number(chain?.staleSec) || 0, taData?.stale ? (Number(taData?.staleSec) || 0) : 0);
+  const decision = feedIssue ? {
+    ...computed,
+    signal: 'NO SIGNAL', regime: 'DATA UNAVAILABLE', bullScore: 0, bearScore: 0,
+    entry: '—', stopLoss: '—', target1: '—', invalidation: '—',
+    reasons: [`Live ${feedIssue} from Zerodha is unavailable right now, so no decision is shown rather than one built on placeholder numbers. It resumes by itself on the next real update.`],
+  } : computed;
 
   const isBuyCall = decision.signal === 'BUY CALL';
   const isBuyPut = decision.signal === 'BUY PUT';
@@ -358,6 +372,9 @@ export function Dashboard() {
             <span className="text-muted-foreground ml-2 font-mono text-[9px] lowercase">
               live at {new Date().toLocaleTimeString()}
             </span>
+            {!feedIssue && delaySec >= 30 && (
+              <span className="text-amber-500 ml-1 font-mono text-[9px] normal-case">· feed delayed {delaySec}s</span>
+            )}
           </div>
           <div className={cn("text-[10px] font-bold tracking-widest border px-3 py-1 rounded-full uppercase", signalColor, signalBorder, signalBgMuted)}>
             REGIME: {decision.regime}
@@ -394,7 +411,7 @@ export function Dashboard() {
                decision: near the support edge favours longs, near resistance
                favours shorts, the middle offers no edge. Replaces a confidence
                bar that always sat exactly on its own "65% entry threshold". */}
-           {(() => {
+           {!feedIssue && (() => {
              const sup = Number(analytics?.supportZone?.strikePrice);
              const res = Number(analytics?.resistanceZone?.strikePrice);
              if (!(sup > 0) || !(res > sup) || !(spot > 0)) return null;

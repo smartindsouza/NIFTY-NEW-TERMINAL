@@ -834,6 +834,11 @@ let latestSpot = 22000;
 let lastRealSpotTickAt = 0; // ms timestamp of the last REAL spot tick (for watcher safety)
 let latestChainData: any = null;
 let latestAnalytics: any = null;
+// When the last REAL (non-simulated) NIFTY chain arrived, and how often a failed
+// fetch was answered by holding it instead of a simulated chain (Oct 14 2026).
+let latestRealChainAt = 0;
+let chainFallbacks = 0;
+let chainLastFallbackAt = 0;
 
 // ===== SENSEX (BSE/BFO) support =====
 // The SENSEX index token streams ALWAYS (one token — powers the index chart's
@@ -888,7 +893,23 @@ function pushTickerSubscriptions() {
 
 async function refreshData() {
   try {
-    latestChainData = await getLiveOptionChain('NSE:NIFTY 50');
+    // A failed Kite fetch comes back as a SIMULATED chain (random OI around
+    // 22,000). It used to replace the real one, so for that 10s cycle the OI
+    // zones, PCR and the Home screen decision were built from random numbers —
+    // the decision flipped bullish/bearish for no market reason. Now a failed
+    // fetch HOLDS the last real chain (up to 5 min) with the live spot price;
+    // only after that does the simulated chain show, and it is flagged isMock
+    // so the Home screen pauses its decision instead of trusting it.
+    const freshChain: any = await getLiveOptionChain('NSE:NIFTY 50');
+    if (freshChain && !freshChain.isMock) {
+      latestChainData = freshChain;
+      latestRealChainAt = Date.now();
+    } else if (latestChainData && !latestChainData.isMock && Date.now() - latestRealChainAt < 5 * 60 * 1000) {
+      chainFallbacks++; chainLastFallbackAt = Date.now();
+      latestChainData = { ...latestChainData, spot: latestSpot > 0 ? latestSpot : latestChainData.spot, staleSec: Math.round((Date.now() - latestRealChainAt) / 1000) };
+    } else {
+      latestChainData = freshChain;
+    }
     if (latestChainData) {
       const tokens: number[] = [256265];
       for (const k of (latestChainData.strikes || [])) {
@@ -2575,6 +2596,13 @@ setInterval(() => {
       cacheMisses: kiteDiagnostics.cacheMisses,
       error429Count: kiteDiagnostics.error429Count,
       endpoints: Object.fromEntries(kiteDiagnostics.endpoints),
+      // How often a failed fetch was covered by holding real data (since restart)
+      dataFallbacks: {
+        chainHeld: chainFallbacks, chainLastHeldAt: chainLastFallbackAt || null,
+        chainRealAgeSec: latestRealChainAt ? Math.round((Date.now() - latestRealChainAt) / 1000) : null,
+        taHeld: kiteDiagnostics.taFallbacks, taLastHeldAt: kiteDiagnostics.taLastFallbackAt || null,
+        taPlaceholderServed: kiteDiagnostics.taMockServed,
+      },
     });
   });
 

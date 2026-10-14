@@ -317,7 +317,13 @@ export const kiteDiagnostics = {
   cacheHits: 0,
   cacheMisses: 0,
   error429Count: 0,
-  endpoints: new Map<string, number>()
+  endpoints: new Map<string, number>(),
+  // A refresh that failed and was answered with the LAST REAL data instead of
+  // random placeholder candles (taFallbacks), and the rarer case where nothing
+  // real existed so placeholder data had to be served (taMockServed).
+  taFallbacks: 0,
+  taLastFallbackAt: 0,
+  taMockServed: 0,
 };
 
 // Reset count every minute
@@ -829,7 +835,28 @@ export async function getTechnicalAnalysis(
     console.error(`[NIFTY DIAGNOSTIC] Error fetching historical TA for ${instrument_token} / ${timeframeMin}m:`, e.message || e);
   }
 
-  // Fallback to MOCK data
+  // A FAILED REFRESH MUST NEVER SWAP REAL CANDLES FOR RANDOM ONES (Oct 14 2026).
+  // Before this, one failed Kite history call fell straight through to the
+  // random generator below and REPLACED the cached real data, so the Home
+  // screen's decision (and anything else reading this feed) was computed on
+  // noise until the next successful fetch — it flipped bullish/bearish for no
+  // market reason. Now the last real result is served, marked stale; the random
+  // generator is reached only when no real data exists at all, and is flagged.
+  {
+    const lastReal = cacheMap.get(cacheKey);
+    if (lastReal && !lastReal.data?.isMock && Array.isArray(lastReal.data?.candles) && lastReal.data.candles.length) {
+      kiteDiagnostics.taFallbacks++; kiteDiagnostics.taLastFallbackAt = Date.now();
+      return { ...lastReal.data, stale: true, staleSec: Math.round((Date.now() - (lastReal.lastFullFetch ?? lastReal.lastUpdate)) / 1000) };
+    }
+    const saved = readPersistedTa(cacheKey);
+    if (saved && saved.data && !saved.data.isMock && Array.isArray(saved.data.candles) && saved.data.candles.length) {
+      kiteDiagnostics.taFallbacks++; kiteDiagnostics.taLastFallbackAt = Date.now();
+      return { ...saved.data, servedFrom: 'persisted', stale: true, staleSec: Math.round((Date.now() - saved.at) / 1000) };
+    }
+  }
+  kiteDiagnostics.taMockServed++;
+
+  // Fallback to MOCK data (nothing real exists for this instrument/timeframe)
   const mockCacheItem = cacheMap.get(cacheKey);
   if (
     mockCacheItem &&
