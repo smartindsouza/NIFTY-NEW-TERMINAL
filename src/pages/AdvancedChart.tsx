@@ -7,6 +7,7 @@ import { useUserSettings, useResolvedTheme } from "../hooks/useUserSettings";
 import { zoomDiag } from "../lib/zoomDiag";
 import { confluenceSignals, detectSwapSweep, ssIstDay, type SsConfluence, type SsSignal } from "../lib/swapSweep";
 import { detectGiftDivergence, type GiftDiv } from "../lib/giftDivergence";
+import { mergeLiveCandles, archiveFingerprint } from "../lib/liveCandles";
 import { getDivergences } from "../lib/divergence";
 import { evaluateBreakout } from "../lib/breakoutQuality";
 import { calculateBollingerBands } from "../indicators/bollingerBands";
@@ -7652,12 +7653,14 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     if (!r.ok) throw new Error('swap-sweep candles');
     return r.json();
   };
-  const { data: ss5Data } = useQuery({ queryKey: ['ss-conf-ta', 5, indexToken], queryFn: ssFetch(5), enabled: ssConfOn || gdOn, refetchInterval: 60000, staleTime: 20000, refetchOnWindowFocus: true });
-  const { data: ss15Data } = useQuery({ queryKey: ['ss-conf-ta', 15, indexToken], queryFn: ssFetch(15), enabled: ssConfOn || gdOn, refetchInterval: 60000, staleTime: 20000, refetchOnWindowFocus: true });
+  const { data: ss5Data } = useQuery({ queryKey: ['ss-conf-ta', 5, indexToken], queryFn: ssFetch(5), enabled: ssConfOn || gdOn, refetchInterval: 15000, staleTime: 10000, refetchOnWindowFocus: true });
+  const { data: ss15Data } = useQuery({ queryKey: ['ss-conf-ta', 15, indexToken], queryFn: ssFetch(15), enabled: ssConfOn || gdOn, refetchInterval: 15000, staleTime: 10000, refetchOnWindowFocus: true });
   const ssConf = useMemo<SsConfluence[]>(() => {
     const c5 = ss5Data?.candles, c15 = ss15Data?.candles;
     if (!ssConfOn || !Array.isArray(c5) || !Array.isArray(c15)) return [];
-    try { return confluenceSignals(c5, c15, { nowSec: Math.floor(Date.now() / 1000) }); } catch (e) { return []; }
+    // 15s polling + the SERVER's clock (a phone clock running behind would hold a
+    // closed candle back as 'still forming' until the next poll).
+    try { return confluenceSignals(c5, c15, { nowSec: Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current }); } catch (e) { return []; }
   }, [ss5Data, ss15Data, ssConfOn]);
   ssConfRef.current = ssConf;
 
@@ -7669,12 +7672,12 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     if (!r.ok) throw new Error('swap-sweep option candles');
     return r.json();
   };
-  const { data: ssOpt5 } = useQuery({ queryKey: ['ss-conf-ta', 5, instrumentToken], queryFn: ssOptFetch(5), enabled: ssOptOn, refetchInterval: 60000, staleTime: 20000, refetchOnWindowFocus: true });
-  const { data: ssOpt15 } = useQuery({ queryKey: ['ss-conf-ta', 15, instrumentToken], queryFn: ssOptFetch(15), enabled: ssOptOn, refetchInterval: 60000, staleTime: 20000, refetchOnWindowFocus: true });
+  const { data: ssOpt5 } = useQuery({ queryKey: ['ss-conf-ta', 5, instrumentToken], queryFn: ssOptFetch(5), enabled: ssOptOn, refetchInterval: 15000, staleTime: 10000, refetchOnWindowFocus: true });
+  const { data: ssOpt15 } = useQuery({ queryKey: ['ss-conf-ta', 15, instrumentToken], queryFn: ssOptFetch(15), enabled: ssOptOn, refetchInterval: 15000, staleTime: 10000, refetchOnWindowFocus: true });
   ssOptConfRef.current = useMemo<SsConfluence[]>(() => {
     const c5 = ssOpt5?.candles, c15 = ssOpt15?.candles;
     if (!ssOptOn || !Array.isArray(c5) || !Array.isArray(c15)) return [];
-    try { return confluenceSignals(c5, c15, { nowSec: Math.floor(Date.now() / 1000) }); } catch (e) { return []; }
+    try { return confluenceSignals(c5, c15, { nowSec: Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current }); } catch (e) { return []; }
   }, [ssOpt5, ssOpt15, ssOptOn]);
 
   // Alert ONCE per signal (index + direction + the 15-min candle), remembered across
@@ -9200,6 +9203,12 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   const structRef = useRef<any[]>([]);
   const structSigRef = useRef<string>('');
   const obSigRef = useRef<string>('');
+  // Directional Zones live recompute (Oct 14 2026): the closed-candle part of the
+  // signature, when the last recompute ran, and the candles it used (the FVG
+  // add-on reads the same ones).
+  const dzBaseKeyRef = useRef<string>('');
+  const dzLastRunRef = useRef<number>(0);
+  const dzInputRef = useRef<any[]>([]);
 
   const lastAlertedDivergenceRef = useRef<string | null>(null);
 
@@ -10355,6 +10364,23 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
     const canvas = overlayCanvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
+    // CANDLES FOR THE CANDLE-BASED INDICATORS (Swap-Sweep, Directional Zones) —
+    // Oct 14 2026. These used to take the fetched history and append only candles
+    // that closed live AFTER its last bar, recomputing when that COUNT changed:
+    //   * the candle still forming when the chart loaded stayed in at its
+    //     half-built values for the rest of the session (its finished version had
+    //     the same time and was filtered out) — and counted as a closed candle;
+    //   * the 15s closed-bar audit REPAIRS live-built candles (a wick the ticks
+    //     missed) in place, but a repair does not change the count, so the
+    //     indicators never saw it. A pattern that needed the repaired high/low
+    //     appeared only after a reload, when clean history was fetched.
+    // Now the history is overlaid BY TIME with every live-closed candle (and every
+    // repair), and the signature covers the newest candles' values, so a repair
+    // triggers a recompute at once.
+    // (logic in lib/liveCandles, where it is tested)
+    const arcFingerprint = (): string => archiveFingerprint(liveClosedCandlesRef.current);
+    const mergedCandles = (): any[] => mergeLiveCandles(chartDataRef.current?.candles || [], liveClosedCandlesRef.current);
     
     const draw = () => {
       if (!canvas.parentElement || !mainChartRef.current || !mainSeriesRef.current) return;
@@ -10787,12 +10813,18 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                     // This timeframe only, up to 1 hour: the chart's own closed candles,
                     // recomputed only when a candle closes; mark on C3.
                     if (tfM >= 1 && tfM <= 60) {
+                      // CLOSED candles only — the signal is at C3's close, so a C3
+                      // still forming must never count. Recomputed when a candle
+                      // closes, when a closed candle is repaired, or when the newest
+                      // candle's time runs out (e.g. at the session close).
+                      const nowS = Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current;
+                      const over = !(isReferenceChartRef.current ? isGiftDataWindow(nowS) : isDataWindow(nowS));
                       const baseS = chartDataRef.current?.candles || [];
-                      const lastS = baseS.length ? baseS[baseS.length - 1].time : 0;
-                      const sinceS = liveClosedCandlesRef.current.filter((k: any) => k.time > lastS);
-                      const key = `${instrumentToken}|${timeframe}|${baseS.length}|${sinceS.length}|${sinceS.length ? sinceS[sinceS.length - 1].time : 0}`;
+                      const liveS = lastCandleDataRef.current;
+                      const liveDone = !!liveS && (over || liveS.time + tfM * 60 <= nowS);
+                      const key = `${instrumentToken}|${timeframe}|${baseS.length}|${baseS.length ? baseS[baseS.length - 1].time : 0}|${arcFingerprint()}|${liveS ? liveS.time : 0}|${liveDone ? 1 : 0}`;
                       if (ssCacheRef.current.key !== key) {
-                        const all = sinceS.length ? [...baseS, ...sinceS] : baseS;
+                        const all = mergedCandles().filter((c: any) => over || c.time + tfM * 60 <= nowS);
                         ssCacheRef.current = { key, signals: detectSwapSweep(all).map((sg) => ({ ...sg, hi: all[sg.idx].high, lo: all[sg.idx].low })) };
                       }
                       pts = ssCacheRef.current.signals;
@@ -10958,17 +10990,32 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
 
               if (showOrderBlocks && !isOptionView && mainSeriesRef.current) {
                 const baseC = chartDataRef.current?.candles || [];
-                const arc = liveClosedCandlesRef.current;
-                const lastT = baseC.length ? baseC[baseC.length - 1].time : 0;
-                const closedSince = arc.filter((k: any) => k.time > lastT);
+                const liveZ = lastCandleDataRef.current;
                 // The INSTRUMENT belongs in this key. Without it, switching index kept the
                 // previous one's zones: both indices return the same number of candles at
                 // the same timeframe, so the key matched, nothing recomputed, and levels
                 // from the old index were drawn far off the new chart's scale — invisible.
-                const sig = `${instrumentToken}|${timeframe}|${baseC.length}|${closedSince.length}|${closedSince.length ? closedSince[closedSince.length - 1].time : 0}`;
-                if (sig !== obSigRef.current) {
+                // REAL TIME (Oct 14 2026): history overlaid with every live-closed and
+                // repaired candle, PLUS the bar still forming with its live values —
+                // TradingView runs the script on the realtime bar too, so a zone shows
+                // as it forms instead of after a reload. Closed-candle changes recompute
+                // at once; changes to the forming bar at most every 1.5 s.
+                const baseKey = `${instrumentToken}|${timeframe}|${baseC.length}|${baseC.length ? baseC[baseC.length - 1].time : 0}|${arcFingerprint()}`;
+                const sig = `${baseKey}|${liveZ ? `${liveZ.time}:${liveZ.open}:${liveZ.high}:${liveZ.low}:${liveZ.close}` : ''}`;
+                const dzDue = baseKey !== dzBaseKeyRef.current
+                  || (sig !== obSigRef.current && Date.now() - dzLastRunRef.current >= 1500);
+                if (dzDue) {
                   obSigRef.current = sig;
-                  obZonesRef.current = computeDirectionalZones(closedSince.length ? [...baseC, ...closedSince] : baseC);
+                  dzBaseKeyRef.current = baseKey;
+                  dzLastRunRef.current = Date.now();
+                  const dzIn = mergedCandles();
+                  if (liveZ) {
+                    const tail = dzIn.length ? dzIn[dzIn.length - 1].time : -Infinity;
+                    if (liveZ.time > tail) dzIn.push(liveZ);
+                    else if (liveZ.time === tail) dzIn[dzIn.length - 1] = liveZ;
+                  }
+                  dzInputRef.current = dzIn;
+                  obZonesRef.current = computeDirectionalZones(dzIn);
                   // Runs on every recompute regardless of the toggle: the seen-set
                   // must stay current so switching alerts ON mid-session announces
                   // only what happens NEXT, not the whole day's taps at once.
@@ -11017,10 +11064,8 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   const zonesNow = obZonesRef.current || [];
                   const key = `${obSigRef.current}|${zonesNow.length}`;
                   if (dzFvgCacheRef.current.key !== key) {
-                    const baseF = chartDataRef.current?.candles || [];
-                    const lastF = baseF.length ? baseF[baseF.length - 1].time : 0;
-                    const sinceF = liveClosedCandlesRef.current.filter((k: any) => k.time > lastF);
-                    dzFvgCacheRef.current = { key, gaps: deriveZoneFvgs(zonesNow as any, sinceF.length ? [...baseF, ...sinceF] : baseF) };
+                    // the exact candles the zones were just computed from
+                    dzFvgCacheRef.current = { key, gaps: deriveZoneFvgs(zonesNow as any, dzInputRef.current) };
                   }
                   const fv = dzFvgRef.current;
                   const alpha = Math.min(100, Math.max(0, fv.opacity)) / 100;
