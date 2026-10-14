@@ -6,6 +6,7 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import SwapSweepBacktest from "../components/SwapSweepBacktest";
 import SwapSweepResearch from "../components/SwapSweepResearch";
 import SwapSweepContinuation from "../components/SwapSweepContinuation";
+import PatternLab from "../components/PatternLab";
 
 export default function Backtesting() {
   const [strategy, setStrategy] = useState("Short Straddle");
@@ -98,6 +99,9 @@ export default function Backtesting() {
 
       {/* Forward test of the frozen "day high/low sweep continues" rule. Logs only. */}
       <SwapSweepContinuation />
+
+      {/* Martin's hand-picked pattern examples: exact candles + draft rules (no performance yet). */}
+      <PatternLab />
 
       {/* The strategies below have NEVER used market data: their win rates are
           fixed numbers in this file and the daily P&L is Math.random(). They are
