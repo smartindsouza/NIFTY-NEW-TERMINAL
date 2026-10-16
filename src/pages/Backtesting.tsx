@@ -7,6 +7,7 @@ import SwapSweepBacktest from "../components/SwapSweepBacktest";
 import SwapSweepResearch from "../components/SwapSweepResearch";
 import SwapSweepContinuation from "../components/SwapSweepContinuation";
 import PatternLab from "../components/PatternLab";
+import OpeningDropForward from "../components/OpeningDropForward";
 
 export default function Backtesting() {
   const [strategy, setStrategy] = useState("Short Straddle");
@@ -102,6 +103,9 @@ export default function Backtesting() {
 
       {/* Martin's hand-picked pattern examples: exact candles + draft rules (no performance yet). */}
       <PatternLab />
+
+      {/* Forward test of the Pattern Lab's opening drop (rule frozen, logs only). */}
+      <OpeningDropForward />
 
       {/* The strategies below have NEVER used market data: their win rates are
           fixed numbers in this file and the daily P&L is Math.random(). They are

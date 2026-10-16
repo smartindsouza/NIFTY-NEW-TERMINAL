@@ -149,7 +149,7 @@ export const PATTERN_TEST = { testTo: 20260901, horizon: 12, rr: 2, costPts: 2, 
 
 type Sig = { idx: number; stop: number };
 
-function fallFirst(c: PC[], e: number, atr: number, horizon: number): boolean | null {
+export function fallFirst(c: PC[], e: number, atr: number, horizon: number): boolean | null {
   const base = c[e].close;
   for (let k = e + 1, n = 0; k < c.length && n < horizon && sameDay(c[k], c[e]); k++, n++) {
     const down = c[k].low <= base - atr, up = c[k].high >= base + atr;
@@ -215,4 +215,34 @@ export function runPatternTest(cIn: PC[], t = PATTERN_TEST) {
       row('O', 'Opening drop', sigO),
     ],
   };
+}
+
+// ---------------------------------------------------------------------------
+// OPENING DROP — FORWARD TEST (Martin, 16 Oct 2026). The rule above, unchanged,
+// graded only on days from OPENING_FWD.liveFrom (08 and 12 Oct were among his
+// examples, and the 2-year test ended 31 Aug, so only days after today count).
+// Each signal is graded exactly as in the 2-year test: a plain short at the third
+// candle's close, stop above the three candles, 2R target, out by the day's close,
+// 2 points cost; plus whether NIFTY fell 1 x ATR before rising 1 x ATR within an
+// hour. Logs only — nothing is ever traded.
+// ---------------------------------------------------------------------------
+export const OPENING_FWD = { frozenOn: '2026-10-16', liveFrom: 20261019, minSignals: 30 } as const;
+
+export type OpeningGraded = { time: number; day: number; entry: number; stop: number; target: number; exit: number; outcome: string; r: number; fallFirst: boolean | null };
+
+export function gradeOpeningDrops(cIn: PC[], fromDay: number = OPENING_FWD.liveFrom): OpeningGraded[] {
+  const c = [...cIn].sort((a, b) => a.time - b.time);
+  const out: OpeningGraded[] = [];
+  for (let k = 2; k < c.length; k++) {
+    if (ssIstDay(c[k].time) < fromDay) continue;
+    const o = checkOpeningDrop(c, k);
+    if (!o.ok) continue;
+    const entries: SsEntry[] = [{ idx: k, time: c[k].time, kind: 'bear', entry: c[k].close, stop: o.stop! }];
+    const tr = backtestEntries(c, entries, { rr: PATTERN_TEST.rr, sessionExit: true, costPts: PATTERN_TEST.costPts })[0];
+    if (!tr) continue;
+    const atr = atrBefore(c, k);
+    out.push({ time: c[k].time, day: ssIstDay(c[k].time), entry: tr.entry, stop: tr.stop, target: tr.target, exit: tr.exit, outcome: tr.outcome, r: tr.r,
+      fallFirst: atr ? fallFirst(c, k, atr, PATTERN_TEST.horizon) : null });
+  }
+  return out;
 }
