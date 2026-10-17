@@ -63,22 +63,29 @@ function initialHasOption(): boolean {
 export function ChartWorkspace() {
   const isDesktop = useIsDesktop();
   const [hasOption, setHasOption] = useState(initialHasOption);
+  // The index half closed with its ×. It stays MOUNTED (just not shown) so it
+  // comes back instantly, drawings and all, and returns by itself once the
+  // option charts are closed.
+  const [spotHidden, setSpotHidden] = useState(false);
 
   useEffect(() => {
     const onOpen = () => setHasOption(true);
-    const onEmpty = () => setHasOption(false);
+    const onEmpty = () => { setHasOption(false); setSpotHidden(false); };
+    const onIndex = () => setSpotHidden(false);      // an index picked in the option half's search
     window.addEventListener('terminal:open-option', onOpen as any);
     window.addEventListener('terminal:options-empty', onEmpty as any);
+    window.addEventListener('terminal:open-index', onIndex as any);
     return () => {
       window.removeEventListener('terminal:open-option', onOpen as any);
       window.removeEventListener('terminal:options-empty', onEmpty as any);
+      window.removeEventListener('terminal:open-index', onIndex as any);
     };
   }, []);
 
   // Phone and tablet: the original component, unchanged and unaware of panes.
   if (!isDesktop) return <AdvancedChart />;
 
-  const split = hasOption;
+  const split = hasOption && !spotHidden;     // both halves on screen
   // Height chain, desktop. main is a fixed-height flex COLUMN; this wrapper must
   // be a flex-1 CHILD of it (not h-full — a percentage that also overflowed by
   // the banner's height whenever a position was open). Each pane is h-full of
@@ -92,15 +99,16 @@ export function ChartWorkspace() {
       {/* LEFT — spot only. Keyed so it is never remounted when the right pane
           appears or disappears: a remount would rebuild the chart, drop the
           drawings and re-run every query. */}
-      <div className={`${split ? 'w-1/2 border-r border-white/10' : 'w-full'} h-full min-w-0 min-h-0`}>
-        <AdvancedChart key="pane-spot" paneRole="spot" />
+      <div className={`${hasOption && spotHidden ? 'hidden' : split ? 'w-1/2 border-r border-white/10' : 'w-full'} h-full min-w-0 min-h-0`}>
+        <AdvancedChart key="pane-spot" paneRole="spot" split={split} onClosePane={() => setSpotHidden(true)} />
       </div>
 
       {/* RIGHT — option charts in the tab strip they already use. Mounted only
           when there is something to show. */}
-      {split && (
-        <div className="w-1/2 h-full min-w-0 min-h-0">
-          <AdvancedChart key="pane-option" paneRole="option" />
+      {hasOption && (
+        <div className={`${spotHidden ? 'w-full' : 'w-1/2'} h-full min-w-0 min-h-0`}>
+          <AdvancedChart key="pane-option" paneRole="option" split={split} spotHidden={spotHidden}
+            onShowSpot={() => setSpotHidden(false)} />
         </div>
       )}
     </div>

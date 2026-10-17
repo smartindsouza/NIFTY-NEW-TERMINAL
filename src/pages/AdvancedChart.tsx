@@ -3583,6 +3583,15 @@ function persistLogicalRanges() {
   }, 800);
 }
 
+/** An option contract (vs an index, stock or future). Saved tabs carry only the
+ *  symbol and token, so the symbol's CE/PE ending is the fallback test. */
+function isOptionInstr(i: any): boolean {
+  if (!i) return false;
+  const t = String(i.instrument_type || '').toUpperCase();
+  if (t === 'CE' || t === 'PE') return true;
+  return /\d(CE|PE)$/.test(String(i.tradingsymbol || '').toUpperCase());
+}
+
 /**
  * paneRole splits this component into the two halves of the desktop workspace:
  *   'spot'   — index charts ONLY. Never displays an option; anything that would
@@ -3592,7 +3601,16 @@ function persistLogicalRanges() {
  *              so every code path below that is not explicitly gated on a role
  *              behaves exactly as it did before this feature existed.
  */
-export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {}) {
+export function AdvancedChart({ paneRole, split = false, spotHidden = false, onClosePane, onShowSpot }: {
+  paneRole?: 'spot' | 'option';
+  /** Both panes are on screen side by side. The toolbar is then shown ONCE (on the
+   *  option pane, at the right end of the row) and drives both charts. */
+  split?: boolean;
+  /** Option pane only: the spot pane was closed with its ×, so this pane is alone. */
+  spotHidden?: boolean;
+  onClosePane?: () => void;
+  onShowSpot?: () => void;
+} = {}) {
   const isSpotPane = paneRole === 'spot';
   const isOptionPane = paneRole === 'option';
   const isPane = paneRole === 'spot' || paneRole === 'option';
@@ -8009,6 +8027,11 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
   // past what a phone can display.
   useEffect(() => {
     if (!selectedInstrument?.tradingsymbol) return;
+    // The option pane's list holds OPTIONS only. An index that reached it (a
+    // search for NIFTY typed into that half) became a "tab" of its own, so the
+    // list never emptied, the split never collapsed, and the right half sat on a
+    // second copy of the NIFTY chart — Martin's screenshot of 17 Oct.
+    if (isOptionPane && !isOptionInstr(selectedInstrument)) return;
     setOpenCharts(prev => {
       if (prev.some(c => c.tradingsymbol === selectedInstrument.tradingsymbol)) return prev;
       return [...prev, {
@@ -8019,6 +8042,136 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       }].slice(-5);
     });
   }, [selectedInstrument?.tradingsymbol]);
+
+  // ── Split view: each half shows only what it is for ──────────────────────────
+  // The option pane must never fall back to the index. With no contract on it,
+  // it moves to another open option chart, or — when none are left — tells the
+  // workspace to collapse back to one full-width chart. Anything that is not an
+  // option is handed to the spot pane instead of being shown here. The spot pane
+  // does the mirror image: an option that lands on it goes to the option pane.
+  useEffect(() => {
+    if (!isOptionPane) return;
+    if (selectedInstrument && !isOptionInstr(selectedInstrument)) {
+      try { window.dispatchEvent(new CustomEvent('terminal:open-index', { detail: selectedInstrument })); } catch (e) {}
+      setSelectedInstrument(null);
+      return;
+    }
+    if (selectedInstrument) return;
+    const opts = openCharts.filter((c) => isOptionInstr(c));
+    if (opts.length !== openCharts.length) { setOpenCharts(opts); return; }
+    if (opts.length) { setSelectedInstrument(opts[opts.length - 1]); return; }
+    try { window.dispatchEvent(new CustomEvent('terminal:options-empty')); } catch (e) {}
+  }, [isOptionPane, selectedInstrument, openCharts]);
+  useEffect(() => {
+    if (!isSpotPane || !selectedInstrument || !isOptionInstr(selectedInstrument)) return;
+    openOptionChart(selectedInstrument);
+    setSelectedInstrument(null);
+  }, [isSpotPane, selectedInstrument]);
+  // The spot pane receives indices/stocks picked in the option pane's search.
+  useEffect(() => {
+    if (!isSpotPane) return;
+    const onIdx = (e: any) => {
+      const i = e?.detail; if (!i) return;
+      // The four indices go through the index switcher, exactly as picking them
+      // from its menu does; anything else (a stock, a future) is shown as is.
+      const tok = String(i.instrument_token || ''), sym = String(i.tradingsymbol || '').toUpperCase();
+      const u = tok === '256265' || sym === 'NIFTY 50' ? 'NIFTY' : tok === '260105' || sym === 'NIFTY BANK' ? 'BANKNIFTY'
+        : sym === 'SENSEX' ? 'SENSEX' : /GIFT/.test(sym) && !/FUT/.test(sym) ? 'GIFT' : null;
+      if (u) { setUnderlying(u as any); setSelectedInstrument(null); } else setSelectedInstrument(i);
+    };
+    window.addEventListener('terminal:open-index', onIdx as any);
+    return () => window.removeEventListener('terminal:open-index', onIdx as any);
+  }, [isSpotPane]);
+
+  /** The option pane's × : close every option chart, which collapses the split. */
+  const closeAllOptionCharts = () => {
+    for (const c of openCharts) { try { dismissedChart.add(c.tradingsymbol); } catch (e) {} }
+    setOptionMenuOpen(false);
+    setOpenCharts([]);
+    setSelectedInstrument(null);
+  };
+
+  // ── Split view: ONE toolbar for both charts ──────────────────────────────────
+  // In the split the toolbar is drawn once, on the option pane (the right end of
+  // the row), and every setting it changes is copied to the other pane. These are
+  // all settings that are already saved globally, so both panes would read the
+  // same values after a reload anyway — this only makes it immediate. Drawn
+  // things (R:R boxes, lines) stay with the chart they were drawn on.
+  const paneSync: Record<string, [any, (v: any) => void]> = {
+    quickTradeEnabled: [quickTradeEnabled, setQuickTradeEnabled], trailTpOn: [trailTpOn, setTrailTpOn],
+    rrArm: [rrArm, setRrArm], rrCapital: [rrCapital, setRrCapital],
+    showPdhPdl: [showPdhPdl, setShowPdhPdl], showOpeningRange: [showOpeningRange, setShowOpeningRange],
+    showConfSignals: [showConfSignals, setShowConfSignals], structDays: [structDays, setStructDays],
+    showPinBars: [showPinBars, setShowPinBars], showSwapSweep: [showSwapSweep, setShowSwapSweep], ssMode: [ssMode, setSsMode],
+    showGiftDiv: [showGiftDiv, setShowGiftDiv], sessionBreak: [sessionBreak, setSessionBreak],
+    structBullColor: [structBullColor, setStructBullColor], structBearColor: [structBearColor, setStructBearColor],
+    showBos: [showBos, setShowBos], favIndicators: [favIndicators, setFavIndicators],
+    showStructure: [showStructure, setShowStructure], showOrderBlocks: [showOrderBlocks, setShowOrderBlocks],
+    showFvg: [showFvg, setShowFvg], showDsZones: [showDsZones, setShowDsZones], dzStyle: [dzStyle, setDzStyle],
+    dzFvg: [dzFvg, setDzFvg], dsZoneOpacity: [dsZoneOpacity, setDsZoneOpacity],
+    levelAlertsOn: [levelAlertsOn, setLevelAlertsOn], zoneTapAlertsOn: [zoneTapAlertsOn, setZoneTapAlertsOn],
+    breakoutAlertsOn: [breakoutAlertsOn, setBreakoutAlertsOn], pdhColor: [pdhColor, setPdhColor], pdlColor: [pdlColor, setPdlColor],
+    fvgBullColor: [fvgBullColor, setFvgBullColor], fvgBearColor: [fvgBearColor, setFvgBearColor], fvgOpacity: [fvgOpacity, setFvgOpacity],
+    orHighColor: [orHighColor, setOrHighColor], orLowColor: [orLowColor, setOrLowColor],
+    levelAlertCooldown: [levelAlertCooldown, setLevelAlertCooldown], levelAlertRearm: [levelAlertRearm, setLevelAlertRearm],
+    zoneTapMinSize: [zoneTapMinSize, setZoneTapMinSize], breakoutAlertMode: [breakoutAlertMode, setBreakoutAlertMode],
+    pdhPdlWidth: [pdhPdlWidth, setPdhPdlWidth], pdhPdlStyle: [pdhPdlStyle, setPdhPdlStyle],
+    showSnR: [showSnR, setShowSnR], supportColor: [supportColor, setSupportColor], resistanceColor: [resistanceColor, setResistanceColor],
+    snrWidth: [snrWidth, setSnrWidth], snrStyle: [snrStyle, setSnrStyle], showOiBars: [showOiBars, setShowOiBars], showRsi: [showRsi, setShowRsi],
+    showHLevels: [showHLevels, setShowHLevels], hLevelsStyle: [hLevelsStyle, setHLevelsStyle], hLevelsWidth: [hLevelsWidth, setHLevelsWidth],
+    showFiftyPercentLevels: [showFiftyPercentLevels, setShowFiftyPercentLevels], fiftyPercentColor: [fiftyPercentColor, setFiftyPercentColor],
+    showVolume: [showVolume, setShowVolume], showBB: [showBB, setShowBB], bbPeriod: [bbPeriod, setBbPeriod], bbStdDev: [bbStdDev, setBbStdDev],
+    bbColor: [bbColor, setBbColor], oiMaxBarWidth: [oiMaxBarWidth, setOiMaxBarWidth], oiBarGap: [oiBarGap, setOiBarGap],
+    oiBarThickness: [oiBarThickness, setOiBarThickness], oiCallColor: [oiCallColor, setOiCallColor], oiPutColor: [oiPutColor, setOiPutColor],
+    rsiColor: [rsiColor, setRsiColor], rsiLineWidth: [rsiLineWidth, setRsiLineWidth], rsiLineStyle: [rsiLineStyle, setRsiLineStyle],
+    rsiSmaLineWidth: [rsiSmaLineWidth, setRsiSmaLineWidth], rsiSmaLineStyle: [rsiSmaLineStyle, setRsiSmaLineStyle],
+    rsiSmaColor: [rsiSmaColor, setRsiSmaColor], rsiOverboughtColor: [rsiOverboughtColor, setRsiOverboughtColor],
+    rsiOversoldColor: [rsiOversoldColor, setRsiOversoldColor],
+  };
+  const paneSyncSettersRef = useRef<Record<string, (v: any) => void>>({});
+  const paneSyncLastRef = useRef<Record<string, string> | null>(null);
+  const syncSer = (v: any) => { try { return JSON.stringify(v) ?? 'u'; } catch (e) { return String(v); } };
+  if (isPane) { const m: Record<string, (v: any) => void> = {}; for (const k in paneSync) m[k] = paneSync[k][1]; paneSyncSettersRef.current = m; }
+  useEffect(() => {
+    if (!isPane) return;
+    const cur: Record<string, string> = {};
+    for (const k in paneSync) cur[k] = syncSer(paneSync[k][0]);
+    const last = paneSyncLastRef.current;
+    paneSyncLastRef.current = cur;
+    if (!last) return;                         // first render: nothing has changed yet
+    for (const k in cur) {
+      if (cur[k] === last[k]) continue;
+      try { window.dispatchEvent(new CustomEvent('terminal:pane-sync', { detail: { from: paneRole, key: k, value: paneSync[k][0] } })); } catch (e) {}
+    }
+  });
+  const [peerRrBox, setPeerRrBox] = useState(false);
+  useEffect(() => {
+    if (!isPane) return;
+    const onSync = (e: any) => {
+      const d = e?.detail; if (!d || d.from === paneRole) return;
+      const set = paneSyncSettersRef.current[d.key]; if (!set) return;
+      // Recorded as already seen, so applying it is not echoed straight back.
+      if (paneSyncLastRef.current) paneSyncLastRef.current[d.key] = syncSer(d.value);
+      set(d.value);
+    };
+    const onCmd = (e: any) => {
+      const d = e?.detail; if (!d || d.from === paneRole) return;
+      if (d.cmd === 'tf' && d.value) setTimeframe(d.value);
+      else if (d.cmd === 'refresh') { try { reloadChartRef.current(); } catch (err) {} }
+      else if (d.cmd === 'rr-clear') { setRrBox(null); setRrArm(null); }
+      else if (d.cmd === 'rr-box') setPeerRrBox(!!d.value);
+    };
+    window.addEventListener('terminal:pane-sync', onSync as any);
+    window.addEventListener('terminal:pane-cmd', onCmd as any);
+    return () => { window.removeEventListener('terminal:pane-sync', onSync as any); window.removeEventListener('terminal:pane-cmd', onCmd as any); };
+  }, [isPane, paneRole]);
+  const paneCmd = (cmd: string, value?: any) => {
+    if (!isPane) return;
+    try { window.dispatchEvent(new CustomEvent('terminal:pane-cmd', { detail: { from: paneRole, cmd, value } })); } catch (e) {}
+  };
+  useEffect(() => { paneCmd('rr-box', !!rrBox); }, [!!rrBox]);
+  // The shared toolbar lives on the option pane while both are on screen.
+  const toolbarHere = !(isSpotPane && split);
 
   // The signal list comes from the SERVER's log — the same rows the scorecard
   // grades — so an arrow always has a paper trail and can never repaint.
@@ -11689,7 +11842,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             unbroken title line instead of one clipped to a pane.
             200% + the 1px divider between the panes. Only in the split; the
             full-width chart and mobile are already as wide as they can be. */}
-        {isOptionPane && (
+        {isOptionPane && split && (
           <div
             /* The option pane does not render the header, but it must RESERVE its
                height. Hiding it outright started that pane's stack 36px higher, so
@@ -11701,7 +11854,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
             aria-hidden="true"
           />
         )}
-        <div className={`relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-row md:items-center md:h-9 md:flex-nowrap md:min-w-0 max-md:pr-24 md:px-3 md:bg-background ${isPane && !isOptionPane ? 'md:w-[calc(200%_+_1px)] md:z-30' : ''} ${isOptionPane ? 'md:hidden' : ''}`}>
+        <div className={`relative flex items-center gap-2 md:gap-3 flex-wrap md:flex-row md:items-center md:h-9 md:flex-nowrap md:min-w-0 max-md:pr-24 md:px-3 md:bg-background ${isSpotPane && split ? 'md:w-[calc(200%_+_1px)] md:z-30' : ''} ${isOptionPane && split ? 'md:hidden' : ''}`}>
           {/* Row 1 — title and clock. shrink-0 and no truncate: the title was
               still ending in an ellipsis after the row was widened, because the
               flex algorithm shrinks every shrinkable child proportionally and
@@ -11864,7 +12017,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               up. Same reservation trick as the option-reality strip: identical
               height on both sides, so alignment holds by construction rather than
               by the two panes happening to contain the same things. */}
-          {isOptionPane && <div className="hidden md:block h-9 shrink-0" aria-hidden="true" />}
+          {isOptionPane && split && <div className="hidden md:block h-9 shrink-0" aria-hidden="true" />}
 
           {/* Two dropdowns in place of the tab strip, on every size. Desktop had
               a scrolling strip of index tabs plus one tab per opened option chart,
@@ -11999,6 +12152,30 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               </div>
               );
             })()}
+
+            {/* Split view: close this half. On the option side that closes its
+                option charts (the split then goes back to one full chart); on
+                the index side it hands the whole width to the option chart. */}
+            {isPane && (split || (isOptionPane && spotHidden)) && (
+              <button
+                onClick={() => {
+                  setIndexMenuOpen(false); setOptionMenuOpen(false);
+                  if (isOptionPane) closeAllOptionCharts(); else onClosePane?.();
+                }}
+                title={isOptionPane ? 'Close the option chart' : 'Close this chart'}
+                aria-label={isOptionPane ? 'Close the option chart' : 'Close this chart'}
+                className="hidden md:flex shrink-0 items-center justify-center h-8 w-8 rounded-md border border-border/60 bg-card text-muted-foreground hover:text-rose-400 hover:border-rose-400/50 transition-colors">
+                <X size={14} />
+              </button>
+            )}
+            {isOptionPane && spotHidden && (
+              <button
+                onClick={() => onShowSpot?.()}
+                title="Show the index chart beside this one"
+                className="hidden md:flex shrink-0 items-center gap-1 h-8 px-2.5 rounded-md border border-border/60 bg-card text-xs font-mono font-bold text-muted-foreground hover:text-foreground transition-colors">
+                <Plus size={13} /> Index chart
+              </button>
+            )}
           </div>
 
           {/* The old tab strip is retired — the dropdowns above replace it on every
@@ -12073,7 +12250,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               and the premium rule; only its tab is removed. */}
           <TradePnl sync={premSync} />
           </div>
-        <div ref={bottomBarRef} className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-card md:bg-transparent border-t border-border md:border-0 px-3 py-1.5 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-nowrap md:flex-wrap justify-end md:shrink md:min-w-0 w-screen md:w-auto md:ml-auto md:mb-0 md:rounded-none md:border-0 md:bg-transparent max-w-[100vw] overflow-x-hidden md:overflow-visible">
+        <div ref={bottomBarRef} className={`${toolbarHere ? '' : 'md:hidden'} fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-card md:bg-transparent border-t border-border md:border-0 px-3 py-1.5 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-nowrap md:flex-wrap justify-end md:shrink md:min-w-0 w-screen md:w-auto md:ml-auto md:mb-0 md:rounded-none md:border-0 md:bg-transparent max-w-[100vw] overflow-x-hidden md:overflow-visible`}>
           <div className="flex flex-1 items-center gap-1.5 sm:gap-2 justify-end min-w-0 md:contents">
           {/* Desktop: an icon until clicked. Mobile: unchanged — the field is
               always shown, which is what the bottom toolbar was built around. */}
@@ -12105,16 +12282,19 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
               onClick={() => {
                 // A placed box is cleared by the same button, so the tool needs no
                 // separate delete affordance on a phone.
-                if (rrBox) { setRrBox(null); setRrArm(null); setRrMenuOpen(false); return; }
+                // Split view: one button for both charts, so it clears a box on
+                // either of them.
+                const anyBox = !!rrBox || (split && peerRrBox);
+                if (anyBox) { setRrBox(null); setRrArm(null); setRrMenuOpen(false); if (split) paneCmd('rr-clear'); return; }
                 setRrMenuOpen(o => !o);
               }}
-              title={rrBox ? 'Clear risk:reward box' : 'Risk:reward tool'}
+              title={(rrBox || (split && peerRrBox)) ? 'Clear risk:reward box' : 'Risk:reward tool'}
               className={`flex items-center justify-center h-9 w-9 rounded-md transition-colors ${
-                rrArm ? 'bg-primary/25 text-primary' : rrBox ? 'bg-emerald-500/15 text-emerald-300' : 'bg-muted/40 text-muted-foreground hover:text-foreground'}`}
+                rrArm ? 'bg-primary/25 text-primary' : (rrBox || (split && peerRrBox)) ? 'bg-emerald-500/15 text-emerald-300' : 'bg-muted/40 text-muted-foreground hover:text-foreground'}`}
             >
               <Scale size={17} />
             </button>
-            {rrMenuOpen && !rrBox && (
+            {rrMenuOpen && !rrBox && !(split && peerRrBox) && (
               <div className="fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)] md:bottom-full md:mb-2 md:right-0 z-[90] md:w-48 bg-card border border-white/10 rounded-lg shadow-2xl md:shadow-xl overflow-hidden">
                 {/* Capital: optional. Leave it at 0 and the tags show points and
                     percent as before; set it and they add the rupee loss at SL
@@ -12150,7 +12330,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
           <div className="flex items-center gap-2 shrink-0 md:order-4">
             <select
               value={timeframe}
-              onChange={(e) => setTimeframe(e.target.value)}
+              onChange={(e) => { setTimeframe(e.target.value); if (split) paneCmd('tf', e.target.value); }}
               className="appearance-none text-center bg-muted/40 text-foreground border border-0 text-xs md:text-sm rounded-md px-3 focus:outline-none focus:ring-1 focus:ring-primary h-9 [&::-ms-expand]:hidden shrink-0"
             >
               <option value="1">1m</option>
@@ -12899,6 +13079,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                   // take the other half down with it, and the whole point of two
                   // buttons is that each half can be refreshed on its own.
                   try { reloadChartRef.current(); } catch (e) {}
+                  if (split) paneCmd('refresh');      // one toolbar: refresh both halves
                   setTimeout(() => setTbReloading(false), 900);
                   return;
                 }
@@ -12906,7 +13087,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
                 setTimeout(() => { try { window.location.reload(); } catch (e) {} }, 150);
               }}
               className={`${isPane ? '' : 'md:hidden'} shrink-0 md:order-4 flex items-center justify-center h-9 w-9 rounded-md bg-muted/40 text-foreground/80`}
-              title={isPane ? 'Refresh this chart' : 'Reload chart and hard-refresh the app'}
+              title={split ? 'Refresh both charts' : isPane ? 'Refresh this chart' : 'Reload chart and hard-refresh the app'}
             >
               <RefreshCw size={18} className={tbReloading ? 'animate-spin' : ''} />
             </button>
@@ -14010,7 +14191,7 @@ export function AdvancedChart({ paneRole }: { paneRole?: 'spot' | 'option' } = {
       {/* The strip above is the option pane's only extra row. In split view its
           height is reserved on the other side too, so both charts end up the same
           height instead of the option side losing a row's worth. */}
-      {isPane && !(isOptionView && optionReality) && <div className="h-7 shrink-0" />}
+      {split && !(isOptionView && optionReality) && <div className="h-7 shrink-0" />}
 
       {/* Armed triggers — always visible while any exist. A pending instruction to
           buy or sell that the user cannot SEE is the thing most likely to surprise
