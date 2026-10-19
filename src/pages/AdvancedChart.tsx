@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState, useEffect } from "react";
+import React, { useMemo, useRef, useState, useEffect, useLayoutEffect } from "react";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
 import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search, ChartNoAxesCombined, TrendingUp, Star, Bell } from "lucide-react";
 import { toast } from "sonner";
@@ -8091,15 +8091,21 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     setSelectedInstrument(null);
   };
 
-  // ── Split view: ONE toolbar for both charts ──────────────────────────────────
-  // In the split the toolbar is drawn once, on the option pane (the right end of
-  // the row), and every setting it changes is copied to the other pane. These are
-  // all settings that are already saved globally, so both panes would read the
-  // same values after a reload anyway — this only makes it immediate. Drawn
-  // things (R:R boxes, lines) stay with the chart they were drawn on.
+  // ── Split view: shared toolbar, per-chart timeframe and indicators ───────────
+  // In the split, search, R:R, Quick Trade, trailing TP, refresh and sync are
+  // drawn ONCE (on the option pane, the right end of the row) and act on both
+  // charts; the settings below are copied to the other pane. Timeframe and
+  // Indicators stay on EACH half and work for that chart alone (Martin, 19 Oct).
+  // Drawn things (R:R boxes, lines) stay with the chart they were drawn on.
   const paneSync: Record<string, [any, (v: any) => void]> = {
     quickTradeEnabled: [quickTradeEnabled, setQuickTradeEnabled], trailTpOn: [trailTpOn, setTrailTpOn],
     rrArm: [rrArm, setRrArm], rrCapital: [rrCapital, setRrCapital],
+  };
+  // Each half's own indicator settings. The settings are also saved under their
+  // usual global keys (the phone reads those), so each half keeps a snapshot of
+  // its own and restores it when it loads — otherwise the option half's choices
+  // would overwrite the index half's after a reload, and vice versa.
+  const paneInd: Record<string, [any, (v: any) => void]> = {
     showPdhPdl: [showPdhPdl, setShowPdhPdl], showOpeningRange: [showOpeningRange, setShowOpeningRange],
     showConfSignals: [showConfSignals, setShowConfSignals], structDays: [structDays, setStructDays],
     showPinBars: [showPinBars, setShowPinBars], showSwapSweep: [showSwapSweep, setShowSwapSweep], ssMode: [ssMode, setSsMode],
@@ -8128,6 +8134,33 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     rsiSmaColor: [rsiSmaColor, setRsiSmaColor], rsiOverboughtColor: [rsiOverboughtColor, setRsiOverboughtColor],
     rsiOversoldColor: [rsiOversoldColor, setRsiOversoldColor],
   };
+  const paneIndKey = `paneIndicators:${paneRole}`;
+  useLayoutEffect(() => {
+    if (!isPane) return;
+    try {
+      const raw = localStorage.getItem(paneIndKey);
+      const saved = raw ? JSON.parse(raw) : null;
+      if (saved && typeof saved === 'object') { for (const k in paneInd) if (k in saved) paneInd[k][1](saved[k]); }
+      else {
+        // First load on this device: start this half's own copy from the
+        // current settings, so a half that is never touched still keeps them
+        // when the other half changes the global ones.
+        const snap: Record<string, any> = {};
+        for (const k in paneInd) snap[k] = paneInd[k][0];
+        localStorage.setItem(paneIndKey, JSON.stringify(snap));
+      }
+    } catch (e) {}
+  }, []);
+  const paneIndRunsRef = useRef(0);
+  useEffect(() => {
+    if (!isPane) return;
+    // Skip the very first run: it still sees the values from before the
+    // snapshot above was applied, and would write them over it.
+    if (paneIndRunsRef.current++ === 0) return;
+    const snap: Record<string, any> = {};
+    for (const k in paneInd) snap[k] = paneInd[k][0];
+    try { localStorage.setItem(paneIndKey, JSON.stringify(snap)); } catch (e) {}
+  }, Object.keys(paneInd).map((k) => paneInd[k][0]));
   const paneSyncSettersRef = useRef<Record<string, (v: any) => void>>({});
   const paneSyncLastRef = useRef<Record<string, string> | null>(null);
   const syncSer = (v: any) => { try { return JSON.stringify(v) ?? 'u'; } catch (e) { return String(v); } };
@@ -8156,8 +8189,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     };
     const onCmd = (e: any) => {
       const d = e?.detail; if (!d || d.from === paneRole) return;
-      if (d.cmd === 'tf' && d.value) setTimeframe(d.value);
-      else if (d.cmd === 'refresh') { try { reloadChartRef.current(); } catch (err) {} }
+      if (d.cmd === 'refresh') { try { reloadChartRef.current(); } catch (err) {} }
       else if (d.cmd === 'rr-clear') { setRrBox(null); setRrArm(null); }
       else if (d.cmd === 'rr-box') setPeerRrBox(!!d.value);
     };
@@ -8170,8 +8202,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     try { window.dispatchEvent(new CustomEvent('terminal:pane-cmd', { detail: { from: paneRole, cmd, value } })); } catch (e) {}
   };
   useEffect(() => { paneCmd('rr-box', !!rrBox); }, [!!rrBox]);
-  // The shared toolbar lives on the option pane while both are on screen.
-  const toolbarHere = !(isSpotPane && split);
+  // The shared toolbar buttons live on the option pane while both are on screen;
+  // the index half keeps only its own timeframe and Indicators.
+  const sharedHidden = isSpotPane && split ? 'md:hidden' : '';
 
   // The signal list comes from the SERVER's log — the same rows the scorecard
   // grades — so an arrow always has a paper trail and can never repaint.
@@ -12250,7 +12283,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               and the premium rule; only its tab is removed. */}
           <TradePnl sync={premSync} />
           </div>
-        <div ref={bottomBarRef} className={`${toolbarHere ? '' : 'md:hidden'} fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-card md:bg-transparent border-t border-border md:border-0 px-3 py-1.5 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-nowrap md:flex-wrap justify-end md:shrink md:min-w-0 w-screen md:w-auto md:ml-auto md:mb-0 md:rounded-none md:border-0 md:bg-transparent max-w-[100vw] overflow-x-hidden md:overflow-visible`}>
+        <div ref={bottomBarRef} className={`fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-card md:bg-transparent border-t border-border md:border-0 px-3 py-1.5 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-nowrap md:flex-wrap justify-end md:shrink md:min-w-0 w-screen md:w-auto md:ml-auto md:mb-0 md:rounded-none md:border-0 md:bg-transparent max-w-[100vw] overflow-x-hidden md:overflow-visible`}>
           <div className="flex flex-1 items-center gap-1.5 sm:gap-2 justify-end min-w-0 md:contents">
           {/* Desktop: an icon until clicked. Mobile: unchanged — the field is
               always shown, which is what the bottom toolbar was built around. */}
@@ -12259,14 +12292,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               onClick={() => setSearchExpanded(true)}
               title="Search symbol"
               aria-label="Search symbol"
-              className="hidden md:flex md:order-1 shrink-0 items-center justify-center h-9 w-9 rounded-md bg-muted/40 text-muted-foreground hover:text-foreground transition-colors"
+              className={`hidden md:flex md:order-1 shrink-0 items-center justify-center h-9 w-9 rounded-md bg-muted/40 text-muted-foreground hover:text-foreground transition-colors ${sharedHidden}`}
             >
               <Search size={17} />
             </button>
           )}
           <div
             ref={searchWrapRef}
-            className={`flex-1 min-w-0 sm:w-auto md:order-1 ${searchExpanded ? 'md:block md:w-64 md:flex-none' : 'md:hidden'}`}
+            className={`flex-1 min-w-0 sm:w-auto md:order-1 ${searchExpanded && !sharedHidden ? 'md:block md:w-64 md:flex-none' : 'md:hidden'}`}
           >
           <SymbolSearch 
             onSelect={setSelectedInstrument} 
@@ -12277,7 +12310,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           {/* Risk:Reward tool — sits between search and timeframe. md:order-2 puts
               it in the same slot on desktop, where the toolbar children are
               explicitly ordered rather than laid out in source order. */}
-          <div className="relative shrink-0 md:order-2" ref={rrMenuRef}>
+          <div className={`relative shrink-0 md:order-2 ${sharedHidden}`} ref={rrMenuRef}>
             <button
               onClick={() => {
                 // A placed box is cleared by the same button, so the tool needs no
@@ -12330,7 +12363,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           <div className="flex items-center gap-2 shrink-0 md:order-4">
             <select
               value={timeframe}
-              onChange={(e) => { setTimeframe(e.target.value); if (split) paneCmd('tf', e.target.value); }}
+              onChange={(e) => setTimeframe(e.target.value)}
               className="appearance-none text-center bg-muted/40 text-foreground border border-0 text-xs md:text-sm rounded-md px-3 focus:outline-none focus:ring-1 focus:ring-primary h-9 [&::-ms-expand]:hidden shrink-0"
             >
               <option value="1">1m</option>
@@ -13060,12 +13093,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             onClick={() => setTrailTpOn(v => !v)}
             title={trailTpOn ? 'Trailing TP ON — target climbs 20% a rung, stop follows one rung behind' : 'Trailing TP OFF — remaining half exits at TP2'}
             aria-label="Trailing TP"
-            className={`${isReferenceChart ? 'hidden' : 'flex'} items-center justify-center h-9 w-9 shrink-0 md:order-2 rounded-md border border-0 transition-colors ${trailTpOn ? 'bg-emerald-500/20 text-emerald-400' : 'bg-muted/40 text-muted-foreground'}`}
+            className={`${isReferenceChart ? 'hidden' : 'flex'} ${sharedHidden} items-center justify-center h-9 w-9 shrink-0 md:order-2 rounded-md border border-0 transition-colors ${trailTpOn ? 'bg-emerald-500/20 text-emerald-400' : 'bg-muted/40 text-muted-foreground'}`}
           >
             <TrendingUp size={17} />
           </button>
           {(
-          <div className={`ml-auto md:ml-0 ${isReferenceChart ? 'hidden' : 'flex'} items-center justify-center gap-2 h-9 w-9 shrink-0 md:order-2 cursor-pointer rounded-md border border-0 transition-colors ${quickTradeEnabled ? "bg-primary/20" : "bg-muted/40"}`} onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled' : 'Quick Trade disabled'); } catch (e) {} }} title="Quick Trade">
+          <div className={`ml-auto md:ml-0 ${isReferenceChart ? 'hidden' : 'flex'} ${sharedHidden} items-center justify-center gap-2 h-9 w-9 shrink-0 md:order-2 cursor-pointer rounded-md border border-0 transition-colors ${quickTradeEnabled ? "bg-primary/20" : "bg-muted/40"}`} onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled' : 'Quick Trade disabled'); } catch (e) {} }} title="Quick Trade">
              {/* Icon on both platforms now; the desktop label and toggle are gone.
                  Colour carries the state, as it already did on mobile. */}
              <Zap size={18} className={quickTradeEnabled ? 'text-primary' : 'text-muted-foreground'} />
@@ -13086,7 +13119,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 try { window.dispatchEvent(new CustomEvent('chart_reload')); } catch (e) {}
                 setTimeout(() => { try { window.location.reload(); } catch (e) {} }, 150);
               }}
-              className={`${isPane ? '' : 'md:hidden'} shrink-0 md:order-4 flex items-center justify-center h-9 w-9 rounded-md bg-muted/40 text-foreground/80`}
+              className={`${isPane ? '' : 'md:hidden'} ${sharedHidden} shrink-0 md:order-4 flex items-center justify-center h-9 w-9 rounded-md bg-muted/40 text-foreground/80`}
               title={split ? 'Refresh both charts' : isPane ? 'Refresh this chart' : 'Reload chart and hard-refresh the app'}
             >
               <RefreshCw size={18} className={tbReloading ? 'animate-spin' : ''} />
@@ -13108,7 +13141,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                  had it at all, which was not deliberate: the button is one of two
                  ways to pull positions, and hiding it left only the other. Same
                  square footprint as the reload button beside it. */
-              className={`shrink-0 md:order-4 flex items-center justify-center h-9 w-9 rounded-md transition-colors ${
+              className={`${sharedHidden} shrink-0 md:order-4 flex items-center justify-center h-9 w-9 rounded-md transition-colors ${
                 resolvedTheme === 'light' ? 'bg-emerald-600/15 text-emerald-700 hover:bg-emerald-600/25' : 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25'}`}
               title="Sync open positions from Zerodha"
               aria-label="Sync open positions from Zerodha"
