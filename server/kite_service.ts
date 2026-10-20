@@ -150,6 +150,19 @@ let lastInstrumentsFetch = 0;
 let bfoInstrumentsCache: any[] | null = null;
 let lastBfoInstrumentsFetch = 0;
 
+/** The NFO contract file, from the same day-long cache the option chain uses
+ *  (read-only; used by /api/market-snapshot for the nearest-expiry OI). */
+export async function getNfoInstruments(): Promise<any[]> {
+  const now = Date.now();
+  if (nfoInstrumentsCache && now - lastInstrumentsFetch < 24 * 60 * 60 * 1000) return nfoInstrumentsCache;
+  const kc = getKiteClient();
+  // @ts-ignore
+  if (!kc || !kc.access_token) return nfoInstrumentsCache || [];
+  nfoInstrumentsCache = await kc.getInstruments('NFO');
+  lastInstrumentsFetch = now;
+  return nfoInstrumentsCache || [];
+}
+
 export function clearInstrumentsCache() {
   allInstrumentsCache = null;
   lastAllInstrumentsFetch = 0;
