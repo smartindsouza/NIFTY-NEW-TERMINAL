@@ -23,6 +23,7 @@ import { getFiiData, getCashFiiDii } from './server/fii_service';
 import { registerGapScorecard, toISTString } from './server/gap_scorecard';
 import { registerCalendar, isNseHoliday as calIsNseHoliday, holidayName } from './server/calendar_service';
 import { registerMarketSnapshot } from './server/market_snapshot';
+import { registerBias } from './server/bias';
 import { registerTriggers, armedTriggerTokens, onTickForTriggers } from './server/triggers';
 import { registerLeverage } from './server/leverage';
 import { GAP_CONFIG } from './server/config/gapScorecard';
@@ -3330,6 +3331,8 @@ setInterval(() => {
 
   // Read-only market snapshot for the external 09:32 IST analysis (SNAPSHOT_API_KEY).
   registerMarketSnapshot(app);
+  // Today's Bias: the 09:33 IST note posted by the scheduled task (same key).
+  registerBias(app, db);
 
   // Gap Risk Gauge: pre-close estimate of EXPECTED OVERNIGHT MAGNITUDE (not direction).
   // Combines India VIX with the nearest-expiry ATM straddle (the option market's own

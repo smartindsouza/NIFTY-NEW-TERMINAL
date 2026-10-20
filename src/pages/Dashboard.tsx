@@ -9,6 +9,7 @@ import { computeMasterSignal } from '@/lib/decisionEngine';
 import { motion } from 'motion/react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { notificationService } from '../lib/notificationService';
+import { TodaysBiasCard } from '../components/TodaysBiasCard';
 
 export function Dashboard() {
   const [timeframe, setTimeframe] = useState(() => {
@@ -302,6 +303,10 @@ export function Dashboard() {
 
   return (
     <div className="p-4 md:p-8 space-y-4 md:space-y-6 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto font-sans tracking-wide pb-20">
+      {/* Today's Bias — the 09:33 IST note from the scheduled analysis. First on
+          the screen so it is seen without scrolling; collapsible. */}
+      <TodaysBiasCard />
+
       {/* Header — elevated hero */}
       <div className="relative bg-card border border-border rounded-xl overflow-hidden">
         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />

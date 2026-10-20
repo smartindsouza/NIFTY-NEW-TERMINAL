@@ -12,6 +12,8 @@ import { useGlobalWebSocket } from './hooks/useWebSocket';
 import { ActivePositions } from './components/ActivePositions';
 import { Toaster } from '@/components/ui/sonner';
 import { DiagnosticsPanel } from './components/DiagnosticsPanel';
+// Today's Bias alert: polls the 09:33 note and pops up once per day, on any screen.
+import { BiasAlert } from './components/BiasAlert';
 import { Cpu } from 'lucide-react';
 import { useUserSettings, useResolvedTheme } from './hooks/useUserSettings';
 
@@ -255,6 +257,7 @@ export default function App() {
           </div>
         )}
       </div>
+      <BiasAlert />
       <Toaster
         theme="dark"
         position="top-center"
