@@ -137,6 +137,8 @@ async function main() {
   assert.equal(snapshotKeyOk('abc', 'abc'), true);
   assert.equal(snapshotKeyOk('abd', 'abc'), false);
   assert.equal(snapshotKeyOk(undefined, 'abc'), false);
+  assert.equal(snapshotKeyOk('abc', ' "abc"\n'), true, 'spaces/quotes around the Railway value are ignored');
+  assert.equal(snapshotKeyOk('', '  '), false);
 
   // The real route over HTTP: 401 without/with a wrong key, 503 when Kite is not set up.
   process.env.SNAPSHOT_API_KEY = 'test-key-123';
@@ -145,7 +147,9 @@ async function main() {
   const srv = http.createServer(app); await new Promise<void>((r) => srv.listen(0, r));
   const port = (srv.address() as any).port;
   const get = async (q: string) => { const r = await fetch(`http://127.0.0.1:${port}/api/market-snapshot${q}`); return { s: r.status, j: await r.json() }; };
-  assert.equal((await get('')).s, 401);
+  const noKey = await get('');
+  assert.equal(noKey.s, 401); assert.equal(noKey.j.key_configured_on_server, true);
+  assert.ok(!JSON.stringify(noKey.j).includes('test-key-123'), 'the key is never echoed');
   assert.equal((await get('?key=wrong')).s, 401);
   const live = await get('?key=test-key-123');
   assert.equal(live.s, 503); assert.equal(live.j.session_valid, false);

@@ -195,8 +195,16 @@ export async function buildMarketSnapshot(deps: SnapshotDeps): Promise<{ status:
   };
 }
 
+/** The configured key, tolerant of how it was pasted into Railway: surrounding
+ *  spaces, a trailing newline or wrapping quotes are ignored. */
+export function configuredSnapshotKey(raw = process.env.SNAPSHOT_API_KEY): string {
+  return String(raw || '').trim().replace(/^(['"])(.*)\1$/, '$2').trim();
+}
+
 /** Constant-time key check. A missing env var rejects every call. */
-export function snapshotKeyOk(given: unknown, expected = process.env.SNAPSHOT_API_KEY): boolean {
+export function snapshotKeyOk(given: unknown, expectedRaw = process.env.SNAPSHOT_API_KEY): boolean {
+  const expected = configuredSnapshotKey(expectedRaw);
+  if (typeof given === 'string') given = given.trim();
   if (!expected || typeof given !== 'string' || !given) return false;
   const a = crypto.createHash('sha256').update(given).digest();
   const b = crypto.createHash('sha256').update(expected).digest();
@@ -209,7 +217,13 @@ let inFlight: Promise<{ status: number; body: any }> | null = null;
 export function registerMarketSnapshot(app: any) {
   app.get('/api/market-snapshot', async (req: any, res: any) => {
     res.setHeader('Cache-Control', 'no-store');
-    if (!snapshotKeyOk(req.query?.key)) return res.status(401).json({ error: 'unauthorized' });
+    if (!snapshotKeyOk(req.query?.key)) {
+      // Says only WHETHER a key is set on the server (never the key), so "the
+      // variable is not reaching the app" can be told apart from "wrong key".
+      const configured = !!configuredSnapshotKey();
+      return res.status(401).json({ error: 'unauthorized', key_configured_on_server: configured,
+        hint: configured ? 'The key in the link does not match SNAPSHOT_API_KEY.' : 'SNAPSHOT_API_KEY is not set on this service (check the name, the service, and that the change was deployed).' });
+    }
     const now = Date.now();
     if (cache && now - cache.at < CACHE_MS) {
       return res.status(cache.status).json({ ...cache.body, cache_age_s: Math.round((now - cache.at) / 1000) });
