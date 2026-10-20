@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect, useLayoutEffect } from "react";
+import { useTodayBias, isRecord as isBiasRecord, istToday as biasIstToday, BIAS_LINES_KEY } from "../lib/bias";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
 import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search, ChartNoAxesCombined, TrendingUp, Star, Bell } from "lucide-react";
 import { toast } from "sonner";
@@ -8206,6 +8207,54 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // the index half keeps only its own timeframe and Indicators.
   const sharedHidden = isSpotPane && split ? 'md:hidden' : '';
 
+  // ── Today's Bias levels on the NIFTY chart ───────────────────────────────────
+  // The 09:33 note's trigger (solid), invalidation (dashed) and opening-range
+  // high/low (faint), labelled. Only today's note, only on the NIFTY 50 chart,
+  // and switchable from the Indicators menu. The same shared query as the Home
+  // card, so no extra polling. The chart's series is rebuilt on every timeframe
+  // or instrument change, so a light 1.5 s check redraws onto the current one.
+  const { data: biasToday } = useTodayBias();
+  const [showBiasLevels, setShowBiasLevels] = useState<boolean>(() => {
+    try { return localStorage.getItem(BIAS_LINES_KEY) !== 'false'; } catch (e) { return true; }
+  });
+  useEffect(() => { try { localStorage.setItem(BIAS_LINES_KEY, String(showBiasLevels)); } catch (e) {} }, [showBiasLevels]);
+  const biasLinesRef = useRef<{ series: any; lines: any[]; sig: string }>({ series: null, lines: [], sig: '' });
+  useEffect(() => {
+    const specs = () => {
+      const rec = isBiasRecord(biasToday) && biasToday.date === biasIstToday() && biasToday.status === 'ok' && biasToday.bias ? biasToday : null;
+      if (!showBiasLevels || !rec || String(instrumentToken) !== '256265') return [];
+      const L = rec.levels || {};
+      const up = '#10b981', down = '#f43f5e', amber = '#f59e0b', faint = 'rgba(148,163,184,0.55)';
+      const trig = rec.bias === 'bullish' ? up : rec.bias === 'bearish' ? down : amber;
+      const inval = rec.bias === 'bullish' ? down : rec.bias === 'bearish' ? up : 'rgba(148,163,184,0.9)';
+      const out = [
+        { price: L.trigger, color: trig, lineWidth: 2, lineStyle: 0, title: 'Bias trigger' },
+        { price: L.invalidation, color: inval, lineWidth: 2, lineStyle: 2, title: 'Invalidation' },
+        { price: L.or_high, color: faint, lineWidth: 1, lineStyle: 1, title: 'OR high' },
+        { price: L.or_low, color: faint, lineWidth: 1, lineStyle: 1, title: 'OR low' },
+      ];
+      return out.filter((x) => typeof x.price === 'number' && Number.isFinite(x.price) && x.price > 0);
+    };
+    const sync = () => {
+      const s = mainSeriesRef.current;
+      const want = specs();
+      const sig = JSON.stringify(want);
+      const cur = biasLinesRef.current;
+      if (cur.series === s && cur.sig === sig) return;
+      if (cur.series) cur.lines.forEach((l) => { try { cur.series.removePriceLine(l); } catch (e) {} });
+      const lines = s ? want.map((p) => { try { return s.createPriceLine({ ...p, axisLabelVisible: true } as any); } catch (e) { return null; } }).filter(Boolean) : [];
+      biasLinesRef.current = { series: s, lines, sig };
+    };
+    sync();
+    const id = setInterval(sync, 1500);
+    return () => clearInterval(id);
+  }, [biasToday, showBiasLevels, instrumentToken]);
+  useEffect(() => () => {
+    const cur = biasLinesRef.current;
+    if (cur.series) cur.lines.forEach((l) => { try { cur.series.removePriceLine(l); } catch (e) {} });
+    biasLinesRef.current = { series: null, lines: [], sig: '' };
+  }, []);
+
   // The signal list comes from the SERVER's log — the same rows the scorecard
   // grades — so an arrow always has a paper trail and can never repaint.
   const { data: confData } = useQuery({
@@ -12816,6 +12865,27 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       className={`p-1 transition-colors ${isFav('GiftDivergence') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('GiftDivergence') ? 'currentColor' : 'none'} />
+                    </button>
+                  </div>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BiasLevels', showBiasLevels)}`}>
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowBiasLevels(!showBiasLevels); }}
+                          aria-label="Toggle Today's Bias Levels"
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showBiasLevels) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showBiasLevels) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none" title="Today's 09:33 bias note: trigger (solid), invalidation (dashed) and opening-range high/low (faint). NIFTY 50 chart, today only.">Today's Bias Levels</span>
+                      </div>
+                    <span className="p-1 w-[22px] shrink-0" aria-hidden="true" />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('BiasLevels'); }}
+                      title={isFav('BiasLevels') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('BiasLevels') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('BiasLevels') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('SessionBreaks', sessionBreak.on)}`}>
