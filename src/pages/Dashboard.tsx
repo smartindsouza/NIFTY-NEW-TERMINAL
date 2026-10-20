@@ -312,19 +312,17 @@ export function Dashboard() {
         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
         <div className="flex justify-between items-center gap-3 p-4 md:p-6">
           <div className="min-w-0">
-            <div className="flex items-center gap-2.5">
-              <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight whitespace-nowrap">NIFTY 50</h1>
-              {isMarketOpen ? (
-                <span className="inline-flex items-center gap-1.5 text-[9px] font-bold bg-green-500/15 text-green-500 px-2 py-1 rounded-full uppercase tracking-wider whitespace-nowrap">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> Market Open
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1.5 text-[9px] font-bold bg-muted text-muted-foreground px-2 py-1 rounded-full uppercase tracking-wider whitespace-nowrap">
-                  <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60" /> Market Closed
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground whitespace-nowrap mt-1.5">Expiry: Live Data</p>
+            <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight whitespace-nowrap">NIFTY 50</h1>
+            {/* One line under the name: "Expiry: Live Data" while the market is
+                open, the MARKET CLOSED badge otherwise. The badge used to sit
+                beside the name, where it ran into the spot price on a phone. */}
+            {isMarketOpen ? (
+              <p className="text-xs text-muted-foreground whitespace-nowrap mt-1.5">Expiry: Live Data</p>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 mt-1.5 text-[9px] font-bold bg-muted text-muted-foreground px-2 py-1 rounded-full uppercase tracking-wider whitespace-nowrap">
+                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60" /> Market Closed
+              </span>
+            )}
           </div>
           <div className="text-right flex flex-col items-end shrink-0">
             <motion.h1 
