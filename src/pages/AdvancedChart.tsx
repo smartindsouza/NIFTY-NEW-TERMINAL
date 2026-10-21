@@ -5788,6 +5788,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const premRuleRef = useRef<{ symbol: string; sl: number; tp: number; trail?: any; slOn?: boolean; tpOn?: boolean } | null>(null);
   // >0 while an arm request is in flight. Guards every periodic reader.
   const rulePushPendingRef = useRef(0);
+  const armErrShownRef = useRef<{ key: string; at: number }>({ key: '', at: 0 });
   useEffect(() => { slActivePosRef.current = slActivePos; }, [slActivePos]);
 
   // ===== Premium SL/TP mirrored onto the SPOT chart =====
@@ -6005,8 +6006,23 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       });
       const d = await r.json().catch(() => null);
       setPremSync(d && d.success ? 'ACTIVE' : 'ERROR');
-      if (d && !d.success && d.error) console.warn('[premium-exit] not armed:', d.error);
-    } catch { setPremSync('ERROR'); }
+      if (d && !d.success && d.error) {
+        console.warn('[premium-exit] not armed:', d.error);
+        // Said OUT LOUD. A refusal used to be a console line plus a small status
+        // dot, so on 21 Oct the SENSEX lines looked armed, snapped back on every
+        // drag, and the stop never fired. A rule that is not armed must be
+        // impossible to miss. Repeated identical refusals show once per minute.
+        const key = `${pos.symbol}|${d.error}`;
+        const now = Date.now();
+        if (armErrShownRef.current.key !== key || now - armErrShownRef.current.at > 60000) {
+          armErrShownRef.current = { key, at: now };
+          try { toast.error('Auto SL/TP NOT armed — exit is not automatic', { description: `${d.error} Set your stop in Kite.`, duration: 15000 }); } catch (e) {}
+        }
+      }
+    } catch {
+      setPremSync('ERROR');
+      try { toast.error('Auto SL/TP NOT armed — could not reach the server', { description: 'Set your stop in Kite until this clears.', duration: 15000 }); } catch (e) {}
+    }
     finally { rulePushPendingRef.current = Math.max(0, rulePushPendingRef.current - 1); }
   };
 

@@ -693,6 +693,31 @@ async function applyTrailActions(tradingsymbol: string, st: TrailState, actions:
   }
 }
 
+// SENSEX options get the same pullback structure from the SENSEX index tick.
+// A separate copy of feedSpotForTrails (below) with its own bars, so the NIFTY
+// path is byte-for-byte what was verified; each only touches its own symbols.
+let sxBar1m: { key: number; close: number } | null = null;
+let sxBar5m: { key: number; close: number } | null = null;
+const isSensexOptionSymbol = (sym: string) => /^SENSEX\d/.test(String(sym || '').toUpperCase());
+function feedSensexSpotForTrails(ltp: number, tsSec: number): void {
+  if (!(ltp > 0) || trailStates.size === 0) { sxBar1m = { key: Math.floor(tsSec / 60), close: ltp }; sxBar5m = { key: Math.floor(tsSec / 300), close: ltp }; return; }
+  const k1 = Math.floor(tsSec / 60), k5 = Math.floor(tsSec / 300);
+  const closed5 = sxBar5m && sxBar5m.key !== k5 ? sxBar5m.close : null;
+  const closed1 = sxBar1m && sxBar1m.key !== k1 ? sxBar1m.close : null;
+  if (sxBar5m && sxBar5m.key === k5) sxBar5m.close = ltp; else sxBar5m = { key: k5, close: ltp };
+  if (sxBar1m && sxBar1m.key === k1) sxBar1m.close = ltp; else sxBar1m = { key: k1, close: ltp };
+  if (closed5 === null && closed1 === null) return;
+  for (const [sym, st] of trailStates) {
+    if (!isSensexOptionSymbol(sym)) continue;
+    try {
+      const acts: TrailAction[] = [];
+      if (closed5 !== null) acts.push(...onSpotClose5m(st, closed5));
+      if (closed1 !== null) acts.push(...onSpotClose1m(st, closed1));
+      if (acts.length) void applyTrailActions(sym, st, acts, 'spot').catch(e => console.error('[trail] sensex spot apply failed', e));
+    } catch (e) { console.error('[trail] sensex spot feed error', sym, e); }
+  }
+}
+
 // Spot candles for the pullback structure, built from the real NIFTY index tick.
 // Closed-bar semantics: a bar's close is emitted when the first tick of the NEXT
 // bar arrives. 5m is processed before 1m at a shared boundary so the pullback
@@ -1035,6 +1060,7 @@ function connectTicker() {
       // SENSEX index tick → same live-candle shape the chart consumes for NIFTY.
       // Deliberately does NOT touch latestSpot/lastRealSpotTickAt — those are the
       // NIFTY numbers every existing watcher and scorecard runs on.
+      try { feedSensexSpotForTrails(tick.ltp, Math.floor(Date.now() / 1000)); } catch (e) {}
       const ts = Math.floor(Date.now() / 1000);
       broadcast({ type: 'tick', symbol: 'BSE:SENSEX', price: tick.ltp, timestamp: ts,
         candle: { time: ts, open: tick.ltp, high: tick.ltp, low: tick.ltp, close: tick.ltp } });
@@ -1458,13 +1484,11 @@ setInterval(() => {
       try { positions = await kc.getPositions(); } catch (e: any) { return res.json({ success: false, error: 'Could not read positions: ' + (e?.message || e) }); }
       const pos = ((positions && positions.net) || []).find((p: any) => p.tradingsymbol === tradingsymbol && p.quantity !== 0);
       if (!pos) return res.json({ success: false, error: `No open position for ${tradingsymbol} on Zerodha.` });
-      // SAFETY GUARD: the auto-exit engine has only ever been live-verified on
-      // NSE (NFO) orders. Refuse to arm on BSE/BFO positions rather than guard
-      // real money with an untested net. Removed only after the SENSEX stage-2
-      // one-lot test-trade ritual passes.
-      if ((pos.exchange || 'NFO') !== 'NFO') {
-        return res.json({ success: false, error: `${pos.exchange} auto SL/TP is not verified yet — manage this position's exit in the Kite app for now.` });
-      }
+      // SENSEX (BFO) auto SL/TP enabled 21 Oct 2026 at Martin's request, same as
+      // NIFTY. The July guard that refused BFO arms is gone: the exit order, the
+      // position check and the 3s poll all use the position's own exchange, the
+      // tick path streams the BFO contract by token, and the trailing engine reads
+      // SENSEX's own index price for delta and pullbacks (below / feedSensexSpot…).
       const side = pos.quantity > 0 ? 'BUY' : 'SELL';
       const long = side === 'BUY';
       // Orientation sanity: a long option exits DOWN at SL and UP at target.
@@ -1489,22 +1513,27 @@ setInterval(() => {
           const risk = Math.abs(entryPx - slN);
           // Minimum pullback: a quarter of the risk, translated to spot points via
           // delta. Delta from the option's own live premium; 0.5 if unsolvable.
+          // The option's OWN underlying: NIFTY's price was used for every contract,
+          // which for a SENSEX option (strike ~74,000 vs spot ~22,000) gives a
+          // meaningless delta. NIFTY options are unchanged (latestSpot).
+          const isNifty = isNiftyOptionSymbol(tradingsymbol);
+          const isSensex = isSensexOptionSymbol(tradingsymbol);
+          const underSpot = isSensex ? (sensexIndexToken ? (getLatestTick(sensexIndexToken)?.ltp || 0) : 0) : latestSpot;
           let delta = 0.5;
           try {
-            if (info?.strike && info?.expiry && latestSpot > 0 && pos.last_price > 0) {
+            if (info?.strike && info?.expiry && underSpot > 0 && pos.last_price > 0) {
               const expMs = new Date(info.expiry + 'T15:40:00+05:30').getTime();
               const T = Math.max(0.15, (expMs - Date.now()) / 86400000) / 365;
-              const iv = impliedVol(optionType, latestSpot, Number(info.strike), T, 0.065, pos.last_price);
-              if (iv) delta = Math.abs(bsDelta(optionType, latestSpot, Number(info.strike), T, 0.065, iv)) || 0.5;
+              const iv = impliedVol(optionType, underSpot, Number(info.strike), T, 0.065, pos.last_price);
+              if (iv) delta = Math.abs(bsDelta(optionType, underSpot, Number(info.strike), T, 0.065, iv)) || 0.5;
             }
           } catch (e) { delta = 0.5; }
           const minPullbackSpot = +(0.25 * risk / Math.max(0.15, delta)).toFixed(2);
-          const isNifty = isNiftyOptionSymbol(tradingsymbol);
           const prev = trailStates.get(tradingsymbol);
           const st = createTrailState({
             side, optionType, entry: entryPx, sl: slN, tp: tpN,
             qty: Math.abs(pos.quantity), lotSize, minPullbackSpot,
-            spotNow: isNifty && latestSpot > 0 ? latestSpot : null,
+            spotNow: isNifty && latestSpot > 0 ? latestSpot : (isSensex && underSpot > 0 ? underSpot : null),
             // Absent means ON, so an older client cannot silently disable the
             // ladder; the switch has to be turned off deliberately.
             trailTp: trailTp !== false && trailTp !== 'false',
@@ -1531,7 +1560,7 @@ setInterval(() => {
             // levels — createTrailState already set them from slN and tpN above.
           }
           trailJson = JSON.stringify(st);
-          console.log(`[trail] ARMED ${tradingsymbol} ${optionType} lot=${lotSize} minPullback=${minPullbackSpot} delta=${delta.toFixed(2)} spotStructure=${isNifty ? 'on' : 'off (non-NIFTY)'}`);
+          console.log(`[trail] ARMED ${tradingsymbol} ${optionType} lot=${lotSize} minPullback=${minPullbackSpot} delta=${delta.toFixed(2)} spotStructure=${isNifty ? 'on (NIFTY)' : isSensex ? 'on (SENSEX)' : 'off'}`);
         } catch (e: any) {
           console.error('[trail] could not build trail state, arming as plain SL/TP:', e?.message || e);
           trailJson = null;
