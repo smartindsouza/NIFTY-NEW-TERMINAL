@@ -10,7 +10,7 @@ import Database from 'better-sqlite3';
 import { generateSimulatedChain } from './server/simulate_data';
 import { computeAnalytics } from './server/analytics_engine';
 import { getTechnicalAnalysis, kiteDiagnostics, taFreshness } from './server/technical_analysis';
-import { getKiteClient, getKiteUserId, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData, getIndexFuturesTokens, getBseIndexToken, getOptionToken, getContractInfo, getOrderMargin, resolveOptionContract, getGiftNiftyInstrument } from './server/kite_service';
+import { getKiteClient, getKiteUserId, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData, getIndexFuturesTokens, getBseIndexToken, getOptionToken, getContractInfo, getOrderMargin, resolveOptionContract, getGiftNiftyInstrument, getNfoInstruments } from './server/kite_service';
 import { getHistoricalAnalytics } from './server/analytics_service';
 import { runRsiBacktest } from './server/rsi_backtest';
 import { getLiveSignal, runOptionConfirmBacktest, getAlertSignal } from './server/option_rsi';
@@ -23,7 +23,12 @@ import { getFiiData, getCashFiiDii } from './server/fii_service';
 import { registerGapScorecard, toISTString } from './server/gap_scorecard';
 import { registerCalendar, isNseHoliday as calIsNseHoliday, holidayName } from './server/calendar_service';
 import { registerMarketSnapshot } from './server/market_snapshot';
-import { registerBias } from './server/bias';
+import { registerBias, getTodayBias } from './server/bias';
+import { buildMarketSnapshot } from './server/market_snapshot';
+// "Check bias" (on-demand Claude note). A CommonJS module: imported the ESM way
+// its README gives, which works under both tsx (dev) and the esbuild bundle.
+import biasCheck from './server/bias.cjs';
+const { createBiasRouter } = biasCheck as any;
 import { registerTriggers, armedTriggerTokens, onTickForTriggers } from './server/triggers';
 import { registerLeverage } from './server/leverage';
 import { GAP_CONFIG } from './server/config/gapScorecard';
@@ -3362,6 +3367,20 @@ setInterval(() => {
   registerMarketSnapshot(app);
   // Today's Bias: the 09:33 IST note posted by the scheduled task (same key).
   registerBias(app, db);
+  // "Check bias" button: GET /api/bias (latest note) and POST /api/bias/run (fresh
+  // note now). POST /api/bias stays with registerBias above (database storage).
+  // The snapshot is built in-process (no HTTP hop) by the same function as
+  // /api/market-snapshot. No key on these two: the app itself has no login, so a
+  // key in the page would be public anyway — the router's 60 s cooldown, "no new
+  // candle" reuse and daily cap (BIAS_DAILY_CAP, default 60) bound the cost.
+  app.use(createBiasRouter({
+    handlePost: false,
+    auth: (_req: any, _res: any, next: any) => next(),
+    getScheduled: () => getTodayBias(db),
+    getSnapshot: async () => (await buildMarketSnapshot({
+      kc: getKiteClient(), getGift: getGiftNiftyInstrument, getNfo: getNfoInstruments, nowMs: Date.now(),
+    })).body,
+  }));
 
   // Gap Risk Gauge: pre-close estimate of EXPECTED OVERNIGHT MAGNITUDE (not direction).
   // Combines India VIX with the nearest-expiry ATM straddle (the option market's own

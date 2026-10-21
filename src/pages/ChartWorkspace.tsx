@@ -85,6 +85,7 @@ export function ChartWorkspace() {
   // Phone and tablet: the original component, unchanged and unaware of panes.
   if (!isDesktop) return <AdvancedChart />;
 
+  const focusedTab = (() => { try { return new URLSearchParams(window.location.search).has('optToken'); } catch (e) { return false; } })();
   const split = hasOption && !spotHidden;     // both halves on screen
   // Height chain, desktop. main is a fixed-height flex COLUMN; this wrapper must
   // be a flex-1 CHILD of it (not h-full — a percentage that also overflowed by
@@ -95,7 +96,12 @@ export function ChartWorkspace() {
   // plain block using flex-1, which has no effect without a flex parent — its
   // height collapsed to content and the chart stopped at its 450px floor.
   return (
-    <div className="flex h-full md:h-auto md:flex-1 w-full min-h-0 min-w-0">
+    // md:h-0 + flex-1 (not md:h-auto): the shell's <main> grows to fit its
+    // content, so a content-sized workspace pushed the bias card below the screen.
+    // A zero preferred height lets flex-1 hand it exactly the space that is left,
+    // and the panes row then takes that space minus the card.
+    <div className="flex flex-col h-full md:h-0 md:flex-1 w-full min-h-0 min-w-0">
+    <div className="flex flex-1 w-full min-h-0 min-w-0">
       {/* LEFT — spot only. Keyed so it is never remounted when the right pane
           appears or disappears: a remount would rebuild the chart, drop the
           drawings and re-run every query. */}
@@ -111,6 +117,21 @@ export function ChartWorkspace() {
             onShowSpot={() => setSpotHidden(false)} />
         </div>
       )}
+    </div>
+    {/* "Check bias" card (public/bias-panel.js): ONE card under both panes, so
+        the two charts keep identical heights. Starts collapsed to its headline. */}
+    {/* Not in a single-contract window (Strike Click tab, ?optToken=): that tab is
+        about one option, and the bias card reads the index. */}
+    {!focusedTab && (
+    <>
+    {/* relative z + its own background: expanded, it sits ON TOP of the RSI pane
+        (the chart keeps a 450px floor, so the panes cannot shrink further).
+        pr-20 keeps the "Check bias" button clear of the floating Diag button. */}
+    <div data-layout="below-charts" className="relative z-[25] bg-background shrink-0 pl-2 pr-20 py-1.5 border-t border-white/10 max-h-[40vh] overflow-y-auto">
+      <bias-panel compact="" />
+    </div>
+    </>
+    )}
     </div>
   );
 }

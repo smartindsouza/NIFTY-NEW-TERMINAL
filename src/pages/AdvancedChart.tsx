@@ -3726,7 +3726,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       try {
         if (!window.matchMedia('(min-width: 768px)').matches) { if (el.style.height) el.style.height = ''; return; }
         const top = el.getBoundingClientRect().top;
-        const h = Math.floor(window.innerHeight - top);
+        // Anything the workspace puts UNDER the charts (the "Check bias" card)
+        // marks itself data-layout="below-charts"; the page ends at its top
+        // instead of the window's bottom, or the chart would run underneath it.
+        const below = document.querySelector('[data-layout="below-charts"]');
+        const floor = below ? Math.min(window.innerHeight, below.getBoundingClientRect().top) : window.innerHeight;
+        const h = Math.floor(floor - top);
         if (h < 200) return;                       // mid-layout nonsense: leave it
         const want = `${h}px`;
         if (el.style.height !== want) el.style.height = want;
@@ -14311,6 +14316,18 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           height is reserved on the other side too, so both charts end up the same
           height instead of the option side losing a row's worth. */}
       {split && !(isOptionView && optionReality) && <div className="h-7 shrink-0" />}
+
+      {/* "Check bias" card (public/bias-panel.js) under the chart, phone layout
+          only — on desktop the workspace puts one card under BOTH panes, so the
+          two charts stay the same height. Index charts only; starts collapsed to
+          its headline row so the chart keeps its room, and scrolls inside itself
+          when expanded. The bottom margin clears the fixed toolbar, as the
+          option-reality strip does. */}
+      {!isPane && !isOptionView && !isFocusedChart && (
+        <div className="shrink-0 px-1 pt-1 max-md:mb-[3.25rem] max-h-[42vh] overflow-y-auto">
+          <bias-panel compact="" />
+        </div>
+      )}
 
       {/* Armed triggers — always visible while any exist. A pending instruction to
           buy or sell that the user cannot SEE is the thing most likely to surprise

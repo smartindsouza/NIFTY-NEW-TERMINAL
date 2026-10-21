@@ -49,3 +49,24 @@ curl -s -X POST "https://nifty-new-terminal-production.up.railway.app/api/bias" 
   -H "Content-Type: application/json" -H "X-API-Key: $SNAPSHOT_API_KEY" \
   -d '{"date":"2026-10-21","generated_at":"2026-10-21T09:33:05+05:30","status":"ok","bias":"bearish","confidence":"moderate","headline":"Gap-up faded in the first 15 min — sell rallies below 22,950","summary":"Opened +45 vs GIFT-implied +60; three red opening candles.","levels":{"trigger":22880,"invalidation":22955,"next_reference":22845,"or_high":22950,"or_low":22880,"first_candle_high":22950,"first_candle_low":22905,"prev_high":23175.25,"prev_low":22845,"prev_close":22888.95,"cpr_pivot":22969.7,"cpr_tc":23010.3,"cpr_bc":22929.1},"gap":{"actual_open_pts":45,"gift_implied_pts":60},"factors":[{"name":"Opening range","read":"bearish","note":"Three red candles after a gap-up"}],"us30":{"close":46612,"change_pts":-38,"change_pct":-0.08,"driver":"Flat ahead of earnings"},"error":null}'
 ```
+
+## "Check bias" button (`/api/bias/run`)
+
+On-demand Claude note under the chart (`public/bias-panel.js`, a `<bias-panel>` web component;
+`server/bias.cjs`, mounted in `server.ts` right after the Today's Bias routes). The numbers are
+computed in code from the same snapshot as `/api/market-snapshot` (built in-process, no HTTP hop)
+plus US futures from Yahoo Finance; Claude (`claude-sonnet-5-5`) only judges and writes the note.
+
+- `GET /api/bias` — latest note (on-demand, or today's 09:35 scheduled note if newer) + today's history.
+- `POST /api/bias/run` — fresh note now; `?force=1` skips the 60 s cooldown / "no new candle" reuse.
+  No key: the app has no login, so a key in the page would be public. Cost is bounded by the
+  cooldown, candle reuse and `BIAS_DAILY_CAP` (default 60 runs/day).
+- `POST /api/bias` — unchanged: the scheduled note, key required, stored in sqlite (see Today's Bias).
+- Railway: `ANTHROPIC_API_KEY` (required). Optional: `BIAS_MODEL`, `BIAS_EFFORT`, `BIAS_COOLDOWN_S`,
+  `BIAS_DAILY_CAP`, `BIAS_TIMEOUT_S`, `BIAS_US=off`, `BIAS_STORE_FILE` (default `data/bias-latest.json`,
+  reset on redeploy).
+
+```
+curl -s -X POST https://nifty-new-terminal-production.up.railway.app/api/bias/run
+curl -s https://nifty-new-terminal-production.up.railway.app/api/bias
+```

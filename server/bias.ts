@@ -118,6 +118,15 @@ const rowToRecord = (r: any) => ({
   outcome_note: r.outcome_note ?? null,
 });
 
+/** Today's (IST) stored note, or null. Used by the "Check bias" router so the
+ *  card under the chart also shows the 09:35 scheduled note. */
+export function getTodayBias(db: any): any | null {
+  try {
+    const r = db.prepare('SELECT * FROM daily_bias WHERE date = ?').get(istToday());
+    return r ? rowToRecord(r) : null;
+  } catch (e) { return null; }
+}
+
 export function registerBias(app: any, db: any) {
   db.exec(`CREATE TABLE IF NOT EXISTS daily_bias (
     date TEXT PRIMARY KEY,

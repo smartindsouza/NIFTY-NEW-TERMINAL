@@ -5,3 +5,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Check-bias note store (server/bias.cjs); recreated at runtime
+data/
