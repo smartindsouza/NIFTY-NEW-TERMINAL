@@ -48,6 +48,8 @@ const OptionValue = lazy(() => import('./pages/OptionValue'));
 const GammaBlast = lazy(() => import('./pages/GammaBlast'));
 const PremiumPulse = lazy(() => import('./pages/PremiumPulse'));
 const Research = lazy(() => import('./pages/Research'));
+// Telegram channel calls → automatic entries with the message's SL (23 Oct 2026).
+const TelegramSignals = lazy(() => import('./pages/TelegramSignals'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -219,6 +221,7 @@ export default function App() {
               <Route path="/gamma-blast" component={GammaBlast} />
               <Route path="/premium-pulse" component={PremiumPulse} />
               <Route path="/research" component={Research} />
+              <Route path="/telegram-signals" component={TelegramSignals} />
               <Route>
                  <div className="p-8 text-center text-muted-foreground animate-pulse">404 - Not Found</div>
               </Route>

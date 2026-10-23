@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'wouter';
-import { Home, List, TrendingUp, Newspaper, Activity, LogIn, CheckCircle2, BarChart2, PlayCircle, FileText, Sparkles, LineChart, Settings2, Bell, BellRing, Menu, BookOpen, Gauge, FlaskConical, Radio, Layers, Zap, Wind, ArrowUpDown, RotateCcw, GripVertical, Check, Cpu, Compass, Landmark } from 'lucide-react';
+import { Send, Home, List, TrendingUp, Newspaper, Activity, LogIn, CheckCircle2, BarChart2, PlayCircle, FileText, Sparkles, LineChart, Settings2, Bell, BellRing, Menu, BookOpen, Gauge, FlaskConical, Radio, Layers, Zap, Wind, ArrowUpDown, RotateCcw, GripVertical, Check, Cpu, Compass, Landmark } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -100,6 +100,7 @@ export function Header() {
     { href: '/gamma-blast', label: 'Gamma Blast', icon: Zap },
     { href: '/premium-pulse', label: 'Premium Pulse', icon: Wind },
     { href: '/research', label: 'Research', icon: Activity },
+    { href: '/telegram-signals', label: 'Telegram Auto-Trade', icon: Send },
   ];
 
   // Apply the user's saved tab order; any tab not in the saved list (e.g. newly added features) is appended.

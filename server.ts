@@ -10,7 +10,7 @@ import Database from 'better-sqlite3';
 import { generateSimulatedChain } from './server/simulate_data';
 import { computeAnalytics } from './server/analytics_engine';
 import { getTechnicalAnalysis, kiteDiagnostics, taFreshness } from './server/technical_analysis';
-import { getKiteClient, getKiteUserId, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData, getIndexFuturesTokens, getBseIndexToken, getOptionToken, getContractInfo, getOrderMargin, resolveOptionContract, getGiftNiftyInstrument, getNfoInstruments } from './server/kite_service';
+import { getKiteClient, getKiteUserId, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData, getIndexFuturesTokens, getBseIndexToken, getOptionToken, getContractInfo, getOrderMargin, resolveOptionContract, getGiftNiftyInstrument, getNfoInstruments, findNearestExpiryOption } from './server/kite_service';
 import { getHistoricalAnalytics } from './server/analytics_service';
 import { runRsiBacktest } from './server/rsi_backtest';
 import { getLiveSignal, runOptionConfirmBacktest, getAlertSignal } from './server/option_rsi';
@@ -30,6 +30,8 @@ import { buildMarketSnapshot } from './server/market_snapshot';
 import biasCheck from './server/bias.cjs';
 const { createBiasRouter } = biasCheck as any;
 import { registerTriggers, armedTriggerTokens, onTickForTriggers } from './server/triggers';
+// Telegram channel calls → automatic 1-lot entries with the message's SL (23 Oct 2026).
+import { registerSignalTrader, signalOnTick, signalTokens, signalNoteManualRearm } from './server/signal_trader';
 import { registerLeverage } from './server/leverage';
 import { GAP_CONFIG } from './server/config/gapScorecard';
 import { evaluateQuantSignals } from './server/quant_engine';
@@ -920,6 +922,9 @@ function pushTickerSubscriptions() {
   for (const t of lastSensexChainTokens) all.add(t);
   for (const t of lastBankChainTokens) all.add(t);
   for (const t of premiumRuleTokens()) all.add(t);
+  // Telegram-call contracts: streamed from the moment the call is read, so the
+  // price is live by the time its TP/SL message lands.
+  for (const t of signalTokens()) all.add(t);
   setSubscriptions(Array.from(all));
 }
 
@@ -1078,6 +1083,9 @@ function connectTicker() {
       // tick that crossed the level — this is the expiry-day seatbelt. The 3s
       // REST poll below stays alive as the fallback net; the atomic claim inside
       // firePremiumExit makes the two paths race-safe.
+      // Telegram-signal ladder first, so a stop it raises on this tick is the
+      // stop the exit check below sees.
+      try { signalOnTick(tick.token, tick.ltp); } catch (e) {}
       const rule = premiumRulesByToken.get(tick.token);
       if (rule && typeof tick.ltp === 'number' && tick.ltp > 0) {
         persistRuleLtpThrottled(rule.tradingsymbol, tick.ltp);
@@ -1587,6 +1595,9 @@ setInterval(() => {
       loadTrailState(armedRow);
       pushTickerSubscriptions(); // stream the armed contract right away (don't wait for the 10s refresh)
       console.log(`[premium-exit] ARMED ${tradingsymbol} side=${side} entry=${entryPx} sl=${slN} tp=${tpN} token=${ruleToken ?? 'unresolved (poll only)'}`);
+      // A Telegram-signal trade re-armed from the chart is handed to Martin (or,
+      // in its first seconds, the chart's default is replaced by the message's SL).
+      try { signalNoteManualRearm(tradingsymbol); } catch (e) {}
       return res.json({ success: true, rule: { tradingsymbol, side, entry: entryPx, sl: slN, tp: tpN, status: 'ACTIVE' } });
     } catch (e: any) {
       console.error('[premium-exit set]', e);
@@ -3367,6 +3378,60 @@ setInterval(() => {
   registerMarketSnapshot(app);
   // Today's Bias: the 09:33 IST note posted by the scheduled task (same key).
   registerBias(app, db);
+
+  // TELEGRAM SIGNAL AUTO-TRADER. Everything it does to an open position goes
+  // through the same premium_exit_rules row, tick path and exit function as a
+  // chart-armed stop — it only decides WHERE the stop is.
+  registerSignalTrader(app, {
+    db,
+    getKiteClient,
+    getLatestTick,
+    findOption: findNearestExpiryOption,
+    refreshSubscriptions: () => pushTickerSubscriptions(),
+    armRule: ({ tradingsymbol, exchange, qty, entry, sl, tp, token }) => {
+      try { db.prepare('DELETE FROM premium_exit_free WHERE tradingsymbol = ?').run(tradingsymbol); } catch (e) {}
+      // TP leg OFF: these trades have no target exit; the ladder raises the stop.
+      // trail_state NULL: the pullback engine must not book a half or move it.
+      db.prepare(`INSERT INTO premium_exit_rules (tradingsymbol, exchange, side, qty, entry, sl, tp, status, attempts, last_ltp, detail, instrument_token, trail_state, created_at, updated_at, kite_user_id)
+        VALUES (?, ?, 'BUY', ?, ?, ?, ?, 'ACTIVE', 0, NULL, 'Telegram signal', ?, NULL, ?, ?, ?)
+        ON CONFLICT(tradingsymbol) DO UPDATE SET exchange=excluded.exchange, side='BUY', qty=excluded.qty,
+          entry=excluded.entry, sl=excluded.sl, tp=excluded.tp, status='ACTIVE', attempts=0, detail='Telegram signal',
+          instrument_token=excluded.instrument_token, trail_state=NULL, updated_at=excluded.updated_at,
+          kite_user_id=excluded.kite_user_id`)
+        .run(tradingsymbol, exchange, qty, entry, sl, tp, token, Date.now(), Date.now(), getKiteUserId());
+      db.prepare('UPDATE premium_exit_rules SET sl_on = 1, tp_on = 0 WHERE tradingsymbol = ?').run(tradingsymbol);
+      const row: any = db.prepare('SELECT * FROM premium_exit_rules WHERE tradingsymbol = ?').get(tradingsymbol);
+      syncPremiumRuleInMemory(row);
+      loadTrailState(row);                       // clears any trail state a chart default left behind
+      pushTickerSubscriptions();
+      console.log(`[signals] ARMED ${tradingsymbol} qty=${qty} entry=${entry} sl=${sl} (TP leg off)`);
+    },
+    setRuleSl: (tradingsymbol, sl) => {
+      const r = db.prepare("UPDATE premium_exit_rules SET sl = ?, detail = ?, updated_at = ? WHERE tradingsymbol = ? AND status = 'ACTIVE'")
+        .run(sl, `Telegram ladder: SL ${sl}`, Date.now(), tradingsymbol);
+      if (!r.changes) return;
+      for (const [tok, rule] of premiumRulesByToken) {
+        if (rule.tradingsymbol === tradingsymbol) { rule.sl = sl; premiumRulesByToken.set(tok, rule); }
+      }
+    },
+    ruleStatus: (tradingsymbol) => {
+      const r: any = db.prepare('SELECT status FROM premium_exit_rules WHERE tradingsymbol = ?').get(tradingsymbol);
+      return r ? String(r.status) : null;
+    },
+    exitPosition: async (tradingsymbol, reason) => {
+      // Same as the app's own Exit (POST /api/exit-position): close, then disarm.
+      const result = await closePositionBySymbol(tradingsymbol, reason);
+      if (result.ok || result.alreadyClosed) {
+        try {
+          const prevRow: any = db.prepare('SELECT instrument_token FROM premium_exit_rules WHERE tradingsymbol=?').get(tradingsymbol);
+          db.prepare("UPDATE premium_exit_rules SET status='CANCELLED', updated_at=? WHERE tradingsymbol=? AND status='ACTIVE'").run(Date.now(), tradingsymbol);
+          syncPremiumRuleInMemory(null, prevRow?.instrument_token ? Number(prevRow.instrument_token) : null);
+        } catch (e) {}
+      }
+      return result;
+    },
+    journalOpen: (o) => journalOpenTrade(o),
+  });
   // "Check bias" button: GET /api/bias (latest note) and POST /api/bias/run (fresh
   // note now). POST /api/bias stays with registerBias above (database storage).
   // The snapshot is built in-process (no HTTP hop) by the same function as

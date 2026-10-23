@@ -70,3 +70,30 @@ plus US futures from Yahoo Finance; Claude (`claude-sonnet-5-5`) only judges and
 curl -s -X POST https://nifty-new-terminal-production.up.railway.app/api/bias/run
 curl -s https://nifty-new-terminal-production.up.railway.app/api/bias
 ```
+
+## Telegram Auto-Trade (`/telegram-signals`, `/api/signals/*`)
+
+Reads ONE Telegram channel as your own account and trades its NIFTY / SENSEX
+BUY calls automatically. Code: `server/signal_parser.ts` (reads the messages),
+`server/signal_ladder.ts` (moves the stop), `server/signal_trader.ts` (orders,
+Telegram, alerts), page `src/pages/TelegramSignals.tsx`.
+
+- **Railway variables:** `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` (my.telegram.org →
+  API development tools), `TELEGRAM_BOT_TOKEN` (@BotFather — alerts with Exit /
+  Keep trailing buttons; without it alerts go to Saved Messages), `SIGNALS_PIN`
+  (protects setup and the Practice/Live switch; Off and Exit never need it).
+- **Setup on the page:** log in with your phone + Telegram code (once), pick the
+  channel, press Start in your bot, then switch Practice or Live.
+- **Entry:** waits for the TP/SL message that follows the call, then buys
+  `lots` × lot size with a LIMIT at entry-high + `allowAbove` (default 2) only
+  while the price is at or below that and above the SL; waits up to `waitMin`
+  (10) minutes, else skips. Nearest expiry, exact strike, MIS. Max `maxTrades`
+  (3) a day, no entries after `lastEntry` (15:00).
+- **Stop:** exactly the message's SL, armed in `premium_exit_rules` (TP leg off).
+  TP1 → SL to the fill price · TP2 → SL to TP1 · TP3 → SL to TP2 and you are
+  asked "Exit now / Keep trailing"; Keep trails in (TP3 − TP2) steps. Square-off
+  at `squareOff` (15:15). Moving the SL on the chart hands the trade to you.
+- **Ignored:** every other message, messages older than 3 minutes, anything that
+  fails the checks (each skip is reported with its reason).
+- Tests: `npx tsx server/signal_parser.test.ts` and
+  `npx tsx server/signal_trader.e2e.ts` (fake Kite + fake Telegram, no network).
