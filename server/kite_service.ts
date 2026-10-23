@@ -346,6 +346,45 @@ export async function resolveOptionContract(
   } catch (e) { return null; }
 }
 
+/** The NEAREST-EXPIRY listed contract for an exact strike, for a Telegram call
+ *  that names a strike but no expiry ("BUY NIFTY 22650 CE"). Exact strike only:
+ *  a call for a strike that is not listed is a typo or a different instrument,
+ *  and must be skipped, not rounded to a neighbour. Expiries before today are
+ *  excluded; today's expiry counts (on expiry day the call means today's). */
+export async function findNearestExpiryOption(
+  underlying: 'NIFTY' | 'SENSEX', strike: number, optionType: 'CE' | 'PE', todayIst: string,
+): Promise<{ tradingsymbol: string; instrument_token: number; exchange: string; lot_size: number; expiry: string } | null> {
+  const kc = getKiteClient();
+  // @ts-ignore
+  if (!kc || !kc.access_token) return null;
+  const isBse = underlying === 'SENSEX';
+  const now = Date.now();
+  if (isBse) {
+    if (!bfoInstrumentsCache || (now - lastBfoInstrumentsFetch > 24 * 60 * 60 * 1000)) {
+      bfoInstrumentsCache = await kc.getInstruments('BFO');
+      lastBfoInstrumentsFetch = now;
+    }
+  } else if (!nfoInstrumentsCache || (now - lastInstrumentsFetch > 24 * 60 * 60 * 1000)) {
+    nfoInstrumentsCache = await kc.getInstruments('NFO');
+    lastInstrumentsFetch = now;
+  }
+  const pool = (isBse ? bfoInstrumentsCache : nfoInstrumentsCache) || [];
+  const toDateStr = (d: any): string => d instanceof Date ? d.toISOString().split('T')[0] : String(d).split('T')[0];
+  let best: any = null;
+  for (const i of pool) {
+    if (i.name !== underlying || i.instrument_type !== optionType) continue;
+    if (Math.abs(Number(i.strike) - strike) > 0.001) continue;
+    const exp = toDateStr(i.expiry);
+    if (exp < todayIst) continue;
+    if (!best || exp < toDateStr(best.expiry)) best = i;
+  }
+  if (!best) return null;
+  return {
+    tradingsymbol: String(best.tradingsymbol), instrument_token: Number(best.instrument_token),
+    exchange: String(best.exchange), lot_size: Number(best.lot_size) || 0, expiry: toDateStr(best.expiry),
+  };
+}
+
 /** Margin required for an order, from Kite's OWN calculator.
  *  For a BUY of options the answer is roughly premium x quantity, but for a SELL
  *  it is a SPAN + exposure figure that only the exchange's model can produce —
