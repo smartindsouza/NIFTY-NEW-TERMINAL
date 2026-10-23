@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect, useLayoutEffect } from "react";
-import { useTodayBias, isRecord as isBiasRecord, istToday as biasIstToday, BIAS_LINES_KEY } from "../lib/bias";
+import { useTodayBias, isRecord as isBiasRecord, istToday as biasIstToday, BIAS_LINES_KEY, useBiasCardHidden } from "../lib/bias";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
 import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search, ChartNoAxesCombined, TrendingUp, Star, Bell } from "lucide-react";
 import { toast } from "sonner";
@@ -8235,6 +8235,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // card, so no extra polling. The chart's series is rebuilt on every timeframe
   // or instrument change, so a light 1.5 s check redraws onto the current one.
   const { data: biasToday } = useTodayBias();
+  // The "Check bias" card under the chart: hidden by its × or from this menu.
+  const [biasCardHidden, setBiasCardHidden] = useBiasCardHidden();
   const [showBiasLevels, setShowBiasLevels] = useState<boolean>(() => {
     try { return localStorage.getItem(BIAS_LINES_KEY) !== 'false'; } catch (e) { return true; }
   });
@@ -12909,6 +12911,27 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       <Star size={14} fill={isFav('BiasLevels') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BiasCard', !biasCardHidden)}`}>
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setBiasCardHidden(!biasCardHidden); }}
+                          aria-label="Toggle the NIFTY Bias card"
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(!biasCardHidden) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(!biasCardHidden) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none" title="The NIFTY Bias card with the Check bias button, under the chart. Its × hides it; this brings it back.">NIFTY Bias card</span>
+                      </div>
+                    <span className="p-1 w-[22px] shrink-0" aria-hidden="true" />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('BiasCard'); }}
+                      title={isFav('BiasCard') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('BiasCard') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('BiasCard') ? 'currentColor' : 'none'} />
+                    </button>
+                  </div>
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('SessionBreaks', sessionBreak.on)}`}>
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
                         <button
@@ -14323,7 +14346,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           its headline row so the chart keeps its room, and scrolls inside itself
           when expanded. The bottom margin clears the fixed toolbar, as the
           option-reality strip does. */}
-      {!isPane && !isOptionView && !isFocusedChart && (
+      {!isPane && !isOptionView && !isFocusedChart && !biasCardHidden && (
         <div className="shrink-0 px-1 pt-1 max-md:mb-[3.25rem] max-h-[42vh] overflow-y-auto">
           <bias-panel compact="" />
         </div>

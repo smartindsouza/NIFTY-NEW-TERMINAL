@@ -18,9 +18,13 @@
         --green:#3ddc84;--red:#ef5350;--amber:#f5b942;--purple:#8b5cf6;
         display:block;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--text)}
   *{box-sizing:border-box}
+  :host{display:block}
   .wrap{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
-  .top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .title{font-weight:700;letter-spacing:.06em;font-size:13px;color:var(--muted)}
+  /* One row, always: More, Check bias and Hide sit together at the right. The
+     title gives way first (ellipsis) on a narrow phone. */
+  .top{display:flex;align-items:center;gap:10px;flex-wrap:nowrap}
+  .title{font-weight:700;letter-spacing:.06em;font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .chip,button{flex-shrink:0}
   .chip{font-size:12px;font-weight:700;padding:3px 9px;border-radius:999px;border:1px solid currentColor;text-transform:uppercase;letter-spacing:.05em}
   .bullish{color:var(--green)} .bearish{color:var(--red)} .neutral{color:var(--amber)}
   .conf{font-size:12px;color:var(--muted)}
@@ -29,6 +33,7 @@
          background:var(--purple);color:#fff;border:0;display:inline-flex;align-items:center;gap:8px;min-height:36px}
   button:disabled{opacity:.6;cursor:default}
   button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);padding:6px 10px;min-height:32px}
+  button.x{background:transparent;color:var(--muted);border:0;padding:4px 6px;min-height:32px;font-size:18px;line-height:1}
   .spin{width:14px;height:14px;border:2px solid #fff6;border-top-color:#fff;border-radius:50%;animation:s .8s linear infinite}
   @keyframes s{to{transform:rotate(360deg)}}
   .headline{margin:10px 0 0;font-size:15px;line-height:1.4;font-weight:700}
@@ -45,14 +50,16 @@
   /* Collapsed is a two-row strip under the chart: top row + a 2-line headline. */
   .collapsed .ext,.collapsed .meta{display:none}
   .collapsed .headline{margin-top:6px;font-size:13px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-  /* Phone (~390px): keep the top row on one line. */
-  @media (max-width:420px){
+  /* Phone: compact sizes. 520, not 420: a Pro Max iPhone is 430 wide, which
+     missed the old breakpoint and pushed "Check bias" onto its own line. */
+  @media (max-width:520px){
     .wrap{padding:9px 10px;border-radius:12px}
     .top{gap:6px;flex-wrap:nowrap}
     .title{font-size:11px;white-space:nowrap}
     .chip{font-size:10px;padding:2px 7px}
     .conf{display:none} /* the headline already says e.g. "Bearish (moderate)" */
     button{font-size:12px;padding:6px 10px;min-height:32px;white-space:nowrap}
+    button.x{padding:4px 4px;font-size:16px}
     button.ghost{padding:5px 8px;min-height:30px}
     .headline{font-size:14px}
     .levels{grid-template-columns:repeat(3,1fr)}
@@ -132,7 +139,8 @@
           ${n?.bias ? `<span class="chip ${n.bias}">${esc(n.bias)}</span><span class="conf">${esc(n.confidence || "")}</span>` : ""}
           <span class="spacer"></span>
           ${n ? `<button class="ghost" data-toggle>${this.collapsed ? "More" : "Less"}</button>` : ""}
-          <button data-run ${this.busy ? "disabled" : ""}>${this.busy ? '<span class="spin"></span>Reading the tape…' : "Check bias"}</button>
+          <button data-run ${this.busy ? "disabled" : ""}>${this.busy ? '<span class="spin"></span>Reading…' : "Check bias"}</button>
+          <button class="x" data-hide title="Hide this card (bring it back from Indicators → NIFTY Bias card)" aria-label="Hide the bias card">×</button>
         </div>
         ${n ? `
           <p class="headline">${esc(n.headline)}</p>
@@ -153,6 +161,10 @@
       this.root.querySelector("[data-run]").onclick = () => this.run(false);
       const t = this.root.querySelector("[data-toggle]");
       if (t) t.onclick = () => { this.collapsed = !this.collapsed; this.render(); };
+      // Hide: the page owns whether the card is shown (it is also switched back on
+      // from the Indicators menu), so the card only announces the request.
+      const h = this.root.querySelector("[data-hide]");
+      if (h) h.onclick = () => window.dispatchEvent(new CustomEvent("terminal:bias-card", { detail: { hidden: true, from: "card" } }));
       const f = this.root.querySelector("[data-force]");
       if (f) f.onclick = (e) => { e.preventDefault(); this.run(true); };
     }

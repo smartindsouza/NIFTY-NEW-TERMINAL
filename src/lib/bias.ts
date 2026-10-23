@@ -2,7 +2,9 @@
 // card, the chart lines and the app-wide alert, so they can never disagree and
 // the server is polled once, not three times.
 
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
 
 export type BiasRead = 'bullish' | 'bearish' | 'neutral';
 export type BiasRecord = {
@@ -97,3 +99,34 @@ export function biasChime() {
 export const BIAS_ALERTED_KEY = 'biasAlertedFor';      // chime + notification fired for this date
 export const BIAS_DISMISSED_KEY = 'biasDismissedFor';  // popup dismissed for this date
 export const BIAS_LINES_KEY = 'showBiasLevels';
+
+// The "Check bias" card under the chart can be hidden (its × button) and shown
+// again from the Indicators menu ("NIFTY Bias card"). One flag in localStorage,
+// changed only through setBiasCardHidden so every mounted chart hears it at once
+// (phone chart and desktop workspace each mount their own card).
+export const BIAS_CARD_HIDDEN_KEY = 'biasCardHidden';
+const readHidden = () => { try { return localStorage.getItem(BIAS_CARD_HIDDEN_KEY) === 'true'; } catch (e) { return false; } };
+export function setBiasCardHidden(hidden: boolean, from = 'menu') {
+  try { localStorage.setItem(BIAS_CARD_HIDDEN_KEY, String(hidden)); } catch (e) { }
+  window.dispatchEvent(new CustomEvent('terminal:bias-card', { detail: { hidden, from, applied: true } }));
+}
+// The card's × only ANNOUNCES (it is plain JS inside a shadow root); this applies
+// it once for the whole app and says where to get the card back.
+if (typeof window !== 'undefined' && !(window as any).__biasCardHideHooked) {
+  (window as any).__biasCardHideHooked = true;
+  window.addEventListener('terminal:bias-card', (e: any) => {
+    if (e?.detail?.from === 'card' && !e.detail.applied) {
+      setBiasCardHidden(true, 'card');
+      try { toast('Bias card hidden', { description: 'Bring it back from Indicators → NIFTY Bias card.' }); } catch (err) { }
+    }
+  });
+}
+export function useBiasCardHidden(): [boolean, (h: boolean) => void] {
+  const [hidden, setHidden] = useState<boolean>(readHidden);
+  useEffect(() => {
+    const on = (e: any) => { if (e?.detail?.applied) setHidden(!!e.detail.hidden); };
+    window.addEventListener('terminal:bias-card', on);
+    return () => window.removeEventListener('terminal:bias-card', on);
+  }, []);
+  return [hidden, (h: boolean) => setBiasCardHidden(h)];
+}

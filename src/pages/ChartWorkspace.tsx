@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AdvancedChart } from './AdvancedChart';
+import { useBiasCardHidden } from '../lib/bias';
 
 /**
  * Desktop chart workspace: spot on the LEFT, option charts on the RIGHT.
@@ -82,6 +83,9 @@ export function ChartWorkspace() {
     };
   }, []);
 
+  // The bias card's × hides it; Indicators → NIFTY Bias card brings it back.
+  // Above the phone early-return below: hooks must run on every render.
+  const [biasCardHidden] = useBiasCardHidden();
   // Phone and tablet: the original component, unchanged and unaware of panes.
   if (!isDesktop) return <AdvancedChart />;
 
@@ -122,7 +126,7 @@ export function ChartWorkspace() {
         the two charts keep identical heights. Starts collapsed to its headline. */}
     {/* Not in a single-contract window (Strike Click tab, ?optToken=): that tab is
         about one option, and the bias card reads the index. */}
-    {!focusedTab && (
+    {!focusedTab && !biasCardHidden && (
     <>
     {/* relative z + its own background: expanded, it sits ON TOP of the RSI pane
         (the chart keeps a 450px floor, so the panes cannot shrink further).
