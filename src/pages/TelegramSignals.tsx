@@ -44,7 +44,7 @@ export default function TelegramSignals() {
   const { data, refetch } = useQuery({
     queryKey: ['signals-status'],
     queryFn: async () => (await fetch('/api/signals/status')).json(),
-    refetchInterval: 2000, refetchOnWindowFocus: true,
+    refetchInterval: 3000, refetchOnWindowFocus: true,
   });
   const s = data?.settings;
   useEffect(() => { if (s && !form) setForm({ ...s }); }, [s, form]);
@@ -109,11 +109,15 @@ export default function TelegramSignals() {
           Add a <b>SIGNALS_PIN</b> variable in Railway (any 6 digits) and redeploy — it protects setup and the Live switch.
         </div>
       )}
-      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-2 flex-wrap text-[11px] text-muted-foreground">
         <KeyRound className="w-3.5 h-3.5" /> PIN
         <input value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 12))} inputMode="numeric" type="password"
           className="h-7 w-28 px-2 rounded-md bg-card border border-border font-mono text-foreground" placeholder="SIGNALS_PIN" />
-        <span className="opacity-70">needed for setup, settings and Practice/Live — not for Off or Exit</span>
+        <span className="opacity-70 flex-1 min-w-0">needed for setup, settings and Practice/Live — not for Off or Exit</span>
+        {data?.telegram?.loggedIn && (
+          <button disabled={busy} onClick={async () => { const d = await post('/api/signals/test-alert'); if (d.ok) toast.success(d.linked ? 'Test alert sent to your bot' : 'Test alert sent to your Saved Messages'); }}
+            className="shrink-0 flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-popover text-foreground"><Bot className="w-3 h-3" /> Test alert</button>
+        )}
       </div>
 
       {/* open trades */}
