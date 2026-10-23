@@ -24,7 +24,10 @@ const rules = new Map<string, any>();            // the premium_exit_rules stand
 const log: string[] = [];
 let fillMode: 'fill' | 'nofill' | 'reject' = 'fill';
 const SYM = 'NIFTY26O2722650CE', TOK = 111;
+let fundsAvail: number | null = 50000;
 const kc: any = {
+  async orderMargins(o: any[]) { return [{ total: o[0].price * o[0].quantity, charges: { total: 30 } }]; },
+  async getMargins() { if (fundsAvail == null) throw new Error('rate limited'); return { equity: { available: { live_balance: fundsAvail } } }; },
   access_token: 'x',
   async getLTP(keys: string[]) { const o: any = {}; for (const k of keys) { const s = k.split(':')[1]; if (price.has(s)) o[k] = { last_price: price.get(s) }; } return o; },
   async placeOrder(_v: string, p: any) {
@@ -196,6 +199,29 @@ await __test.housekeeping(); await __test.reconcileLive();
 assert.equal(trades().at(-1).status, 'CLOSED'); assert.match(trades().at(-1).exit_reason, /square-off/); ok('15:15 square-off');
 a = msg(CALL); await __test.handleMessage(a, 'push'); await __test.handleMessage(msg(LEVELS, a.id), 'push'); await settle();
 assert.match(calls().at(-1).reason, /last entry/); ok('no new entries after 15:00');
+
+// 12b) MAX lots: sized from funds, capped, falls back to 1 lot
+__test.setClockOffset(Date.UTC(2026, 9, 26, 5, 0) - Date.now());   // 10:30 IST
+__test.setSettings({ lots: 'MAX', maxLotsCap: 20, maxTrades: 99 }); __test.clearPriceCache(); price.set(SYM, 147);
+const buysBefore = orders.filter(o => o.transaction_type === 'BUY').length;
+a = msg(CALL); await __test.handleMessage(a, 'push'); await __test.handleMessage(msg(LEVELS, a.id), 'push'); await settle(800);
+let lastBuy = orders.filter(o => o.transaction_type === 'BUY').at(-1);
+assert.equal(orders.filter(o => o.transaction_type === 'BUY').length, buysBefore + 1);
+assert.equal(lastBuy.quantity, 5 * 65);                         // 50,000 x 0.985 / (151 x 65 + 30) = 5.01 -> 5
+assert.ok(events().some(e => e.includes('MAX: ₹50,000 available'))); ok('MAX: ₹50,000 → 5 lots (325), note in the alert');
+await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
+fundsAvail = 10_000_000; __test.clearPriceCache(); price.set(SYM, 147);
+a = msg(CALL); await __test.handleMessage(a, 'push'); await __test.handleMessage(msg(LEVELS, a.id), 'push'); await settle(800);
+lastBuy = orders.filter(o => o.transaction_type === 'BUY').at(-1); assert.equal(lastBuy.quantity, 20 * 65); ok('MAX: big balance capped at 20 lots');
+await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
+fundsAvail = 5000; __test.clearPriceCache(); price.set(SYM, 147);
+a = msg(CALL); await __test.handleMessage(a, 'push'); await __test.handleMessage(msg(LEVELS, a.id), 'push'); await settle(800);
+assert.match(calls().at(-1).reason, /not enough funds/); ok('MAX: not enough for 1 lot → skipped, no order');
+fundsAvail = null; __test.clearPriceCache(); price.set(SYM, 147);
+a = msg(CALL); await __test.handleMessage(a, 'push'); await __test.handleMessage(msg(LEVELS, a.id), 'push'); await settle(800);
+lastBuy = orders.filter(o => o.transaction_type === 'BUY').at(-1); assert.equal(lastBuy.quantity, 65); ok('MAX: funds unreadable → 1 lot, said so');
+await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
+__test.setSettings({ lots: 1 });
 
 // 13) bot: only the owner may press buttons
 __test.setOwner('777');

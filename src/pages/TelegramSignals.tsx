@@ -86,7 +86,7 @@ export default function TelegramSignals() {
             <h1 className="text-lg md:text-2xl font-bold tracking-tight">Telegram Auto-Trade</h1>
             <div className="text-[11px] text-muted-foreground truncate">
               {s?.channelTitle ? `Channel: ${s.channelTitle}` : 'No channel chosen yet'}
-              {s ? ` · ${s.lots} lot · max ${s.maxTrades}/day · today ${data?.tradesToday ?? 0}` : ''}
+              {s ? ` · ${s.lots === 'MAX' ? `max lots (cap ${s.maxLotsCap})` : `${s.lots} lot`} · max ${s.maxTrades}/day · today ${data?.tradesToday ?? 0}` : ''}
             </div>
           </div>
         </div>
@@ -191,8 +191,21 @@ export default function TelegramSignals() {
         <div className="bg-card border border-border rounded-xl p-4">
           <h2 className="font-bold mb-3">Rules</h2>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+            <label className="flex flex-col gap-1 text-muted-foreground">Lots per trade
+              <select value={String(form.lots)} onChange={e => setForm({ ...form, lots: e.target.value === 'MAX' ? 'MAX' : Number(e.target.value) })}
+                className="h-8 px-2 rounded-md bg-popover border border-border font-mono text-foreground">
+                <option value="MAX">Max possible (funds)</option>
+                {Array.from({ length: 25 }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </label>
+            {form.lots === 'MAX' && (
+              <label className="flex flex-col gap-1 text-muted-foreground">Never more than (lots)
+                <input type="number" min={1} max={25} value={form.maxLotsCap ?? 20} onChange={e => setForm({ ...form, maxLotsCap: e.target.value })}
+                  className="h-8 px-2 rounded-md bg-popover border border-border font-mono text-foreground" />
+              </label>
+            )}
             {([
-              ['lots', 'Lots per trade', 'number'], ['maxTrades', 'Max trades a day', 'number'],
+              ['maxTrades', 'Max trades a day', 'number'],
               ['allowAbove', 'Points allowed above range', 'number'], ['waitMin', 'Wait for price (min)', 'number'],
               ['lastEntry', 'No new entries after', 'time'], ['squareOff', 'Square-off at', 'time'],
             ] as const).map(([k, label, type]) => (
@@ -203,9 +216,10 @@ export default function TelegramSignals() {
               </label>
             ))}
           </div>
+          {form.lots === 'MAX' && <div className="text-[11px] text-muted-foreground mt-2">Max possible: at each call it buys as many lots as your Zerodha funds allow at the top of the entry range (keeping 1.5% spare for charges), up to the limit you set (25 at most). If funds can't be read, it buys 1 lot and tells you.</div>}
           <div className="text-[11px] text-muted-foreground mt-2">SL is always the one in the message. TP1 → SL to entry · TP2 → SL to TP1 · TP3 → SL to TP2 and you are asked to exit or keep trailing.</div>
           <button disabled={busy} onClick={async () => { const d = await post('/api/signals/settings', {
-              lots: form.lots, maxTrades: form.maxTrades, allowAbove: form.allowAbove, waitMin: form.waitMin, lastEntry: form.lastEntry, squareOff: form.squareOff });
+              lots: form.lots, maxLotsCap: form.maxLotsCap, maxTrades: form.maxTrades, allowAbove: form.allowAbove, waitMin: form.waitMin, lastEntry: form.lastEntry, squareOff: form.squareOff });
               if (d.ok) { setForm({ ...d.settings }); toast.success('Saved'); } }}
             className="mt-3 text-xs font-bold px-3 py-2 rounded-lg bg-primary text-primary-foreground">Save rules</button>
         </div>

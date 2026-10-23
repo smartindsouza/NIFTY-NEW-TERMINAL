@@ -47,11 +47,11 @@ export interface SignalDeps {
 
 type Mode = 'OFF' | 'PRACTICE' | 'LIVE';
 interface Settings {
-  mode: Mode; lots: number; maxTrades: number; allowAbove: number; waitMin: number;
+  mode: Mode; lots: number | 'MAX'; maxLotsCap: number; maxTrades: number; allowAbove: number; waitMin: number;
   lastEntry: string; squareOff: string; channelId: string | null; channelTitle: string | null;
 }
 const DEFAULTS: Settings = {
-  mode: 'OFF', lots: 1, maxTrades: 3, allowAbove: 2, waitMin: 10,
+  mode: 'OFF', lots: 1, maxLotsCap: 20, maxTrades: 3, allowAbove: 2, waitMin: 10,
   lastEntry: '15:00', squareOff: '15:15', channelId: null, channelTitle: null,
 };
 
@@ -322,6 +322,7 @@ async function completeCall(callId: number, lv: ParsedLevels, levelsMsgId: numbe
 
   D.db.prepare("UPDATE signal_calls SET status='WATCHING', mode=?, watch_until=?, updated_at=? WHERE id=?")
     .run(settings.mode, Date.now() + settings.waitMin * 60000, Date.now(), callId);
+  presize(fresh);
   logEvent(`${settings.mode === 'LIVE' ? '' : '[practice] '}call complete: ${label} — watching for price ≤ ${r2(call.entryHigh + settings.allowAbove)}`);
   await checkWatching(callId);                    // try at once: speed matters
 }
@@ -364,8 +365,55 @@ async function checkWatching(callId: number) {
   try { await enter(c, ltp, cap); } finally { entering.delete(callId); }
 }
 
+// MAX LOTS (Martin, 23 Oct): as many lots as the funds allow, sized the way the
+// trigger engine sizes at fire time (server/triggers.ts): Zerodha's own margin
+// calculator prices ONE lot exactly as the order will be priced (LIMIT at the
+// cap, MIS) with charges, and the largest whole number of lots that fits in
+// 98.5% of the live balance is bought. Never more than maxLotsCap (default 20,
+// at most 25): 25 lots stays under the exchange's single-order freeze for both
+// NIFTY (25 x 65 = 1,625) and SENSEX (25 x 20 = 500), so one order is enough.
+// Sized when the TP/SL message lands (pre-sized, so the buy itself waits on
+// nothing) and again only if that answer is over a minute old. If the funds
+// cannot be read, 1 lot is bought and the alert says so — a failed sizing step
+// must not cost the trade, and must not guess big.
+const sizing = new Map<number, { at: number; p: Promise<{ lots: number; note: string | null }> }>();
+async function sizeMaxLots(c: any, cap: number): Promise<{ lots: number; note: string | null }> {
+  const ceiling = Math.max(1, Math.min(25, Math.round(settings.maxLotsCap || 20)));
+  try {
+    const kc = D.getKiteClient();
+    if (!kc || !kc.access_token) return { lots: 1, note: 'MAX sizing: Zerodha not logged in — bought 1 lot' };
+    const [mg, funds] = await Promise.all([
+      kc.orderMargins([{ exchange: c.exchange, tradingsymbol: c.tradingsymbol, transaction_type: 'BUY', variety: 'regular',
+        product: 'MIS', order_type: 'LIMIT', quantity: c.lot_size, price: r2(tick05(cap)), trigger_price: 0 }]),
+      kc.getMargins(),
+    ]);
+    const perLot = Number(mg?.[0]?.total) + (Number(mg?.[0]?.charges?.total) || 0);
+    const available = Number(funds?.equity?.available?.live_balance ?? funds?.equity?.net);
+    if (!(perLot > 0) || !isFinite(available)) return { lots: 1, note: 'MAX sizing: could not read funds — bought 1 lot' };
+    const fit = Math.floor((available * 0.985) / perLot);
+    const lots = Math.min(ceiling, fit);
+    const note = `MAX: ₹${Math.round(available).toLocaleString('en-IN')} available, ₹${Math.round(perLot).toLocaleString('en-IN')} a lot at ${r2(tick05(cap))}` +
+      (fit > ceiling ? ` → capped at ${ceiling} lots` : ` → ${lots} lot${lots === 1 ? '' : 's'}`);
+    return { lots, note };
+  } catch (e: any) {
+    return { lots: 1, note: `MAX sizing failed (${e?.message || e}) — bought 1 lot` };
+  }
+}
+function presize(c: any) {
+  if (settings.lots !== 'MAX') return;
+  sizing.set(c.id, { at: Date.now(), p: sizeMaxLots(c, r2(c.entry_high + settings.allowAbove)) });
+}
+
 async function enter(c: any, ltp: number, cap: number) {
-  const qty = settings.lots * c.lot_size;
+  let lots = 1, sizeNote: string | null = null;
+  if (settings.lots === 'MAX') {
+    let s = sizing.get(c.id);
+    if (!s || Date.now() - s.at > 60000) { presize(c); s = sizing.get(c.id)!; }
+    ({ lots, note: sizeNote } = await s.p);
+    sizing.delete(c.id);
+    if (lots < 1) return skip(c.id, `not enough funds for 1 lot (${sizeNote})`);
+  } else lots = settings.lots;
+  const qty = lots * c.lot_size;
   const mode: Mode = c.mode === 'LIVE' ? 'LIVE' : 'PRACTICE';
   if (tradesToday() >= settings.maxTrades) return skip(c.id, `already ${settings.maxTrades} trades today`);
   setCall(c.id, 'ORDERED');
@@ -418,7 +466,8 @@ async function enter(c: any, ltp: number, cap: number) {
   }
   openTrades.set(tradeId, ladder);
   await notify(`${mode === 'LIVE' ? '✅ BOUGHT' : '🧪 PRACTICE BUY'} ${c.underlying} ${c.strike} ${c.option_type} (${c.expiry})\n` +
-    `${filledQty} qty @ ${rs(fillPx)}\nSL ${rs(c.sl)} · TP1 ${rs(c.tp1)} · TP2 ${rs(c.tp2)} · TP3 ${rs(c.tp3)}`,
+    `${filledQty} qty (${Math.round(filledQty / c.lot_size)} lot${filledQty / c.lot_size === 1 ? '' : 's'}) @ ${rs(fillPx)}\nSL ${rs(c.sl)} · TP1 ${rs(c.tp1)} · TP2 ${rs(c.tp2)} · TP3 ${rs(c.tp3)}` +
+    (sizeNote ? `\n${sizeNote}` : '') + (filledQty < qty ? `\nOnly ${filledQty} of ${qty} filled — the rest was cancelled.` : ''),
     [{ text: '🚪 Exit now', data: `exit:${tradeId}` }]);
 }
 
@@ -705,14 +754,15 @@ export function registerSignalTrader(app: any, deps: SignalDeps) {
       if (b.mode !== 'OFF' && !settings.channelId) return res.json({ ok: false, error: 'Pick the channel first.' });
       settings.mode = b.mode;
     }
-    if (b.lots !== undefined) settings.lots = Math.round(num(b.lots, 1, 5, settings.lots));
+    if (b.lots !== undefined) settings.lots = String(b.lots).toUpperCase() === 'MAX' ? 'MAX' : Math.round(num(b.lots, 1, 25, settings.lots === 'MAX' ? 1 : settings.lots));
+    if (b.maxLotsCap !== undefined) settings.maxLotsCap = Math.round(num(b.maxLotsCap, 1, 25, settings.maxLotsCap));
     if (b.maxTrades !== undefined) settings.maxTrades = Math.round(num(b.maxTrades, 1, 10, settings.maxTrades));
     if (b.allowAbove !== undefined) settings.allowAbove = num(b.allowAbove, 0, 20, settings.allowAbove);
     if (b.waitMin !== undefined) settings.waitMin = num(b.waitMin, 0, 60, settings.waitMin);
     if (typeof b.lastEntry === 'string' && /^\d{2}:\d{2}$/.test(b.lastEntry)) settings.lastEntry = b.lastEntry;
     if (typeof b.squareOff === 'string' && /^\d{2}:\d{2}$/.test(b.squareOff)) settings.squareOff = b.squareOff;
     saveSettings();
-    logEvent(`settings: ${settings.mode}, ${settings.lots} lot, max ${settings.maxTrades}/day, +${settings.allowAbove} above range, wait ${settings.waitMin} min`);
+    logEvent(`settings: ${settings.mode}, ${settings.lots === 'MAX' ? `MAX lots (cap ${settings.maxLotsCap})` : `${settings.lots} lot`}, max ${settings.maxTrades}/day, +${settings.allowAbove} above range, wait ${settings.waitMin} min`);
     res.json({ ok: true, settings });
   });
 
