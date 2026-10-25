@@ -13,7 +13,7 @@ import { getDivergences } from "../lib/divergence";
 import { evaluateBreakout } from "../lib/breakoutQuality";
 import { calculateBollingerBands } from "../indicators/bollingerBands";
 // Martin's TradingView "Institutional Levels" (TCI Key Institutional Levels v2.0), ported 25 Oct 2026.
-import { computeInstitutionalLevels, IL_COLORS, type IlResult } from "../indicators/institutionalLevels";
+import { computeInstitutionalLevels, ilColors, normaliseIlSettings, IL_DEFAULTS, IL_FONT_PX, type IlResult, type IlSettings } from "../indicators/institutionalLevels";
 import { format } from "date-fns";
 import { SymbolSearch } from "../components/SymbolSearch";
 import MarketContext from "../components/MarketContext";
@@ -2296,6 +2296,146 @@ function deriveSessionBreaks(candles: any[]): { prevTime: number; time: number }
   return out;
 }
 
+// INSTITUTIONAL LEVELS settings — the same inputs, sections and defaults as the
+// TradingView panel of "TCI Key Institutional Levels v2.0", so Martin can set it
+// up here exactly as he has it there. Changes apply live; Cancel restores.
+function InstitutionalLevelsEditorModal({ value, onChange, onClose, onApply }: {
+  value: IlSettings, onChange: (v: IlSettings) => void, onClose: () => void, onApply: () => void,
+}) {
+  const set = (patch: Partial<IlSettings>) => onChange({ ...value, ...patch });
+  const Section = ({ title }: { title: string }) => (
+    <div className="pt-3 pb-1 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">{title}</div>
+  );
+  const Check = ({ k, label }: { k: keyof IlSettings, label: string }) => (
+    <label className="flex items-center gap-2 py-1 text-sm text-foreground/85 cursor-pointer select-none">
+      <input type="checkbox" checked={!!value[k]} onChange={(e) => set({ [k]: e.target.checked } as any)} className="w-4 h-4 accent-emerald-500" />
+      {label}
+    </label>
+  );
+  const Sel = ({ k, opts, label }: { k: keyof IlSettings, opts: [string, string][], label: string }) => (
+    <div className="flex items-center justify-between gap-3 py-1">
+      <span className="text-sm text-foreground/85">{label}</span>
+      <select value={String(value[k])} onChange={(e) => set({ [k]: e.target.value } as any)}
+        className="h-8 px-2 rounded-md bg-background border border-border text-sm text-foreground min-w-[120px]">
+        {opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+    </div>
+  );
+  const Num = ({ k, label, step, min, max }: { k: keyof IlSettings, label: string, step?: number, min?: number, max?: number }) => (
+    <div className="flex items-center justify-between gap-3 py-1">
+      <span className="text-sm text-foreground/85">{label}</span>
+      <input type="number" value={value[k] as any} step={step ?? 1} min={min} max={max}
+        onChange={(e) => set({ [k]: e.target.value === '' ? value[k] : Number(e.target.value) } as any)}
+        className="h-8 w-[90px] px-2 rounded-md bg-background border border-border text-sm font-mono text-foreground" />
+    </div>
+  );
+  const Color = ({ k, label }: { k: keyof IlSettings, label: string }) => (
+    <div className="flex items-center justify-between gap-3 py-1">
+      <span className="text-sm text-foreground/85">{label}</span>
+      <TVStylePicker color={String(value[k])} onColorChange={(c) => set({ [k]: c } as any)} />
+    </div>
+  );
+  const Fill = ({ k, label }: { k: 'intBullOB' | 'intBearOB' | 'swBullOB' | 'swBearOB' | 'fvgBull' | 'fvgBear', label: string }) => (
+    <div className="flex items-center justify-between gap-3 py-1">
+      <span className="text-sm text-foreground/85">{label}</span>
+      <TVStylePicker color={value[k].color} opacity={value[k].opacity}
+        onColorChange={(c) => set({ [k]: { ...value[k], color: c } } as any)}
+        onOpacityChange={(o) => set({ [k]: { ...value[k], opacity: o } } as any)} />
+    </div>
+  );
+  const FILT: [string, string][] = [['All', 'All'], ['Breaker', 'Breaker'], ['Trap', 'Trap']];
+  const SIZE: [string, string][] = [['tiny', 'tiny'], ['small', 'small'], ['normal', 'normal']];
+  const Mtf = ({ on, st, col, label }: { on: 'showDaily' | 'showWeekly' | 'showMonthly', st: 'dailyStyle' | 'weeklyStyle' | 'monthlyStyle', col: 'dailyColor' | 'weeklyColor' | 'monthlyColor', label: string }) => (
+    <div className="flex items-center justify-between gap-3 py-1">
+      <label className="flex items-center gap-2 text-sm text-foreground/85 cursor-pointer select-none">
+        <input type="checkbox" checked={value[on]} onChange={(e) => set({ [on]: e.target.checked } as any)} className="w-4 h-4 accent-emerald-500" />
+        {label}
+      </label>
+      <TVStylePicker color={value[col]} lineStyle={value[st]}
+        onColorChange={(c) => set({ [col]: c } as any)} onLineStyleChange={(l) => set({ [st]: (l === 1 || l === 2 ? l : 0) } as any)} />
+    </div>
+  );
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-transparent p-4 animate-in fade-in duration-250" onClick={onClose}>
+      <div className="bg-card border border-0 rounded-lg w-full max-w-[380px] max-h-[88vh] flex flex-col pt-1 relative" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-0">
+          <h2 className="text-lg font-medium text-foreground">Institutional Levels</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="px-4 pb-3 overflow-y-auto">
+          {Section({ title: "Smart Money Concepts" })}
+          {Sel({ k: "mode", label: "Mode", opts: [['Historical', 'Historical'], ['Present', 'Present']] })}
+          {Sel({ k: "style", label: "Style", opts: [['Colored', 'Colored'], ['Monochrome', 'Monochrome']] })}
+          {Check({ k: "colorCandles", label: "Color Candles" })}
+
+          {Section({ title: "Real Time Internal Structure" })}
+          {Check({ k: "showInternal", label: "Show Internal Structure" })}
+          {Sel({ k: "intBullFilt", label: "Bullish Structure", opts: FILT })}
+          {Color({ k: "intBullColor", label: "Bullish colour" })}
+          {Sel({ k: "intBearFilt", label: "Bearish Structure", opts: FILT })}
+          {Color({ k: "intBearColor", label: "Bearish colour" })}
+          {Check({ k: "intConfl", label: "Confluence Filter" })}
+          {Sel({ k: "intLblSz", label: "Internal Label Size", opts: SIZE })}
+
+          {Section({ title: "Real Time Swing Structure" })}
+          {Check({ k: "showSwing", label: "Show Swing Structure" })}
+          {Sel({ k: "swBullFilt", label: "Bullish Structure", opts: FILT })}
+          {Color({ k: "swBullColor", label: "Bullish colour" })}
+          {Sel({ k: "swBearFilt", label: "Bearish Structure", opts: FILT })}
+          {Color({ k: "swBearColor", label: "Bearish colour" })}
+          {Sel({ k: "swLblSz", label: "Swing Label Size", opts: SIZE })}
+          {Check({ k: "showSwPts", label: "Show Swing Points" })}
+          {Num({ k: "swLength", label: "Swing length", min: 10 })}
+          {Check({ k: "showStrWeak", label: "Show Strong/Supply Zone/Low" })}
+
+          {Section({ title: "Order Blocks" })}
+          <div className="flex items-center justify-between gap-3">{Check({ k: "showIntOB", label: "Internal Order Blocks" })}{Num({ k: "intOBCnt", label: "", min: 1, max: 20 })}</div>
+          <div className="flex items-center justify-between gap-3">{Check({ k: "showSwOB", label: "Swing Order Blocks" })}{Num({ k: "swOBCnt", label: "", min: 1, max: 20 })}</div>
+          {Sel({ k: "obFilt", label: "Order Block Filter", opts: [['Atr', 'Atr'], ['Cumulative Mean Range', 'Cumulative Mean Range']] })}
+          {Sel({ k: "obMit", label: "Order Block Mitigation", opts: [['Close', 'Close'], ['High/Low', 'High/Low']] })}
+          {Fill({ k: "intBullOB", label: "Internal Bullish OB" })}
+          {Fill({ k: "intBearOB", label: "Internal Bearish OB" })}
+          {Fill({ k: "swBullOB", label: "Bullish OB" })}
+          {Fill({ k: "swBearOB", label: "Bearish OB" })}
+
+          {Section({ title: "Double High / Double Low" })}
+          {Check({ k: "showEqHL", label: "Equal High/Low" })}
+          {Num({ k: "eqLen", label: "Bars Confirmation", min: 1 })}
+          {Num({ k: "eqThresh", label: "Threshold", step: 0.1, min: 0, max: 0.5 })}
+          {Sel({ k: "eqLblSz", label: "Label Size", opts: SIZE })}
+
+          {Section({ title: "Fair Value Gaps" })}
+          {Check({ k: "showFVG", label: "Fair Value Gaps" })}
+          {Check({ k: "fvgAuto", label: "Auto Threshold" })}
+          {Sel({ k: "fvgTF", label: "Timeframe", opts: [['Chart', 'Chart'], ['15', '15m'], ['30', '30m'], ['60', '1h'], ['240', '4h'], ['1D', '1D']] })}
+          {Fill({ k: "fvgBull", label: "Bullish FVG" })}
+          {Fill({ k: "fvgBear", label: "Bearish FVG" })}
+          {Num({ k: "fvgExtend", label: "Extend FVG", min: 0 })}
+
+          {Section({ title: "Highs & Lows MTF" })}
+          {Mtf({ on: "showDaily", st: "dailyStyle", col: "dailyColor", label: "Daily" })}
+          {Mtf({ on: "showWeekly", st: "weeklyStyle", col: "weeklyColor", label: "Weekly" })}
+          {Mtf({ on: "showMonthly", st: "monthlyStyle", col: "monthlyColor", label: "Monthly" })}
+
+          {Section({ title: "Premium & Discount Zones" })}
+          {Check({ k: "showZones", label: "Premium/Discount Zones" })}
+          {Color({ k: "premColor", label: "Premium Zone" })}
+          {Color({ k: "equilColor", label: "Equilibrium Zone" })}
+          {Color({ k: "discColor", label: "Discount Zone" })}
+          <div className="text-[11px] text-muted-foreground leading-relaxed pt-2">A timeframe for the FVGs below the chart's own falls back to the chart's, as on TradingView.</div>
+        </div>
+        <div className="flex items-center justify-between p-4 border-t border-0 bg-muted gap-2">
+          <button onClick={() => onChange({ ...IL_DEFAULTS })} className="px-3 py-1.5 text-sm bg-transparent border border-border rounded text-foreground/80 hover:text-foreground">Defaults</button>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
+            <button onClick={onApply} className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium">Ok</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SessionBreaksEditorModal({ onClose, value, onChange, onApply }: {
   onClose: () => void,
   value: SbSettings,
@@ -3952,6 +4092,15 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   useEffect(() => { try { localStorage.setItem('showInstLevels', String(showInstLevels)); } catch (e) {} }, [showInstLevels]);
   const showInstLevelsRef = useRef(showInstLevels);
   showInstLevelsRef.current = showInstLevels;
+  // Its settings: every input of the TradingView panel, defaults = the script's.
+  const [ilSettings, setIlSettings] = useState<IlSettings>(() => {
+    try { return normaliseIlSettings(JSON.parse(localStorage.getItem('instLevelsSettings') || 'null')); } catch (e) { return { ...IL_DEFAULTS }; }
+  });
+  useEffect(() => { try { localStorage.setItem('instLevelsSettings', JSON.stringify(ilSettings)); } catch (e) {} }, [ilSettings]);
+  const ilSettingsRef = useRef(ilSettings);
+  ilSettingsRef.current = ilSettings;
+  const [isEditingIl, setIsEditingIl] = useState(false);
+  const ilSnapshotRef = useRef<IlSettings>(ilSettings);
   // Fair Value Gaps — drawn like Demand/Supply zones, index chart only.
   const [showFvg, setShowFvg] = useState(() => {
     try { const v = localStorage.getItem('showFvg'); return v === null ? true : v === 'true'; } catch (e) { return true; }
@@ -8145,7 +8294,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     structBullColor: [structBullColor, setStructBullColor], structBearColor: [structBearColor, setStructBearColor],
     showBos: [showBos, setShowBos], favIndicators: [favIndicators, setFavIndicators],
     showStructure: [showStructure, setShowStructure], showOrderBlocks: [showOrderBlocks, setShowOrderBlocks],
-    showInstLevels: [showInstLevels, setShowInstLevels],
+    showInstLevels: [showInstLevels, setShowInstLevels], ilSettings: [ilSettings, setIlSettings],
     showFvg: [showFvg, setShowFvg], showDsZones: [showDsZones, setShowDsZones], dzStyle: [dzStyle, setDzStyle],
     dzFvg: [dzFvg, setDzFvg], dsZoneOpacity: [dsZoneOpacity, setDsZoneOpacity],
     levelAlertsOn: [levelAlertsOn, setLevelAlertsOn], zoneTapAlertsOn: [zoneTapAlertsOn, setZoneTapAlertsOn],
@@ -9483,6 +9632,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const ilSigRef = useRef<string>('');
   const ilLastRunRef = useRef<number>(0);
   const ilResRef = useRef<IlResult | null>(null);
+  const ilCandlesRef = useRef<{ time: number; open: number; high: number; low: number; close: number }[]>([]);
   const dzInputRef = useRef<any[]>([]);
 
   const lastAlertedDivergenceRef = useRef<string | null>(null);
@@ -11330,17 +11480,19 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               }
 
               // INSTITUTIONAL LEVELS (src/indicators/institutionalLevels.ts) — Martin's
-              // TradingView indicator. Computed on history + live-closed candles + the
-              // forming bar, like TradingView runs it on the realtime bar. Drawn in
-              // the script's colours: order blocks (5 internal, extended right),
-              // structure lines tagged Breaker/Trap (internal dashed, swing solid),
-              // equal highs/lows (dotted), and the Supply/Demand extremes.
+              // TradingView indicator with every input of its settings panel. Computed
+              // on history + live-closed candles + the forming bar, like TradingView
+              // runs it on the realtime bar (closed candles at once, the forming bar at
+              // most every 1.5 s, and at once when a setting changes).
               if (showInstLevelsRef.current && mainSeriesRef.current) {
                 try {
+                  const S = ilSettingsRef.current;
+                  const tfSec = (parseInt(String(timeframe), 10) || 5) * 60;
                   const baseI = chartDataRef.current?.candles || [];
                   const liveI = lastCandleDataRef.current;
-                  const baseKeyI = `${instrumentToken}|${timeframe}|${baseI.length}|${baseI.length ? baseI[baseI.length - 1].time : 0}|${arcFingerprint()}`;
-                  const sigI = `${baseKeyI}|${liveI ? `${liveI.time}:${liveI.high}:${liveI.low}:${liveI.close}` : ''}`;
+                  const setKey = JSON.stringify(S);
+                  const baseKeyI = `${instrumentToken}|${timeframe}|${baseI.length}|${baseI.length ? baseI[baseI.length - 1].time : 0}|${arcFingerprint()}|${setKey}`;
+                  const sigI = `${baseKeyI}|${liveI ? `${liveI.time}:${liveI.open}:${liveI.high}:${liveI.low}:${liveI.close}` : ''}`;
                   if (baseKeyI !== ilBaseKeyRef.current || (sigI !== ilSigRef.current && Date.now() - ilLastRunRef.current >= 1500)) {
                     ilBaseKeyRef.current = baseKeyI; ilSigRef.current = sigI; ilLastRunRef.current = Date.now();
                     const inI = mergedCandles();
@@ -11349,55 +11501,115 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       if (liveI.time > tail) inI.push(liveI);
                       else if (liveI.time === tail) inI[inI.length - 1] = liveI;
                     }
-                    ilResRef.current = computeInstitutionalLevels(inI.map((c: any) => ({ time: toUnixSeconds(c.time), open: +c.open, high: +c.high, low: +c.low, close: +c.close })));
+                    const cIn = inI.map((c: any) => ({ time: toUnixSeconds(c.time), open: +c.open, high: +c.high, low: +c.low, close: +c.close }));
+                    ilCandlesRef.current = cIn;
+                    ilResRef.current = computeInstitutionalLevels(cIn, S, tfSec);
                   }
                   const res = ilResRef.current;
+                  const cIn = ilCandlesRef.current;
                   const tsI = mainChartRef.current?.timeScale();
-                  const xOf = (t: number) => { const x = tsI?.timeToCoordinate(t as any); return x === null || x === undefined ? null : x; };
-                  const yOf = (p: number) => mainSeriesRef.current.priceToCoordinate(p);
-                  if (res && tsI) {
-                    ctx.save();
-                    const FONT = "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif";
-                    // order blocks — 80% transparent fill, internal ones have no border
-                    for (const ob of res.orderBlocks) {
-                      const yT = yOf(ob.top), yB = yOf(ob.bottom), x0 = xOf(ob.time);
-                      if (yT === null || yB === null) continue;
-                      const bx = x0 === null ? 0 : Math.max(0, x0);
-                      if (bx >= textAlignX) continue;
-                      ctx.fillStyle = hexToRgba(ob.dir === 'bull' ? IL_COLORS.obBull : IL_COLORS.obBear, 0.2);
-                      ctx.fillRect(bx, Math.min(yT, yB), textAlignX - bx, Math.max(1, Math.abs(yB - yT)));
-                    }
-                    const label = (text: string, x: number, y: number, above: boolean, col: string, px: number) => {
-                      ctx.font = `${px}px ${FONT}`; ctx.fillStyle = col; ctx.textAlign = 'center';
-                      ctx.textBaseline = above ? 'bottom' : 'top';
-                      ctx.fillText(text, x, above ? y - 2 : y + 2);
+                  if (res && tsI && cIn.length) {
+                    const COL = ilColors(S);
+                    const lastT = cIn[cIn.length - 1].time;
+                    // Any time to x: a bar's own time directly; a time between bars to the
+                    // bar before it; a time past the last bar extrapolated in bars (Pine
+                    // draws some of its lines and boxes into the future).
+                    const xOf = (t: number): number | null => {
+                      const x = tsI.timeToCoordinate(t as any);
+                      if (x !== null && x !== undefined) return x;
+                      if (t > lastT) { const lx = tsI.logicalToCoordinate(((cIn.length - 1) + (t - lastT) / tfSec) as any); return lx === null || lx === undefined ? null : lx; }
+                      let lo = 0, hi = cIn.length - 1;
+                      if (t < cIn[0].time) return null;
+                      while (lo < hi) { const m = (lo + hi + 1) >> 1; if (cIn[m].time <= t) lo = m; else hi = m - 1; }
+                      const lx = tsI.timeToCoordinate(cIn[lo].time as any);
+                      return lx === null || lx === undefined ? null : lx;
                     };
-                    // structure: Breaker / Trap
+                    const yOf = (p: number) => mainSeriesRef.current.priceToCoordinate(p);
+                    const dash = (st: number) => st === 1 ? [6, 4] : st === 2 ? [1.5, 3] : [];
+                    const FONT = "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif";
+                    const label = (text: string, x: number, y: number, pos: 'above' | 'below' | 'right' | 'leftOfEdge', col: string, px: number) => {
+                      ctx.font = `${px}px ${FONT}`; ctx.fillStyle = col;
+                      if (pos === 'right') { ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(text, x + 4, y); return; }
+                      if (pos === 'leftOfEdge') { ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(text, x - 4, y); return; }
+                      ctx.textAlign = 'center'; ctx.textBaseline = pos === 'above' ? 'bottom' : 'top';
+                      ctx.fillText(text, x, pos === 'above' ? y - 2 : y + 2);
+                    };
+                    const box = (left: number, right: number, top: number, bot: number, fill: { color: string; opacity: number }, border: boolean) => {
+                      const yT = yOf(top), yB = yOf(bot); if (yT === null || yB === null) return;
+                      const l = Math.max(0, left), r = Math.min(textAlignX, right); if (r <= l) return;
+                      const yA = Math.min(yT, yB), h = Math.max(1, Math.abs(yB - yT));
+                      ctx.fillStyle = hexToRgba(fill.color, Math.min(100, Math.max(0, fill.opacity)) / 100);
+                      ctx.fillRect(l, yA, r - l, h);
+                      if (border) { ctx.strokeStyle = hexToRgba(fill.color, Math.min(1, fill.opacity / 100 + 0.25)); ctx.lineWidth = 1; ctx.setLineDash([]); ctx.strokeRect(l, yA, r - l, h); }
+                    };
+                    ctx.save();
+
+                    // COLOR CANDLES — the internal trend at the start of each bar, painted
+                    // over the visible candles in the swing colours, as plotcandle does.
+                    if (S.colorCandles) {
+                      const vr = tsI.getVisibleLogicalRange?.();
+                      const from = Math.max(0, Math.floor(vr ? vr.from : 0)), to = Math.min(cIn.length - 1, Math.ceil(vr ? vr.to : cIn.length - 1));
+                      const spacing = (tsI.options() as any).barSpacing || 6;
+                      const bw = Math.max(1, Math.floor(spacing * 0.8));
+                      for (let k = from; k <= to; k++) {
+                        const c = cIn[k]; const x = tsI.timeToCoordinate(c.time as any); if (x === null || x === undefined || x > textAlignX) continue;
+                        const yo = yOf(c.open), yc = yOf(c.close), yh = yOf(c.high), yl = yOf(c.low);
+                        if (yo === null || yc === null || yh === null || yl === null) continue;
+                        const col = res.candleBull[k] ? COL.swBull : COL.swBear;
+                        ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1; ctx.setLineDash([]);
+                        ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, yh); ctx.lineTo(Math.round(x) + 0.5, yl); ctx.stroke();
+                        ctx.fillRect(Math.round(x - bw / 2), Math.min(yo, yc), bw, Math.max(1, Math.abs(yc - yo)));
+                      }
+                    }
+
+                    // ORDER BLOCKS — extended right; internal without a border
+                    for (const ob of res.orderBlocks) {
+                      const x0 = xOf(ob.time);
+                      const fill = ob.internal ? (ob.dir === 'bull' ? COL.obIntBull : COL.obIntBear) : (ob.dir === 'bull' ? COL.obSwBull : COL.obSwBear);
+                      box(x0 === null ? 0 : x0, textAlignX, ob.top, ob.bottom, fill, !ob.internal);
+                    }
+                    // FAIR VALUE GAPS — two halves, top-to-mid and mid-to-bottom
+                    for (const g of res.fvgs) {
+                      const x0 = xOf(g.leftTime), x1 = xOf(g.rightTime); if (x0 === null || x1 === null) continue;
+                      const fill = g.dir === 'bull' ? COL.fvgBull : COL.fvgBear;
+                      box(x0, x1, Math.max(g.top, g.bottom), g.mid, fill, true);
+                      box(x0, x1, g.mid, Math.min(g.top, g.bottom), fill, true);
+                    }
+                    // STRUCTURE — Breaker / Trap
                     for (const st of res.structures) {
                       const x0 = xOf(st.fromTime), x1 = xOf(st.toTime), y = yOf(st.level);
                       if (x0 === null || x1 === null || y === null || x1 < 0 || x0 > textAlignX) continue;
-                      const col = st.dir === 'bull' ? IL_COLORS.bull : IL_COLORS.bear;
-                      ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.setLineDash(st.internal ? [4, 3] : []);
-                      ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(Math.min(x1, textAlignX), y); ctx.stroke();
+                      const col = st.internal ? (st.dir === 'bull' ? COL.intBull : COL.intBear) : (st.dir === 'bull' ? COL.swBull : COL.swBear);
+                      if (st.line) {
+                        ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.setLineDash(st.internal ? [4, 3] : []);
+                        ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(Math.min(x1, textAlignX), y); ctx.stroke();
+                      }
                       const xl = xOf(st.labelTime);
-                      if (xl !== null && xl >= 0 && xl <= textAlignX) label(st.tag, xl, y, st.dir === 'bull', col, st.internal ? 9 : 11);
+                      if (st.label && xl !== null && xl >= 0 && xl <= textAlignX) label(st.tag, xl, y, st.dir === 'bull' ? 'above' : 'below', col, IL_FONT_PX[st.internal ? S.intLblSz : S.swLblSz]);
                     }
-                    // equal highs / lows — dotted
-                    ctx.setLineDash([1.5, 3]);
+                    // DOUBLE HIGH / DOUBLE LOW — dotted
                     for (const e of res.equals) {
                       const x0 = xOf(e.fromTime), x1 = xOf(e.toTime), y0 = yOf(e.fromLevel), y1 = yOf(e.toLevel);
                       if (x0 === null || x1 === null || y0 === null || y1 === null || x1 < 0 || x0 > textAlignX) continue;
-                      const col = e.kind === 'high' ? IL_COLORS.bear : IL_COLORS.bull;
-                      ctx.strokeStyle = col; ctx.lineWidth = 1;
-                      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+                      const col = e.kind === 'high' ? COL.swBear : COL.swBull;
+                      if (e.line) {
+                        ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.setLineDash([1.5, 3]);
+                        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+                      }
                       const xl = xOf(e.labelTime);
-                      if (xl !== null && xl >= 0 && xl <= textAlignX) label(e.kind === 'high' ? 'Double High' : 'Double LOW', xl, y1, e.kind === 'high', col, 9);
+                      if (e.label && xl !== null && xl >= 0 && xl <= textAlignX) label(e.kind === 'high' ? 'Double High' : 'Double LOW', xl, y1, e.kind === 'high' ? 'above' : 'below', col, IL_FONT_PX[S.eqLblSz]);
                     }
                     ctx.setLineDash([]);
-                    // Supply / Demand extremes — from their time to the right edge, label at the end
+                    // SWING POINTS — HH / LH above the highs, HL / LL below the lows
+                    for (const sp of res.swingPoints) {
+                      const x = xOf(sp.time), y = yOf(sp.level);
+                      if (x === null || y === null || x < 0 || x > textAlignX) continue;
+                      label(sp.text, x, y, sp.kind === 'high' ? 'above' : 'below', sp.kind === 'high' ? COL.swBear : COL.swBull, 11);
+                    }
+                    // SUPPLY / DEMAND (Strong/Weak) — from their bar to the right edge
                     const sw = res.strongWeak;
                     if (sw) {
-                      for (const [lvl, t, txt, col, above] of [[sw.hi, sw.hiTime, sw.hiLabel, IL_COLORS.bear, true], [sw.lo, sw.loTime, sw.loLabel, IL_COLORS.bull, false]] as [number, number, string, string, boolean][]) {
+                      for (const [lvl, t, txt, col, above] of [[sw.hi, sw.hiTime, sw.hiLabel, COL.swBear, true], [sw.lo, sw.loTime, sw.loLabel, COL.swBull, false]] as [number, number, string, string, boolean][]) {
                         const y = yOf(lvl); if (y === null) continue;
                         const x0 = xOf(t); const sx = x0 === null ? 0 : Math.max(0, x0);
                         if (sx >= textAlignX) continue;
@@ -11406,6 +11618,37 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                         ctx.font = `9px ${FONT}`; ctx.fillStyle = col; ctx.textAlign = 'right';
                         ctx.textBaseline = above ? 'bottom' : 'top';
                         ctx.fillText(txt, textAlignX - 4, above ? y - 2 : y + 2);
+                      }
+                    }
+                    // DAILY / WEEKLY / MONTHLY previous high and low
+                    for (const m of res.mtf) {
+                      const col = m.tf === 'D' ? S.dailyColor : m.tf === 'W' ? S.weeklyColor : S.monthlyColor;
+                      const stl = m.tf === 'D' ? S.dailyStyle : m.tf === 'W' ? S.weeklyStyle : S.monthlyStyle;
+                      for (const [lvl, t, txt] of [[m.hi, m.hiTime, `P${m.tf}H`], [m.lo, m.loTime, `P${m.tf}L`]] as [number, number, string][]) {
+                        const y = yOf(lvl); if (y === null) continue;
+                        const x0 = xOf(t); const sx = x0 === null ? 0 : Math.max(0, x0);
+                        if (sx >= textAlignX) continue;
+                        ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.setLineDash(dash(stl));
+                        ctx.beginPath(); ctx.moveTo(sx, y); ctx.lineTo(textAlignX, y); ctx.stroke();
+                        ctx.setLineDash([]);
+                        label(txt, textAlignX, y, 'leftOfEdge', col, 11);
+                      }
+                    }
+                    // PREMIUM / EQUILIBRIUM / DISCOUNT — as the script draws them: from
+                    // the last bar to the last bar (a sliver), labels at the last bar.
+                    const z = res.zones;
+                    if (z) {
+                      const rng = z.hi - z.lo, eq = z.hi - rng * 0.5;
+                      const xz = xOf(z.fromTime);
+                      if (xz !== null) {
+                        const l = xz - 1, r = Math.max(xz + 1, (xOf(z.toTime) ?? xz) + 1);
+                        box(l, r, z.hi, z.hi - rng * 0.05, { color: COL.prem, opacity: 20 }, false);
+                        box(l, r, eq + rng * 0.025, eq - rng * 0.025, { color: COL.equil, opacity: 20 }, false);
+                        box(l, r, z.lo + rng * 0.05, z.lo, { color: COL.disc, opacity: 20 }, false);
+                        const yP = yOf(z.hi), yE = yOf(eq), yD = yOf(z.lo);
+                        if (yP !== null) label('Premium', xz, yP, 'above', COL.prem, 11);
+                        if (yE !== null) label('Equilibrium', xz, yE, 'right', COL.equil, 11);
+                        if (yD !== null) label('Discount', xz, yD, 'below', COL.disc, 11);
                       }
                     }
                     ctx.restore();
@@ -12678,9 +12921,19 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                         >
                           <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showInstLevels) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showInstLevels) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
                         </button>
-                        <span className="truncate select-none" title="Port of your TradingView 'TCI Key Institutional Levels v2.0' with its default settings: Breaker/Trap structure (internal dashed, swing solid), 5 internal order blocks, Double High/LOW, Supply/Demand extremes.">Institutional Levels</span>
+                        <span className="truncate select-none" title="Port of your TradingView 'TCI Key Institutional Levels v2.0'. Gear: the same settings as on TradingView.">Institutional Levels</span>
                       </div>
-                    <span className="p-1 w-[22px] shrink-0" aria-hidden="true" />
+                    {showInstLevels ? (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); ilSnapshotRef.current = ilSettings; setIsEditingIl(true); setIsIndicatorsOpen(false); }}
+                        className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+                        title="Institutional Levels Settings"
+                      >
+                        <Settings size={14} />
+                      </button>
+                    ) : (
+                      <span className="p-1 w-[22px] shrink-0" aria-hidden="true" />
+                    )}
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleFav('InstitutionalLevels'); }}
                       title={isFav('InstitutionalLevels') ? 'Remove from favourites' : 'Mark as favourite'}
@@ -14009,6 +14262,15 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           onChange={(style) => setDzStyle(style)}
           fvg={dzFvg}
           onFvgChange={setDzFvg}
+        />
+      )}
+
+      {isEditingIl && (
+        <InstitutionalLevelsEditorModal
+          value={ilSettings}
+          onChange={setIlSettings}
+          onClose={() => { setIlSettings(ilSnapshotRef.current); setIsEditingIl(false); }}
+          onApply={() => setIsEditingIl(false)}
         />
       )}
 
