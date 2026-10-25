@@ -200,15 +200,16 @@ async function resolveChannel() {
     if (!channelEntity) { logEvent('the chosen channel is not in your Telegram chats any more'); return; }
     // Whatever is already in the channel is history: mark it seen so neither a
     // restart nor the first poll can act on an old call.
-    const last: any[] = await tg.getMessages(channelEntity, { limit: 10 });
+    const last: any[] = await tg.getMessages(channelEntity, { limit: 100 });
     for (const m of last) seen.add(`${settings.channelId}:${m.id}`);
-    // Show them on the page (marked as history, never traded) — proof that the
-    // channel is readable and how the parser reads its real messages.
+    // Show some on the page (history, never traded) — proof that the channel is
+    // readable and how the parser reads its real messages: the newest 8, plus the
+    // newest 6 calls / TP-SL messages among the last 100 (the channel posts many
+    // price updates between calls, which the newest 8 alone would be).
     recentMsgs.length = 0;
-    for (const m of last.slice(0, 8)) {
-      const p = parseSignalMessage(String(m.message || ''));
-      recentMsgs.push({ at: Number(m.date || 0) * 1000, text: String(m.message || '').slice(0, 160), parsed: p ? p.kind : 'ignored' });
-    }
+    const rows = last.map(m => { const p = parseSignalMessage(String(m.message || '')); return { at: Number(m.date || 0) * 1000, text: String(m.message || '').slice(0, 160), parsed: p ? p.kind : 'ignored' }; });
+    const pick = new Set([...rows.slice(0, 8), ...rows.filter(r => r.parsed !== 'ignored').slice(0, 6)]);
+    for (const r of rows) if (pick.has(r)) recentMsgs.push(r);
     channelResolvedAt = Date.now();
   } catch (e: any) { logEvent(`could not open the channel: ${e?.message || e}`); }
 }
