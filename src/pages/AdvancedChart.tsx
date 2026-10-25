@@ -12,6 +12,8 @@ import { mergeLiveCandles, archiveFingerprint } from "../lib/liveCandles";
 import { getDivergences } from "../lib/divergence";
 import { evaluateBreakout } from "../lib/breakoutQuality";
 import { calculateBollingerBands } from "../indicators/bollingerBands";
+// Martin's TradingView "Institutional Levels" (TCI Key Institutional Levels v2.0), ported 25 Oct 2026.
+import { computeInstitutionalLevels, IL_COLORS, type IlResult } from "../indicators/institutionalLevels";
 import { format } from "date-fns";
 import { SymbolSearch } from "../components/SymbolSearch";
 import MarketContext from "../components/MarketContext";
@@ -3942,6 +3944,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const [showOrderBlocks, setShowOrderBlocks] = useState(() => {
     try { const v = localStorage.getItem('showOrderBlocks'); return v === null ? true : v === 'true'; } catch (e) { return true; }
   });
+  // Institutional Levels (port of Martin's TradingView indicator). Off until he
+  // switches it on: it draws a lot, on top of BOS-CHoCH and the zones.
+  const [showInstLevels, setShowInstLevels] = useState<boolean>(() => {
+    try { return localStorage.getItem('showInstLevels') === 'true'; } catch (e) { return false; }
+  });
+  useEffect(() => { try { localStorage.setItem('showInstLevels', String(showInstLevels)); } catch (e) {} }, [showInstLevels]);
+  const showInstLevelsRef = useRef(showInstLevels);
+  showInstLevelsRef.current = showInstLevels;
   // Fair Value Gaps — drawn like Demand/Supply zones, index chart only.
   const [showFvg, setShowFvg] = useState(() => {
     try { const v = localStorage.getItem('showFvg'); return v === null ? true : v === 'true'; } catch (e) { return true; }
@@ -8135,6 +8145,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     structBullColor: [structBullColor, setStructBullColor], structBearColor: [structBearColor, setStructBearColor],
     showBos: [showBos, setShowBos], favIndicators: [favIndicators, setFavIndicators],
     showStructure: [showStructure, setShowStructure], showOrderBlocks: [showOrderBlocks, setShowOrderBlocks],
+    showInstLevels: [showInstLevels, setShowInstLevels],
     showFvg: [showFvg, setShowFvg], showDsZones: [showDsZones, setShowDsZones], dzStyle: [dzStyle, setDzStyle],
     dzFvg: [dzFvg, setDzFvg], dsZoneOpacity: [dsZoneOpacity, setDsZoneOpacity],
     levelAlertsOn: [levelAlertsOn, setLevelAlertsOn], zoneTapAlertsOn: [zoneTapAlertsOn, setZoneTapAlertsOn],
@@ -9466,6 +9477,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // add-on reads the same ones).
   const dzBaseKeyRef = useRef<string>('');
   const dzLastRunRef = useRef<number>(0);
+  // Institutional Levels: same recompute rule as the Directional Zones (closed
+  // candles at once, the forming bar at most every 1.5 s).
+  const ilBaseKeyRef = useRef<string>('');
+  const ilSigRef = useRef<string>('');
+  const ilLastRunRef = useRef<number>(0);
+  const ilResRef = useRef<IlResult | null>(null);
   const dzInputRef = useRef<any[]>([]);
 
   const lastAlertedDivergenceRef = useRef<string | null>(null);
@@ -11312,6 +11329,90 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 }
               }
 
+              // INSTITUTIONAL LEVELS (src/indicators/institutionalLevels.ts) — Martin's
+              // TradingView indicator. Computed on history + live-closed candles + the
+              // forming bar, like TradingView runs it on the realtime bar. Drawn in
+              // the script's colours: order blocks (5 internal, extended right),
+              // structure lines tagged Breaker/Trap (internal dashed, swing solid),
+              // equal highs/lows (dotted), and the Supply/Demand extremes.
+              if (showInstLevelsRef.current && mainSeriesRef.current) {
+                try {
+                  const baseI = chartDataRef.current?.candles || [];
+                  const liveI = lastCandleDataRef.current;
+                  const baseKeyI = `${instrumentToken}|${timeframe}|${baseI.length}|${baseI.length ? baseI[baseI.length - 1].time : 0}|${arcFingerprint()}`;
+                  const sigI = `${baseKeyI}|${liveI ? `${liveI.time}:${liveI.high}:${liveI.low}:${liveI.close}` : ''}`;
+                  if (baseKeyI !== ilBaseKeyRef.current || (sigI !== ilSigRef.current && Date.now() - ilLastRunRef.current >= 1500)) {
+                    ilBaseKeyRef.current = baseKeyI; ilSigRef.current = sigI; ilLastRunRef.current = Date.now();
+                    const inI = mergedCandles();
+                    if (liveI) {
+                      const tail = inI.length ? inI[inI.length - 1].time : -Infinity;
+                      if (liveI.time > tail) inI.push(liveI);
+                      else if (liveI.time === tail) inI[inI.length - 1] = liveI;
+                    }
+                    ilResRef.current = computeInstitutionalLevels(inI.map((c: any) => ({ time: toUnixSeconds(c.time), open: +c.open, high: +c.high, low: +c.low, close: +c.close })));
+                  }
+                  const res = ilResRef.current;
+                  const tsI = mainChartRef.current?.timeScale();
+                  const xOf = (t: number) => { const x = tsI?.timeToCoordinate(t as any); return x === null || x === undefined ? null : x; };
+                  const yOf = (p: number) => mainSeriesRef.current.priceToCoordinate(p);
+                  if (res && tsI) {
+                    ctx.save();
+                    const FONT = "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif";
+                    // order blocks — 80% transparent fill, internal ones have no border
+                    for (const ob of res.orderBlocks) {
+                      const yT = yOf(ob.top), yB = yOf(ob.bottom), x0 = xOf(ob.time);
+                      if (yT === null || yB === null) continue;
+                      const bx = x0 === null ? 0 : Math.max(0, x0);
+                      if (bx >= textAlignX) continue;
+                      ctx.fillStyle = hexToRgba(ob.dir === 'bull' ? IL_COLORS.obBull : IL_COLORS.obBear, 0.2);
+                      ctx.fillRect(bx, Math.min(yT, yB), textAlignX - bx, Math.max(1, Math.abs(yB - yT)));
+                    }
+                    const label = (text: string, x: number, y: number, above: boolean, col: string, px: number) => {
+                      ctx.font = `${px}px ${FONT}`; ctx.fillStyle = col; ctx.textAlign = 'center';
+                      ctx.textBaseline = above ? 'bottom' : 'top';
+                      ctx.fillText(text, x, above ? y - 2 : y + 2);
+                    };
+                    // structure: Breaker / Trap
+                    for (const st of res.structures) {
+                      const x0 = xOf(st.fromTime), x1 = xOf(st.toTime), y = yOf(st.level);
+                      if (x0 === null || x1 === null || y === null || x1 < 0 || x0 > textAlignX) continue;
+                      const col = st.dir === 'bull' ? IL_COLORS.bull : IL_COLORS.bear;
+                      ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.setLineDash(st.internal ? [4, 3] : []);
+                      ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(Math.min(x1, textAlignX), y); ctx.stroke();
+                      const xl = xOf(st.labelTime);
+                      if (xl !== null && xl >= 0 && xl <= textAlignX) label(st.tag, xl, y, st.dir === 'bull', col, st.internal ? 9 : 11);
+                    }
+                    // equal highs / lows — dotted
+                    ctx.setLineDash([1.5, 3]);
+                    for (const e of res.equals) {
+                      const x0 = xOf(e.fromTime), x1 = xOf(e.toTime), y0 = yOf(e.fromLevel), y1 = yOf(e.toLevel);
+                      if (x0 === null || x1 === null || y0 === null || y1 === null || x1 < 0 || x0 > textAlignX) continue;
+                      const col = e.kind === 'high' ? IL_COLORS.bear : IL_COLORS.bull;
+                      ctx.strokeStyle = col; ctx.lineWidth = 1;
+                      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+                      const xl = xOf(e.labelTime);
+                      if (xl !== null && xl >= 0 && xl <= textAlignX) label(e.kind === 'high' ? 'Double High' : 'Double LOW', xl, y1, e.kind === 'high', col, 9);
+                    }
+                    ctx.setLineDash([]);
+                    // Supply / Demand extremes — from their time to the right edge, label at the end
+                    const sw = res.strongWeak;
+                    if (sw) {
+                      for (const [lvl, t, txt, col, above] of [[sw.hi, sw.hiTime, sw.hiLabel, IL_COLORS.bear, true], [sw.lo, sw.loTime, sw.loLabel, IL_COLORS.bull, false]] as [number, number, string, string, boolean][]) {
+                        const y = yOf(lvl); if (y === null) continue;
+                        const x0 = xOf(t); const sx = x0 === null ? 0 : Math.max(0, x0);
+                        if (sx >= textAlignX) continue;
+                        ctx.strokeStyle = col; ctx.lineWidth = 1;
+                        ctx.beginPath(); ctx.moveTo(sx, y); ctx.lineTo(textAlignX, y); ctx.stroke();
+                        ctx.font = `9px ${FONT}`; ctx.fillStyle = col; ctx.textAlign = 'right';
+                        ctx.textBaseline = above ? 'bottom' : 'top';
+                        ctx.fillText(txt, textAlignX - 4, above ? y - 2 : y + 2);
+                      }
+                    }
+                    ctx.restore();
+                  }
+                } catch (e) { /* an indicator must never break the frame */ }
+              }
+
               // FVG WITH DIRECTIONAL ZONES — a separate pass over the zones block's
               // OUTPUT. The block above is untouched; this only reads obZonesRef.
               // Derived once per recompute (keyed on the zones block's own signature),
@@ -12566,6 +12667,29 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     </button>
                   </div>
                   )}
+
+                  {/* Institutional Levels (Martin's TradingView indicator, ported 25 Oct 2026) */}
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('InstitutionalLevels', showInstLevels)}`}>
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowInstLevels(!showInstLevels); }}
+                          aria-label="Toggle Institutional Levels"
+                          className="w-4 flex items-center justify-center shrink-0"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(showInstLevels) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(showInstLevels) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none" title="Port of your TradingView 'TCI Key Institutional Levels v2.0' with its default settings: Breaker/Trap structure (internal dashed, swing solid), 5 internal order blocks, Double High/LOW, Supply/Demand extremes.">Institutional Levels</span>
+                      </div>
+                    <span className="p-1 w-[22px] shrink-0" aria-hidden="true" />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleFav('InstitutionalLevels'); }}
+                      title={isFav('InstitutionalLevels') ? 'Remove from favourites' : 'Mark as favourite'}
+                      aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('InstitutionalLevels') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                    >
+                      <Star size={14} fill={isFav('InstitutionalLevels') ? 'currentColor' : 'none'} />
+                    </button>
+                  </div>
 
                   {/* Directional Zones (ported TradingView indicator; replaced Order Blocks) */}
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('DirectionalZones', showOrderBlocks)}`}>
