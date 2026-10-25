@@ -43,16 +43,22 @@ export interface SignalDeps {
   ruleStatus: (tradingsymbol: string) => string | null;
   exitPosition: (tradingsymbol: string, reason: string) => Promise<{ ok: boolean; error?: string; alreadyClosed?: boolean }>;
   journalOpen: (o: any) => void;
+  // Morning Zerodha login reminder (25 Oct 2026)
+  kiteLoggedInToday: () => boolean;
+  kiteLoginUrl: () => string | null;
+  isTradingDay: (dateIst: string) => boolean;
 }
 
 type Mode = 'OFF' | 'PRACTICE' | 'LIVE';
 interface Settings {
   mode: Mode; lots: number | 'MAX'; maxLotsCap: number; maxTrades: number; allowAbove: number; waitMin: number;
   lastEntry: string; squareOff: string; channelId: string | null; channelTitle: string | null;
+  loginReminder: boolean; reminderAt: string; reminderAgainAt: string;
 }
 const DEFAULTS: Settings = {
   mode: 'OFF', lots: 1, maxLotsCap: 20, maxTrades: 3, allowAbove: 2, waitMin: 10,
   lastEntry: '15:00', squareOff: '15:15', channelId: null, channelTitle: null,
+  loginReminder: true, reminderAt: '08:45', reminderAgainAt: '09:05',
 };
 
 // ---------- clock (IST) ----------
@@ -115,14 +121,15 @@ async function botCall(method: string, body: any): Promise<any> {
     return await r.json();
   } catch (e: any) { return { ok: false, description: e?.message || String(e) }; }
 }
-type Btn = { text: string; data: string };
+// A button either calls back into the app (data) or opens a page (url).
+type Btn = { text: string; data?: string; url?: string };
 async function notify(text: string, buttons?: Btn[]) {
   logEvent(text.replace(/\n/g, ' · '));
   const chat = getKV('signals_bot_chat');
   if (BOT() && chat) {
     const r = await botCall('sendMessage', {
       chat_id: chat, text, disable_web_page_preview: true,
-      ...(buttons?.length ? { reply_markup: { inline_keyboard: [buttons.map(b => ({ text: b.text, callback_data: b.data }))] } } : {}),
+      ...(buttons?.length ? { reply_markup: { inline_keyboard: [buttons.map(b => (b.url ? { text: b.text, url: b.url } : { text: b.text, callback_data: b.data }))] } } : {}),
     });
     if (r?.ok) return;
   }
@@ -138,6 +145,9 @@ let tgStatus = 'not started';
 let pendingLogin: { phone: string; hash: string } | null = null;
 let channelEntity: any = null;
 let handlerAdded = false;
+let channelResolvedAt = 0;
+let lastUpdateAt = 0;            // any update from Telegram: the push stream is alive
+let lastChannelPushAt = 0;       // a new message in the chosen channel arrived by push
 const seen = new Set<string>();         // `${chat}:${msg}` already handled (push and poll race)
 const recentMsgs: { at: number; text: string; parsed: string }[] = [];
 
@@ -192,6 +202,14 @@ async function resolveChannel() {
     // restart nor the first poll can act on an old call.
     const last: any[] = await tg.getMessages(channelEntity, { limit: 10 });
     for (const m of last) seen.add(`${settings.channelId}:${m.id}`);
+    // Show them on the page (marked as history, never traded) — proof that the
+    // channel is readable and how the parser reads its real messages.
+    recentMsgs.length = 0;
+    for (const m of last.slice(0, 8)) {
+      const p = parseSignalMessage(String(m.message || ''));
+      recentMsgs.push({ at: Number(m.date || 0) * 1000, text: String(m.message || '').slice(0, 160), parsed: p ? p.kind : 'ignored' });
+    }
+    channelResolvedAt = Date.now();
   } catch (e: any) { logEvent(`could not open the channel: ${e?.message || e}`); }
 }
 
@@ -203,9 +221,11 @@ const msgChannelId = (m: any): string | null => {
 
 async function onUpdate(u: any) {
   try {
+    lastUpdateAt = Date.now();
     if (!(u instanceof Api.UpdateNewChannelMessage)) return;
     const m: any = u.message;
     if (msgChannelId(m) !== settings.channelId) return;
+    lastChannelPushAt = Date.now();
     await handleMessage(m, 'push');
   } catch (e: any) { console.error('[signals] update error', e?.message || e); }
 }
@@ -277,6 +297,9 @@ function prepareContract(callId: number): Promise<boolean> {
       .run(opt.tradingsymbol, opt.exchange, opt.instrument_token, opt.lot_size, opt.expiry, Date.now(), callId);
     watchTokens.add(opt.instrument_token);
     D.refreshSubscriptions();                     // stream it now, so the price is live when the levels land
+    // MAX lots: size now, from the call alone (the cap is entry-high + allowance),
+    // so the funds check is finished before the TP/SL message even arrives.
+    if (settings.lots === 'MAX') presize({ ...c, tradingsymbol: opt.tradingsymbol, exchange: opt.exchange, lot_size: opt.lot_size });
     return true;
   })();
   callContract.set(callId, p);
@@ -322,7 +345,8 @@ async function completeCall(callId: number, lv: ParsedLevels, levelsMsgId: numbe
 
   D.db.prepare("UPDATE signal_calls SET status='WATCHING', mode=?, watch_until=?, updated_at=? WHERE id=?")
     .run(settings.mode, Date.now() + settings.waitMin * 60000, Date.now(), callId);
-  presize(fresh);
+  if (fresh.token) watchingTokens.set(fresh.token, [...(watchingTokens.get(fresh.token) || []), callId]);
+  if (!sizing.has(callId) || Date.now() - sizing.get(callId)!.at > 60000) presize(fresh);
   logEvent(`${settings.mode === 'LIVE' ? '' : '[practice] '}call complete: ${label} — watching for price ≤ ${r2(call.entryHigh + settings.allowAbove)}`);
   await checkWatching(callId);                    // try at once: speed matters
 }
@@ -349,20 +373,26 @@ async function priceOf(token: number, exchange: string, tradingsymbol: string): 
 
 // ---------- entry ----------
 const entering = new Set<number>();
+// token -> calls currently WATCHING for their price (rebuilt by housekeeping)
+const watchingTokens = new Map<number, number[]>();
 async function checkWatching(callId: number) {
+  // The whole check is one critical section per call: ticks, the 1 s loop and
+  // the first check can all arrive together, and only one may ever reach enter().
   if (entering.has(callId)) return;
-  const c: any = D.db.prepare('SELECT * FROM signal_calls WHERE id = ?').get(callId);
-  if (!c || c.status !== 'WATCHING') return;
-  if (settings.mode === 'OFF') return skip(callId, 'auto-trade was switched OFF', true);
-  if (Date.now() > c.watch_until) return skip(callId, `price never came into range within ${settings.waitMin} min`);
-  if (istParts().mins > hm(settings.lastEntry)) return skip(callId, 'reached the last entry time');
-  const ltp = await priceOf(c.token, c.exchange, c.tradingsymbol);
-  if (ltp == null) return;
-  const cap = r2(c.entry_high + settings.allowAbove);
-  if (ltp <= c.sl) return skip(callId, `price ${ltp} is already at/below the SL ${c.sl}`);
-  if (ltp > cap) return;                          // keep watching
   entering.add(callId);
-  try { await enter(c, ltp, cap); } finally { entering.delete(callId); }
+  try {
+    const c: any = D.db.prepare('SELECT * FROM signal_calls WHERE id = ?').get(callId);
+    if (!c || c.status !== 'WATCHING') return;
+    if (settings.mode === 'OFF') return skip(callId, 'auto-trade was switched OFF', true);
+    if (Date.now() > c.watch_until) return skip(callId, `price never came into range within ${settings.waitMin} min`);
+    if (istParts().mins > hm(settings.lastEntry)) return skip(callId, 'reached the last entry time');
+    const ltp = await priceOf(c.token, c.exchange, c.tradingsymbol);
+    if (ltp == null) return;
+    const cap = r2(c.entry_high + settings.allowAbove);
+    if (ltp <= c.sl) return skip(callId, `price ${ltp} is already at/below the SL ${c.sl}`);
+    if (ltp > cap) return;                          // keep watching
+    await enter(c, ltp, cap);
+  } finally { entering.delete(callId); }
 }
 
 // MAX LOTS (Martin, 23 Oct): as many lots as the funds allow, sized the way the
@@ -538,7 +568,13 @@ function finishTrade(id: number, px: number | null, reason: string) {
 
 /** Called on every option tick (server.ts). Cheap when nothing is open. */
 export function signalOnTick(token: number, ltp: number) {
-  if (!openTrades.size || !(ltp > 0)) return;
+  if (!(ltp > 0)) return;
+  // A call waiting for its price is checked on the very tick, not on the next
+  // 1-second housekeeping pass.
+  if (watchingTokens.size && watchingTokens.has(token)) {
+    for (const id of watchingTokens.get(token)!) void checkWatching(id).catch(() => { });
+  }
+  if (!openTrades.size) return;
   for (const [id, st] of openTrades) {
     const t = tradeRow(id);
     if (!t || t.token !== token || t.status !== 'OPEN') continue;
@@ -558,8 +594,70 @@ async function housekeeping() {
   try { await housekeepingInner(); } finally { hkBusy = false; }
 }
 let lastConnectTry = 0;
+// MORNING ZERODHA LOGIN. Zerodha requires the day's login to be done by Martin
+// himself (exchange rule: no automated logins), so the app does the next best
+// thing: at reminderAt on a trading day, if today's session is missing, the bot
+// sends a button that opens Zerodha's own login page; after he approves it there,
+// Zerodha sends him back to the app and the session is saved as usual. A second,
+// louder nudge at reminderAgainAt if he still has not, and a one-line "logged in"
+// confirmation when the session appears. Nothing on weekends or NSE holidays.
+// Sent-flags live in app_settings so a restart never re-sends.
+function loginReminderTick(t: ReturnType<typeof istParts>) {
+  if (!settings.loginReminder) return;
+  if (t.day === 0 || t.day === 6 || t.mins < 6 * 60 || t.mins > 15 * 60 + 30) return;
+  let tradingDay = true;
+  try { tradingDay = D.isTradingDay(t.date); } catch { }
+  if (!tradingDay) return;
+  const st = getKV('signals_login_reminder') || {};
+  const today = st.date === t.date ? st : { date: t.date };
+  const loggedIn = D.kiteLoggedInToday();
+  const save = (patch: any) => setKV('signals_login_reminder', { ...today, ...patch });
+  const url = D.kiteLoginUrl();
+  const btn = url ? [{ text: '🔑 Log in to Zerodha', url }] : undefined;
+  const tail = url ? '' : ' (KITE_API_KEY is not set on the server)';
+  if (loggedIn) {
+    if ((today.first || today.second) && !today.confirmed) { save({ confirmed: true }); void notify('✅ Zerodha is logged in for today. Auto-trade and the auto SL/TP are ready.'); }
+    return;
+  }
+  if (!today.first && t.mins >= hm(settings.reminderAt) && t.mins < 15 * 60) {
+    save({ first: Date.now() });
+    void notify(`🔑 Good morning — log in to Zerodha for today.\nTap the button, approve the login in Zerodha, and you're set.${tail}${!BOT() && url ? `\n${url}` : ''}`, btn);
+    return;
+  }
+  if (today.first && !today.second && t.mins >= hm(settings.reminderAgainAt) && t.mins < 15 * 60) {
+    save({ second: Date.now() });
+    void notify(`⚠️ Zerodha is still NOT logged in.\nUntil you log in, Telegram calls are skipped and the auto SL/TP cannot place exits.${tail}${!BOT() && url ? `\n${url}` : ''}`, btn);
+  }
+}
+
+let lastResolveTry = 0;
+// MORNING READINESS (09:10 on trading days, while auto-trade is on): one message
+// that says either "ready" or exactly what is not — so a problem is found before
+// the first call, not by a call being missed.
+function readinessTick(t: ReturnType<typeof istParts>) {
+  if (settings.mode === 'OFF' || t.day === 0 || t.day === 6 || t.mins < 9 * 60 + 10 || t.mins > 15 * 60) return;
+  try { if (!D.isTradingDay(t.date)) return; } catch { }
+  const st = getKV('signals_ready_check') || {};
+  if (st.date === t.date) return;
+  setKV('signals_ready_check', { date: t.date, at: Date.now() });
+  const problems: string[] = [];
+  if (!tgLoggedIn) problems.push('Telegram is not logged in (Setup, step 2)');
+  else if (!channelEntity) problems.push(`the channel "${settings.channelTitle || '?'}" could not be opened`);
+  let kiteOk = false; try { kiteOk = D.kiteLoggedInToday(); } catch { }
+  if (settings.mode === 'LIVE' && !kiteOk) problems.push('Zerodha is not logged in');
+  const size = settings.lots === 'MAX' ? `max lots (up to ${settings.maxLotsCap})` : `${settings.lots} lot${settings.lots === 1 ? '' : 's'}`;
+  if (problems.length) void notify(`⚠️ Auto-trade is ${settings.mode} but NOT ready:\n• ${problems.join('\n• ')}`);
+  else void notify(`✅ Auto-trade ready (${settings.mode}): reading "${settings.channelTitle}", Zerodha logged in, ${size}, max ${settings.maxTrades} trades.`);
+}
+
 async function housekeepingInner() {
   const t = istParts();
+  try { loginReminderTick(t); } catch (e) { console.error('[signals] login reminder', e); }
+  try { readinessTick(t); } catch (e) { console.error('[signals] readiness', e); }
+  if (tg && tgLoggedIn && settings.channelId && !channelEntity && Date.now() - lastResolveTry > 60000) {
+    lastResolveTry = Date.now();
+    void resolveChannel();
+  }
   if (!tg && apiCreds() && Date.now() - lastConnectTry > 60000) {
     lastConnectTry = Date.now();
     void tgConnect().catch((e: any) => { tgStatus = `error: ${e?.message || e}`; });
@@ -576,7 +674,10 @@ async function housekeepingInner() {
     void D.findOption('SENSEX', 0, 'CE', t.date).catch(() => { });
   }
   // watched calls
-  for (const c of D.db.prepare("SELECT id FROM signal_calls WHERE status='WATCHING'").all() as any[]) await checkWatching(c.id);
+  const watching = D.db.prepare("SELECT id, token FROM signal_calls WHERE status='WATCHING'").all() as any[];
+  watchingTokens.clear();
+  for (const c of watching) { if (c.token) watchingTokens.set(c.token, [...(watchingTokens.get(c.token) || []), c.id]); }
+  for (const c of watching) await checkWatching(c.id);
   // expire calls whose levels never came
   for (const c of D.db.prepare("SELECT id FROM signal_calls WHERE status='WAITING_LEVELS' AND received_at < ?").all(Date.now() - 180000) as any[])
     await skip(c.id, 'the TP/SL message never arrived (3 min)', settings.mode === 'OFF');
@@ -736,9 +837,11 @@ export function registerSignalTrader(app: any, deps: SignalDeps) {
     const events = D.db.prepare('SELECT at, text FROM signal_events WHERE day = ? ORDER BY id DESC LIMIT 60').all(day);
     res.json({
       settings, pinConfigured: !!process.env.SIGNALS_PIN,
-      telegram: { apiConfigured: !!apiCreds(), status: tgStatus, loggedIn: tgLoggedIn, me: tgMe?.name || null, awaitingCode: !!pendingLogin },
+      telegram: { apiConfigured: !!apiCreds(), status: tgStatus, loggedIn: tgLoggedIn, me: tgMe?.name || null, awaitingCode: !!pendingLogin,
+        channelOpen: !!channelEntity, channelOpenedAt: channelResolvedAt || null, lastUpdateAt: lastUpdateAt || null, lastChannelPushAt: lastChannelPushAt || null },
       bot: { configured: !!BOT(), username: botUser, linked: !!getKV('signals_bot_chat') },
       tradesToday: tradesToday(), calls, trades, events, recentMessages: recentMsgs.slice(0, 15),
+      kite: { loggedInToday: (() => { try { return D.kiteLoggedInToday(); } catch { return false; } })() },
     });
   });
 
@@ -761,6 +864,9 @@ export function registerSignalTrader(app: any, deps: SignalDeps) {
     if (b.waitMin !== undefined) settings.waitMin = num(b.waitMin, 0, 60, settings.waitMin);
     if (typeof b.lastEntry === 'string' && /^\d{2}:\d{2}$/.test(b.lastEntry)) settings.lastEntry = b.lastEntry;
     if (typeof b.squareOff === 'string' && /^\d{2}:\d{2}$/.test(b.squareOff)) settings.squareOff = b.squareOff;
+    if (typeof b.loginReminder === 'boolean') settings.loginReminder = b.loginReminder;
+    if (typeof b.reminderAt === 'string' && /^\d{2}:\d{2}$/.test(b.reminderAt)) settings.reminderAt = b.reminderAt;
+    if (typeof b.reminderAgainAt === 'string' && /^\d{2}:\d{2}$/.test(b.reminderAgainAt)) settings.reminderAgainAt = b.reminderAgainAt;
     saveSettings();
     logEvent(`settings: ${settings.mode}, ${settings.lots === 'MAX' ? `MAX lots (cap ${settings.maxLotsCap})` : `${settings.lots} lot`}, max ${settings.maxTrades}/day, +${settings.allowAbove} above range, wait ${settings.waitMin} min`);
     res.json({ ok: true, settings });
@@ -839,6 +945,13 @@ export function registerSignalTrader(app: any, deps: SignalDeps) {
   app.post('/api/signals/keep', json, async (req: any, res: any) => {
     res.json({ ok: true, message: await keep(Number(req.body?.id)) });
   });
+  app.post('/api/signals/login-now', json, async (req: any, res: any) => {
+    if (!needPin(req, res)) return;
+    const url = D.kiteLoginUrl();
+    if (!url) return res.json({ ok: false, error: 'KITE_API_KEY is not set on the server.' });
+    await notify('🔑 Log in to Zerodha for today.\nTap the button, approve the login in Zerodha, and you\'re set.', [{ text: '🔑 Log in to Zerodha', url }]);
+    res.json({ ok: true, linked: !!getKV('signals_bot_chat') });
+  });
   app.post('/api/signals/test-alert', json, async (req: any, res: any) => {
     if (!needPin(req, res)) return;
     await notify('🔔 Test alert from your NIFTY app. Buttons and trade alerts will arrive here.');
@@ -850,7 +963,7 @@ export function registerSignalTrader(app: any, deps: SignalDeps) {
   void tgConnect().catch((e: any) => { tgStatus = `error: ${e?.message || e}`; console.error('[signals] connect', e); });
   void botLoop();
   setInterval(() => { void housekeeping().catch(e => console.error('[signals] housekeeping', e)); }, 1000);
-  setInterval(() => { void pollChannel(); }, 4000);
+  setInterval(() => { void pollChannel(); }, 3000);
   setInterval(() => { void reconcileLive().catch(() => { }); }, 5000);
   console.log('[signals] registered: /api/signals/*');
 }
@@ -859,5 +972,5 @@ export function registerSignalTrader(app: any, deps: SignalDeps) {
 export const __test = {
   handleMessage, housekeeping, reconcileLive, closeTrade, keep, onBotUpdate,
   get settings() { return settings; }, setSettings(s: Partial<Settings>) { settings = { ...settings, ...s }; },
-  setClockOffset(ms: number) { clockOffsetMs = ms; }, clearPriceCache() { lastRestAt.clear(); restLtp.clear(); }, setOwner(id: string) { setKV('signals_owner_id', id); },
+  setClockOffset(ms: number) { clockOffsetMs = ms; }, loginReminderTick: () => loginReminderTick(istParts()), clearPriceCache() { lastRestAt.clear(); restLtp.clear(); }, setOwner(id: string) { setKV('signals_owner_id', id); },
 };
