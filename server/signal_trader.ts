@@ -43,9 +43,8 @@ export interface SignalDeps {
   ruleStatus: (tradingsymbol: string) => string | null;
   exitPosition: (tradingsymbol: string, reason: string) => Promise<{ ok: boolean; error?: string; alreadyClosed?: boolean }>;
   journalOpen: (o: any) => void;
-  // Morning Zerodha login reminder (25 Oct 2026)
+  // the 09:10 readiness message
   kiteLoggedInToday: () => boolean;
-  kiteLoginUrl: () => string | null;
   isTradingDay: (dateIst: string) => boolean;
 }
 
@@ -53,12 +52,10 @@ type Mode = 'OFF' | 'PRACTICE' | 'LIVE';
 interface Settings {
   mode: Mode; lots: number | 'MAX'; maxLotsCap: number; maxTrades: number; allowAbove: number; waitMin: number;
   lastEntry: string; squareOff: string; channelId: string | null; channelTitle: string | null;
-  loginReminder: boolean; reminderAt: string; reminderAgainAt: string;
 }
 const DEFAULTS: Settings = {
   mode: 'OFF', lots: 1, maxLotsCap: 20, maxTrades: 3, allowAbove: 2, waitMin: 10,
   lastEntry: '15:00', squareOff: '15:15', channelId: null, channelTitle: null,
-  loginReminder: true, reminderAt: '08:45', reminderAgainAt: '09:05',
 };
 
 // ---------- clock (IST) ----------
@@ -595,41 +592,9 @@ async function housekeeping() {
   try { await housekeepingInner(); } finally { hkBusy = false; }
 }
 let lastConnectTry = 0;
-// MORNING ZERODHA LOGIN. Zerodha requires the day's login to be done by Martin
-// himself (exchange rule: no automated logins), so the app does the next best
-// thing: at reminderAt on a trading day, if today's session is missing, the bot
-// sends a button that opens Zerodha's own login page; after he approves it there,
-// Zerodha sends him back to the app and the session is saved as usual. A second,
-// louder nudge at reminderAgainAt if he still has not, and a one-line "logged in"
-// confirmation when the session appears. Nothing on weekends or NSE holidays.
-// Sent-flags live in app_settings so a restart never re-sends.
-function loginReminderTick(t: ReturnType<typeof istParts>) {
-  if (!settings.loginReminder) return;
-  if (t.day === 0 || t.day === 6 || t.mins < 6 * 60 || t.mins > 15 * 60 + 30) return;
-  let tradingDay = true;
-  try { tradingDay = D.isTradingDay(t.date); } catch { }
-  if (!tradingDay) return;
-  const st = getKV('signals_login_reminder') || {};
-  const today = st.date === t.date ? st : { date: t.date };
-  const loggedIn = D.kiteLoggedInToday();
-  const save = (patch: any) => setKV('signals_login_reminder', { ...today, ...patch });
-  const url = D.kiteLoginUrl();
-  const btn = url ? [{ text: '🔑 Log in to Zerodha', url }] : undefined;
-  const tail = url ? '' : ' (KITE_API_KEY is not set on the server)';
-  if (loggedIn) {
-    if ((today.first || today.second) && !today.confirmed) { save({ confirmed: true }); void notify('✅ Zerodha is logged in for today. Auto-trade and the auto SL/TP are ready.'); }
-    return;
-  }
-  if (!today.first && t.mins >= hm(settings.reminderAt) && t.mins < 15 * 60) {
-    save({ first: Date.now() });
-    void notify(`🔑 Good morning — log in to Zerodha for today.\nTap the button, approve the login in Zerodha, and you're set.${tail}${!BOT() && url ? `\n${url}` : ''}`, btn);
-    return;
-  }
-  if (today.first && !today.second && t.mins >= hm(settings.reminderAgainAt) && t.mins < 15 * 60) {
-    save({ second: Date.now() });
-    void notify(`⚠️ Zerodha is still NOT logged in.\nUntil you log in, Telegram calls are skipped and the auto SL/TP cannot place exits.${tail}${!BOT() && url ? `\n${url}` : ''}`, btn);
-  }
-}
+// (A morning "Log in to Zerodha" button lived here, 25-26 Oct 2026. Martin found
+// logging in through it clumsy and asked for it to go; he logs in as before. The
+// 09:10 readiness message below still says when Zerodha is not logged in.)
 
 let lastResolveTry = 0;
 // MORNING READINESS (09:10 on trading days, while auto-trade is on): one message
@@ -653,7 +618,6 @@ function readinessTick(t: ReturnType<typeof istParts>) {
 
 async function housekeepingInner() {
   const t = istParts();
-  try { loginReminderTick(t); } catch (e) { console.error('[signals] login reminder', e); }
   try { readinessTick(t); } catch (e) { console.error('[signals] readiness', e); }
   if (tg && tgLoggedIn && settings.channelId && !channelEntity && Date.now() - lastResolveTry > 60000) {
     lastResolveTry = Date.now();
@@ -695,7 +659,9 @@ async function housekeepingInner() {
       const rs_ = D.ruleStatus(tr.tradingsymbol);
       if (rs_ && rs_ !== 'ACTIVE') {          // the engine exited (SL), or the rule was cleared elsewhere
         D.db.prepare("UPDATE signal_trades SET status='CLOSING', exit_reason=COALESCE(exit_reason, ?), updated_at=? WHERE id=?")
-          .run(rs_ === 'DONE' ? `SL ${st.sl} hit` : `rule ${rs_.toLowerCase()}`, Date.now(), id);
+          // TRIGGERED is the engine's stop exit in flight, DONE the same exit placed —
+          // both are the SL. Anything else (CANCELLED) was cleared elsewhere.
+          .run(rs_ === 'DONE' || rs_ === 'TRIGGERED' ? `SL ${st.sl} hit` : `rule ${rs_.toLowerCase()}`, Date.now(), id);
         openTrades.delete(id);
       }
     }
@@ -865,9 +831,6 @@ export function registerSignalTrader(app: any, deps: SignalDeps) {
     if (b.waitMin !== undefined) settings.waitMin = num(b.waitMin, 0, 60, settings.waitMin);
     if (typeof b.lastEntry === 'string' && /^\d{2}:\d{2}$/.test(b.lastEntry)) settings.lastEntry = b.lastEntry;
     if (typeof b.squareOff === 'string' && /^\d{2}:\d{2}$/.test(b.squareOff)) settings.squareOff = b.squareOff;
-    if (typeof b.loginReminder === 'boolean') settings.loginReminder = b.loginReminder;
-    if (typeof b.reminderAt === 'string' && /^\d{2}:\d{2}$/.test(b.reminderAt)) settings.reminderAt = b.reminderAt;
-    if (typeof b.reminderAgainAt === 'string' && /^\d{2}:\d{2}$/.test(b.reminderAgainAt)) settings.reminderAgainAt = b.reminderAgainAt;
     saveSettings();
     logEvent(`settings: ${settings.mode}, ${settings.lots === 'MAX' ? `MAX lots (cap ${settings.maxLotsCap})` : `${settings.lots} lot`}, max ${settings.maxTrades}/day, +${settings.allowAbove} above range, wait ${settings.waitMin} min`);
     res.json({ ok: true, settings });
@@ -946,13 +909,6 @@ export function registerSignalTrader(app: any, deps: SignalDeps) {
   app.post('/api/signals/keep', json, async (req: any, res: any) => {
     res.json({ ok: true, message: await keep(Number(req.body?.id)) });
   });
-  app.post('/api/signals/login-now', json, async (req: any, res: any) => {
-    if (!needPin(req, res)) return;
-    const url = D.kiteLoginUrl();
-    if (!url) return res.json({ ok: false, error: 'KITE_API_KEY is not set on the server.' });
-    await notify('🔑 Log in to Zerodha for today.\nTap the button, approve the login in Zerodha, and you\'re set.', [{ text: '🔑 Log in to Zerodha', url }]);
-    res.json({ ok: true, linked: !!getKV('signals_bot_chat') });
-  });
   app.post('/api/signals/test-alert', json, async (req: any, res: any) => {
     if (!needPin(req, res)) return;
     await notify('🔔 Test alert from your NIFTY app. Buttons and trade alerts will arrive here.');
@@ -973,5 +929,5 @@ export function registerSignalTrader(app: any, deps: SignalDeps) {
 export const __test = {
   handleMessage, housekeeping, reconcileLive, closeTrade, keep, onBotUpdate,
   get settings() { return settings; }, setSettings(s: Partial<Settings>) { settings = { ...settings, ...s }; },
-  setClockOffset(ms: number) { clockOffsetMs = ms; }, loginReminderTick: () => loginReminderTick(istParts()), clearPriceCache() { lastRestAt.clear(); restLtp.clear(); }, setOwner(id: string) { setKV('signals_owner_id', id); },
+  setClockOffset(ms: number) { clockOffsetMs = ms; }, clearPriceCache() { lastRestAt.clear(); restLtp.clear(); }, setOwner(id: string) { setKV('signals_owner_id', id); },
 };

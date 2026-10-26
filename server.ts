@@ -3431,15 +3431,14 @@ setInterval(() => {
       return result;
     },
     journalOpen: (o) => journalOpenTrade(o),
-    // Morning login reminder: today's real (not simulated) Kite session, Zerodha's
-    // own login page, and the NSE calendar's trading days.
+    // The 09:10 readiness message: today's real (not simulated) Kite session and
+    // the NSE calendar's trading days.
     kiteLoggedInToday: () => {
       try {
         const row: any = db.prepare('SELECT access_token, token_date FROM kite_tokens ORDER BY id DESC LIMIT 1').get();
         return !!row && row.access_token !== 'simulated_session_token' && row.token_date === new Date().toISOString().split('T')[0];
       } catch (e) { return false; }
     },
-    kiteLoginUrl: () => getKiteLoginUrl(),
     isTradingDay: (d) => !calIsNseHoliday(d),
   });
   // "Check bias" button: GET /api/bias (latest note) and POST /api/bias/run (fresh

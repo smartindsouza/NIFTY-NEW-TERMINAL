@@ -68,7 +68,7 @@ registerSignalTrader(app, {
   setRuleSl: (s, sl) => { const r = rules.get(s); if (r?.status === 'ACTIVE') { r.sl = sl; log.push(`SL ${sl}`); } },
   ruleStatus: (s) => rules.get(s)?.status ?? null,
   exitPosition, journalOpen: () => log.push('JOURNAL'),
-  kiteLoggedInToday: () => kiteIn, kiteLoginUrl: () => 'https://kite.zerodha.com/connect/login?api_key=k&v=3', isTradingDay: (d) => d !== '2026-10-27',
+  kiteLoggedInToday: () => kiteIn, isTradingDay: (d) => d !== '2026-10-27',
 });
 // the existing exit engine, faked: SL touched → position flattened, rule DONE
 function tick(ltp: number) {
@@ -240,24 +240,6 @@ __test.setSettings({ lots: 1 });
   assert.equal(orders.filter(o => o.transaction_type === 'BUY').length, before + 1);
   assert.equal(calls().at(-1).status, 'ENTERED'); ok('burst of ticks + loop while watching → exactly one order');
   await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
-}
-
-// 12c) morning Zerodha login reminder
-{
-  const ev = () => events().filter(e => /Zerodha/.test(e));
-  const at = (d: number, h: number, m: number) => __test.setClockOffset(Date.UTC(2026, 9, d, h, m) - 5.5 * 3600e3 - Date.now());
-  kiteIn = false;
-  at(26, 8, 40); __test.loginReminderTick(); assert.equal(ev().length, 0);
-  at(26, 8, 45); __test.loginReminderTick(); __test.loginReminderTick(); await settle();
-  assert.equal(ev().length, 1); assert.match(ev()[0], /log in to Zerodha/); ok('08:45 reminder sent once (not at 08:40, not twice)');
-  at(26, 9, 5); __test.loginReminderTick(); __test.loginReminderTick(); await settle();
-  assert.equal(ev().length, 2); assert.match(ev()[1], /still NOT logged in/); ok('09:05 second reminder, once');
-  kiteIn = true; at(26, 9, 7); __test.loginReminderTick(); __test.loginReminderTick(); await settle();
-  assert.equal(ev().length, 3); assert.match(ev()[2], /logged in for today/); ok('login confirmed once');
-  const n0 = ev().length;
-  kiteIn = false; at(27, 8, 50); __test.loginReminderTick(); await settle(); assert.equal(ev().length, n0); ok('holiday: nothing sent');
-  at(31, 8, 50); __test.loginReminderTick(); await settle(); assert.equal(ev().length, n0); ok('Saturday: nothing sent');
-  kiteIn = true; at(28, 8, 50); __test.loginReminderTick(); await settle(); assert.equal(ev().length, n0); ok('already logged in: nothing sent');
 }
 
 // 13) bot: only the owner may press buttons

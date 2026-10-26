@@ -186,40 +186,6 @@ export default function TelegramSignals() {
         </div>
       </div>
 
-      {/* morning Zerodha login reminder */}
-      {form && (
-        <div className="bg-card border border-border rounded-xl p-4">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <h2 className="font-bold">Morning Zerodha login</h2>
-            <span className={cn('text-[11px] font-bold px-2 py-0.5 rounded-md', data?.kite?.loggedInToday ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400')}>
-              {data?.kite?.loggedInToday ? 'Logged in today' : 'Not logged in today'}
-            </span>
-          </div>
-          <div className="text-[11px] text-muted-foreground mt-1">On trading days your bot sends a "Log in to Zerodha" button if today's login is missing — tap it, approve in Zerodha, done. Zerodha requires the login to be yours, so the app never logs in by itself.</div>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs mt-3">
-            <label className="flex items-center gap-2 text-foreground/85 col-span-2 md:col-span-1">
-              <input type="checkbox" checked={!!form.loginReminder} onChange={e => setForm({ ...form, loginReminder: e.target.checked })} className="w-4 h-4 accent-emerald-500" />
-              Remind me
-            </label>
-            <label className="flex flex-col gap-1 text-muted-foreground">First reminder (IST)
-              <input type="time" value={form.reminderAt ?? '08:45'} onChange={e => setForm({ ...form, reminderAt: e.target.value })}
-                className="h-8 px-2 rounded-md bg-popover border border-border font-mono text-foreground" />
-            </label>
-            <label className="flex flex-col gap-1 text-muted-foreground">Again if still not logged in
-              <input type="time" value={form.reminderAgainAt ?? '09:05'} onChange={e => setForm({ ...form, reminderAgainAt: e.target.value })}
-                className="h-8 px-2 rounded-md bg-popover border border-border font-mono text-foreground" />
-            </label>
-          </div>
-          <div className="flex gap-2 mt-3 flex-wrap">
-            <button disabled={busy} onClick={async () => { const d = await post('/api/signals/settings', { loginReminder: !!form.loginReminder, reminderAt: form.reminderAt, reminderAgainAt: form.reminderAgainAt });
-                if (d.ok) { setForm({ ...d.settings }); toast.success('Saved'); } }}
-              className="text-xs font-bold px-3 py-2 rounded-lg bg-primary text-primary-foreground">Save</button>
-            <button disabled={busy} onClick={async () => { const d = await post('/api/signals/login-now'); if (d.ok) toast.success(d.linked ? 'Login button sent to your bot' : 'Login link sent to your Saved Messages'); }}
-              className="text-xs font-bold px-3 py-2 rounded-lg bg-popover">Send me the login button now</button>
-          </div>
-        </div>
-      )}
-
       {/* settings */}
       {form && (
         <div className="bg-card border border-border rounded-xl p-4">
