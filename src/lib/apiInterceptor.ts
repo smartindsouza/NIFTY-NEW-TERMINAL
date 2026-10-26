@@ -32,6 +32,8 @@ const LOCAL_ONLY_ENDPOINTS = new Set([
   // warning Martin already found noisy would fire within a minute.
   '/api/signals/manual',
   '/api/signals/manual/',
+  // Second-account card on the same page: local SQLite only.
+  '/api/family/status',
 ]);
 
 // Endpoints that DO sit in front of the broker but are served from a short shared

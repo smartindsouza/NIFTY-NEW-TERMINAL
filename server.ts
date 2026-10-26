@@ -32,6 +32,7 @@ const { createBiasRouter } = biasCheck as any;
 import { registerTriggers, armedTriggerTokens, onTickForTriggers } from './server/triggers';
 // Telegram channel calls → automatic 1-lot entries with the message's SL (23 Oct 2026).
 import { registerSignalTrader, signalOnTick, signalTokens, signalNoteManualRearm, signalManages } from './server/signal_trader';
+import { registerFamilyTrader, familyOnTick, familyTokens } from './server/family_trader';
 import { registerLeverage } from './server/leverage';
 import { GAP_CONFIG } from './server/config/gapScorecard';
 import { evaluateQuantSignals } from './server/quant_engine';
@@ -925,6 +926,8 @@ function pushTickerSubscriptions() {
   // Telegram-call contracts: streamed from the moment the call is read, so the
   // price is live by the time its TP/SL message lands.
   for (const t of signalTokens()) all.add(t);
+  // Second account (wife): the same channel contracts, while she watches or holds one.
+  for (const t of familyTokens()) all.add(t);
   setSubscriptions(Array.from(all));
 }
 
@@ -1086,6 +1089,8 @@ function connectTicker() {
       // Telegram-signal ladder first, so a stop it raises on this tick is the
       // stop the exit check below sees.
       try { signalOnTick(tick.token, tick.ltp); } catch (e) {}
+      // Second account: her own ladder and exits, on her own Zerodha (server/family_trader.ts).
+      try { familyOnTick(tick.token, tick.ltp); } catch (e) {}
       const rule = premiumRulesByToken.get(tick.token);
       if (rule && typeof tick.ltp === 'number' && tick.ltp > 0) {
         persistRuleLtpThrottled(rule.tradingsymbol, tick.ltp);
@@ -3449,6 +3454,16 @@ setInterval(() => {
     },
     isTradingDay: (d) => !calIsNseHoliday(d),
   });
+  // SECOND ACCOUNT (wife's Zerodha): follows the channel's calls with its own
+  // login, tables and exits. Inert until FAMILY_KITE_API_KEY is set and her mode
+  // is switched on. It reads prices from this app's feed and never touches
+  // kite_tokens, premium_exit_rules or the journal.
+  try {
+    registerFamilyTrader(app, {
+      db, getLatestTick, getMartinKite: getKiteClient, getMartinUserId: getKiteUserId,
+      findOption: findNearestExpiryOption, refreshSubscriptions: () => pushTickerSubscriptions(),
+    });
+  } catch (e) { console.error('[family] failed to start — the rest of the app is unaffected', e); }
   // "Check bias" button: GET /api/bias (latest note) and POST /api/bias/run (fresh
   // note now). POST /api/bias stays with registerBias above (database storage).
   // The snapshot is built in-process (no HTTP hop) by the same function as

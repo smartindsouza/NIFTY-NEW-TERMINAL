@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { Send, Power, Bot, KeyRound, LogOut, RefreshCw, Check, DoorOpen, TrendingUp, ChevronDown, ChevronRight } from 'lucide-react';
+import FamilyAccountCard from '../components/FamilyAccountCard';
 
 // Telegram Auto-Trade: reads one channel's BUY calls and trades them with the
 // message's SL (server/signal_trader.ts). This page is the switch, the setup and
@@ -224,6 +225,9 @@ export default function TelegramSignals() {
             className="mt-3 text-xs font-bold px-3 py-2 rounded-lg bg-primary text-primary-foreground">Save rules</button>
         </div>
       )}
+
+      {/* second account (wife's Zerodha) — its own card and endpoints */}
+      <FamilyAccountCard pin={pin} />
 
       {/* setup */}
       <div className="bg-card border border-border rounded-xl p-4">

@@ -329,6 +329,7 @@ async function completeCall(callId: number, lv: ParsedLevels, levelsMsgId: numbe
   D.db.prepare('UPDATE signal_calls SET sl=?, tp1=?, tp2=?, tp3=?, levels_msg_id=?, updated_at=? WHERE id=?')
     .run(lv.sl, lv.tps[0], lv.tps[1], lv.tps[2], levelsMsgId, Date.now(), callId);
   const c: any = D.db.prepare('SELECT * FROM signal_calls WHERE id = ?').get(callId);
+  emitCall(callId);
   const call: ParsedCall = { underlying: c.underlying, strike: c.strike, optionType: c.option_type, entryLow: c.entry_low, entryHigh: c.entry_high };
   const label = `${call.underlying} ${call.strike} ${call.optionType} · entry ${call.entryLow}-${call.entryHigh} · SL ${lv.sl} · TP ${lv.tps.join('/')}`;
 
@@ -822,6 +823,11 @@ async function onBotUpdate(u: any) {
     if (c?.status === 'WATCHING') { await skip(id, 'cancelled by you'); answer = 'Order cancelled.'; }
     else answer = c?.status === 'ENTERED' ? 'Already bought — use Exit.' : 'Not waiting any more.';
   }
+  else {
+    for (const fn of buttonListeners) {
+      try { const r = await fn(act, id); if (r) { answer = r; break; } } catch (e: any) { answer = e?.message || 'failed'; }
+    }
+  }
   await botCall('answerCallbackQuery', { callback_query_id: q.id, text: answer });
 }
 
@@ -1050,6 +1056,30 @@ export function registerSignalTrader(app: any, deps: SignalDeps) {
 }
 
 // exported for the end-to-end test harness
+// ---------- SECOND ACCOUNT HOOKS (26 Oct 2026) ----------
+// Martin's wife's Zerodha account follows the channel's calls (server/family_trader.ts).
+// These hooks only HAND OUT what this engine already has — a complete call, the
+// timing settings, the clock, the alert channel, the PIN check, and bot buttons it
+// does not itself use. Nothing here changes how Martin's own calls are traded:
+// listeners run on the next turn of the event loop, after Martin's path has started,
+// and any error inside one is caught and logged here.
+const callListeners: ((callId: number) => void | Promise<void>)[] = [];
+const buttonListeners: ((act: string, id: number) => Promise<string | null>)[] = [];
+function emitCall(callId: number) {
+  for (const fn of callListeners) {
+    setImmediate(() => {
+      try { void Promise.resolve(fn(callId)).catch((e: any) => console.error('[signals] call listener', e?.message || e)); }
+      catch (e: any) { console.error('[signals] call listener', e?.message || e); }
+    });
+  }
+}
+export function onSignalCall(fn: (callId: number) => void | Promise<void>) { callListeners.push(fn); }
+export function onSignalButton(fn: (act: string, id: number) => Promise<string | null>) { buttonListeners.push(fn); }
+export function signalTiming() { return { allowAbove: settings.allowAbove, waitMin: settings.waitMin, lastEntry: settings.lastEntry, squareOff: settings.squareOff, channelTitle: settings.channelTitle }; }
+export function signalNowMs() { return Date.now() + clockOffsetMs; }
+export function signalNotify(text: string, buttons?: { text: string; data?: string; url?: string }[]) { return notify(text, buttons); }
+export function signalPinOk(given: any) { return pinOk(given); }
+
 export const __test = {
   handleMessage, housekeeping, reconcileLive, closeTrade, keep, onBotUpdate,
   get settings() { return settings; }, setSettings(s: Partial<Settings>) { settings = { ...settings, ...s }; },
