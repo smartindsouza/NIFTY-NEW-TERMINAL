@@ -6133,7 +6133,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
   // Push the premium SL/TP rule to the server — the dragged lines become the
   // LIVE protective rule immediately, no confirmation step.
-  const pushPremiumRule = async (slPx: number, tpPx: number) => {
+  // source 'auto' = the chart arming its -10%/+20% default on its own; 'user' =
+  // a drag or the TP & SL editor. The server lets an automatic arm replace
+  // nothing that the Telegram auto-trader is managing (it hands those trades
+  // over only on a deliberate change).
+  const pushPremiumRule = async (slPx: number, tpPx: number, source: 'auto' | 'user' = 'user') => {
     const pos = slActivePosRef.current;
     if (!pos) return;
     // A push is in flight from HERE until the server confirms. While it is, the
@@ -6166,10 +6170,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           slOn: tpSlDefaultsRef.current.slOn !== false,
           tpOn: tpSlDefaultsRef.current.tpOn !== false,
           optionType: pos.optionType || (String(pos.symbol).endsWith('PE') ? 'PE' : 'CE'),
+          source,
         })
       });
       const d = await r.json().catch(() => null);
       setPremSync(d && d.success ? 'ACTIVE' : 'ERROR');
+      // The server kept a rule it manages (Telegram trade): show ITS levels.
+      if (d && d.success && d.kept && d.rule) premRuleRef.current = { symbol: pos.symbol, sl: Number(d.rule.sl), tp: Number(d.rule.tp) };
       if (d && !d.success && d.error) {
         console.warn('[premium-exit] not armed:', d.error);
         // Said OUT LOUD. A refusal used to be a console line plus a small status
@@ -6407,6 +6414,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     return () => { cancelled = true; };
   }, [slActivePos]);
 
+  // Bumped to re-run the effect below after a failed rule read.
+  const [premRetry, setPremRetry] = useState(0);
   // When a trade appears: restore an existing rule (reload case) or arm the
   // defaults (-10% SL / +20% TARGET) immediately — protection from second one.
   useEffect(() => {
@@ -6419,6 +6428,16 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       try {
         const d = await fetchArmedRule(pos.symbol);
         if (cancelled) return;
+        // NO ANSWER IS NOT "NO RULE". On 26 Oct a Telegram trade's stop was
+        // replaced by the -10%/+20% default five minutes after the buy, most likely
+        // because this read failed on the phone and the code below took the failure
+        // for "nothing armed". Now a failed read arms nothing and tries again in 3 s;
+        // only a real answer of "no rule" arms the default.
+        if (d && d.ok === false) {
+          setPremSync('ERROR');
+          setTimeout(() => { if (premSyncedForRef.current === pos.symbol) { premSyncedForRef.current = ''; setPremRetry((n) => n + 1); } }, 3000);
+          return;
+        }
         const rule = d?.rule;
         const long = pos.side === 'BUY';
         if (rule && rule.status === 'ACTIVE') {
@@ -6454,12 +6473,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           const { slPct, tpPct } = tpSlDefaultsRef.current;
           const slP = +((long ? pos.entryPrice * (1 - slPct / 100) : pos.entryPrice * (1 + slPct / 100))).toFixed(2);
           const tpP = +((long ? pos.entryPrice * (1 + tpPct / 100) : pos.entryPrice * (1 - tpPct / 100))).toFixed(2);
-          pushPremiumRule(slP, tpP);   // also sets premRuleRef
+          pushPremiumRule(slP, tpP, 'auto');   // also sets premRuleRef
         }
       } catch { if (!cancelled) setPremSync('ERROR'); }
     })();
     return () => { cancelled = true; };
-  }, [slActivePos]);
+  }, [slActivePos, premRetry]);
 
   // Track the active position (first one); only update state when it actually changes
   useEffect(() => {

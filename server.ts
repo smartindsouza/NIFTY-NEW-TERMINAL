@@ -31,7 +31,7 @@ import biasCheck from './server/bias.cjs';
 const { createBiasRouter } = biasCheck as any;
 import { registerTriggers, armedTriggerTokens, onTickForTriggers } from './server/triggers';
 // Telegram channel calls → automatic 1-lot entries with the message's SL (23 Oct 2026).
-import { registerSignalTrader, signalOnTick, signalTokens, signalNoteManualRearm } from './server/signal_trader';
+import { registerSignalTrader, signalOnTick, signalTokens, signalNoteManualRearm, signalManages } from './server/signal_trader';
 import { registerLeverage } from './server/leverage';
 import { GAP_CONFIG } from './server/config/gapScorecard';
 import { evaluateQuantSignals } from './server/quant_engine';
@@ -1485,6 +1485,14 @@ setInterval(() => {
     try { if (req.body?.tradingsymbol) db.prepare('DELETE FROM premium_exit_free WHERE tradingsymbol = ?').run(req.body.tradingsymbol); } catch (e) {}
     try {
       const { tradingsymbol, sl, tp, entry, trail, trailTp, slOn, tpOn, optionType: optTypeIn } = req.body || {};
+      // The chart's AUTOMATIC default (-10%/+20%) never replaces a stop the
+      // Telegram auto-trader is managing: answer with the managed rule instead.
+      // Only a deliberate change (drag, TP & SL editor) hands such a trade over.
+      if (req.body?.source === 'auto' && tradingsymbol && signalManages(String(tradingsymbol))) {
+        const kept: any = db.prepare("SELECT * FROM premium_exit_rules WHERE tradingsymbol=?").get(tradingsymbol);
+        console.log(`[premium-exit] kept the Telegram rule for ${tradingsymbol}; ignored the chart's automatic default`);
+        return res.json({ success: true, kept: true, rule: kept ? { tradingsymbol, side: kept.side, entry: kept.entry, sl: kept.sl, tp: kept.tp, status: kept.status } : null });
+      }
       const slOnN = slOn === false ? 0 : 1, tpOnN = tpOn === false ? 0 : 1;
       const slN = Number(sl), tpN = Number(tp);
       if (!tradingsymbol || !isFinite(slN) || !isFinite(tpN) || slN <= 0 || tpN <= 0) {

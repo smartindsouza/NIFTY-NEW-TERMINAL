@@ -702,6 +702,16 @@ async function reconcileLive() {
 // ---------- hooks used by server.ts ----------
 export function signalTokens(): number[] { return Array.from(watchTokens); }
 
+/** Is this contract an open LIVE Telegram trade whose stop the app manages? */
+export function signalManages(tradingsymbol: string): boolean {
+  if (!D) return false;
+  for (const [id] of openTrades) {
+    const t = tradeRow(id);
+    if (t?.tradingsymbol === tradingsymbol && t.mode === 'LIVE' && t.status === 'OPEN') return true;
+  }
+  return false;
+}
+
 /** Martin re-armed SL/TP on the chart for a contract the app is managing: hand
  *  it over. His rule is now in charge; the ladder stops moving the stop. */
 export function signalNoteManualRearm(tradingsymbol: string) {
