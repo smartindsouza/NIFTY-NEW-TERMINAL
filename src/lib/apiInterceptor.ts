@@ -26,6 +26,12 @@ const LOCAL_ONLY_ENDPOINTS = new Set([
   // Telegram Auto-Trade page poll: local SQLite rows + in-memory state only
   // (server/signal_trader.ts). It never calls Zerodha, so it cannot cause a 429.
   '/api/signals/status',
+  // My Order sheet: the list is local SQLite; the preview subscribes the contract
+  // to the live ticker on its first call and is answered from ticks after that.
+  // Polled every 2-3 s while the sheet is open — without this the "too frequent"
+  // warning Martin already found noisy would fire within a minute.
+  '/api/signals/manual',
+  '/api/signals/manual/',
 ]);
 
 // Endpoints that DO sit in front of the broker but are served from a short shared

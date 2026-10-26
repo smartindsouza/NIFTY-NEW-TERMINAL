@@ -242,6 +242,52 @@ __test.setSettings({ lots: 1 });
   await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
 }
 
+// 12d) MY ORDER — Martin's own entry/SL/TPs, taken when the level is reached
+{
+  const srv = app.listen(0); const port = (srv.address() as any).port;
+  const api = async (path: string, body?: any) => (await fetch(`http://127.0.0.1:${port}${path}`, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {})).json();
+  __test.setClockOffset(Date.UTC(2026, 9, 26, 6, 0) - Date.now());       // 11:30 IST
+  __test.setSettings({ lots: 1, maxTrades: 0 });                           // channel cap used up: must not block my orders
+  const buys = () => orders.filter(o => o.transaction_type === 'BUY');
+  // preview
+  __test.clearPriceCache(); price.set(SYM, 140);
+  const pv = await api('/api/signals/manual/preview?u=NIFTY&strike=22650&type=CE');
+  assert.equal(pv.ok, true); assert.equal(pv.tradingsymbol, SYM); assert.equal(pv.ltp, 140); ok('preview: contract, lot size and live price');
+  // armed ABOVE the market: waits, fires when the premium rises to it
+  const b0 = buys().length;
+  let r = await api('/api/signals/manual', { underlying: 'NIFTY', strike: 22650, optionType: 'CE', entry: 145, sl: 130, tp1: 160, tp2: 170, tp3: 185, lots: 2 });
+  assert.equal(r.ok, true); assert.equal(r.direction, 'up'); assert.equal(buys().length, b0); ok('armed above the price (140 < 145): direction up, no order yet');
+  const r2 = await api('/api/signals/manual', { underlying: 'NIFTY', strike: 22650, optionType: 'CE', entry: 150, sl: 130, tp1: 160, tp2: 170, tp3: 185, lots: 1 });
+  assert.equal(r2.ok, false); assert.match(r2.error, /already has an order/); ok('second order on the same contract refused');
+  __test.clearPriceCache(); price.set(SYM, 144); signalOnTick(TOK, 144); await settle(300); assert.equal(buys().length, b0); ok('144: not yet');
+  __test.clearPriceCache(); price.set(SYM, 145.5); signalOnTick(TOK, 145.5); await settle(900);
+  assert.equal(buys().length, b0 + 1); assert.equal(buys().at(-1).quantity, 2 * 65); assert.equal(buys().at(-1).price, 147);
+  assert.equal(rules.get(SYM).sl, 130); ok('145.5: fired — 2 lots, LIMIT 147 (entry + 2), SL 130 armed; channel cap ignored');
+  tick(160); await settle(); assert.equal(rules.get(SYM).sl, 145.5); ok('TP1 160 → SL to entry, same ladder as the channel trades');
+  await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
+  // armed BELOW the market: fires when the premium falls to it
+  __test.clearPriceCache(); price.set(SYM, 150);
+  r = await api('/api/signals/manual', { underlying: 'NIFTY', strike: 22650, optionType: 'CE', entry: 146, sl: 130, tp1: 160, tp2: 170, tp3: 185, lots: 1 });
+  assert.equal(r.direction, 'down');
+  __test.clearPriceCache(); price.set(SYM, 147); signalOnTick(TOK, 147); await settle(300); assert.equal(buys().length, b0 + 1);
+  __test.clearPriceCache(); price.set(SYM, 145.8); signalOnTick(TOK, 145.8); await settle(900);
+  assert.equal(buys().length, b0 + 2); ok('armed below (150 > 146): 147 waits, 145.8 fires');
+  await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
+  // cancel
+  __test.clearPriceCache(); price.set(SYM, 140);
+  r = await api('/api/signals/manual', { underlying: 'NIFTY', strike: 22650, optionType: 'CE', entry: 150, sl: 130, tp1: 160, tp2: 170, tp3: 185, lots: 1 });
+  const c = await api('/api/signals/manual/cancel', { id: r.id }); assert.equal(c.ok, true);
+  __test.clearPriceCache(); price.set(SYM, 150.5); signalOnTick(TOK, 150.5); await settle(500); assert.equal(buys().length, b0 + 2); ok('cancelled order never fires');
+  // bad input
+  r = await api('/api/signals/manual', { underlying: 'NIFTY', strike: 22650, optionType: 'CE', entry: 150, sl: 155, tp1: 160, tp2: 170, tp3: 185, lots: 1 });
+  assert.match(r.error, /not below/); ok('SL above entry refused');
+  r = await api('/api/signals/manual', { underlying: 'NIFTY', strike: 22700, optionType: 'CE', entry: 150, sl: 140, tp1: 160, tp2: 170, tp3: 185, lots: 1 });
+  assert.match(r.error, /not listed/); ok('unknown strike refused');
+  const list = await api('/api/signals/manual'); assert.equal(list.orders.length, 3); ok('list shows today\'s 3 orders');
+  srv.close();
+  __test.setSettings({ maxTrades: 3 });
+}
+
 // 13) bot: only the owner may press buttons
 __test.setOwner('777');
 await __test.onBotUpdate({ update_id: 1, callback_query: { id: 'q', from: { id: 1 }, data: `exit:${trades().at(-1).id}` } });

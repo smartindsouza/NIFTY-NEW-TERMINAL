@@ -1,7 +1,8 @@
 import React, { useMemo, useRef, useState, useEffect, useLayoutEffect } from "react";
 import { useTodayBias, isRecord as isBiasRecord, istToday as biasIstToday, BIAS_LINES_KEY, useBiasCardHidden } from "../lib/bias";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search, ChartNoAxesCombined, TrendingUp, Star, Bell } from "lucide-react";
+import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search, ChartNoAxesCombined, TrendingUp, Star, Bell, ClipboardPen } from "lucide-react";
+import MyOrderModal from "../components/MyOrderModal";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { useUserSettings, useResolvedTheme } from "../hooks/useUserSettings";
@@ -5219,6 +5220,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const trailTpRef = useRef(trailTpOn);
   trailTpRef.current = trailTpOn;
   useEffect(() => { try { localStorage.setItem('trailTpOn', String(trailTpOn)); } catch (e) {} }, [trailTpOn]);
+  // My Order sheet (spot chart toolbar). The spot is captured when it opens so the
+  // strike box starts at the ATM strike.
+  const [myOrderOpen, setMyOrderOpen] = useState(false);
+  const [myOrderSpot, setMyOrderSpot] = useState<number | null>(null);
 
   // Refs for the two overlays dismissed by the document listener below. Declared
   // here because the JSX that uses them lives above the effect.
@@ -13597,16 +13602,41 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           </div>
           <div className="flex items-center gap-2 flex-none max-w-[45%] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents md:min-w-0 md:basis-auto pr-1">
           {/* Trailing TP, beside Quick Trade. Distinct icon and colour so the two
-              switches are not mistaken for each other at a glance. */}
+              switches are not mistaken for each other at a glance.
+              26 Oct: shown only on an OPTION premium chart while a trade is open —
+              it governs that trade's exits, and on the spot chart it read as a
+              setting of the index (Martin asked for it off the spot chart). The
+              spot chart gets the My Order button in the same slot instead. A
+              toast confirms each change, since the colour alone was easy to miss. */}
+          {isOptionView && slActivePos ? (
           <button
             data-layout="icons"
-            onClick={() => setTrailTpOn(v => !v)}
+            onClick={() => {
+              const next = !trailTpOn;
+              setTrailTpOn(next);
+              try { toast(next ? 'Trailing SL enabled — target climbs 20% a rung, stop follows one rung behind' : 'Trailing SL disabled — remaining half exits at TP2'); } catch (e) {}
+            }}
             title={trailTpOn ? 'Trailing TP ON — target climbs 20% a rung, stop follows one rung behind' : 'Trailing TP OFF — remaining half exits at TP2'}
             aria-label="Trailing TP"
             className={`${isReferenceChart ? 'hidden' : 'flex'} ${sharedHidden} items-center justify-center h-9 w-9 shrink-0 md:order-2 rounded-md border border-0 transition-colors ${trailTpOn ? 'bg-emerald-500/20 text-emerald-400' : 'bg-muted/40 text-muted-foreground'}`}
           >
             <TrendingUp size={17} />
           </button>
+          ) : !isOptionView ? (
+          <button
+            data-layout="icons"
+            onClick={() => {
+              const last = chartDataRef.current?.candles?.[chartDataRef.current.candles.length - 1]?.close;
+              setMyOrderSpot(Number(last) > 0 ? Number(last) : null);
+              setMyOrderOpen(true);
+            }}
+            title="My order — set entry, SL and TP1-3 for a strike; bought automatically when the premium reaches the entry"
+            aria-label="My order"
+            className={`${isReferenceChart ? 'hidden' : 'flex'} ${sharedHidden} items-center justify-center h-9 w-9 shrink-0 md:order-2 rounded-md border border-0 transition-colors bg-muted/40 text-muted-foreground hover:text-foreground`}
+          >
+            <ClipboardPen size={17} />
+          </button>
+          ) : null}
           {(
           <div className={`ml-auto md:ml-0 ${isReferenceChart ? 'hidden' : 'flex'} ${sharedHidden} items-center justify-center gap-2 h-9 w-9 shrink-0 md:order-2 cursor-pointer rounded-md border border-0 transition-colors ${quickTradeEnabled ? "bg-primary/20" : "bg-muted/40"}`} onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled' : 'Quick Trade disabled'); } catch (e) {} }} title="Quick Trade">
              {/* Icon on both platforms now; the desktop label and toggle are gone.
@@ -14284,6 +14314,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         />
       )}
 
+      {myOrderOpen && (
+        <MyOrderModal onClose={() => setMyOrderOpen(false)} underlying={underlying} spot={myOrderSpot} />
+      )}
       {isEditingIl && (
         <InstitutionalLevelsEditorModal
           value={ilSettings}

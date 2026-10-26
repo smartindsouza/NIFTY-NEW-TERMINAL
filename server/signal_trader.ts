@@ -82,6 +82,12 @@ function initTables() {
     tradingsymbol TEXT, exchange TEXT, token INTEGER, lot_size INTEGER, expiry TEXT,
     status TEXT, reason TEXT, mode TEXT, watch_until INTEGER, updated_at INTEGER,
     UNIQUE(chat_id, msg_id))`);
+  // MY ORDER (26 Oct): Martin's own orders run through the same engine as the
+  // channel's calls. source = 'telegram' | 'manual'; for a manual order the
+  // trigger direction (price must rise or fall to the entry) and the lots asked
+  // for are stored with it.
+  for (const col of ["source TEXT DEFAULT 'telegram'", 'trigger_dir TEXT', 'lots_req TEXT'])
+    try { D.db.exec(`ALTER TABLE signal_calls ADD COLUMN ${col}`); } catch { /* exists */ }
   D.db.exec(`CREATE TABLE IF NOT EXISTS signal_trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT, call_id INTEGER, day TEXT, mode TEXT,
     tradingsymbol TEXT, exchange TEXT, token INTEGER, qty INTEGER, entry REAL, entry_at INTEGER,
@@ -315,7 +321,9 @@ async function skip(id: number, reason: string, quiet = false) {
   else logEvent(`skipped ${what}: ${reason}`);
 }
 
-const tradesToday = () => (D.db.prepare("SELECT COUNT(*) AS n FROM signal_trades WHERE day = ? AND mode = ?").get(istParts().date, settings.mode) as any).n as number;
+// The day's cap is on the CHANNEL's calls; Martin's own orders do not use it up.
+const tradesToday = () => (D.db.prepare(`SELECT COUNT(*) AS n FROM signal_trades t JOIN signal_calls c ON c.id = t.call_id
+  WHERE t.day = ? AND t.mode = ? AND COALESCE(c.source, 'telegram') = 'telegram'`).get(istParts().date, settings.mode) as any).n as number;
 
 async function completeCall(callId: number, lv: ParsedLevels, levelsMsgId: number) {
   D.db.prepare('UPDATE signal_calls SET sl=?, tp1=?, tp2=?, tp3=?, levels_msg_id=?, updated_at=? WHERE id=?')
@@ -351,6 +359,10 @@ async function completeCall(callId: number, lv: ParsedLevels, levelsMsgId: numbe
 
 // ---------- prices ----------
 const watchTokens = new Set<number>();
+// Contracts the My Order form is previewing. Kept apart from watchTokens and
+// dropped 30 s after the form stops asking, so stepping the strike up and down
+// does not leave a dozen unused contracts on the live feed for the rest of the day.
+const previewTokens = new Map<number, number>();
 const lastRestAt = new Map<number, number>();
 const restLtp = new Map<number, number>();
 async function priceOf(token: number, exchange: string, tradingsymbol: string): Promise<number | null> {
@@ -381,6 +393,7 @@ async function checkWatching(callId: number) {
   try {
     const c: any = D.db.prepare('SELECT * FROM signal_calls WHERE id = ?').get(callId);
     if (!c || c.status !== 'WATCHING') return;
+    if (c.source === 'manual') return await checkManual(c);
     if (settings.mode === 'OFF') return skip(callId, 'auto-trade was switched OFF', true);
     if (Date.now() > c.watch_until) return skip(callId, `price never came into range within ${settings.waitMin} min`);
     if (istParts().mins > hm(settings.lastEntry)) return skip(callId, 'reached the last entry time');
@@ -391,6 +404,24 @@ async function checkWatching(callId: number) {
     if (ltp > cap) return;                          // keep watching
     await enter(c, ltp, cap);
   } finally { entering.delete(callId); }
+}
+
+// MY ORDER trigger: the entry is a LEVEL. Armed below the market it fires when
+// the premium falls to it; armed above, when the premium rises to it — the same
+// rule as the chart's price triggers. On firing it buys with a LIMIT at entry +
+// the allowance (2 points by default), so a fast move never pays more than that.
+// Valid until the last entry time today; skipped if the premium is at the SL.
+async function checkManual(c: any) {
+  const t = istParts();
+  if (t.mins > hm(settings.lastEntry)) return skip(c.id, `not triggered by ${settings.lastEntry} — cancelled`);
+  if (t.day === 0 || t.day === 6 || t.mins < 9 * 60 + 15) return;   // armed early: waits for the open
+  const ltp = await priceOf(c.token, c.exchange, c.tradingsymbol);
+  if (ltp == null) return;
+  if (ltp <= c.sl) return skip(c.id, `price ${ltp} reached the SL ${c.sl} before the entry`);
+  const entry = c.entry_high, cap = r2(entry + settings.allowAbove);
+  const fired = c.trigger_dir === 'up' ? ltp >= entry && ltp <= cap : ltp <= entry;
+  if (!fired) return;
+  await enter(c, ltp, cap);
 }
 
 // MAX LOTS (Martin, 23 Oct): as many lots as the funds allow, sized the way the
@@ -428,22 +459,24 @@ async function sizeMaxLots(c: any, cap: number): Promise<{ lots: number; note: s
   }
 }
 function presize(c: any) {
-  if (settings.lots !== 'MAX') return;
+  if (c.source === 'manual' ? c.lots_req !== 'MAX' : settings.lots !== 'MAX') return;
   sizing.set(c.id, { at: Date.now(), p: sizeMaxLots(c, r2(c.entry_high + settings.allowAbove)) });
 }
 
 async function enter(c: any, ltp: number, cap: number) {
   let lots = 1, sizeNote: string | null = null;
-  if (settings.lots === 'MAX') {
+  const manual = c.source === 'manual';
+  const want: number | 'MAX' = manual ? (c.lots_req === 'MAX' ? 'MAX' : Math.max(1, Math.min(25, Number(c.lots_req) || 1))) : settings.lots;
+  if (want === 'MAX') {
     let s = sizing.get(c.id);
     if (!s || Date.now() - s.at > 60000) { presize(c); s = sizing.get(c.id)!; }
     ({ lots, note: sizeNote } = await s.p);
     sizing.delete(c.id);
     if (lots < 1) return skip(c.id, `not enough funds for 1 lot (${sizeNote})`);
-  } else lots = settings.lots;
+  } else lots = want;
   const qty = lots * c.lot_size;
   const mode: Mode = c.mode === 'LIVE' ? 'LIVE' : 'PRACTICE';
-  if (tradesToday() >= settings.maxTrades) return skip(c.id, `already ${settings.maxTrades} trades today`);
+  if (!manual && tradesToday() >= settings.maxTrades) return skip(c.id, `already ${settings.maxTrades} trades today`);
   setCall(c.id, 'ORDERED');
   let fillPx = ltp, filledQty = qty, orderId: string | null = null;
 
@@ -490,10 +523,10 @@ async function enter(c: any, ltp: number, cap: number) {
     try { D.armRule({ tradingsymbol: c.tradingsymbol, exchange: c.exchange, qty: filledQty, entry: fillPx, sl: c.sl, tp: c.tp3, token: c.token }); }
     catch (e: any) { await notify(`🚨 BOUGHT ${c.tradingsymbol} but the SL could NOT be armed (${e?.message || e}). Put a stop at ${rs(c.sl)} in Kite NOW.`); }
     try { D.journalOpen({ tradingsymbol: c.tradingsymbol, exchange: c.exchange, side: 'BUY', qty: filledQty, product: 'MIS', entryPrice: fillPx,
-      optionType: c.option_type, strike: c.strike, context: { source: 'telegram', channel: settings.channelTitle, entryRange: [c.entry_low, c.entry_high], sl: c.sl, tps: [c.tp1, c.tp2, c.tp3] } }); } catch { }
+      optionType: c.option_type, strike: c.strike, context: { source: manual ? 'my-order' : 'telegram', channel: manual ? null : settings.channelTitle, entryRange: [c.entry_low, c.entry_high], sl: c.sl, tps: [c.tp1, c.tp2, c.tp3] } }); } catch { }
   }
   openTrades.set(tradeId, ladder);
-  await notify(`${mode === 'LIVE' ? '✅ BOUGHT' : '🧪 PRACTICE BUY'} ${c.underlying} ${c.strike} ${c.option_type} (${c.expiry})\n` +
+  await notify(`${manual ? '🧾 MY ORDER — ' : ''}${mode === 'LIVE' ? '✅ BOUGHT' : '🧪 PRACTICE BUY'} ${c.underlying} ${c.strike} ${c.option_type} (${c.expiry})\n` +
     `${filledQty} qty (${Math.round(filledQty / c.lot_size)} lot${filledQty / c.lot_size === 1 ? '' : 's'}) @ ${rs(fillPx)}\nSL ${rs(c.sl)} · TP1 ${rs(c.tp1)} · TP2 ${rs(c.tp2)} · TP3 ${rs(c.tp3)}` +
     (sizeNote ? `\n${sizeNote}` : '') + (filledQty < qty ? `\nOnly ${filledQty} of ${qty} filled — the rest was cancelled.` : ''),
     [{ text: '🚪 Exit now', data: `exit:${tradeId}` }]);
@@ -619,6 +652,9 @@ function readinessTick(t: ReturnType<typeof istParts>) {
 async function housekeepingInner() {
   const t = istParts();
   try { readinessTick(t); } catch (e) { console.error('[signals] readiness', e); }
+  let pruned = false;
+  for (const [tok, at] of previewTokens) if (Date.now() - at > 30000) { previewTokens.delete(tok); pruned = true; }
+  if (pruned) D.refreshSubscriptions();
   if (tg && tgLoggedIn && settings.channelId && !channelEntity && Date.now() - lastResolveTry > 60000) {
     lastResolveTry = Date.now();
     void resolveChannel();
@@ -700,7 +736,7 @@ async function reconcileLive() {
 }
 
 // ---------- hooks used by server.ts ----------
-export function signalTokens(): number[] { return Array.from(watchTokens); }
+export function signalTokens(): number[] { return Array.from(new Set([...watchTokens, ...previewTokens.keys()])); }
 
 /** Is this contract an open LIVE Telegram trade whose stop the app manages? */
 export function signalManages(tradingsymbol: string): boolean {
@@ -781,6 +817,11 @@ async function onBotUpdate(u: any) {
   let answer = '…';
   if (act === 'exit') { const r = await closeTrade(id, 'Exit button (Telegram)'); answer = r.ok ? 'Exiting…' : (r.error || 'failed'); }
   else if (act === 'keep') answer = await keep(id);
+  else if (act === 'cancel') {
+    const c: any = D.db.prepare("SELECT status FROM signal_calls WHERE id = ? AND source = 'manual'").get(id);
+    if (c?.status === 'WATCHING') { await skip(id, 'cancelled by you'); answer = 'Order cancelled.'; }
+    else answer = c?.status === 'ENTERED' ? 'Already bought — use Exit.' : 'Not waiting any more.';
+  }
   await botCall('answerCallbackQuery', { callback_query_id: q.id, text: answer });
 }
 
@@ -919,6 +960,79 @@ export function registerSignalTrader(app: any, deps: SignalDeps) {
   app.post('/api/signals/keep', json, async (req: any, res: any) => {
     res.json({ ok: true, message: await keep(Number(req.body?.id)) });
   });
+  // ---------- MY ORDER (Martin's own entry / SL / TP1-3, taken when triggered) ----------
+  const resolveOpt = async (u: any, strike: any, type: any) => {
+    const und = String(u || '').toUpperCase() === 'SENSEX' ? 'SENSEX' : 'NIFTY';
+    const k = Math.round(Number(strike)), ot = String(type || '').toUpperCase() === 'PE' ? 'PE' : 'CE';
+    if (!(k > 0)) return { error: 'Enter the strike price.' };
+    const kc = D.getKiteClient();
+    if (!kc || !kc.access_token) return { error: 'Zerodha is not logged in today.' };
+    const opt = await D.findOption(und, k, ot, istParts().date).catch(() => null);
+    if (!opt) return { error: `${und} ${k} ${ot} is not listed (check the strike).` };
+    const ltp = await priceOf(opt.instrument_token, opt.exchange, opt.tradingsymbol);
+    return { und, strike: k, type: ot, opt, ltp };
+  };
+  app.get('/api/signals/manual/preview', async (req: any, res: any) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const r: any = await resolveOpt(req.query.u, req.query.strike, req.query.type);
+      if (r.error) return res.json({ ok: false, error: r.error });
+      const fresh = !previewTokens.has(r.opt.instrument_token) && !watchTokens.has(r.opt.instrument_token);
+      previewTokens.set(r.opt.instrument_token, Date.now());                 // live price while the form is open
+      if (fresh) D.refreshSubscriptions();
+      res.json({ ok: true, tradingsymbol: r.opt.tradingsymbol, expiry: r.opt.expiry, lotSize: r.opt.lot_size, ltp: r.ltp });
+    } catch (e: any) { res.json({ ok: false, error: e?.message || String(e) }); }
+  });
+  app.get('/api/signals/manual', (_req: any, res: any) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const rows = D.db.prepare(`SELECT c.*, t.status AS trade_status, t.entry AS fill, t.exit_price, t.pnl, t.id AS trade_id
+      FROM signal_calls c LEFT JOIN signal_trades t ON t.call_id = c.id
+      WHERE c.source = 'manual' AND c.day = ? ORDER BY c.id DESC`).all(istParts().date);
+    res.json({ ok: true, orders: rows, allowAbove: settings.allowAbove, lastEntry: settings.lastEntry });
+  });
+  app.post('/api/signals/manual', json, async (req: any, res: any) => {
+    try {
+      const b = req.body || {};
+      const r: any = await resolveOpt(b.underlying, b.strike, b.optionType);
+      if (r.error) return res.json({ ok: false, error: r.error });
+      const entry = Number(b.entry), sl = Number(b.sl), tps = [Number(b.tp1), Number(b.tp2), Number(b.tp3)] as [number, number, number];
+      if (![entry, sl, ...tps].every(x => Number.isFinite(x) && x > 0)) return res.json({ ok: false, error: 'Fill in entry, SL, TP1, TP2 and TP3.' });
+      const bad = validateSetup({ underlying: r.und, strike: r.strike, optionType: r.type, entryLow: entry, entryHigh: entry }, { tps, sl });
+      if (bad) return res.json({ ok: false, error: bad });
+      if (istParts().mins > hm(settings.lastEntry)) return res.json({ ok: false, error: `It is past the last entry time (${settings.lastEntry}).` });
+      if (r.ltp == null) return res.json({ ok: false, error: 'No live price for this option yet — try again in a moment.' });
+      const busy = D.db.prepare(`SELECT 1 FROM signal_calls c LEFT JOIN signal_trades t ON t.call_id = c.id
+        WHERE c.tradingsymbol = ? AND (c.status IN ('WATCHING','ORDERED') OR t.status IN ('OPEN','MANUAL','CLOSING'))`).get(r.opt.tradingsymbol);
+      if (busy) return res.json({ ok: false, error: `${r.opt.tradingsymbol} already has an order or open trade here.` });
+      const lotsReq = String(b.lots).toUpperCase() === 'MAX' ? 'MAX' : String(Math.max(1, Math.min(25, Math.round(Number(b.lots) || 1))));
+      const dir = r.ltp < entry ? 'up' : 'down';
+      const now = Date.now();
+      const ins = D.db.prepare(`INSERT INTO signal_calls (chat_id, msg_id, day, received_at, raw, underlying, strike, option_type, entry_low, entry_high,
+        sl, tp1, tp2, tp3, tradingsymbol, exchange, token, lot_size, expiry, status, reason, mode, watch_until, updated_at, source, trigger_dir, lots_req)
+        VALUES ('manual', ?, ?, ?, 'my order', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'WATCHING', NULL, 'LIVE', ?, ?, 'manual', ?, ?)`)
+        .run(-now, istParts().date, now, r.und, r.strike, r.type, entry, entry, sl, tps[0], tps[1], tps[2],
+          r.opt.tradingsymbol, r.opt.exchange, r.opt.instrument_token, r.opt.lot_size, r.opt.expiry, now + 24 * 3600e3, now, dir, lotsReq);
+      const id = Number(ins.lastInsertRowid);
+      watchTokens.add(r.opt.instrument_token); D.refreshSubscriptions();
+      watchingTokens.set(r.opt.instrument_token, [...(watchingTokens.get(r.opt.instrument_token) || []), id]);
+      const c: any = D.db.prepare('SELECT * FROM signal_calls WHERE id = ?').get(id);
+      presize(c);
+      const how = dir === 'up' ? `when it RISES to ${entry} (now ${r.ltp})` : `when it FALLS to ${entry} (now ${r.ltp})`;
+      await notify(`🧾 MY ORDER armed: BUY ${r.und} ${r.strike} ${r.type} (${r.opt.expiry}) ${lotsReq === 'MAX' ? 'max lots' : `${lotsReq} lot${lotsReq === '1' ? '' : 's'}`}\nBuys ${how}, limit ${r2(entry + settings.allowAbove)}\nSL ${rs(sl)} · TP1 ${rs(tps[0])} · TP2 ${rs(tps[1])} · TP3 ${rs(tps[2])}`,
+        [{ text: '✖ Cancel order', data: `cancel:${id}` }]);
+      await checkWatching(id);                       // the level may already be met
+      res.json({ ok: true, id, direction: dir, ltp: r.ltp, tradingsymbol: r.opt.tradingsymbol });
+    } catch (e: any) { res.json({ ok: false, error: e?.message || String(e) }); }
+  });
+  app.post('/api/signals/manual/cancel', json, async (req: any, res: any) => {
+    const id = Number(req.body?.id);
+    const c: any = D.db.prepare("SELECT * FROM signal_calls WHERE id = ? AND source = 'manual'").get(id);
+    if (!c) return res.json({ ok: false, error: 'No such order.' });
+    if (c.status !== 'WATCHING') return res.json({ ok: false, error: c.status === 'ENTERED' ? 'Already bought — use Exit on the trade.' : 'Not waiting any more.' });
+    await skip(id, 'cancelled by you');
+    res.json({ ok: true });
+  });
+
   app.post('/api/signals/test-alert', json, async (req: any, res: any) => {
     if (!needPin(req, res)) return;
     await notify('🔔 Test alert from your NIFTY app. Buttons and trade alerts will arrive here.');
