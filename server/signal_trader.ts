@@ -790,6 +790,9 @@ async function setManagedLevels(tradingsymbol: string, b: { sl?: any; tp?: any }
     const sl = r2(tick05(Number(b.sl) + 0.025));
     if (!(sl > 0)) return { ok: false, error: 'Bad SL.' };
     if (ltp != null && sl >= ltp) return { ok: false, error: `SL must be below the current price (${ltp}).` };
+    // The entry is a wall until TP1 (Martin, 30 Oct): the ladder itself moves the
+    // stop to the entry at TP1; before that a drag may not put it above.
+    if (st.stage < 1 && sl > st.entry) return { ok: false, error: `SL can't be above your entry (${st.entry}) until TP1 is hit.` };
     const nextTp = st.stage < 3 ? (st.tps as number[])[st.stage] : null;
     if (nextTp != null && sl >= nextTp) return { ok: false, error: `SL must be below the next target (${nextTp}).` };
     st.sl = sl;

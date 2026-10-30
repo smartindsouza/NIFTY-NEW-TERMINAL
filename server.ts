@@ -33,6 +33,8 @@ import { registerTriggers, armedTriggerTokens, onTickForTriggers } from './serve
 // Telegram channel calls → automatic 1-lot entries with the message's SL (23 Oct 2026).
 import { registerSignalTrader, signalOnTick, signalTokens, signalNoteManualRearm, signalManages, signalManagedLevels } from './server/signal_trader';
 import { registerFamilyTrader, familyOnTick, familyTokens } from './server/family_trader';
+import { currentLeg, needsLegAverage } from './server/leg_average';
+import { entryWallError } from './server/entry_wall';
 import { registerLeverage } from './server/leverage';
 import { GAP_CONFIG } from './server/config/gapScorecard';
 import { evaluateQuantSignals } from './server/quant_engine';
@@ -1365,6 +1367,26 @@ setInterval(() => {
   // queued, so simultaneous callers all ride the same promise.
   let posCache: { at: number; p: Promise<any> } | null = null;
   const POSITIONS_CACHE_MS = 1500;
+  // Today's fills, read only when a position was re-entered, and reused for 10 s
+  // unless the day's traded quantities change (a new fill always refetches).
+  let fillsCache: { key: string; at: number; fills: any[] } | null = null;
+  async function openLegAverages(kc: any, open: any[]): Promise<Map<string, number>> {
+    const outMap = new Map<string, number>();
+    const need = open.filter((p: any) => { try { return needsLegAverage(p); } catch (e) { return false; } });
+    if (!need.length) return outMap;
+    try {
+      const key = need.map((p: any) => `${p.tradingsymbol}:${p.day_buy_quantity}:${p.day_sell_quantity}:${p.quantity}`).join('|');
+      let fills: any[];
+      if (fillsCache && fillsCache.key === key && Date.now() - fillsCache.at < 10000) fills = fillsCache.fills;
+      else { fills = (await kc.getTrades()) || []; fillsCache = { key, at: Date.now(), fills }; }
+      for (const p of need) {
+        const leg = currentLeg(fills, p.tradingsymbol);
+        // Use it only when the replay lands exactly on the quantity Zerodha holds.
+        if (leg.qty === Number(p.quantity) && leg.avg > 0) outMap.set(p.tradingsymbol, leg.avg);
+      }
+    } catch (e: any) { console.error('[positions] open-leg average failed, using Zerodha average:', e?.message || e); }
+    return outMap;
+  }
   app.get('/api/positions-live', async (_req, res) => {
     try {
       if (posCache && Date.now() - posCache.at < POSITIONS_CACHE_MS) {
@@ -1398,15 +1420,24 @@ setInterval(() => {
         const q = quotes[`${p.exchange}:${p.tradingsymbol}`];
         return (q && q.last_price > 0) ? q.last_price : (p.last_price || p.average_price);
       };
+      // A contract traded, exited and traded again today: Zerodha's average is
+      // blended across both trades, which put the second trade's automatic SL a
+      // couple of points from the price (30 Oct). Replace it with the average of
+      // the trade that is open NOW, from today's fills (server/leg_average.ts).
+      // Fetched only when such a position exists; on any doubt Zerodha's own
+      // figure is kept.
+      const legAvg = await openLegAverages(kc, open);
       const out = open.map((p: any) => {
         const ltp = ltpFor(p);
         const bv = Number(p.buy_value), sv = Number(p.sell_value);
+        const own = legAvg.get(p.tradingsymbol);
         return {
           tradingsymbol: p.tradingsymbol,
           instrument_token: p.instrument_token,
           quantity: p.quantity,               // signed by Kite: + long, − short
           product: p.product,
-          average_price: p.average_price,
+          average_price: own ?? p.average_price,   // the OPEN trade's entry (see above)
+          kite_average_price: p.average_price,
           last_price: ltp,
           // pnl_base lets the CLIENT recompute P&L against a live tick using the
           // exact same formula: pnl = pnl_base + quantity × ltp. That is what makes
@@ -1523,6 +1554,17 @@ setInterval(() => {
         return res.json({ success: false, error: long ? 'For a long option, SL must be below TARGET.' : 'For a short option, SL must be above TARGET.' });
       }
       const entryPx = Number(entry) > 0 ? Number(entry) : (pos.average_price || 0);
+      // THE ENTRY IS A WALL UNTIL TP1 (30 Oct 2026, Martin): before the first
+      // target is reached the stop may not be set above the entry, nor the target
+      // below it (mirrored for a short). The chart stops the lines at the entry;
+      // this refuses anything that gets past it. Once TP1 has been reached (the
+      // trailing engine booked its half / climbed a rung) the stop may go above.
+      if (entryPx > 0 && req.body?.source !== 'auto') {
+        const pt: any = trailStates.get(tradingsymbol);
+        const tp1Hit = !!(pt && Math.abs(Number(pt.entry) - entryPx) < 0.01 && (pt.tp1Done || Number(pt.rung) > 1));
+        const wall = entryWallError({ long, entry: entryPx, sl: slN, tp: tpN, slOn: !!slOnN, tpOn: !!tpOnN, tp1Hit });
+        if (wall) return res.json({ success: false, error: wall, entryWall: true });
+      }
       // Resolve the contract's instrument token so the ticker can stream it (the
       // tick engine's primary path). null is fine — the 3s poll covers the rule.
       let ruleToken: number | null = null;

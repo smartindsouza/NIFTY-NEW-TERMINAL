@@ -5813,6 +5813,23 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // repaints those itself, so there is no React work per move here either.
   const exitDragRef = useRef<{ mode: 'sl' | 'smap'; kind: string; grabOffset: number; moved: boolean } | null>(null);
   exitDragRefForQt.current = exitDragRef;
+  // Has the open trade reached its first target? A Telegram-managed trade: the
+  // ladder's stage. Any other trade: the trailing engine has booked its half or
+  // climbed a rung. Until then the entry is a wall for both lines.
+  const tp1Reached = () => {
+    const pos = slActivePosRef.current;
+    const mg = managedFor(pos?.symbol);
+    if (mg) return mg.stage >= 1;
+    const tr = premRuleRef.current?.trail;
+    return !!(tr && (tr.tp1Done || Number(tr.rung) > 1));
+  };
+  const crossesEntryWall = (label: string, price: number) => {
+    const entry = slEntryRef.current, pos = slActivePosRef.current;
+    if (!entry || !pos || tp1Reached()) return false;
+    const long = (pos.side || 'BUY') !== 'SELL';
+    if (label === 'SL') return long ? price > entry : price < entry;
+    return long ? price < entry : price > entry;     // TARGET / TP line
+  };
   const startExitLineDrag = () => {
     const move = (ev: PointerEvent) => {
       const cont = chartContainerRef.current;
@@ -5822,11 +5839,15 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       const rect = cont.getBoundingClientRect();
       const raw = series.coordinateToPrice(ev.clientY - rect.top + d.grabOffset);
       if (raw === null) return;
-      const newPrice = snapTick(raw);
+      let newPrice = snapTick(raw);
       d.moved = true;
       if (d.mode === 'smap') {
         const ml = spotMapLinesRef.current.find(l => l.kind === d.kind);
         if (!ml || ml.price === newPrice) return;
+        // Entry wall (below): a spot level is a premium in disguise, so the line
+        // simply stops moving once its premium would cross the entry.
+        const estW = premiumForSpotLocal(newPrice);
+        if (estW !== null && crossesEntryWall(d.kind === 'sl' ? 'SL' : 'TARGET', estW)) return;
         ml.price = newPrice;
         const est = premiumForSpotLocal(newPrice);
         const label = d.kind === 'sl' ? 'SL' : 'TARGET';
@@ -5839,7 +5860,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         return;
       }
       const sl = slLinesRef.current.find((l: any) => l.kind === d.kind);
-      if (!sl || sl.price === newPrice) return;
+      if (!sl) return;
+      // THE ENTRY IS A WALL UNTIL TP1 (30 Oct 2026, Martin): the SL line stops
+      // at the entry and cannot be dragged above it, and the target line stops
+      // at the entry and cannot go below it (mirrored for a short), until the
+      // first target has been reached. The server refuses the same thing.
+      if (crossesEntryWall(sl.label, newPrice)) newPrice = slEntryRef.current as number;
+      if (sl.price === newPrice) return;
       sl.price = newPrice;
       const entry = slEntryRef.current;
       try {
@@ -6193,6 +6220,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       slOn: tpSlDefaultsRef.current.slOn !== false, tpOn: tpSlDefaultsRef.current.tpOn !== false } })); } catch (e) {}
     // Record what is being armed BEFORE the round trip, so a redraw that happens
     // while the request is in flight still draws the dragged levels.
+    const prevRule = premRuleRef.current;
     premRuleRef.current = { symbol: pos.symbol, sl: slPx, tp: tpPx };
     setPremSync('SYNCING');
     try {
@@ -6215,6 +6243,17 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       setPremSync(d && d.success ? 'ACTIVE' : 'ERROR');
       // The server kept a rule it manages (Telegram trade): show ITS levels.
       if (d && d.success && d.kept && d.rule) premRuleRef.current = { symbol: pos.symbol, sl: Number(d.rule.sl), tp: Number(d.rule.tp) };
+      if (d && !d.success && d.entryWall) {
+        // Refused only because it crossed the entry before TP1: the armed rule is
+        // unchanged and still protecting the trade, so say so plainly and put the
+        // lines back where the real stop and target are.
+        premRuleRef.current = prevRule;
+        setPremSync('ACTIVE');
+        invalidateArmedRule();
+        try { toast.error(d.error, { id: 'entry-wall' }); } catch (e) {}
+        try { if (prevRule) window.dispatchEvent(new CustomEvent('terminal:rule-changed', { detail: { symbol: pos.symbol, sl: prevRule.sl, tp: prevRule.tp, slOn: prevRule.slOn !== false, tpOn: prevRule.tpOn !== false } })); } catch (e) {}
+        return;
+      }
       if (d && !d.success && d.error) {
         console.warn('[premium-exit] not armed:', d.error);
         // Said OUT LOUD. A refusal used to be a console line plus a small status
