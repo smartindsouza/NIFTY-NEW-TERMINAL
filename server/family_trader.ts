@@ -308,8 +308,8 @@ async function applyLadder(id: number, acts: LadderAction[]) {
   setRow(id, { ladder: JSON.stringify(st) });
   for (const a of acts) {
     if (a.type === 'SET_SL') await notify(`🔼 ${r.tradingsymbol}: ${a.reason} → SL ${rs(a.sl)}`, [{ text: '🚪 Exit her trade', data: `fexit:${id}` }]);
-    else if (a.type === 'ASK_TP3') await notify(`🎯 TP3 reached on ${r.tradingsymbol}. Her SL is now at TP2 (${rs(st.sl)}).\nExit now, or keep trailing?`,
-      [{ text: '🚪 Exit her trade', data: `fexit:${id}` }, { text: '📈 Keep trailing', data: `fkeep:${id}` }]);
+    else if (a.type === 'TP3_TRAILING') await notify(`🎯 TP3 reached on ${r.tradingsymbol}. Her SL is now at TP2 (${rs(st.sl)}) and trailing is ON — it steps up ${rs(st.tps[2] - st.tps[1])} behind the price.\nTap Exit to book it now.`,
+      [{ text: '🚪 Exit her trade', data: `fexit:${id}` }]);
   }
 }
 function onPrice(id: number, ltp: number) {

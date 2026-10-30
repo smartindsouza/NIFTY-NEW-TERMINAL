@@ -218,7 +218,7 @@ export default function TelegramSignals() {
             ))}
           </div>
           {form.lots === 'MAX' && <div className="text-[11px] text-muted-foreground mt-2">Max possible: at each call it buys as many lots as your Zerodha funds allow at the top of the entry range (keeping 1.5% spare for charges), up to the limit you set (25 at most). If funds can't be read, it buys 1 lot and tells you.</div>}
-          <div className="text-[11px] text-muted-foreground mt-2">SL is always the one in the message. TP1 → SL to entry · TP2 → SL to TP1 · TP3 → SL to TP2 and you are asked to exit or keep trailing.</div>
+          <div className="text-[11px] text-muted-foreground mt-2">SL is always the one in the message. TP1 → SL to entry · TP2 → SL to TP1 · TP3 → SL to TP2, then it trails up automatically in steps of (TP3 − TP2) — tap Exit any time to book.</div>
           <button disabled={busy} onClick={async () => { const d = await post('/api/signals/settings', {
               lots: form.lots, maxLotsCap: form.maxLotsCap, maxTrades: form.maxTrades, allowAbove: form.allowAbove, waitMin: form.waitMin, lastEntry: form.lastEntry, squareOff: form.squareOff });
               if (d.ok) { setForm({ ...d.settings }); toast.success('Saved'); } }}

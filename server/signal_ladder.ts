@@ -4,10 +4,13 @@
 //   • the SL is exactly the one in the message;
 //   • TP1 hit  → SL to the entry price (the actual fill);
 //   • TP2 hit  → SL to TP1;
-//   • TP3 hit  → SL to TP2, and ASK him: exit now, or keep trailing?
-//   • KEEP     → the ladder carries on above TP3 in steps of (TP3 − TP2):
+//   • TP3 hit  → SL to TP2, and trailing switches ON by itself (30 Oct 2026,
+//                Martin: "enable trailing SL by default after TP3"). Until then
+//                he was asked Exit / Keep at TP3 and, with no answer, the SL sat
+//                at TP2 however far the price ran — a move he had to catch by
+//                hand. Now the alert only offers Exit; doing nothing trails.
+//   • trailing → the ladder carries on above TP3 in steps of (TP3 − TP2):
 //                each new step reached lifts the SL to the previous one.
-//   • no answer → SL stays at TP2 until the 15:15 square-off.
 // There is NO target exit. Exits happen only through the SL (the existing
 // premium-exit engine, which this ladder feeds), the Exit button, his "exit"
 // answer at TP3, or the square-off.
@@ -27,7 +30,7 @@ export interface LadderState {
 
 export type LadderAction =
   | { type: 'SET_SL'; sl: number; reason: string }
-  | { type: 'ASK_TP3' };
+  | { type: 'TP3_TRAILING' };
 
 export function createLadder(entry: number, sl: number, tps: [number, number, number]): LadderState {
   return { entry, sl, tps, stage: 0, decision: null, stepsAbove: 0, peak: entry };
@@ -65,8 +68,11 @@ export function onLadderPrice(st: LadderState, ltp: number): LadderAction[] {
   if (st.stage < 2 && ltp >= t2) { st.stage = 2; raise(st, t1, 'TP2 hit — SL to TP1', out); }
   if (st.stage < 3 && ltp >= t3) {
     st.stage = 3; raise(st, t2, 'TP3 hit — SL to TP2', out);
-    if (st.decision === null) { st.decision = 'PENDING'; out.push({ type: 'ASK_TP3' }); }
+    if (st.decision === null || st.decision === 'PENDING') { st.decision = 'KEEP'; out.push({ type: 'TP3_TRAILING' }); }
   }
+  // A trade saved by the old version while it waited for an answer at TP3
+  // (stage 3, PENDING) trails from its next price too, without a second alert.
+  if (st.stage >= 3 && st.decision === 'PENDING') st.decision = 'KEEP';
   applyKeepSteps(st, out);
   return out;
 }

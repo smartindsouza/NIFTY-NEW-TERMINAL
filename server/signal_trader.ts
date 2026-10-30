@@ -556,9 +556,9 @@ async function applyLadder(id: number, acts: LadderAction[]) {
   for (const a of acts) {
     if (a.type === 'SET_SL') {
       await notify(`🔼 ${t.tradingsymbol}: ${a.reason} → SL ${rs(a.sl)}`, [{ text: '🚪 Exit now', data: `exit:${id}` }]);
-    } else if (a.type === 'ASK_TP3') {
-      await notify(`🎯 TP3 reached on ${t.tradingsymbol}. SL is now at TP2 (${rs(st.sl)}).\nExit now, or keep trailing?`,
-        [{ text: '🚪 Exit now', data: `exit:${id}` }, { text: '📈 Keep trailing', data: `keep:${id}` }]);
+    } else if (a.type === 'TP3_TRAILING') {
+      await notify(`🎯 TP3 reached on ${t.tradingsymbol}. SL is now at TP2 (${rs(st.sl)}) and trailing is ON — it steps up ${rs(st.tps[2] - st.tps[1])} behind the price.\nTap Exit to book it now.`,
+        [{ text: '🚪 Exit now', data: `exit:${id}` }]);
     }
   }
 }

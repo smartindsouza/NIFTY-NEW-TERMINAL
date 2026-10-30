@@ -121,9 +121,10 @@ tick(160); assert.equal(rules.get(SYM).sl, 130);
 tick(164); await settle(); assert.equal(rules.get(SYM).sl, 147); ok('TP1 → SL to entry 147');
 tick(179); await settle(); assert.equal(rules.get(SYM).sl, 164); ok('TP2 → SL to TP1 164');
 tick(199); await settle(); assert.equal(rules.get(SYM).sl, 179);
-assert.ok(events().some(e => e.includes('TP3 reached'))); ok('TP3 → SL to TP2 179 and the question is asked');
-tick(230); await settle(); assert.equal(rules.get(SYM).sl, 179); ok('no answer → SL stays at TP2');
-await __test.keep(trades()[0].id); await settle(); assert.equal(rules.get(SYM).sl, 199); ok('Keep trailing → catches up (219 reached → SL 199)');
+assert.ok(events().some(e => e.includes('TP3 reached') && e.includes('trailing is ON'))); ok('TP3 → SL to TP2 179, alert says trailing is ON');
+tick(218); await settle(); assert.equal(rules.get(SYM).sl, 179); ok('below the first step (219) → SL stays at TP2');
+tick(230); await settle(); assert.equal(rules.get(SYM).sl, 199); ok('trailing on by itself: 219 reached → SL 199, no button needed');
+assert.equal(await __test.keep(trades()[0].id), 'Already trailing.'); ok('an old "Keep trailing" button press is harmless');
 tick(239); await settle(); assert.equal(rules.get(SYM).sl, 219); ok('next step 239 → SL 219');
 tick(218); await settle();                           // engine exits at 218 (<219)
 await __test.housekeeping(); await __test.reconcileLive(); await settle();

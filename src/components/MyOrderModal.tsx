@@ -136,7 +136,7 @@ export function MyOrderModal({ onClose, underlying, spot }: { onClose: () => voi
             </select>
           </label>
           <div className="text-[11px] text-muted-foreground leading-relaxed">
-            Buys {dirText}, as a limit order up to {entry > 0 ? (entry + allow).toFixed(2) : `entry + ${allow}`}. The SL is armed at once; TP1 moves it to your entry, TP2 to TP1, and at TP3 you are asked to exit or keep trailing. Valid until {lastEntry} today; square-off 15:15.
+            Buys {dirText}, as a limit order up to {entry > 0 ? (entry + allow).toFixed(2) : `entry + ${allow}`}. The SL is armed at once; TP1 moves it to your entry, TP2 to TP1, and at TP3 it moves to TP2 and trails up automatically in steps of (TP3 − TP2). Valid until {lastEntry} today; square-off 15:15.
           </div>
           {err && <div className="text-sm text-rose-400">{err}</div>}
           <button disabled={busy} onClick={arm} className="w-full h-11 rounded-lg bg-primary text-primary-foreground font-bold disabled:opacity-50">
