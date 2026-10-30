@@ -751,6 +751,68 @@ export function signalManages(tradingsymbol: string): boolean {
 
 /** Martin re-armed SL/TP on the chart for a contract the app is managing: hand
  *  it over. His rule is now in charge; the ladder stops moving the stop. */
+// CHART EDITS THAT KEEP THE LADDER RUNNING (30 Oct 2026, Martin). With Quick
+// Trade on he can drag a Telegram trade's SL line and its NEXT target line on
+// the option chart (or their spot mirrors). Asked what should happen, he chose:
+// the dragged SL becomes the stop and the ladder carries on from there, and the
+// target line is the next TP of the ladder (TP1, then TP2, then TP3), which the
+// drag moves. So a drag no longer hands the trade over — that remains only for
+// the TP & SL editor, which re-arms the whole rule (signalNoteManualRearm).
+// The ladder only ever RAISES a stop, so a stop he has put above the next rung
+// is kept when that rung is reached, and a lower one is lifted as before.
+function managedTrade(tradingsymbol: string): { id: number; t: any; st: LadderState } | null {
+  if (!D) return null;
+  for (const [id, st] of openTrades) {
+    const t = tradeRow(id);
+    if (t?.tradingsymbol === tradingsymbol && t.mode === 'LIVE' && t.status === 'OPEN') return { id, t, st };
+  }
+  return null;
+}
+/** What the chart should draw for a managed trade: the live SL and the next target. */
+export function signalManagedLevels(tradingsymbol: string) {
+  const m = managedTrade(tradingsymbol);
+  if (!m) return null;
+  const idx = m.st.stage < 3 ? m.st.stage : null;          // 0 → TP1, 1 → TP2, 2 → TP3, null after TP3
+  return { id: m.id, sl: m.st.sl, nextTp: idx == null ? null : (m.st.tps as number[])[idx], tpIndex: idx == null ? null : idx + 1,
+    stage: m.st.stage, trailing: m.st.decision === 'KEEP', source: tradeCallSource(m.t.call_id) };
+}
+const tradeCallSource = (callId: number) => {
+  try { return (D.db.prepare('SELECT source FROM signal_calls WHERE id = ?').get(callId) as any)?.source || 'telegram'; } catch { return 'telegram'; }
+};
+async function setManagedLevels(tradingsymbol: string, b: { sl?: any; tp?: any }) {
+  const m = managedTrade(tradingsymbol);
+  if (!m) return { ok: false, error: 'This trade is not being managed by Telegram Auto-Trade.' };
+  const ltp = await priceOf(m.t.token, m.t.exchange, m.t.tradingsymbol);
+  const st = openTrades.get(m.id);                         // re-read: a tick may have moved it while we waited
+  if (!st) return { ok: false, error: 'That trade has just closed.' };
+  const said: string[] = [];
+  if (b.sl !== undefined && b.sl !== null) {
+    const sl = r2(tick05(Number(b.sl) + 0.025));
+    if (!(sl > 0)) return { ok: false, error: 'Bad SL.' };
+    if (ltp != null && sl >= ltp) return { ok: false, error: `SL must be below the current price (${ltp}).` };
+    const nextTp = st.stage < 3 ? (st.tps as number[])[st.stage] : null;
+    if (nextTp != null && sl >= nextTp) return { ok: false, error: `SL must be below the next target (${nextTp}).` };
+    st.sl = sl;
+    said.push(`SL → ${rs(sl)}`);
+  }
+  if (b.tp !== undefined && b.tp !== null) {
+    if (st.stage >= 3) return { ok: false, error: 'TP3 has been reached — the stop now trails by itself; there is no target left to move.' };
+    const i = st.stage, tp = r2(tick05(Number(b.tp) + 0.025));
+    const floor = Math.max(st.sl, i === 0 ? st.entry : (st.tps as number[])[i - 1]);
+    if (!(tp > floor)) return { ok: false, error: `TP${i + 1} must be above ${i === 0 ? 'the entry' : `TP${i}`} and the SL (${r2(floor)}).` };
+    if (i < 2 && tp >= (st.tps as number[])[i + 1]) return { ok: false, error: `TP${i + 1} must stay below TP${i + 2} (${(st.tps as number[])[i + 1]}).` };
+    if (ltp != null && tp <= ltp) return { ok: false, error: `TP${i + 1} must be above the current price (${ltp}).` };
+    (st.tps as number[])[i] = tp;
+    said.push(`TP${i + 1} → ${rs(tp)}`);
+  }
+  if (!said.length) return { ok: false, error: 'Nothing to change.' };
+  saveLadder(m.id, st);
+  D.setRuleSl(tradingsymbol, st.sl);
+  void notify(`✋ ${tradingsymbol}: you moved ${said.join(', ')} on the chart. The ladder carries on from there${st.stage < 3 ? ` (next: TP${st.stage + 1} ${rs((st.tps as number[])[st.stage])})` : ''}.`,
+    [{ text: '🚪 Exit now', data: `exit:${m.id}` }]);
+  return { ok: true, ...signalManagedLevels(tradingsymbol) };
+}
+
 export function signalNoteManualRearm(tradingsymbol: string) {
   if (!D) return;
   for (const [id, st] of openTrades) {
@@ -963,6 +1025,11 @@ export function registerSignalTrader(app: any, deps: SignalDeps) {
     const r = await closeTrade(Number(req.body?.id), 'Exit button (app)');
     res.json(r);
   });
+  // Chart drags on a managed trade (Quick Trade on): move the SL or the next TP.
+  app.post('/api/signals/levels', json, async (req: any, res: any) => {
+    try { res.json(await setManagedLevels(String(req.body?.tradingsymbol || ''), { sl: req.body?.sl, tp: req.body?.tp })); }
+    catch (e: any) { res.json({ ok: false, error: e?.message || String(e) }); }
+  });
   app.post('/api/signals/keep', json, async (req: any, res: any) => {
     res.json({ ok: true, message: await keep(Number(req.body?.id)) });
   });
@@ -1081,7 +1148,7 @@ export function signalNotify(text: string, buttons?: { text: string; data?: stri
 export function signalPinOk(given: any) { return pinOk(given); }
 
 export const __test = {
-  handleMessage, housekeeping, reconcileLive, closeTrade, keep, onBotUpdate,
+  handleMessage, housekeeping, reconcileLive, closeTrade, keep, onBotUpdate, setManagedLevels,
   get settings() { return settings; }, setSettings(s: Partial<Settings>) { settings = { ...settings, ...s }; },
   setClockOffset(ms: number) { clockOffsetMs = ms; }, clearPriceCache() { lastRestAt.clear(); restLtp.clear(); }, setOwner(id: string) { setKV('signals_owner_id', id); },
 };

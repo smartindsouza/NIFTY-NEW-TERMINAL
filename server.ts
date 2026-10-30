@@ -31,7 +31,7 @@ import biasCheck from './server/bias.cjs';
 const { createBiasRouter } = biasCheck as any;
 import { registerTriggers, armedTriggerTokens, onTickForTriggers } from './server/triggers';
 // Telegram channel calls → automatic 1-lot entries with the message's SL (23 Oct 2026).
-import { registerSignalTrader, signalOnTick, signalTokens, signalNoteManualRearm, signalManages } from './server/signal_trader';
+import { registerSignalTrader, signalOnTick, signalTokens, signalNoteManualRearm, signalManages, signalManagedLevels } from './server/signal_trader';
 import { registerFamilyTrader, familyOnTick, familyTokens } from './server/family_trader';
 import { registerLeverage } from './server/leverage';
 import { GAP_CONFIG } from './server/config/gapScorecard';
@@ -1496,7 +1496,8 @@ setInterval(() => {
       if (req.body?.source === 'auto' && tradingsymbol && signalManages(String(tradingsymbol))) {
         const kept: any = db.prepare("SELECT * FROM premium_exit_rules WHERE tradingsymbol=?").get(tradingsymbol);
         console.log(`[premium-exit] kept the Telegram rule for ${tradingsymbol}; ignored the chart's automatic default`);
-        return res.json({ success: true, kept: true, rule: kept ? { tradingsymbol, side: kept.side, entry: kept.entry, sl: kept.sl, tp: kept.tp, status: kept.status } : null });
+        const kv = kept ? managedView(kept) : null;
+        return res.json({ success: true, kept: true, rule: kv ? { tradingsymbol, side: kv.side, entry: kv.entry, sl: kv.sl, tp: kv.tp, status: kv.status, tp_on: kv.tp_on, managed: kv.managed || null } : null });
       }
       const slOnN = slOn === false ? 0 : 1, tpOnN = tpOn === false ? 0 : 1;
       const slN = Number(sl), tpN = Number(tp);
@@ -1628,6 +1629,18 @@ setInterval(() => {
     } catch (e: any) { return res.json({ free: false }); }
   });
 
+  // A Telegram-managed trade's rule row has its target leg OFF (the ladder has no
+  // target exit). The chart is shown the ladder instead: the live SL and the NEXT
+  // target (TP1, TP2, then TP3) as the target line, marked managed so a drag goes
+  // to /api/signals/levels and the label reads TP1/TP2/TP3. Display only — the
+  // row itself is not changed, so nothing that fires exits sees a target.
+  const managedView = (row: any) => {
+    if (!row) return row;
+    let m: any = null;
+    try { m = signalManagedLevels(String(row.tradingsymbol)); } catch (e) { m = null; }
+    if (!m) return row;
+    return { ...row, sl: m.sl, tp: m.nextTp ?? row.tp, tp_on: m.nextTp != null ? 1 : 0, managed: m };
+  };
   app.get('/api/premium-exit/get', (req, res) => {
     try {
       const sym = String(req.query.tradingsymbol || '');
@@ -1638,7 +1651,7 @@ setInterval(() => {
       const st = trailStates.get(sym);
       if (st) trailSummary = { tp1: st.tp1, tp1Done: st.tp1Done, costMoved: st.costMoved,
         qtyRemaining: st.qtyRemaining, rung: st.rung, trailTp: st.trailTp };
-      return res.json({ rule: { ...row, trail: trailSummary } });
+      return res.json({ rule: managedView({ ...row, trail: trailSummary }) });
     } catch (e: any) { return res.status(500).json({ rule: null, error: e?.message || String(e) }); }
   });
 

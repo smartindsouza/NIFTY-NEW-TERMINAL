@@ -289,6 +289,33 @@ __test.setSettings({ lots: 1 });
   __test.setSettings({ maxTrades: 3 });
 }
 
+// 12e) CHART DRAGS on a managed trade (Quick Trade on): the ladder keeps running
+{
+  __test.setClockOffset(Date.UTC(2026, 9, 26, 6, 30) - Date.now());       // 12:00 IST
+  __test.setSettings({ mode: 'LIVE', lots: 1, maxTrades: 99 }); __test.clearPriceCache(); price.set(SYM, 147);
+  const a3 = msg(CALL); await __test.handleMessage(a3, 'push'); await __test.handleMessage(msg(LEVELS, a3.id), 'push'); await settle(900);
+  const tr = trades().at(-1); assert.equal(tr.status, 'OPEN');
+  const lv = (x: any) => __test.setManagedLevels(SYM, x);
+  let r: any = await lv({ sl: 150 });
+  assert.equal(r.ok, false); assert.match(r.error, /below the current price/); ok('drag: SL above the price refused');
+  r = await lv({ sl: 138 }); assert.equal(r.ok, true); assert.equal(rules.get(SYM).sl, 138); assert.equal(r.nextTp, 164); assert.equal(r.tpIndex, 1);
+  ok('drag: SL 130 → 138 reaches the exit engine; next target TP1 164');
+  r = await lv({ tp: 185 }); assert.equal(r.ok, false); assert.match(r.error, /below TP2/); ok('drag: TP1 above TP2 refused');
+  r = await lv({ tp: 160 }); assert.equal(r.ok, true); assert.equal(r.nextTp, 160); ok('drag: TP1 164 → 160');
+  tick(159); await settle(); assert.equal(rules.get(SYM).sl, 138);
+  tick(160); await settle(); assert.equal(rules.get(SYM).sl, 147); ok('ladder kept running: the dragged TP1 160 moves the SL to entry 147');
+  assert.equal(trades().at(-1).status, 'OPEN'); ok('a drag does not hand the trade over (still OPEN, not MANUAL)');
+  r = await lv({ sl: 165 }); assert.equal(r.ok, false); ok('drag: SL above the price refused (price 160)');
+  tick(170); await settle();
+  r = await lv({ sl: 168 }); assert.equal(r.ok, true); assert.equal(rules.get(SYM).sl, 168);
+  tick(179); await settle(); assert.equal(rules.get(SYM).sl, 168); ok('a dragged SL above the next rung is kept (TP2 would lift only to 160)');
+  tick(199); await settle(); assert.equal(rules.get(SYM).sl, 179);
+  r = await lv({ tp: 230 }); assert.equal(r.ok, false); assert.match(r.error, /trails by itself/); ok('after TP3: no target left to move');
+  r = await lv({ sl: 185 }); assert.equal(r.ok, true); tick(219); await settle(); assert.equal(rules.get(SYM).sl, 199); ok('after TP3 a dragged SL 185 still trails up (219 → 199)');
+  await __test.closeTrade(tr.id, 'x'); await __test.reconcileLive();
+  r = await lv({ sl: 150 }); assert.equal(r.ok, false); assert.match(r.error, /not being managed/); ok('closed trade: drag refused');
+}
+
 // 13) bot: only the owner may press buttons
 __test.setOwner('777');
 await __test.onBotUpdate({ update_id: 1, callback_query: { id: 'q', from: { id: 1 }, data: `exit:${trades().at(-1).id}` } });

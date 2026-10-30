@@ -1016,6 +1016,7 @@ async function fetchArmedRule(symbol: string, force = false): Promise<any> {
       // that distinction is what decides whether the mirrored lines are removed.
       const out = { ok: r.ok, rule: d?.rule ?? null };
       ruleCache = { symbol, at: Date.now(), data: out };
+      if (r.ok) noteManaged(symbol, out.rule?.managed || null);
       return out;
     } catch (e) {
       return { ok: false, rule: null };
@@ -1028,6 +1029,16 @@ async function fetchArmedRule(symbol: string, force = false): Promise<any> {
 }
 /** Drop the cache so the next read is fresh — used right after arming. */
 function invalidateArmedRule() { ruleCache = null; }
+
+// TELEGRAM-MANAGED TRADES (30 Oct 2026). The server marks the rule of a trade
+// the Telegram ladder is running ("managed"), and serves its live SL plus the
+// NEXT ladder target (TP1, TP2, TP3) as the target line. Every reader of the
+// rule goes through fetchArmedRule, so this map is always as fresh as the rule.
+// A drag on such a trade goes to /api/signals/levels (the ladder keeps running)
+// instead of re-arming the rule (which would hand the trade over).
+const managedBySymbol = new Map<string, { id: number; sl: number; nextTp: number | null; tpIndex: number | null; stage: number; trailing: boolean } | null>();
+function noteManaged(symbol: string, m: any) { managedBySymbol.set(symbol, m && typeof m === 'object' ? m : null); }
+function managedFor(symbol: string | null | undefined) { return symbol ? managedBySymbol.get(symbol) || null : null; }
 
 // FIRST-PAINT SNAPSHOT. A cold /api/ta call pulls ~100 days of candles from
 // Zerodha and recomputes every indicator — two to three seconds — and the
@@ -3895,21 +3906,34 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     return "15";
   });
   const [wsError, setWsError] = useState<string>('');
-  const [quickTradeEnabled, setQuickTradeEnabled] = useState(() => {
-    try {
-      return localStorage.getItem('quickTradeEnabled') === 'true';
-    } catch(e) {}
-    return false;
-  });
+  // QUICK TRADE IS A ONE-MINUTE SWITCH (30 Oct 2026, Martin). It used to be
+  // remembered across reloads and stay on until switched off, so a chart opened
+  // hours later could still turn a stray tap into a trigger or move an exit
+  // line. Now it starts OFF on every load and turns itself off 1 minute after
+  // being switched on — for everything it gates, not only Telegram trades.
+  const [quickTradeEnabled, setQuickTradeEnabled] = useState(false);
   const quickTradeEnabledRef = useRef(quickTradeEnabled);
+  const exitDragRefForQt = useRef<any>(null);       // filled once the drag refs exist (below)
+  const rrDraggingRefForQt = useRef<any>(null);
   useEffect(() => {
     quickTradeEnabledRef.current = quickTradeEnabled;
   }, [quickTradeEnabled]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('quickTradeEnabled', String(quickTradeEnabled));
-    } catch(e) {}
+    try { localStorage.removeItem('quickTradeEnabled'); } catch(e) {}   // no longer remembered
+    if (!quickTradeEnabled) return;
+    const offAt = Date.now() + 60000;
+    // Checked every second rather than one 60 s timer, so a line being dragged
+    // at the minute mark is not cut off mid-gesture: it switches off once the
+    // finger lifts. In split view both panes run this; the toast id makes it one.
+    const iv = setInterval(() => {
+      if (Date.now() < offAt) return;
+      if (exitDragRefForQt.current?.current || rrDraggingRefForQt.current?.current) return;
+      clearInterval(iv);
+      setQuickTradeEnabled(false);
+      try { toast('Quick Trade switched off (1 minute)', { id: 'qt-auto-off' }); } catch (e) {}
+    }, 1000);
+    return () => clearInterval(iv);
   }, [quickTradeEnabled]);
 
   const [testOrderMode, setTestOrderMode] = useState(() => {
@@ -5288,6 +5312,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // A dedicated flag rather than draggingLineRef, which is declared far below
   // this line and would be in its temporal dead zone here.
   const rrDraggingRef = useRef(false);
+  rrDraggingRefForQt.current = rrDraggingRef;
   const rrBoxRef = useRef(rrBox);
   if (!rrDraggingRef.current) rrBoxRef.current = rrBox;
   const rrArmRef = useRef(rrArm);
@@ -5787,6 +5812,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // Movement writes straight to the price-line instance — lightweight-charts
   // repaints those itself, so there is no React work per move here either.
   const exitDragRef = useRef<{ mode: 'sl' | 'smap'; kind: string; grabOffset: number; moved: boolean } | null>(null);
+  exitDragRefForQt.current = exitDragRef;
   const startExitLineDrag = () => {
     const move = (ev: PointerEvent) => {
       const cont = chartContainerRef.current;
@@ -5856,6 +5882,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           // keeps its value from the armed rule — it is still stored, just
           // disabled, so the switch can turn it back on at the same level.
           const rule = premRuleRef.current;
+          if (posNow && managedFor(posNow.symbol)) {
+            // Telegram-managed: move just the dragged level; the ladder keeps running.
+            const moved = slLinesRef.current.find((l: any) => l.kind === d.kind);
+            if (moved) void pushManagedLevel(posNow.symbol, moved.label === 'SL' ? 'sl' : 'tp', moved.price);
+            return;
+          }
           if (posNow && (u || lo)) {
             const long = posNow.side === 'BUY';
             const slPx = long ? (lo?.price ?? rule?.sl) : (u?.price ?? rule?.sl);
@@ -5893,7 +5925,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           // counted as a new rule and re-solved from the round-tripped premium,
           // which lands a point or two off the drop and looked like a hop.
           if (spotMapRef.current) { spotMapRef.current.sl = nextSl; spotMapRef.current.tp = nextTp; }
-          await pushPremiumRule(nextSl, nextTp);
+          if (managedFor(pos.symbol)) await pushManagedLevel(pos.symbol, d.kind === 'sl' ? 'sl' : 'tp', +px.toFixed(2));
+          else await pushPremiumRule(nextSl, nextTp);
           refreshSpotMap();
         } catch { setPremSync('ERROR'); refreshSpotMap(); }
       })();
@@ -6084,7 +6117,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
     const want: { kind: 'sl' | 'tp'; price: number | null; premium: number; color: string; label: string }[] = [
       { kind: 'sl', price: m.slSpot, premium: m.sl, color: '#f43f5e', label: 'SL' },
-      { kind: 'tp', price: m.tpSpot, premium: m.tp, color: '#10b981', label: 'TARGET' },
+      { kind: 'tp', price: m.tpSpot, premium: m.tp, color: '#10b981', label: (() => { const mg = managedFor(pos.symbol); return mg?.tpIndex ? `TP${mg.tpIndex}` : 'TARGET'; })() },
     ];
     for (const w of want) {
       const existing = spotMapLinesRef.current.find(l => l.kind === w.kind);
@@ -6202,6 +6235,47 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     finally { rulePushPendingRef.current = Math.max(0, rulePushPendingRef.current - 1); }
   };
 
+
+  // Move ONE level of a Telegram-managed trade (SL, or the next TP). The server
+  // validates (SL below price and below the next TP; TP between its neighbours
+  // and above price) and answers with the ladder's levels, which the lines then
+  // adopt — so a refused drag springs back to where the stop really is.
+  const pushManagedLevel = async (symbol: string, which: 'sl' | 'tp', price: number) => {
+    rulePushPendingRef.current += 1;
+    setPremSync('SYNCING');
+    try {
+      const r = await fetch('/api/signals/levels', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tradingsymbol: symbol, [which]: +(+price).toFixed(2) }) });
+      const d = await r.json().catch(() => null);
+      if (d?.ok) {
+        noteManaged(symbol, d);
+        const prev = premRuleRef.current;
+        premRuleRef.current = { ...(prev && prev.symbol === symbol ? prev : { symbol }), symbol, sl: Number(d.sl), tp: d.nextTp != null ? Number(d.nextTp) : (prev?.tp ?? 0),
+          slOn: true, tpOn: d.nextTp != null } as any;
+        setPremSync('ACTIVE');
+        try { toast.success(which === 'sl' ? `SL moved to ₹${d.sl} — the ladder carries on` : `TP${d.tpIndex} moved to ₹${d.nextTp}`, { id: 'tg-level' }); } catch (e) {}
+      } else {
+        setPremSync('ACTIVE');
+        try { toast.error(d?.error || 'Level not changed', { id: 'tg-level' }); } catch (e) {}
+      }
+      invalidateArmedRule();
+      try { window.dispatchEvent(new CustomEvent('terminal:rule-changed', { detail: { symbol, sl: premRuleRef.current?.sl, tp: premRuleRef.current?.tp, slOn: true, tpOn: premRuleRef.current?.tpOn !== false } })); } catch (e) {}
+    } catch (e) {
+      setPremSync('ERROR');
+      try { toast.error('Could not reach the server — level not changed', { id: 'tg-level' }); } catch (er) {}
+    } finally {
+      rulePushPendingRef.current = Math.max(0, rulePushPendingRef.current - 1);
+      // put the lines back on the server's levels (a refusal springs back here)
+      const pr = premRuleRef.current, pos = slActivePosRef.current;
+      if (pr && pos && pr.symbol === pos.symbol) {
+        const long = (pos.side || 'BUY') !== 'SELL';
+        for (const l of slLinesRef.current) {
+          const want = l.kind === 'upper' ? (long ? pr.tp : pr.sl) : (long ? pr.sl : pr.tp);
+          if (Number.isFinite(want) && Math.abs(l.price - want) > 0.004) { l.price = want; try { l.instance.applyOptions({ price: want }); } catch (e) {} }
+        }
+      }
+    }
+  };
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (!chartContainerRef.current || !mainSeriesRef.current || !mainChartRef.current) return;
@@ -6617,6 +6691,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         ? (tr.rung > 1 ? ` · R${tr.rung}` : tr.costMoved ? ' · SL AT COST' : '')
           + (tr.tp1Done ? ' · ½ booked' : '')
         : '';
+      const mg = managedFor(pos?.symbol);
+      if (mg) {
+        const shown = label === 'TARGET' && mg.tpIndex ? `TP${mg.tpIndex}` : label;
+        return `${shown} ${sign(pct)}${Math.abs(pct).toFixed(1)}%${money} · TG${mg.trailing ? ' · TRAILING' : ''}`;
+      }
       return `${label} ${sign(pct)}${Math.abs(pct).toFixed(1)}%${money}${stage}`;
     };
 
@@ -13638,7 +13717,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           </button>
           ) : null}
           {(
-          <div className={`ml-auto md:ml-0 ${isReferenceChart ? 'hidden' : 'flex'} ${sharedHidden} items-center justify-center gap-2 h-9 w-9 shrink-0 md:order-2 cursor-pointer rounded-md border border-0 transition-colors ${quickTradeEnabled ? "bg-primary/20" : "bg-muted/40"}`} onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled' : 'Quick Trade disabled'); } catch (e) {} }} title="Quick Trade">
+          <div className={`ml-auto md:ml-0 ${isReferenceChart ? 'hidden' : 'flex'} ${sharedHidden} items-center justify-center gap-2 h-9 w-9 shrink-0 md:order-2 cursor-pointer rounded-md border border-0 transition-colors ${quickTradeEnabled ? "bg-primary/20" : "bg-muted/40"}`} onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled for 1 minute' : 'Quick Trade disabled', { id: 'qt-toggle' }); } catch (e) {} }} title="Quick Trade — switches itself off 1 minute after it is turned on">
              {/* Icon on both platforms now; the desktop label and toggle are gone.
                  Colour carries the state, as it already did on mobile. */}
              <Zap size={18} className={quickTradeEnabled ? 'text-primary' : 'text-muted-foreground'} />
