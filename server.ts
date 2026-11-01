@@ -35,6 +35,7 @@ import { registerSignalTrader, signalOnTick, signalTokens, signalNoteManualRearm
 import { registerFamilyTrader, familyOnTick, familyTokens } from './server/family_trader';
 import { currentLeg, needsLegAverage } from './server/leg_average';
 import { entryWallError } from './server/entry_wall';
+import { registerResearchExport } from './server/research_export';
 import { registerLeverage } from './server/leverage';
 import { GAP_CONFIG } from './server/config/gapScorecard';
 import { evaluateQuantSignals } from './server/quant_engine';
@@ -3509,6 +3510,8 @@ setInterval(() => {
     },
     isTradingDay: (d) => !calIsNseHoliday(d),
   });
+  // NIFTY 50 history for offline research (read-only index candles).
+  try { registerResearchExport(app); } catch (e) { console.error('[research] export not registered', e); }
   // SECOND ACCOUNT (wife's Zerodha): follows the channel's calls with its own
   // login, tables and exits. Inert until FAMILY_KITE_API_KEY is set and her mode
   // is switched on. It reads prices from this app's feed and never touches
