@@ -42,6 +42,8 @@ export interface SignalDeps {
   setRuleSl: (tradingsymbol: string, sl: number) => void;
   ruleStatus: (tradingsymbol: string) => string | null;
   exitPosition: (tradingsymbol: string, reason: string) => Promise<{ ok: boolean; error?: string; alreadyClosed?: boolean }>;
+  // TP1 half-booking (2 Nov 2026): sell part of the position, capped at what is open.
+  exitPartial?: (tradingsymbol: string, qty: number, reason: string) => Promise<{ ok: boolean; error?: string }>;
   journalOpen: (o: any) => void;
   // the 09:10 readiness message
   kiteLoggedInToday: () => boolean;
@@ -54,7 +56,7 @@ interface Settings {
   lastEntry: string; squareOff: string; channelId: string | null; channelTitle: string | null;
 }
 const DEFAULTS: Settings = {
-  mode: 'OFF', lots: 1, maxLotsCap: 20, maxTrades: 3, allowAbove: 2, waitMin: 10,
+  mode: 'OFF', lots: 2, maxLotsCap: 20, maxTrades: 3, allowAbove: 2, waitMin: 10,
   lastEntry: '15:00', squareOff: '15:15', channelId: null, channelTitle: null,
 };
 
@@ -93,6 +95,11 @@ function initTables() {
     tradingsymbol TEXT, exchange TEXT, token INTEGER, qty INTEGER, entry REAL, entry_at INTEGER,
     order_id TEXT, ladder TEXT, status TEXT, last_ltp REAL, exit_price REAL, exit_at INTEGER,
     exit_reason TEXT, pnl REAL, updated_at INTEGER)`);
+  // TP1 HALF-BOOKING (2 Nov 2026): how much was sold at TP1 and at what price.
+  // part_status is written BEFORE the order goes out, so a restart or a second
+  // tick can never book the half twice.
+  for (const col of ['part_qty INTEGER', 'part_px REAL', 'part_status TEXT', 'part_at INTEGER'])
+    try { D.db.exec(`ALTER TABLE signal_trades ADD COLUMN ${col}`); } catch { /* exists */ }
   D.db.exec(`CREATE TABLE IF NOT EXISTS signal_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER, day TEXT, text TEXT)`);
 }
@@ -104,7 +111,13 @@ const setKV = (k: string, v: any) => {
   D.db.prepare('INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at')
     .run(k, JSON.stringify(v), Date.now());
 };
-function loadSettings() { settings = { ...DEFAULTS, ...(getKV('signals_settings') || {}) }; }
+// MINIMUM 2 LOTS (2 Nov 2026, Martin): channel trades are at least 2 lots, so
+// half can be booked at TP1. An older saved "1" is raised to 2 on load.
+const MIN_LOTS = 2;
+function loadSettings() {
+  settings = { ...DEFAULTS, ...(getKV('signals_settings') || {}) };
+  if (settings.lots !== 'MAX' && !(Number(settings.lots) >= MIN_LOTS)) { settings.lots = MIN_LOTS; try { saveSettings(); } catch { } }
+}
 function saveSettings() { setKV('signals_settings', settings); }
 
 function logEvent(text: string) {
@@ -474,6 +487,10 @@ async function enter(c: any, ltp: number, cap: number) {
     ({ lots, note: sizeNote } = await s.p);
     sizing.delete(c.id);
     if (lots < 1) return skip(c.id, `not enough funds for 1 lot (${sizeNote})`);
+    // Funds could not be read: sizing fell back to 1 lot so a hiccup never costs
+    // the trade. For channel trades that fallback is the minimum, 2 lots.
+    if (!manual && lots === 1 && /could not read funds|not logged in|sizing failed/.test(String(sizeNote))) { lots = MIN_LOTS; sizeNote = String(sizeNote).replace(/1 lot$/, `${MIN_LOTS} lots (the minimum)`); }
+    if (!manual && lots < MIN_LOTS) return skip(c.id, `funds allow only ${lots} lot — the minimum for channel trades is ${MIN_LOTS} (${sizeNote})`);
   } else lots = want;
   const qty = lots * c.lot_size;
   const mode: Mode = c.mode === 'LIVE' ? 'LIVE' : 'PRACTICE';
@@ -553,6 +570,7 @@ async function applyLadder(id: number, acts: LadderAction[]) {
   // Every stop move reaches the exit engine BEFORE any message goes out: a gap
   // through two targets must not leave the second raise waiting on Telegram.
   if (t.mode === 'LIVE' && t.status === 'OPEN') D.setRuleSl(t.tradingsymbol, st.sl);
+  if (st.stage >= 1 && !t.part_status) await bookHalfAtTp1(id, t, st);
   for (const a of acts) {
     if (a.type === 'SET_SL') {
       await notify(`🔼 ${t.tradingsymbol}: ${a.reason} → SL ${rs(a.sl)}`, [{ text: '🚪 Exit now', data: `exit:${id}` }]);
@@ -560,6 +578,37 @@ async function applyLadder(id: number, acts: LadderAction[]) {
       await notify(`🎯 TP3 reached on ${t.tradingsymbol}. SL is now at TP2 (${rs(st.sl)}) and trailing is ON — it steps up ${rs(st.tps[2] - st.tps[1])} behind the price.\nTap Exit to book it now.`,
         [{ text: '🚪 Exit now', data: `exit:${id}` }]);
     }
+  }
+}
+
+// TP1 → SELL HALF (2 Nov 2026, Martin: "whenever target 1 is hit exit 50%").
+// Channel trades only (not My Order), and only when the trade holds 2+ lots:
+// half the lots, rounded down to whole lots (2 → 1, 3 → 1, 4 → 2). The rest
+// stays on with the ladder as before (SL to entry at TP1, TP1 at TP2, trailing
+// after TP3). Recorded BEFORE the order goes out, so it can only happen once.
+async function bookHalfAtTp1(id: number, t: any, st: LadderState) {
+  const c: any = D.db.prepare('SELECT source, lot_size FROM signal_calls WHERE id = ?').get(t.call_id);
+  if (!c || (c.source && c.source !== 'telegram')) return;
+  const lot = Number(c.lot_size) || 0, lots = lot ? Math.floor(t.qty / lot) : 0;
+  if (lots < 2) return;
+  const half = Math.floor(lots / 2) * lot;
+  const claim = D.db.prepare("UPDATE signal_trades SET part_status='SENT', part_qty=?, part_at=?, updated_at=? WHERE id=? AND part_status IS NULL")
+    .run(half, Date.now(), Date.now(), id);
+  if (!claim.changes) return;
+  const px = (await priceOf(t.token, t.exchange, t.tradingsymbol)) ?? st.tps[0];
+  if (t.mode !== 'LIVE') {
+    D.db.prepare("UPDATE signal_trades SET part_status='DONE', part_px=? WHERE id=?").run(px, id);
+    return void notify(`💰 (practice) TP1 hit on ${t.tradingsymbol} — booked half: ${half} qty (${half / lot} lot) @ ${rs(px)}. The rest rides with SL at entry.`);
+  }
+  const r = D.exitPartial ? await D.exitPartial(t.tradingsymbol, half, 'TG TP1 half') : { ok: false, error: 'partial exit not available' };
+  if (r.ok) {
+    D.db.prepare("UPDATE signal_trades SET part_status='DONE', part_px=? WHERE id=?").run(px, id);
+    await notify(`💰 TP1 hit on ${t.tradingsymbol} — sold half: ${half} qty (${half / lot} lot) at about ${rs(px)}. ${t.qty - half} qty rides on with SL at entry ${rs(st.sl)}.`,
+      [{ text: '🚪 Exit the rest', data: `exit:${id}` }]);
+  } else {
+    D.db.prepare("UPDATE signal_trades SET part_status='FAILED' WHERE id=?").run(id);
+    await notify(`⚠️ TP1 hit on ${t.tradingsymbol} but selling half FAILED (${r.error}). Sell ${half} qty in Kite if you want it booked — the full ${t.qty} qty is still on with SL at entry.`,
+      [{ text: '🚪 Exit all now', data: `exit:${id}` }]);
   }
 }
 
@@ -590,7 +639,10 @@ async function closeTrade(id: number, reason: string, pxHint?: number, automatic
 }
 function finishTrade(id: number, px: number | null, reason: string) {
   const t = tradeRow(id);
-  const pnl = px != null ? r2((px - t.entry) * t.qty) : null;
+  const pq = t.part_status === 'DONE' ? Number(t.part_qty) || 0 : 0;
+  const pnl = px == null ? null
+    : (t.mode !== 'LIVE' && pq > 0 && t.part_px != null) ? r2((t.part_px - t.entry) * pq + (px - t.entry) * (t.qty - pq))
+    : r2((px - t.entry) * t.qty);    // live: px is Zerodha's average of ALL sells of this trade, half included
   D.db.prepare("UPDATE signal_trades SET status='CLOSED', exit_price=?, exit_at=?, exit_reason=COALESCE(exit_reason, ?), pnl=?, updated_at=? WHERE id=?")
     .run(px, Date.now(), reason, pnl, Date.now(), id);
   openTrades.delete(id);
@@ -946,7 +998,7 @@ export function registerSignalTrader(app: any, deps: SignalDeps) {
       if (b.mode !== 'OFF' && !settings.channelId) return res.json({ ok: false, error: 'Pick the channel first.' });
       settings.mode = b.mode;
     }
-    if (b.lots !== undefined) settings.lots = String(b.lots).toUpperCase() === 'MAX' ? 'MAX' : Math.round(num(b.lots, 1, 25, settings.lots === 'MAX' ? 1 : settings.lots));
+    if (b.lots !== undefined) settings.lots = String(b.lots).toUpperCase() === 'MAX' ? 'MAX' : Math.round(num(b.lots, MIN_LOTS, 25, settings.lots === 'MAX' ? MIN_LOTS : settings.lots));
     if (b.maxLotsCap !== undefined) settings.maxLotsCap = Math.round(num(b.maxLotsCap, 1, 25, settings.maxLotsCap));
     if (b.maxTrades !== undefined) settings.maxTrades = Math.round(num(b.maxTrades, 1, 10, settings.maxTrades));
     if (b.allowAbove !== undefined) settings.allowAbove = num(b.allowAbove, 0, 20, settings.allowAbove);

@@ -3501,6 +3501,8 @@ setInterval(() => {
       return result;
     },
     journalOpen: (o) => journalOpenTrade(o),
+    // TP1 half-booking: the same capped partial exit the trailing engine uses.
+    exitPartial: (tradingsymbol, qty, reason) => closePartialBySymbol(tradingsymbol, qty, reason),
     // The 09:10 readiness message: today's real (not simulated) Kite session and
     // the NSE calendar's trading days.
     kiteLoggedInToday: () => {

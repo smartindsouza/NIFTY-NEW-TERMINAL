@@ -49,6 +49,7 @@ const kc: any = {
   },
 };
 let lastExitPx = 0;
+let partialFail = false;
 async function exitPosition(sym: string, reason: string) {
   const q = positions.get(sym) || 0;
   if (!q) return { ok: false, alreadyClosed: true };
@@ -68,6 +69,12 @@ registerSignalTrader(app, {
   setRuleSl: (s, sl) => { const r = rules.get(s); if (r?.status === 'ACTIVE') { r.sl = sl; log.push(`SL ${sl}`); } },
   ruleStatus: (s) => rules.get(s)?.status ?? null,
   exitPosition, journalOpen: () => log.push('JOURNAL'),
+  exitPartial: async (sym, q, reason) => {
+    if (partialFail) return { ok: false, error: 'broker said no' };
+    const open = positions.get(sym) || 0; const qq = Math.min(q, open); if (!qq) return { ok: false, error: 'no open position' };
+    positions.set(sym, open - qq); orders.push({ id: 'P' + orders.length, tradingsymbol: sym, transaction_type: 'SELL', quantity: qq, reason, partial: true });
+    return { ok: true };
+  },
   kiteLoggedInToday: () => kiteIn, isTradingDay: (d) => d !== '2026-10-27',
 });
 // the existing exit engine, faked: SL touched → position flattened, rule DONE
@@ -90,7 +97,8 @@ const trades = () => db.prepare('SELECT * FROM signal_trades ORDER BY id').all()
 const events = () => (db.prepare('SELECT text FROM signal_events ORDER BY id').all() as any[]).map(e => e.text);
 let n = 0; const ok = (name: string) => { n++; console.log('ok', name); };
 
-__test.setSettings({ channelId: '42', channelTitle: 'Nifty Sensex VIP setups', mode: 'LIVE' });
+assert.equal(__test.settings.lots, 2); ok('default lots for channel trades is 2');
+__test.setSettings({ channelId: '42', channelTitle: 'Nifty Sensex VIP setups', mode: 'LIVE', lots: 1 });   // older flows below were written for 1 lot
 
 // 1) OFF: nothing is traded
 __test.setSettings({ mode: 'OFF' });
@@ -222,7 +230,7 @@ a = msg(CALL); await __test.handleMessage(a, 'push'); await __test.handleMessage
 assert.match(calls().at(-1).reason, /not enough funds/); ok('MAX: not enough for 1 lot → skipped, no order');
 fundsAvail = null; __test.clearPriceCache(); price.set(SYM, 147);
 a = msg(CALL); await __test.handleMessage(a, 'push'); await __test.handleMessage(msg(LEVELS, a.id), 'push'); await settle(800);
-lastBuy = orders.filter(o => o.transaction_type === 'BUY').at(-1); assert.equal(lastBuy.quantity, 65); ok('MAX: funds unreadable → 1 lot, said so');
+lastBuy = orders.filter(o => o.transaction_type === 'BUY').at(-1); assert.equal(lastBuy.quantity, 130); ok('MAX: funds unreadable → the 2-lot minimum, said so');
 await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
 __test.setSettings({ lots: 1 });
 
@@ -317,6 +325,64 @@ __test.setSettings({ lots: 1 });
   r = await lv({ sl: 185 }); assert.equal(r.ok, true); tick(219); await settle(); assert.equal(rules.get(SYM).sl, 199); ok('after TP3 a dragged SL 185 still trails up (219 → 199)');
   await __test.closeTrade(tr.id, 'x'); await __test.reconcileLive();
   r = await lv({ sl: 150 }); assert.equal(r.ok, false); assert.match(r.error, /not being managed/); ok('closed trade: drag refused');
+}
+
+// 12f) MINIMUM 2 LOTS + HALF AT TP1 (2 Nov 2026)
+{
+  const srv = app.listen(0); const port = (srv.address() as any).port;
+  const api = async (path: string, body?: any) => (await fetch(`http://127.0.0.1:${port}${path}`, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {})).json();
+  let r: any = await api('/api/signals/settings', { pin: '123456', lots: 1 });
+  assert.equal(r.settings.lots, 2); ok('settings: 1 lot is raised to the minimum of 2');
+  r = await api('/api/signals/settings', { pin: '123456', lots: 3 }); assert.equal(r.settings.lots, 3);
+  __test.setClockOffset(Date.UTC(2026, 9, 26, 7, 0) - Date.now());        // 12:30 IST
+  for (const [lots, wantHalf] of [[2, 65], [3, 65], [4, 130]] as [number, number][]) {
+    __test.setSettings({ mode: 'LIVE', lots, maxTrades: 99 }); __test.clearPriceCache(); price.set(SYM, 147);
+    const a5 = msg(CALL); await __test.handleMessage(a5, 'push'); await __test.handleMessage(msg(LEVELS, a5.id), 'push'); await settle(900);
+    const tr = trades().at(-1); assert.equal(tr.qty, lots * 65);
+    tick(160); await settle(); assert.equal(orders.filter((o: any) => o.partial).length, lots === 2 ? 0 : [2, 3].includes(lots) ? 1 : 2);
+    tick(164); await settle(300);
+    const part = orders.filter((o: any) => o.partial).at(-1);
+    assert.equal(part.quantity, wantHalf); assert.equal(rules.get(SYM).sl, 147);
+    assert.equal(positions.get(SYM), lots * 65 - wantHalf);
+    const row = trades().at(-1); assert.equal(row.part_status, 'DONE'); assert.equal(row.part_qty, wantHalf);
+    tick(165); tick(170); await settle(); assert.equal(orders.filter((o: any) => o.partial && o.tradingsymbol === SYM).length, lots === 2 ? 1 : lots === 3 ? 2 : 3);
+    ok(`${lots} lots: TP1 sells ${wantHalf / 65} lot (${wantHalf} qty) once, SL to entry, the rest stays on`);
+    await __test.closeTrade(tr.id, 'x'); await __test.reconcileLive();
+  }
+  // a gap straight through TP1 and TP2 still books the half only once
+  __test.setSettings({ lots: 2 }); __test.clearPriceCache(); price.set(SYM, 147);
+  let a6 = msg(CALL); await __test.handleMessage(a6, 'push'); await __test.handleMessage(msg(LEVELS, a6.id), 'push'); await settle(900);
+  const before = orders.filter((o: any) => o.partial).length;
+  tick(181); await settle(300);
+  assert.equal(orders.filter((o: any) => o.partial).length, before + 1); assert.equal(rules.get(SYM).sl, 164); ok('gap through TP1 and TP2: half sold once, SL to TP1');
+  await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
+  // broker refuses the half: alert, full position stays, never retried into a double sale
+  partialFail = true; __test.clearPriceCache(); price.set(SYM, 147);
+  a6 = msg(CALL); await __test.handleMessage(a6, 'push'); await __test.handleMessage(msg(LEVELS, a6.id), 'push'); await settle(900);
+  tick(165); await settle(300); tick(166); await settle(200);
+  assert.equal(trades().at(-1).part_status, 'FAILED'); assert.equal(positions.get(SYM), 130);
+  assert.ok(events().some((e: string) => /selling half FAILED/.test(e))); ok('half refused by the broker: alert, full position kept, not retried');
+  partialFail = false;
+  await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
+  // MAX sizing: funds for only 1 lot → the channel trade is skipped (minimum 2)
+  __test.setSettings({ lots: 'MAX' as any }); fundsAvail = 12000; __test.clearPriceCache(); price.set(SYM, 147);
+  a6 = msg(CALL); await __test.handleMessage(a6, 'push'); await __test.handleMessage(msg(LEVELS, a6.id), 'push'); await settle(900);
+  assert.equal(calls().at(-1).status, 'SKIPPED'); assert.match(calls().at(-1).reason, /minimum for channel trades is 2/); ok('MAX with funds for 1 lot: skipped, says why');
+  fundsAvail = 50000;
+  // practice: half booked on paper, P&L splits both parts
+  __test.setSettings({ mode: 'PRACTICE', lots: 2 }); __test.clearPriceCache(); price.set(SYM, 147);
+  a6 = msg(CALL); await __test.handleMessage(a6, 'push'); await __test.handleMessage(msg(LEVELS, a6.id), 'push'); await settle(900);
+  tick(164); await settle(300); tick(147); await settle(300);
+  const pr = trades().at(-1); assert.equal(pr.status, 'CLOSED'); assert.equal(pr.part_qty, 65);
+  assert.equal(pr.pnl, (164 - 147) * 65 + (147 - 147) * 65); ok(`practice: half booked at 164, rest out at entry → P&L +${pr.pnl}`);
+  // My Order (manual) trades are not split
+  __test.setSettings({ mode: 'LIVE', lots: 2, maxTrades: 99 }); __test.clearPriceCache(); price.set(SYM, 140);
+  const mo = await api('/api/signals/manual', { underlying: 'NIFTY', strike: 22650, optionType: 'CE', entry: 145, sl: 130, tp1: 160, tp2: 170, tp3: 185, lots: 2 });
+  assert.equal(mo.ok, true); __test.clearPriceCache(); price.set(SYM, 145.5); signalOnTick(TOK, 145.5); await settle(900);
+  const pb = orders.filter((o: any) => o.partial).length; tick(161); await settle(300);
+  assert.equal(orders.filter((o: any) => o.partial).length, pb); ok('My Order trades are not split at TP1');
+  await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
+  srv.close();
 }
 
 // 13) bot: only the owner may press buttons

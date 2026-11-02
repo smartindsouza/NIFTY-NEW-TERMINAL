@@ -130,12 +130,12 @@ ok('her settings: wrong PIN refused, right PIN accepted');
 // 4) both LIVE: one order on EACH account, each on its own client, own quantity
 await sendCall();
 assert.equal(M.orders.length, 1, 'Martin: one order'); assert.equal(W.orders.length, 1, 'wife: one order');
-assert.deepEqual({ q: M.orders[0].quantity, p: M.orders[0].price }, { q: 65, p: 151 });
+assert.deepEqual({ q: M.orders[0].quantity, p: M.orders[0].price }, { q: 130, p: 151 });   // Martin's channel minimum is 2 lots since 2 Nov
 assert.deepEqual({ q: W.orders[0].quantity, p: W.orders[0].price, prod: W.orders[0].product, tag: W.orders[0].tag }, { q: 130, p: 151, prod: 'MIS', tag: 'tgfamily' });
 assert.equal(fam()[0].status, 'OPEN'); assert.equal(fam()[0].entry, 147); assert.equal(sig().at(-1).status, 'OPEN');
 assert.ok(M.orders[0].at <= W.orders[0].at, 'Martin\'s order goes first');
 console.log(`   Martin ordered at +0 ms, wife at +${W.orders[0].at - M.orders[0].at} ms`);
-ok('both live: Martin 1 lot on his account, wife 2 lots on hers (LIMIT 151, MIS); Martin first');
+ok('both live: Martin 2 lots on his account, wife 2 lots on hers (LIMIT 151, MIS); Martin first');
 assert.ok(familyTokens().includes(TOK)); ok('her contract stays on the live feed while she holds it');
 
 // 5) her ladder: TP1 → SL to entry; back to entry → her exit sells HER qty on HER account only
