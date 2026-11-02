@@ -3,6 +3,7 @@ import { KiteTicker } from 'kiteconnect';
 export interface LiveTick {
   token: number; ltp: number; oi?: number; volume?: number; change?: number;
   ohlc?: { open: number; high: number; low: number; close: number }; ts: number;
+  exTs?: number | null;   // Zerodha's exchange_timestamp (ms, whole seconds) — for the price-age measurement
 }
 type Broadcaster = (tick: LiveTick) => void;
 
@@ -29,7 +30,8 @@ export function startTicker(apiKey: string, accessToken: string, onTick: Broadca
   ticker.on('ticks', (ticks: any[]) => {
     for (const t of ticks) {
       const tick: LiveTick = { token: t.instrument_token, ltp: t.last_price, oi: t.oi,
-        volume: t.volume_traded, change: t.change, ohlc: t.ohlc, ts: Date.now() };
+        volume: t.volume_traded, change: t.change, ohlc: t.ohlc, ts: Date.now(),
+        exTs: (() => { const v = t.exchange_timestamp || t.last_trade_time; const ms = v instanceof Date ? v.getTime() : v ? new Date(v).getTime() : NaN; return Number.isFinite(ms) ? ms : null; })() };
       latest.set(tick.token, tick);
       if (broadcaster) broadcaster(tick);
     }

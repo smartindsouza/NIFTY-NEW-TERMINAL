@@ -37,6 +37,7 @@ import { currentLeg, needsLegAverage } from './server/leg_average';
 import { entryWallError } from './server/entry_wall';
 import { registerResearchExport } from './server/research_export';
 import { registerGoldenSweep } from './server/golden_sweep';
+import { registerLatencyDiag, noteServerTick } from './server/latency_diag';
 import { registerLeverage } from './server/leverage';
 import { GAP_CONFIG } from './server/config/gapScorecard';
 import { evaluateQuantSignals } from './server/quant_engine';
@@ -1038,7 +1039,12 @@ async function refreshData() {
 }
 
   // Broadcast function
+  // Price-age measurement: every tick message carries the exchange time of the
+  // tick being handled and the moment the server sent it (server/latency_diag.ts).
+  // Extra fields only; nothing that reads these messages relies on them.
+  let currentTickExTs: number | null = null;
   const broadcast = (data: any) => {
+    if (data && (data.type === 'tick' || data.type === 'optionTick')) { data.srvTs = Date.now(); data.exTs = currentTickExTs; }
     wss.clients.forEach((client) => {
       if (client.readyState === 1) { // OPEN
         client.send(JSON.stringify(data));
@@ -1051,6 +1057,8 @@ function connectTicker() {
   const token = getTodayAccessToken();
   if (!apiKey || !token) return;
   startTicker(apiKey, token, (tick) => {
+    currentTickExTs = tick.exTs ?? null;
+    try { noteServerTick(tick.token, tick.exTs ?? null, tick.ts); } catch (e) {}
     if (tick.token === 256265) {
       latestSpot = tick.ltp;
       lastRealSpotTickAt = Date.now();
@@ -3513,6 +3521,8 @@ setInterval(() => {
     },
     isTradingDay: (d) => !calIsNseHoliday(d),
   });
+  // Price-age measurement (diagnostic only).
+  try { registerLatencyDiag(app, express); } catch (e) { console.error('[latency] not registered', e); }
   // Golden-zone Swap-Sweep: WATCH-ONLY alerts and a live record (no orders).
   try { registerGoldenSweep(app, { db, notify: (t: string) => signalNotify(t) }); } catch (e) { console.error('[golden-sweep] not registered', e); }
   // NIFTY 50 history for offline research (read-only index candles).

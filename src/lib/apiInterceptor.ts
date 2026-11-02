@@ -36,6 +36,9 @@ const LOCAL_ONLY_ENDPOINTS = new Set([
   '/api/family/status',
   // Golden-zone Swap-Sweep watch card: local SQLite only.
   '/api/golden-sweep/status',
+  // Price-age measurement: a clock ping each minute and a summary every 30 s.
+  '/api/diag/time',
+  '/api/diag/latency/client',
 ]);
 
 // Endpoints that DO sit in front of the broker but are served from a short shared
