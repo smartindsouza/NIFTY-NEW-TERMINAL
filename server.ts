@@ -31,11 +31,12 @@ import biasCheck from './server/bias.cjs';
 const { createBiasRouter } = biasCheck as any;
 import { registerTriggers, armedTriggerTokens, onTickForTriggers } from './server/triggers';
 // Telegram channel calls → automatic 1-lot entries with the message's SL (23 Oct 2026).
-import { registerSignalTrader, signalOnTick, signalTokens, signalNoteManualRearm, signalManages, signalManagedLevels } from './server/signal_trader';
+import { registerSignalTrader, signalOnTick, signalTokens, signalNoteManualRearm, signalManages, signalManagedLevels, signalNotify } from './server/signal_trader';
 import { registerFamilyTrader, familyOnTick, familyTokens } from './server/family_trader';
 import { currentLeg, needsLegAverage } from './server/leg_average';
 import { entryWallError } from './server/entry_wall';
 import { registerResearchExport } from './server/research_export';
+import { registerGoldenSweep } from './server/golden_sweep';
 import { registerLeverage } from './server/leverage';
 import { GAP_CONFIG } from './server/config/gapScorecard';
 import { evaluateQuantSignals } from './server/quant_engine';
@@ -3510,6 +3511,8 @@ setInterval(() => {
     },
     isTradingDay: (d) => !calIsNseHoliday(d),
   });
+  // Golden-zone Swap-Sweep: WATCH-ONLY alerts and a live record (no orders).
+  try { registerGoldenSweep(app, { db, notify: (t: string) => signalNotify(t) }); } catch (e) { console.error('[golden-sweep] not registered', e); }
   // NIFTY 50 history for offline research (read-only index candles).
   try { registerResearchExport(app); } catch (e) { console.error('[research] export not registered', e); }
   // SECOND ACCOUNT (wife's Zerodha): follows the channel's calls with its own

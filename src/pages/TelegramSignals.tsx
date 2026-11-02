@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { Send, Power, Bot, KeyRound, LogOut, RefreshCw, Check, DoorOpen, TrendingUp, ChevronDown, ChevronRight } from 'lucide-react';
 import FamilyAccountCard from '../components/FamilyAccountCard';
+import GoldenSweepCard from '../components/GoldenSweepCard';
 
 // Telegram Auto-Trade: reads one channel's BUY calls and trades them with the
 // message's SL (server/signal_trader.ts). This page is the switch, the setup and
@@ -228,6 +229,9 @@ export default function TelegramSignals() {
 
       {/* second account (wife's Zerodha) — its own card and endpoints */}
       <FamilyAccountCard pin={pin} />
+
+      {/* Golden-zone Swap-Sweep — watch-only alerts (server/golden_sweep.ts) */}
+      <GoldenSweepCard />
 
       {/* setup */}
       <div className="bg-card border border-border rounded-xl p-4">

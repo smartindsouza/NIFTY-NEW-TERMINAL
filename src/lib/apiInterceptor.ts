@@ -34,6 +34,8 @@ const LOCAL_ONLY_ENDPOINTS = new Set([
   '/api/signals/manual/',
   // Second-account card on the same page: local SQLite only.
   '/api/family/status',
+  // Golden-zone Swap-Sweep watch card: local SQLite only.
+  '/api/golden-sweep/status',
 ]);
 
 // Endpoints that DO sit in front of the broker but are served from a short shared
