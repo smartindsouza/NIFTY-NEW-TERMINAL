@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
-import { X, RefreshCw, Sparkles, TrendingUp, TrendingDown, Shield, ChevronDown } from "lucide-react";
+import { X, RefreshCw, Sparkles, TrendingUp, TrendingDown, Shield, ChevronDown, LineChart } from "lucide-react";
+import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { addWsMessageListener } from "../hooks/useWebSocket";
@@ -24,6 +25,30 @@ export interface ActiveTrade {
 
 export function ActivePositions() {
   const [positions, setPositions] = useState<ActiveTrade[]>([]);
+  const [location, setLocation] = useLocation();
+  // OPEN CHART (4 Nov 2026, Martin): one tap from any screen to this position's
+  // option chart. It hands the contract to the chart the same way a trade or a
+  // search does — the session's selected instrument and option tabs, which the
+  // chart reads when it mounts (phone, desktop split alike) — and clears any
+  // earlier "closed this chart" record so the tap always opens it. Not shown on
+  // the chart page itself, where the contract is already one tap away.
+  const onChartPage = location.startsWith('/advanced-chart');
+  const openChartFor = (pos: ActiveTrade) => {
+    if (!pos.token) { toast.error('Chart not ready yet — the contract is still loading from Zerodha.'); return; }
+    const instr: any = { instrument_token: String(pos.token), tradingsymbol: pos.symbol,
+      exchange: /^(SENSEX|BANKEX)/.test(pos.symbol) ? 'BFO' : 'NFO' };
+    try {
+      const d = JSON.parse(localStorage.getItem('dismissedOptionCharts') || '[]');
+      if (Array.isArray(d)) localStorage.setItem('dismissedOptionCharts', JSON.stringify(d.filter((x: string) => x !== pos.symbol)));
+    } catch (e) {}
+    try {
+      sessionStorage.setItem('selectedInstrument', JSON.stringify(instr));
+      const tabs = JSON.parse(sessionStorage.getItem('openOptionCharts') || '[]');
+      const list = Array.isArray(tabs) ? tabs.filter((t: any) => t?.tradingsymbol !== pos.symbol) : [];
+      sessionStorage.setItem('openOptionCharts', JSON.stringify([...list, instr]));
+    } catch (e) {}
+    setLocation('/advanced-chart');
+  };
 
   // ===== Auto-exit (server-side stoploss/target watcher) state =====
   const [autoExitOpenId, setAutoExitOpenId] = useState<string | null>(null);
@@ -619,6 +644,15 @@ export function ActivePositions() {
               be swallowed by the row's collapse toggle, and it only appears when
               there is exactly one position — with several, which to exit is a
               real choice and the card must be opened to make it. */}
+          {collapsed && positions.length === 1 && !onChartPage && (
+            <button
+              onClick={(e) => { e.stopPropagation(); openChartFor(positions[0]); }}
+              title={`Open ${positions[0].symbol} chart`} aria-label="Open chart"
+              className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded-md border border-primary/30 bg-primary/10 hover:bg-primary/20 font-semibold text-primary text-[10px] transition-all"
+            >
+              <LineChart className="w-3 h-3" />Chart
+            </button>
+          )}
           {collapsed && positions.length === 1 && (
             <button
               onClick={(e) => { e.stopPropagation(); handleExitPosition(positions[0]); }}
@@ -733,8 +767,14 @@ export function ActivePositions() {
                 </div>
               </div>
 
-              {/* Right: Auto-Exit + Quick Exit */}
+              {/* Right: Chart + Auto-Exit + Quick Exit */}
               <div className="flex items-center gap-2">
+                {!onChartPage && (
+                  <button onClick={() => openChartFor(pos)} title={`Open ${pos.symbol} chart`} aria-label="Open chart"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 text-xs font-semibold transition-all duration-200 select-none">
+                    <LineChart className="w-3.5 h-3.5" /> Chart
+                  </button>
+                )}
                 <button
                   onClick={() => { setAutoExitOpenId(isAutoOpen ? null : pos.id); setForm({ spotLower: rule?.spot_lower ? String(rule.spot_lower) : '', spotUpper: rule?.spot_upper ? String(rule.spot_upper) : '', spotMode: (rule?.spot_mode === 'CLOSE' ? 'CLOSE' : 'TOUCH'), rsiLower: rule?.rsi_lower ? String(rule.rsi_lower) : '', rsiUpper: rule?.rsi_upper ? String(rule.rsi_upper) : '', timeframe: rule?.timeframe ? String(rule.timeframe) : '5' }); }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all duration-200 select-none ${rule ? 'border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20' : 'border-primary/30 bg-primary/10 text-primary hover:bg-primary/20'}`}
