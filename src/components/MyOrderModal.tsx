@@ -57,6 +57,15 @@ export function MyOrderModal({ onClose, underlying, spot }: { onClose: () => voi
   useEffect(() => { loadOrders(); const iv = setInterval(loadOrders, 3000); return () => clearInterval(iv); }, []);
 
   const n = (v: string) => Number(v);
+  // AUTO TP2 / TP3 (4 Nov 2026, Martin): TP2 = TP1 + 10%, TP3 = TP2 + 10%, rounded to
+  // the 0.05 tick — unless he types his own. Clearing a typed value brings the
+  // automatic one back. The order could not be armed before unless all three
+  // were typed, which slowed down punching in a trade.
+  const tick = (x: number) => (Math.round(x * 20) / 20).toFixed(2).replace(/\.?0+$/, '');
+  const autoTp2 = n(f.tp1) > 0 ? tick(n(f.tp1) * 1.1) : '';
+  const tp2Eff = f.tp2 !== '' ? f.tp2 : autoTp2;
+  const autoTp3 = n(tp2Eff) > 0 ? tick(n(tp2Eff) * 1.1) : '';
+  const tp3Eff = f.tp3 !== '' ? f.tp3 : autoTp3;
   const entry = n(f.entry), ltp = pv?.ok ? Number(pv.ltp) : NaN;
   const dirText = entry > 0 && ltp > 0 ? (ltp < entry ? `when the premium RISES to ${entry} (now ${ltp})` : `when the premium FALLS to ${entry} (now ${ltp})`) : 'when the premium reaches the entry';
 
@@ -65,7 +74,7 @@ export function MyOrderModal({ onClose, underlying, spot }: { onClose: () => voi
     setBusy(true);
     try {
       const r = await fetch('/api/signals/manual', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ underlying: und, strike: n(strike), optionType: type, entry: n(f.entry), sl: n(f.sl), tp1: n(f.tp1), tp2: n(f.tp2), tp3: n(f.tp3), lots }) });
+        body: JSON.stringify({ underlying: und, strike: n(strike), optionType: type, entry: n(f.entry), sl: n(f.sl), tp1: n(f.tp1), tp2: n(tp2Eff), tp3: n(tp3Eff), lots }) });
       const d = await r.json();
       if (!d.ok) { setErr(d.error || 'Not armed'); return; }
       toast.success(`Order armed: ${d.tradingsymbol} — buys ${d.direction === 'up' ? 'when it rises to' : 'when it falls to'} ${f.entry}`);
@@ -80,10 +89,13 @@ export function MyOrderModal({ onClose, underlying, spot }: { onClose: () => voi
     loadOrders();
   };
 
-  const Field = (k: keyof typeof f, label: string, tone?: string) => (
-    <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">{label}
-      <input inputMode="decimal" value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value.replace(/[^\d.]/g, '') })}
-        className={cn('h-10 px-2 rounded-md bg-background border border-border font-mono text-base text-foreground', tone)} />
+  // An auto field shows its computed value as the placeholder (dimmed, marked
+  // "auto"); typing replaces it, clearing restores it.
+  const Field = (k: keyof typeof f, label: string, tone?: string, auto?: string) => (
+    <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+      <span>{label}{auto !== undefined && f[k] === '' && auto !== '' ? <span className="ml-1 text-[9px] font-bold px-1 rounded bg-muted text-muted-foreground">AUTO +10%</span> : null}</span>
+      <input inputMode="decimal" value={f[k]} placeholder={auto || ''} onChange={(e) => setF({ ...f, [k]: e.target.value.replace(/[^\d.]/g, '') })}
+        className={cn('h-10 px-2 rounded-md bg-background border border-border font-mono text-base text-foreground placeholder:text-foreground/50', tone)} />
     </label>
   );
   const seg = (on: boolean) => cn('flex-1 h-9 rounded-md text-sm font-bold transition-colors', on ? 'bg-primary text-primary-foreground' : 'bg-muted/50 text-muted-foreground');
@@ -125,8 +137,8 @@ export function MyOrderModal({ onClose, underlying, spot }: { onClose: () => voi
           </div>
           <div className="grid grid-cols-3 gap-2">
             {Field('tp1', 'TP1', 'text-emerald-400')}
-            {Field('tp2', 'TP2', 'text-emerald-400')}
-            {Field('tp3', 'TP3', 'text-emerald-400')}
+            {Field('tp2', 'TP2', 'text-emerald-400', autoTp2)}
+            {Field('tp3', 'TP3', 'text-emerald-400', autoTp3)}
           </div>
           <label className="flex items-center justify-between gap-3 text-sm">
             <span className="text-muted-foreground text-[11px]">Lots</span>
