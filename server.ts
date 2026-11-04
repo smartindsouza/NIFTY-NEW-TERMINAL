@@ -3466,7 +3466,7 @@ setInterval(() => {
     getLatestTick,
     findOption: findNearestExpiryOption,
     refreshSubscriptions: () => pushTickerSubscriptions(),
-    armRule: ({ tradingsymbol, exchange, qty, entry, sl, tp, token }) => {
+    armRule: ({ tradingsymbol, exchange, qty, entry, sl, tp, token, tpOn }) => {
       try { db.prepare('DELETE FROM premium_exit_free WHERE tradingsymbol = ?').run(tradingsymbol); } catch (e) {}
       // TP leg OFF: these trades have no target exit; the ladder raises the stop.
       // trail_state NULL: the pullback engine must not book a half or move it.
@@ -3477,12 +3477,14 @@ setInterval(() => {
           instrument_token=excluded.instrument_token, trail_state=NULL, updated_at=excluded.updated_at,
           kite_user_id=excluded.kite_user_id`)
         .run(tradingsymbol, exchange, qty, entry, sl, tp, token, Date.now(), Date.now(), getKiteUserId());
-      db.prepare('UPDATE premium_exit_rules SET sl_on = 1, tp_on = 0 WHERE tradingsymbol = ?').run(tradingsymbol);
+      // TP leg: off for the classic ladder (no target exit); ON for channel trades
+      // under the "double" rules, where tp is the 2 × entry target (4 Nov 2026).
+      db.prepare('UPDATE premium_exit_rules SET sl_on = 1, tp_on = ? WHERE tradingsymbol = ?').run(tpOn ? 1 : 0, tradingsymbol);
       const row: any = db.prepare('SELECT * FROM premium_exit_rules WHERE tradingsymbol = ?').get(tradingsymbol);
       syncPremiumRuleInMemory(row);
       loadTrailState(row);                       // clears any trail state a chart default left behind
       pushTickerSubscriptions();
-      console.log(`[signals] ARMED ${tradingsymbol} qty=${qty} entry=${entry} sl=${sl} (TP leg off)`);
+      console.log(`[signals] ARMED ${tradingsymbol} qty=${qty} entry=${entry} sl=${sl} ${tpOn ? `target ${tp} (TP leg on)` : '(TP leg off)'}`);
     },
     setRuleSl: (tradingsymbol, sl) => {
       const r = db.prepare("UPDATE premium_exit_rules SET sl = ?, detail = ?, updated_at = ? WHERE tradingsymbol = ? AND status = 'ACTIVE'")

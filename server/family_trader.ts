@@ -278,7 +278,9 @@ async function enter(r: any, ltp: number, cap: number) {
       return void notify(`❌ NOT FILLED ${r.tradingsymbol} (limit ${r2(tick05(cap))}): ${st?.status_message || st?.status || 'no fill in 20 s'}`);
     }
   }
-  const ladder = createLadder(fillPx, r.sl, [r.tp1, r.tp2, r.tp3]);
+  // Same "double" rules as Martin's channel trades (4 Nov 2026): TP1 → SL to entry,
+  // TP3 → SL to TP1, everything out at 2 × entry. (No half-booking for her.)
+  const ladder = createLadder(fillPx, r.sl, [r.tp1, r.tp2, r.tp3], 'double');
   setRow(r.id, { status: 'OPEN', mode, qty: filled, entry: fillPx, entry_at: Date.now(), order_id: orderId, ladder: JSON.stringify(ladder), last_ltp: fillPx });
   openTrades.set(r.id, ladder);
   watchTokens.add(r.token);
@@ -308,6 +310,8 @@ async function applyLadder(id: number, acts: LadderAction[]) {
   setRow(id, { ladder: JSON.stringify(st) });
   for (const a of acts) {
     if (a.type === 'SET_SL') await notify(`🔼 ${r.tradingsymbol}: ${a.reason} → SL ${rs(a.sl)}`, [{ text: '🚪 Exit her trade', data: `fexit:${id}` }]);
+    else if (a.type === 'NOTE') await notify(`ℹ️ ${r.tradingsymbol}: ${a.reason} (${rs(st.sl)})`, [{ text: '🚪 Exit her trade', data: `fexit:${id}` }]);
+    else if (a.type === 'TARGET') await notify(`🏆 ${r.tradingsymbol} reached 2× entry (${rs(a.target)}) — selling her position.`);
     else if (a.type === 'TP3_TRAILING') await notify(`🎯 TP3 reached on ${r.tradingsymbol}. Her SL is now at TP2 (${rs(st.sl)}) and trailing is ON — it steps up ${rs(st.tps[2] - st.tps[1])} behind the price.\nTap Exit to book it now.`,
       [{ text: '🚪 Exit her trade', data: `fexit:${id}` }]);
   }
@@ -316,6 +320,8 @@ function onPrice(id: number, ltp: number) {
   const st = openTrades.get(id), r = row(id);
   if (!st || !r || r.status !== 'OPEN') return;
   const acts = onLadderPrice(st, ltp);
+  // 2 × entry reached: sell everything (her exits are this module's own orders)
+  if (acts.some(a => a.type === 'TARGET')) void closeTrade(id, `2× entry target ${st.target} hit`, ltp, true);
   if (acts.length) void applyLadder(id, acts);
   lastPriceAt.set(id, Date.now());
   if (ltp <= st.sl) void closeTrade(id, `SL ${st.sl} hit`, ltp, true);
@@ -396,6 +402,7 @@ function finish(id: number, px: number | null, reason: string) {
 async function keep(id: number): Promise<string> {
   const st = openTrades.get(id);
   if (!st) return 'That trade is no longer open.';
+  if (st.rules === 'double') return 'Not used: after TP3 her SL sits at TP1 and everything is sold at 2× entry.';
   if (st.stage < 3) return 'TP3 has not been reached yet.';
   if (st.decision === 'KEEP') return 'Already trailing.';
   const acts = keepTrailing(st);

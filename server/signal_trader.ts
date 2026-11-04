@@ -38,7 +38,7 @@ export interface SignalDeps {
   findOption: (u: 'NIFTY' | 'SENSEX', strike: number, type: 'CE' | 'PE', todayIst: string) =>
     Promise<{ tradingsymbol: string; instrument_token: number; exchange: string; lot_size: number; expiry: string } | null>;
   refreshSubscriptions: () => void;
-  armRule: (r: { tradingsymbol: string; exchange: string; qty: number; entry: number; sl: number; tp: number; token: number | null }) => void;
+  armRule: (r: { tradingsymbol: string; exchange: string; qty: number; entry: number; sl: number; tp: number; token: number | null; tpOn?: boolean }) => void;
   setRuleSl: (tradingsymbol: string, sl: number) => void;
   ruleStatus: (tradingsymbol: string) => string | null;
   exitPosition: (tradingsymbol: string, reason: string) => Promise<{ ok: boolean; error?: string; alreadyClosed?: boolean }>;
@@ -530,15 +530,20 @@ async function enter(c: any, ltp: number, cap: number) {
     }
   }
 
-  const ladder = createLadder(fillPx, c.sl, [c.tp1, c.tp2, c.tp3]);
+  // Channel trades use the "double" rules (4 Nov 2026): TP1 → SL to entry, TP3 →
+  // SL to TP1, everything out at 2 × entry. My Order keeps the classic ladder.
+  const ladder = createLadder(fillPx, c.sl, [c.tp1, c.tp2, c.tp3], manual ? 'classic' : 'double');
   const ins = D.db.prepare(`INSERT INTO signal_trades (call_id, day, mode, tradingsymbol, exchange, token, qty, entry, entry_at, order_id, ladder, status, last_ltp, updated_at)
     VALUES (?,?,?,?,?,?,?,?,?,?,?, 'OPEN', ?, ?)`)
     .run(c.id, istParts().date, mode, c.tradingsymbol, c.exchange, c.token, filledQty, fillPx, Date.now(), orderId, JSON.stringify(ladder), fillPx, Date.now());
   const tradeId = Number(ins.lastInsertRowid);
   setCall(c.id, 'ENTERED');
   if (mode === 'LIVE') {
-    // SL armed straight away through the existing premium-exit engine; TP leg off.
-    try { D.armRule({ tradingsymbol: c.tradingsymbol, exchange: c.exchange, qty: filledQty, entry: fillPx, sl: c.sl, tp: c.tp3, token: c.token }); }
+    // SL armed straight away through the existing premium-exit engine. Classic:
+    // TP leg off. Double: the TP leg is the 2 × entry target, so the engine sells
+    // everything on the very tick it is reached (tick path + 3 s poll).
+    try { D.armRule({ tradingsymbol: c.tradingsymbol, exchange: c.exchange, qty: filledQty, entry: fillPx, sl: c.sl,
+      tp: ladder.rules === 'double' ? ladder.target! : c.tp3, tpOn: ladder.rules === 'double', token: c.token }); }
     catch (e: any) { await notify(`🚨 BOUGHT ${c.tradingsymbol} but the SL could NOT be armed (${e?.message || e}). Put a stop at ${rs(c.sl)} in Kite NOW.`); }
     try { D.journalOpen({ tradingsymbol: c.tradingsymbol, exchange: c.exchange, side: 'BUY', qty: filledQty, product: 'MIS', entryPrice: fillPx,
       optionType: c.option_type, strike: c.strike, context: { source: manual ? 'my-order' : 'telegram', channel: manual ? null : settings.channelTitle, entryRange: [c.entry_low, c.entry_high], sl: c.sl, tps: [c.tp1, c.tp2, c.tp3] } }); } catch { }
@@ -546,6 +551,7 @@ async function enter(c: any, ltp: number, cap: number) {
   openTrades.set(tradeId, ladder);
   await notify(`${manual ? '🧾 MY ORDER — ' : ''}${mode === 'LIVE' ? '✅ BOUGHT' : '🧪 PRACTICE BUY'} ${c.underlying} ${c.strike} ${c.option_type} (${c.expiry})\n` +
     `${filledQty} qty (${Math.round(filledQty / c.lot_size)} lot${filledQty / c.lot_size === 1 ? '' : 's'}) @ ${rs(fillPx)}\nSL ${rs(c.sl)} · TP1 ${rs(c.tp1)} · TP2 ${rs(c.tp2)} · TP3 ${rs(c.tp3)}` +
+    (ladder.rules === 'double' ? `\nRules: TP1 → sell half, SL to entry · TP3 → SL to TP1 · all out at 2× entry ${rs(ladder.target!)}` : '') +
     (sizeNote ? `\n${sizeNote}` : '') + (filledQty < qty ? `\nOnly ${filledQty} of ${qty} filled — the rest was cancelled.` : ''),
     [{ text: '🚪 Exit now', data: `exit:${tradeId}` }]);
 }
@@ -574,6 +580,19 @@ async function applyLadder(id: number, acts: LadderAction[]) {
   for (const a of acts) {
     if (a.type === 'SET_SL') {
       await notify(`🔼 ${t.tradingsymbol}: ${a.reason} → SL ${rs(a.sl)}`, [{ text: '🚪 Exit now', data: `exit:${id}` }]);
+    } else if (a.type === 'NOTE') {
+      await notify(`ℹ️ ${t.tradingsymbol}: ${a.reason} (${rs(st.sl)})`, [{ text: '🚪 Exit now', data: `exit:${id}` }]);
+    } else if (a.type === 'TARGET') {
+      await notify(`🏆 ${t.tradingsymbol} reached 2× entry (${rs(a.target)}) — selling everything left.`);
+      if (t.mode !== 'LIVE') void closeTrade(id, `2× entry target ${a.target} hit`, a.target, true);
+      else {
+        // LIVE: the exit engine's TP leg is this same target and sells on the tick.
+        // Only if the rule is somehow still ACTIVE 5 s later does the app sell
+        // itself — never at the same moment, so two sell orders cannot race.
+        setTimeout(() => {
+          try { if (D.ruleStatus(t.tradingsymbol) === 'ACTIVE' && openTrades.has(id)) void closeTrade(id, `2× entry target ${a.target} hit`, undefined, true); } catch { }
+        }, 5000);
+      }
     } else if (a.type === 'TP3_TRAILING') {
       await notify(`🎯 TP3 reached on ${t.tradingsymbol}. SL is now at TP2 (${rs(st.sl)}) and trailing is ON — it steps up ${rs(st.tps[2] - st.tps[1])} behind the price.\nTap Exit to book it now.`,
         [{ text: '🚪 Exit now', data: `exit:${id}` }]);
@@ -750,7 +769,9 @@ async function housekeepingInner() {
         D.db.prepare("UPDATE signal_trades SET status='CLOSING', exit_reason=COALESCE(exit_reason, ?), updated_at=? WHERE id=?")
           // TRIGGERED is the engine's stop exit in flight, DONE the same exit placed —
           // both are the SL. Anything else (CANCELLED) was cleared elsewhere.
-          .run(rs_ === 'DONE' || rs_ === 'TRIGGERED' ? `SL ${st.sl} hit` : `rule ${rs_.toLowerCase()}`, Date.now(), id);
+          .run(rs_ === 'DONE' || rs_ === 'TRIGGERED'
+            ? (st.rules === 'double' && st.target && (st.targetHit || (D.getLatestTick(tr.token)?.ltp ?? 0) >= st.target) ? `2× entry target ${st.target} hit` : `SL ${st.sl} hit`)
+            : `rule ${rs_.toLowerCase()}`, Date.now(), id);
         openTrades.delete(id);
       }
     }
@@ -825,7 +846,9 @@ export function signalManagedLevels(tradingsymbol: string) {
   const m = managedTrade(tradingsymbol);
   if (!m) return null;
   const idx = m.st.stage < 3 ? m.st.stage : null;          // 0 → TP1, 1 → TP2, 2 → TP3, null after TP3
-  return { id: m.id, sl: m.st.sl, nextTp: idx == null ? null : (m.st.tps as number[])[idx], tpIndex: idx == null ? null : idx + 1,
+  // double rules: after TP3 the line on the chart is the 2 × entry target (shown as TARGET)
+  const after3 = m.st.rules === 'double' ? (m.st.target ?? null) : null;
+  return { id: m.id, sl: m.st.sl, nextTp: idx == null ? after3 : (m.st.tps as number[])[idx], tpIndex: idx == null ? null : idx + 1,
     stage: m.st.stage, trailing: m.st.decision === 'KEEP', source: tradeCallSource(m.t.call_id) };
 }
 const tradeCallSource = (callId: number) => {
@@ -851,7 +874,9 @@ async function setManagedLevels(tradingsymbol: string, b: { sl?: any; tp?: any }
     said.push(`SL → ${rs(sl)}`);
   }
   if (b.tp !== undefined && b.tp !== null) {
-    if (st.stage >= 3) return { ok: false, error: 'TP3 has been reached — the stop now trails by itself; there is no target left to move.' };
+    if (st.stage >= 3) return { ok: false, error: st.rules === 'double'
+      ? `TP3 has been reached — the target is now 2× entry (${st.target}), which does not move.`
+      : 'TP3 has been reached — the stop now trails by itself; there is no target left to move.' };
     const i = st.stage, tp = r2(tick05(Number(b.tp) + 0.025));
     const floor = Math.max(st.sl, i === 0 ? st.entry : (st.tps as number[])[i - 1]);
     if (!(tp > floor)) return { ok: false, error: `TP${i + 1} must be above ${i === 0 ? 'the entry' : `TP${i}`} and the SL (${r2(floor)}).` };
@@ -877,7 +902,8 @@ export function signalNoteManualRearm(tradingsymbol: string) {
       // landing just after the fill (it arms any position it sees with no rule),
       // not Martin. The message's SL wins: re-arm it.
       if (Date.now() - t.entry_at < 15000) {
-        D.armRule({ tradingsymbol, exchange: t.exchange, qty: t.qty, entry: t.entry, sl: st.sl, tp: st.tps[2], token: t.token });
+        D.armRule({ tradingsymbol, exchange: t.exchange, qty: t.qty, entry: t.entry, sl: st.sl,
+          tp: st.rules === 'double' ? st.target! : st.tps[2], tpOn: st.rules === 'double', token: t.token });
         logEvent(`${tradingsymbol}: the chart's default SL/TP arrived just after the fill — replaced with the message's SL ${st.sl}`);
         continue;
       }
@@ -892,6 +918,7 @@ async function keep(id: number) {
   const st = openTrades.get(id);
   if (!st) return 'That trade is no longer open.';
   if (st.stage < 3) return 'TP3 has not been reached yet.';
+  if (st.rules === 'double') return 'Not used for channel trades: the SL sits at TP1 after TP3 and everything is sold at 2× entry.';
   if (st.decision === 'KEEP') return 'Already trailing.';
   const acts = keepTrailing(st);
   saveLadder(id, st);

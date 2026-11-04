@@ -83,6 +83,7 @@ function tick(ltp: number) {
   signalOnTick(TOK, ltp);
   const r = rules.get(SYM);
   if (r && r.status === 'ACTIVE' && ltp <= r.sl) { r.status = 'DONE'; lastExitPx = ltp; positions.set(SYM, 0); log.push(`ENGINE EXIT @${ltp}`); }
+  else if (r && r.status === 'ACTIVE' && r.tpOn && ltp >= r.tp) { r.status = 'DONE'; lastExitPx = ltp; positions.set(SYM, 0); log.push(`ENGINE TARGET @${ltp}`); }
 }
 // Monday 26 Oct 2026, 10:05 IST
 __test.setClockOffset(Date.UTC(2026, 9, 26, 4, 35) - Date.now());
@@ -124,20 +125,19 @@ ok('in range: LIMIT BUY capped at 149+2, 1 lot (65), SL 130 armed, journaled');
 // 3) duplicate message (push + poll) is ignored
 await __test.handleMessage({ ...a }, 'poll'); assert.equal(orders.length, 1); ok('same message twice → handled once');
 
-// 4) ladder through the exit engine
+// 4) ladder through the exit engine — channel trades use the "double" rules (4 Nov 2026)
+assert.equal(rules.get(SYM).tpOn, true); assert.equal(rules.get(SYM).tp, 294); ok('armed: SL 130 and the 2× entry target 294 on the exit engine');
 tick(160); assert.equal(rules.get(SYM).sl, 130);
 tick(164); await settle(); assert.equal(rules.get(SYM).sl, 147); ok('TP1 → SL to entry 147');
-tick(179); await settle(); assert.equal(rules.get(SYM).sl, 164); ok('TP2 → SL to TP1 164');
-tick(199); await settle(); assert.equal(rules.get(SYM).sl, 179);
-assert.ok(events().some(e => e.includes('TP3 reached') && e.includes('trailing is ON'))); ok('TP3 → SL to TP2 179, alert says trailing is ON');
-tick(218); await settle(); assert.equal(rules.get(SYM).sl, 179); ok('below the first step (219) → SL stays at TP2');
-tick(230); await settle(); assert.equal(rules.get(SYM).sl, 199); ok('trailing on by itself: 219 reached → SL 199, no button needed');
-assert.equal(await __test.keep(trades()[0].id), 'Already trailing.'); ok('an old "Keep trailing" button press is harmless');
-tick(239); await settle(); assert.equal(rules.get(SYM).sl, 219); ok('next step 239 → SL 219');
-tick(218); await settle();                           // engine exits at 218 (<219)
+tick(179); await settle(); assert.equal(rules.get(SYM).sl, 147); assert.ok(events().some(e => e.includes('TP2 hit — SL stays at entry'))); ok('TP2 → SL stays at entry 147');
+tick(199); await settle(); assert.equal(rules.get(SYM).sl, 164); ok('TP3 → SL to TP1 164');
+tick(260); await settle(); assert.equal(rules.get(SYM).sl, 164); ok('above TP3 the SL stays at TP1 (no trailing)');
+assert.match(await __test.keep(trades()[0].id), /Not used/); ok('an old "Keep trailing" press does nothing');
+tick(294); await settle();                           // the exit engine sells everything at 2× entry
 await __test.housekeeping(); await __test.reconcileLive(); await settle();
-assert.equal(trades()[0].status, 'CLOSED'); assert.equal(trades()[0].exit_price, 218);
-assert.equal(trades()[0].pnl, (218 - 147) * 65); ok(`stop hit → trade closed from broker book, P&L +${(218 - 147) * 65}`);
+assert.equal(trades()[0].status, 'CLOSED'); assert.equal(trades()[0].exit_price, 294); assert.match(trades()[0].exit_reason, /2× entry target 294 hit/);
+assert.equal(trades()[0].pnl, (294 - 147) * 65); ok(`2× entry → everything sold by the exit engine, P&L +${(294 - 147) * 65}`);
+assert.ok(events().some(e => e.includes('reached 2× entry'))); ok('alert: reached 2× entry');
 
 // 5) price above range+2 → waits, then enters when it comes back
 __test.clearPriceCache(); price.set(SYM, 155);
@@ -320,9 +320,9 @@ __test.setSettings({ lots: 1 });
   tick(170); await settle();
   r = await lv({ sl: 168 }); assert.equal(r.ok, true); assert.equal(rules.get(SYM).sl, 168);
   tick(179); await settle(); assert.equal(rules.get(SYM).sl, 168); ok('a dragged SL above the next rung is kept (TP2 would lift only to 160)');
-  tick(199); await settle(); assert.equal(rules.get(SYM).sl, 179);
-  r = await lv({ tp: 230 }); assert.equal(r.ok, false); assert.match(r.error, /trails by itself/); ok('after TP3: no target left to move');
-  r = await lv({ sl: 185 }); assert.equal(r.ok, true); tick(219); await settle(); assert.equal(rules.get(SYM).sl, 199); ok('after TP3 a dragged SL 185 still trails up (219 → 199)');
+  tick(199); await settle(); assert.equal(rules.get(SYM).sl, 168); ok('TP3 → SL to TP1 (160), but the dragged 168 is higher and is kept');
+  r = await lv({ tp: 230 }); assert.equal(r.ok, false); assert.match(r.error, /target is now 2× entry/); ok('after TP3: the 2× target cannot be dragged');
+  r = await lv({ sl: 185 }); assert.equal(r.ok, true); tick(219); await settle(); assert.equal(rules.get(SYM).sl, 185); ok('after TP3 a dragged SL 185 stays put (no trailing)');
   await __test.closeTrade(tr.id, 'x'); await __test.reconcileLive();
   r = await lv({ sl: 150 }); assert.equal(r.ok, false); assert.match(r.error, /not being managed/); ok('closed trade: drag refused');
 }
@@ -354,7 +354,7 @@ __test.setSettings({ lots: 1 });
   let a6 = msg(CALL); await __test.handleMessage(a6, 'push'); await __test.handleMessage(msg(LEVELS, a6.id), 'push'); await settle(900);
   const before = orders.filter((o: any) => o.partial).length;
   tick(181); await settle(300);
-  assert.equal(orders.filter((o: any) => o.partial).length, before + 1); assert.equal(rules.get(SYM).sl, 164); ok('gap through TP1 and TP2: half sold once, SL to TP1');
+  assert.equal(orders.filter((o: any) => o.partial).length, before + 1); assert.equal(rules.get(SYM).sl, 147); ok('gap through TP1 and TP2: half sold once, SL at entry (TP2 moves nothing)');
   await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
   // broker refuses the half: alert, full position stays, never retried into a double sale
   partialFail = true; __test.clearPriceCache(); price.set(SYM, 147);
@@ -375,12 +375,21 @@ __test.setSettings({ lots: 1 });
   tick(164); await settle(300); tick(147); await settle(300);
   const pr = trades().at(-1); assert.equal(pr.status, 'CLOSED'); assert.equal(pr.part_qty, 65);
   assert.equal(pr.pnl, (164 - 147) * 65 + (147 - 147) * 65); ok(`practice: half booked at 164, rest out at entry → P&L +${pr.pnl}`);
+  // practice, all the way: half at TP1, SL to TP1 at TP3, the rest out at 2× entry
+  __test.setSettings({ mode: 'PRACTICE', lots: 2 }); __test.clearPriceCache(); price.set(SYM, 147);
+  a6 = msg(CALL); await __test.handleMessage(a6, 'push'); await __test.handleMessage(msg(LEVELS, a6.id), 'push'); await settle(900);
+  tick(164); await settle(300); tick(199); await settle(200);
+  assert.equal(JSON.parse(trades().at(-1).ladder).sl, 164);
+  tick(294); await settle(400);
+  const pd = trades().at(-1); assert.equal(pd.status, 'CLOSED'); assert.match(pd.exit_reason, /2× entry target 294/);
+  assert.equal(pd.pnl, (164 - 147) * 65 + (294 - 147) * 65); ok(`practice to the end: half at 164, rest at 2× (294) → P&L +${pd.pnl}`);
   // My Order (manual) trades are not split
   __test.setSettings({ mode: 'LIVE', lots: 2, maxTrades: 99 }); __test.clearPriceCache(); price.set(SYM, 140);
   const mo = await api('/api/signals/manual', { underlying: 'NIFTY', strike: 22650, optionType: 'CE', entry: 145, sl: 130, tp1: 160, tp2: 170, tp3: 185, lots: 2 });
   assert.equal(mo.ok, true); __test.clearPriceCache(); price.set(SYM, 145.5); signalOnTick(TOK, 145.5); await settle(900);
   const pb = orders.filter((o: any) => o.partial).length; tick(161); await settle(300);
   assert.equal(orders.filter((o: any) => o.partial).length, pb); ok('My Order trades are not split at TP1');
+  tick(171); await settle(); assert.equal(rules.get(SYM).sl, 160); assert.ok(!rules.get(SYM).tpOn); ok('My Order keeps the classic ladder: TP2 → SL to TP1, no 2× target');
   await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
   srv.close();
 }

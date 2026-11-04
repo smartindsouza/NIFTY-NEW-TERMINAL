@@ -180,7 +180,7 @@ export default function FamilyAccountCard({ pin }: { pin: string }) {
           <div className="col-span-2 md:col-span-4 flex items-center gap-3 flex-wrap">
             <button disabled={busy} onClick={async () => { const d = await post('/api/family/settings', { name: form.name, lots: form.lots, maxLotsCap: form.maxLotsCap, maxTrades: form.maxTrades }); if (d.ok) { setForm({ ...d.settings }); toast.success('Saved'); } }}
               className="text-xs font-bold px-3 py-2 rounded-lg bg-primary text-primary-foreground">Save her rules</button>
-            <span className="text-[11px] text-muted-foreground flex-1 min-w-[200px]">Same entry range, SL and TP ladder as the call. Timing ({data.timing?.allowAbove} pts above range, wait {data.timing?.waitMin} min, last entry {data.timing?.lastEntry}, square-off {data.timing?.squareOff}) follows your Rules above. Runs whether your own auto-trade is on or off.</span>
+            <span className="text-[11px] text-muted-foreground flex-1 min-w-[200px]">Same entry range and SL as the call; TP1 → SL to entry, TP3 → SL to TP1, everything sold at 2× entry. Timing ({data.timing?.allowAbove} pts above range, wait {data.timing?.waitMin} min, last entry {data.timing?.lastEntry}, square-off {data.timing?.squareOff}) follows your Rules above. Runs whether your own auto-trade is on or off.</span>
           </div>
         </div>
       )}

@@ -98,4 +98,31 @@ ok('ladder: entry above TP1 never lowers the SL', () => {
   assert.ok(st.sl >= 140);
 });
 
+// ---- "double" rules (4 Nov 2026): channel trades ----
+ok('double: TP1 → SL to entry, TP2 → nothing moves, TP3 → SL to TP1, 2× entry → TARGET', () => {
+  const st = createLadder(150, 130, [165, 180, 200], 'double');
+  assert.equal(st.target, 300);
+  assert.deepEqual(onLadderPrice(st, 164), []);
+  assert.deepEqual(onLadderPrice(st, 165), [{ type: 'SET_SL', sl: 150, reason: 'TP1 hit — SL to entry' }]);
+  assert.deepEqual(onLadderPrice(st, 180), [{ type: 'NOTE', reason: 'TP2 hit — SL stays at entry' }]); assert.equal(st.sl, 150);
+  assert.deepEqual(onLadderPrice(st, 200), [{ type: 'SET_SL', sl: 165, reason: 'TP3 hit — SL to TP1' }]);
+  assert.deepEqual(onLadderPrice(st, 260), []); assert.equal(st.sl, 165);         // no trailing above TP3
+  assert.deepEqual(onLadderPrice(st, 300), [{ type: 'TARGET', target: 300 }]);
+  assert.deepEqual(onLadderPrice(st, 305), []);                                    // once only
+});
+ok('double: a gap straight to 2× fires every step at once', () => {
+  const st = createLadder(150, 130, [165, 180, 200], 'double');
+  assert.deepEqual(onLadderPrice(st, 301).map(a => a.type === 'SET_SL' ? a.sl : a.type), [150, 'NOTE', 165, 'TARGET']);
+});
+ok('double: target rounds to the 0.05 tick; keepTrailing does nothing', () => {
+  const st = createLadder(147.33, 130, [164, 179, 199], 'double');
+  assert.equal(st.target, 294.65);
+  onLadderPrice(st, 200); assert.deepEqual(keepTrailing(st), []); assert.equal(st.sl, 164);
+});
+ok('classic is unchanged for My Order and old saved trades', () => {
+  const st = createLadder(147, 130, [164, 179, 199]);
+  assert.equal(st.rules, undefined);
+  onLadderPrice(st, 199); assert.equal(st.sl, 179); assert.equal(st.decision, 'KEEP');
+});
+
 console.log(`\n${n} passed`);

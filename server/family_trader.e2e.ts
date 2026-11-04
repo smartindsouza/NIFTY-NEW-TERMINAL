@@ -245,6 +245,17 @@ assert.equal(W.orders.filter((o: any) => o.transaction_type === 'SELL').length, 
 ok('closed by hand in her Kite: recorded, no sell order sent');
 await __test.closeTrade(sig().at(-1).id, 'test'); resetAccounts();
 
+// 15b) "double" rules on her account: TP2 moves nothing, TP3 → SL to TP1, 2× entry sells everything
+await sendCall();
+f = fam().at(-1); assert.equal(f.status, 'OPEN');
+tick(164); await settle(); tick(179); await settle(); assert.equal(JSON.parse(fam().at(-1).ladder).sl, 147);
+tick(199); await settle(); assert.equal(JSON.parse(fam().at(-1).ladder).sl, 164);
+tick(294); await settle(700);
+assert.equal(fam().at(-1).status, 'CLOSED'); assert.match(fam().at(-1).exit_reason, /2× entry target 294/);
+assert.equal(W.orders.filter((o: any) => o.transaction_type === 'SELL').at(-1).quantity, 130);
+ok('her account, double rules: TP2 holds SL at entry, TP3 → TP1, 2× entry sells all 130 on her account');
+await __test.closeTrade(sig().at(-1).id, 'test'); resetAccounts();
+
 // 16) switching her OFF needs no PIN; then calls are ignored for her
 d = await post('/api/family/settings', { mode: 'OFF' }); assert.equal(d.ok, true);
 const before = fam().length;

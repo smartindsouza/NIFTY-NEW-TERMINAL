@@ -18,7 +18,19 @@
 // The SL only ever moves UP. A price that gaps through several targets in one
 // tick moves the ladder through all of them at once.
 
+// RULE SET "double" (4 Nov 2026, Martin — Telegram channel trades):
+//   • TP1 hit  → SL to the entry (and half the lots are sold, in signal_trader.ts)
+//   • TP2 hit  → nothing moves: the SL stays at the entry
+//   • TP3 hit  → SL to TP1
+//   • price reaches 2 × entry (the capital used has doubled) → everything left is sold
+// No trailing above TP3 and no question at TP3. "classic" (above) is kept for
+// My Order trades and for any trade saved before this change.
+export type LadderRules = 'classic' | 'double';
+
 export interface LadderState {
+  rules?: LadderRules;           // absent = classic (states saved before 4 Nov)
+  target?: number;               // double: 2 × entry
+  targetHit?: boolean;
   entry: number;                 // actual average fill price
   sl: number;                    // current stop
   tps: [number, number, number];
@@ -30,10 +42,14 @@ export interface LadderState {
 
 export type LadderAction =
   | { type: 'SET_SL'; sl: number; reason: string }
-  | { type: 'TP3_TRAILING' };
+  | { type: 'TP3_TRAILING' }
+  | { type: 'NOTE'; reason: string }
+  | { type: 'TARGET'; target: number };
 
-export function createLadder(entry: number, sl: number, tps: [number, number, number]): LadderState {
-  return { entry, sl, tps, stage: 0, decision: null, stepsAbove: 0, peak: entry };
+export function createLadder(entry: number, sl: number, tps: [number, number, number], rules: LadderRules = 'classic'): LadderState {
+  const st: LadderState = { entry, sl, tps, stage: 0, decision: null, stepsAbove: 0, peak: entry };
+  if (rules === 'double') { st.rules = 'double'; st.target = Math.round(entry * 2 * 20) / 20; st.targetHit = false; }
+  return st;
 }
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
@@ -64,6 +80,13 @@ export function onLadderPrice(st: LadderState, ltp: number): LadderAction[] {
   if (!(ltp > 0)) return out;
   if (ltp > st.peak) st.peak = ltp;
   const [t1, t2, t3] = st.tps;
+  if (st.rules === 'double') {
+    if (st.stage < 1 && ltp >= t1) { st.stage = 1; raise(st, st.entry, 'TP1 hit — SL to entry', out); }
+    if (st.stage < 2 && ltp >= t2) { st.stage = 2; out.push({ type: 'NOTE', reason: 'TP2 hit — SL stays at entry' }); }
+    if (st.stage < 3 && ltp >= t3) { st.stage = 3; raise(st, t1, 'TP3 hit — SL to TP1', out); }
+    if (!st.targetHit && st.target && ltp >= st.target) { st.targetHit = true; out.push({ type: 'TARGET', target: st.target }); }
+    return out;
+  }
   if (st.stage < 1 && ltp >= t1) { st.stage = 1; raise(st, st.entry, 'TP1 hit — SL to entry', out); }
   if (st.stage < 2 && ltp >= t2) { st.stage = 2; raise(st, t1, 'TP2 hit — SL to TP1', out); }
   if (st.stage < 3 && ltp >= t3) {
@@ -80,7 +103,7 @@ export function onLadderPrice(st: LadderState, ltp: number): LadderAction[] {
 /** Martin pressed "Keep trailing". */
 export function keepTrailing(st: LadderState): LadderAction[] {
   const out: LadderAction[] = [];
-  if (st.stage < 3) return out;
+  if (st.stage < 3 || st.rules === 'double') return out;
   st.decision = 'KEEP';
   applyKeepSteps(st, out);
   return out;
