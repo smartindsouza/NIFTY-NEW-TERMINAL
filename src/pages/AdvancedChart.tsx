@@ -15,6 +15,7 @@ import { evaluateBreakout } from "../lib/breakoutQuality";
 import { calculateBollingerBands } from "../indicators/bollingerBands";
 // Martin's TradingView "Institutional Levels" (TCI Key Institutional Levels v2.0), ported 25 Oct 2026.
 import { computeInstitutionalLevels, ilColors, normaliseIlSettings, IL_DEFAULTS, IL_FONT_PX, type IlResult, type IlSettings } from "../indicators/institutionalLevels";
+import { computeBreakersAndGrabs, normaliseBlSettings, BL_DEFAULTS, type BlResult, type BlSettings } from "../indicators/breakerLiquidity";
 import { format } from "date-fns";
 import { SymbolSearch } from "../components/SymbolSearch";
 import MarketContext from "../components/MarketContext";
@@ -2311,6 +2312,59 @@ function deriveSessionBreaks(candles: any[]): { prevTime: number; time: number }
 // INSTITUTIONAL LEVELS settings — the same inputs, sections and defaults as the
 // TradingView panel of "TCI Key Institutional Levels v2.0", so Martin can set it
 // up here exactly as he has it there. Changes apply live; Cancel restores.
+// Settings for Breaker Blocks & Liquidity Grabs. Helpers are called as functions
+// (not components) so inputs keep focus while typing — same as the IL modal.
+function BreakerSettingsModal({ value, onChange, onClose, onApply }: {
+  value: BlSettings, onChange: (v: BlSettings) => void, onClose: () => void, onApply: () => void,
+}) {
+  const set = (patch: Partial<BlSettings>) => onChange(normaliseBlSettings({ ...value, ...patch }));
+  const chk = (k: keyof BlSettings, label: string, hint?: string) => (
+    <label key={k} className="flex items-start gap-2 py-1.5 text-sm text-foreground/85 cursor-pointer select-none">
+      <input type="checkbox" checked={!!value[k]} onChange={(e) => set({ [k]: e.target.checked } as any)} className="w-4 h-4 mt-0.5 accent-emerald-500" />
+      <span>{label}{hint ? <span className="block text-[11px] text-muted-foreground">{hint}</span> : null}</span>
+    </label>
+  );
+  const num = (k: keyof BlSettings, label: string, min: number, max: number, hint?: string) => (
+    <div key={k} className="flex items-center justify-between gap-3 py-1.5">
+      <span className="text-sm text-foreground/85">{label}{hint ? <span className="block text-[11px] text-muted-foreground">{hint}</span> : null}</span>
+      <input type="number" min={min} max={max} value={Number(value[k])} onChange={(e) => set({ [k]: Number(e.target.value) } as any)}
+        className="w-20 h-8 px-2 rounded-md bg-background border border-border font-mono text-sm text-foreground" />
+    </div>
+  );
+  const sec = (t: string) => <div className="pt-3 pb-1 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">{t}</div>;
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 p-3" onClick={onClose}>
+      <div className="bg-card border border-border rounded-xl w-full max-w-[400px] max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <h2 className="text-base font-semibold">Breaker Blocks & Liquidity Grabs</h2>
+          <button onClick={onClose} className="p-1 text-muted-foreground hover:text-foreground"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="px-4 py-2 overflow-y-auto">
+          {sec('Structure')}
+          {num('swingLen', 'Swing length', 2, 20, 'Candles each side that make a swing high / low')}
+          {sec('Breaker blocks')}
+          {chk('showBear', 'Bearish breakers (resistance)', 'HH → HL → HH, then a close below the HL: the bullish OB flips')}
+          {chk('showBull', 'Bullish breakers (support)', 'LL → LH → LL, then a close above the LH: the bearish OB flips')}
+          {chk('showRetest', 'Mark the first retest', 'Triangle where price first comes back into the zone')}
+          {chk('showInvalidated', 'Keep invalidated breakers (faded)', 'A close through the zone ends it')}
+          {num('maxBreakers', 'Breakers shown (each side)', 1, 30)}
+          {sec('Liquidity grabs')}
+          {chk('showGrabs', 'Show liquidity grabs', 'Wick through a swing high/low, close back inside ("LG")')}
+          {chk('grabPrevDay', 'Include previous day high / low', 'Marked "PDH grab" / "PDL grab"')}
+          {num('maxGrabs', 'Grabs shown', 1, 200)}
+        </div>
+        <div className="flex justify-between gap-2 px-4 py-3 border-t border-border">
+          <button onClick={() => onChange({ ...BL_DEFAULTS })} className="px-3 h-9 rounded-md text-sm text-muted-foreground hover:text-foreground">Defaults</button>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-3 h-9 rounded-md bg-muted text-sm">Cancel</button>
+            <button onClick={onApply} className="px-4 h-9 rounded-md bg-primary text-primary-foreground text-sm font-semibold">OK</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function InstitutionalLevelsEditorModal({ value, onChange, onClose, onApply }: {
   value: IlSettings, onChange: (v: IlSettings) => void, onClose: () => void, onApply: () => void,
 }) {
@@ -4126,6 +4180,21 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   ilSettingsRef.current = ilSettings;
   const [isEditingIl, setIsEditingIl] = useState(false);
   const ilSnapshotRef = useRef<IlSettings>(ilSettings);
+  // Breaker Blocks & Liquidity Grabs (src/indicators/breakerLiquidity.ts, 5 Nov 2026).
+  const [showBreakers, setShowBreakers] = useState<boolean>(() => {
+    try { return localStorage.getItem('showBreakers') === 'true'; } catch (e) { return false; }
+  });
+  useEffect(() => { try { localStorage.setItem('showBreakers', String(showBreakers)); } catch (e) {} }, [showBreakers]);
+  const showBreakersRef = useRef(showBreakers);
+  showBreakersRef.current = showBreakers;
+  const [blSettings, setBlSettings] = useState<BlSettings>(() => {
+    try { return normaliseBlSettings(JSON.parse(localStorage.getItem('breakerSettings') || 'null')); } catch (e) { return { ...BL_DEFAULTS }; }
+  });
+  useEffect(() => { try { localStorage.setItem('breakerSettings', JSON.stringify(blSettings)); } catch (e) {} }, [blSettings]);
+  const blSettingsRef = useRef(blSettings);
+  blSettingsRef.current = blSettings;
+  const [isEditingBl, setIsEditingBl] = useState(false);
+  const blSnapshotRef = useRef<BlSettings>(blSettings);
   // Fair Value Gaps — drawn like Demand/Supply zones, index chart only.
   const [showFvg, setShowFvg] = useState(() => {
     try { const v = localStorage.getItem('showFvg'); return v === null ? true : v === 'true'; } catch (e) { return true; }
@@ -8437,6 +8506,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     showBos: [showBos, setShowBos], favIndicators: [favIndicators, setFavIndicators],
     showStructure: [showStructure, setShowStructure], showOrderBlocks: [showOrderBlocks, setShowOrderBlocks],
     showInstLevels: [showInstLevels, setShowInstLevels], ilSettings: [ilSettings, setIlSettings],
+    showBreakers: [showBreakers, setShowBreakers], blSettings: [blSettings, setBlSettings],
     showFvg: [showFvg, setShowFvg], showDsZones: [showDsZones, setShowDsZones], dzStyle: [dzStyle, setDzStyle],
     dzFvg: [dzFvg, setDzFvg], dsZoneOpacity: [dsZoneOpacity, setDsZoneOpacity],
     levelAlertsOn: [levelAlertsOn, setLevelAlertsOn], zoneTapAlertsOn: [zoneTapAlertsOn, setZoneTapAlertsOn],
@@ -9774,6 +9844,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const ilSigRef = useRef<string>('');
   const ilLastRunRef = useRef<number>(0);
   const ilResRef = useRef<IlResult | null>(null);
+  const blBaseKeyRef = useRef<string>(''); const blSigRef = useRef<string>(''); const blLastRunRef = useRef(0);
+  const blResRef = useRef<BlResult | null>(null);
+  const blCandlesRef = useRef<{ time: number; open: number; high: number; low: number; close: number }[]>([]);
   const ilCandlesRef = useRef<{ time: number; open: number; high: number; low: number; close: number }[]>([]);
   const dzInputRef = useRef<any[]>([]);
 
@@ -11798,6 +11871,99 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 } catch (e) { /* an indicator must never break the frame */ }
               }
 
+              // BREAKER BLOCKS & LIQUIDITY GRABS (src/indicators/breakerLiquidity.ts).
+              // Same refresh rule as Institutional Levels: closed candles at once, the
+              // forming candle at most every 1.5 s, and at once when a setting changes.
+              if (showBreakersRef.current && mainSeriesRef.current) {
+                try {
+                  const S = blSettingsRef.current;
+                  const tfS = (parseInt(String(timeframe), 10) || 5) * 60;
+                  const baseB = chartDataRef.current?.candles || [];
+                  const liveB = lastCandleDataRef.current;
+                  const baseKeyB = `${instrumentToken}|${timeframe}|${baseB.length}|${baseB.length ? baseB[baseB.length - 1].time : 0}|${arcFingerprint()}|${JSON.stringify(S)}`;
+                  const sigB = `${baseKeyB}|${liveB ? `${liveB.time}:${liveB.high}:${liveB.low}:${liveB.close}` : ''}`;
+                  if (baseKeyB !== blBaseKeyRef.current || (sigB !== blSigRef.current && Date.now() - blLastRunRef.current >= 1500)) {
+                    blBaseKeyRef.current = baseKeyB; blSigRef.current = sigB; blLastRunRef.current = Date.now();
+                    const inB = mergedCandles();
+                    if (liveB) {
+                      const tail = inB.length ? inB[inB.length - 1].time : -Infinity;
+                      if (liveB.time > tail) inB.push(liveB); else if (liveB.time === tail) inB[inB.length - 1] = liveB;
+                    }
+                    const cB = inB.map((c: any) => ({ time: toUnixSeconds(c.time), open: +c.open, high: +c.high, low: +c.low, close: +c.close }));
+                    blCandlesRef.current = cB;
+                    blResRef.current = computeBreakersAndGrabs(cB, S);
+                  }
+                  const res = blResRef.current, cB = blCandlesRef.current;
+                  const tsB = mainChartRef.current?.timeScale();
+                  if (res && tsB && cB.length) {
+                    const lastT = cB[cB.length - 1].time;
+                    const xOf = (t: number): number | null => {
+                      const x = tsB.timeToCoordinate(t as any);
+                      if (x !== null && x !== undefined) return x;
+                      if (t > lastT) return null;
+                      let lo = 0, hi = cB.length - 1;
+                      if (t < cB[0].time) return null;
+                      while (lo < hi) { const m = (lo + hi + 1) >> 1; if (cB[m].time <= t) lo = m; else hi = m - 1; }
+                      const lx = tsB.timeToCoordinate(cB[lo].time as any);
+                      return lx === null || lx === undefined ? null : lx;
+                    };
+                    const yOf = (p: number) => mainSeriesRef.current.priceToCoordinate(p);
+                    const FONT = "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif";
+                    const BULL = '#10b981', BEAR = '#f43f5e', GRAB_UP = '#f59e0b', GRAB_DN = '#38bdf8';
+                    ctx.save();
+                    // breaker zones: from the order-block candle to where they were invalidated, or the right edge
+                    for (const z of res.breakers) {
+                      const x0 = xOf(z.obTime); const x1 = z.endTime ? xOf(z.endTime) : textAlignX;
+                      const yT = yOf(z.top), yB = yOf(z.bottom);
+                      if (x1 === null || yT === null || yB === null) continue;
+                      const l = Math.max(0, x0 === null ? 0 : x0), r = Math.min(textAlignX, x1); if (r <= l) continue;
+                      const col = z.dir === 'bull' ? BULL : BEAR, dead = z.endTime !== null;
+                      const yA = Math.min(yT, yB), h = Math.max(2, Math.abs(yB - yT));
+                      ctx.fillStyle = hexToRgba(col, dead ? 0.07 : 0.16); ctx.fillRect(l, yA, r - l, h);
+                      ctx.strokeStyle = hexToRgba(col, dead ? 0.3 : 0.75); ctx.lineWidth = 1; ctx.setLineDash(dead ? [3, 3] : []); ctx.strokeRect(l, yA, r - l, h);
+                      ctx.setLineDash([]);
+                      ctx.font = `10px ${FONT}`; ctx.fillStyle = hexToRgba(col, dead ? 0.5 : 0.95); ctx.textBaseline = 'bottom'; ctx.textAlign = 'right';
+                      ctx.fillText(`${z.dir === 'bull' ? 'Bull' : 'Bear'} Breaker`, r - 3, yA - 1);
+                      // the break: a short dashed line at the swing that was broken
+                      const xb = xOf(z.breakTime), ys = yOf(z.swingLevel);
+                      if (xb !== null && ys !== null && x0 !== null) {
+                        ctx.strokeStyle = hexToRgba(col, 0.6); ctx.setLineDash([4, 3]);
+                        ctx.beginPath(); ctx.moveTo(Math.max(0, x0), ys); ctx.lineTo(Math.min(textAlignX, xb), ys); ctx.stroke(); ctx.setLineDash([]);
+                        ctx.textAlign = 'left'; ctx.textBaseline = z.dir === 'bull' ? 'bottom' : 'top'; ctx.fillStyle = hexToRgba(col, 0.8);
+                        ctx.fillText('break', Math.min(textAlignX - 30, xb + 3), z.dir === 'bull' ? ys - 1 : ys + 1);
+                      }
+                      // first retest of the zone — the entry the explanation describes
+                      if (S.showRetest && z.retestTime) {
+                        const xr = xOf(z.retestTime); const k = cB.findIndex(c => c.time === z.retestTime);
+                        if (xr !== null && xr <= textAlignX && k >= 0) {
+                          const y = yOf(z.dir === 'bear' ? cB[k].high : cB[k].low);
+                          if (y !== null) {
+                            const yy = z.dir === 'bear' ? y - 6 : y + 6, s2 = 5;
+                            ctx.fillStyle = col; ctx.beginPath();
+                            if (z.dir === 'bear') { ctx.moveTo(xr - s2, yy - s2); ctx.lineTo(xr + s2, yy - s2); ctx.lineTo(xr, yy + 1); }
+                            else { ctx.moveTo(xr - s2, yy + s2); ctx.lineTo(xr + s2, yy + s2); ctx.lineTo(xr, yy - 1); }
+                            ctx.closePath(); ctx.fill();
+                          }
+                        }
+                      }
+                    }
+                    // liquidity grabs: the level that was swept (dotted, from where it formed) + a marker on the wick
+                    for (const gb of res.grabs) {
+                      const xg = xOf(gb.time), y = yOf(gb.level), yw = yOf(gb.extreme);
+                      if (xg === null || y === null || yw === null || xg < 0 || xg > textAlignX) continue;
+                      const col = gb.dir === 'bear' ? GRAB_UP : GRAB_DN;
+                      const xl = xOf(gb.levelTime);
+                      ctx.strokeStyle = hexToRgba(col, 0.7); ctx.lineWidth = 1; ctx.setLineDash([1.5, 3]);
+                      ctx.beginPath(); ctx.moveTo(Math.max(0, xl === null ? xg - 40 : xl), y); ctx.lineTo(xg + 6, y); ctx.stroke(); ctx.setLineDash([]);
+                      ctx.font = `bold 9px ${FONT}`; ctx.fillStyle = col; ctx.textAlign = 'center';
+                      ctx.textBaseline = gb.dir === 'bear' ? 'bottom' : 'top';
+                      ctx.fillText(gb.kind === 'prev-day' ? (gb.dir === 'bear' ? 'PDH grab' : 'PDL grab') : 'LG', xg, gb.dir === 'bear' ? yw - 3 : yw + 3);
+                    }
+                    ctx.restore();
+                  }
+                } catch (e) { /* an indicator must never break the frame */ }
+              }
+
               // FVG WITH DIRECTIONAL ZONES — a separate pass over the zones block's
               // OUTPUT. The block above is untouched; this only reads obZonesRef.
               // Derived once per recompute (keyed on the zones block's own signature),
@@ -13083,6 +13249,27 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       className={`p-1 transition-colors ${isFav('InstitutionalLevels') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('InstitutionalLevels') ? 'currentColor' : 'none'} />
+                    </button>
+                  </div>
+
+                  {/* Breaker Blocks & Liquidity Grabs (5 Nov 2026) */}
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BreakersGrabs', showBreakers)}`}>
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button onClick={(e) => { e.stopPropagation(); setShowBreakers(!showBreakers); }} aria-label="Toggle Breaker Blocks & Liquidity Grabs" className="w-4 flex items-center justify-center shrink-0">
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${showBreakers ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{showBreakers && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none" title="Breaker blocks (failed order blocks that flip after a break of structure) and liquidity grabs (a wick through a swing / previous-day level that closes back inside).">Breaker Blocks & Liquidity Grabs</span>
+                      </div>
+                    {showBreakers ? (
+                      <button onClick={(e) => { e.stopPropagation(); blSnapshotRef.current = blSettings; setIsEditingBl(true); setIsIndicatorsOpen(false); }}
+                        className="p-1 text-muted-foreground hover:text-foreground transition-colors" title="Breaker Blocks & Liquidity Grabs Settings">
+                        <Settings size={14} />
+                      </button>
+                    ) : (<span className="p-1 w-[22px] shrink-0" aria-hidden="true" />)}
+                    <button onClick={(e) => { e.stopPropagation(); toggleFav('BreakersGrabs'); }}
+                      title={isFav('BreakersGrabs') ? 'Remove from favourites' : 'Mark as favourite'} aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('BreakersGrabs') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}>
+                      <Star size={14} fill={isFav('BreakersGrabs') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
 
@@ -14434,6 +14621,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
       {myOrderOpen && (
         <MyOrderModal onClose={() => setMyOrderOpen(false)} underlying={underlying} spot={myOrderSpot} />
+      )}
+      {isEditingBl && (
+        <BreakerSettingsModal
+          value={blSettings}
+          onChange={setBlSettings}
+          onClose={() => { setBlSettings(blSnapshotRef.current); setIsEditingBl(false); }}
+          onApply={() => setIsEditingBl(false)}
+        />
       )}
       {isEditingIl && (
         <InstitutionalLevelsEditorModal
