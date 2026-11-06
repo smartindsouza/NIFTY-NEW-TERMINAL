@@ -2,14 +2,16 @@
 // before a sharp move" study to be re-run on ~2 years of data instead of the
 // ~3 months the chart caches. This hands out NIFTY 50 index candles only (public
 // market data, no account data), read through today's Zerodha session.
-//   GET /api/research/nifty-history?interval=5minute|15minute&days=1..730
+//   GET /api/research/nifty-history?interval=minute|5minute|15minute&days=1..730
 // One fetch at a time, results kept for 6 hours, so repeated calls cost Zerodha
 // nothing. Requests are spaced like the existing backtests (400 ms apart).
 import { getKiteClient } from './kite_service';
 
 const IST = 5.5 * 3600000;
 const toIst = (ms: number) => new Date(ms + IST).toISOString().slice(0, 19).replace('T', ' ');
-const CHUNK_DAYS: Record<string, number> = { '5minute': 90, '15minute': 180 };
+// 1minute added 6 Nov 2026 for the breaker scalping test; Kite serves at most 60
+// days of 1-minute candles per request.
+const CHUNK_DAYS: Record<string, number> = { 'minute': 60, '5minute': 90, '15minute': 180 };
 const cache = new Map<string, { at: number; rows: number[][] }>();
 let busy: Promise<any> | null = null;
 
@@ -33,7 +35,7 @@ async function fetchHistory(interval: string, days: number): Promise<number[][]>
 export function registerResearchExport(app: any) {
   app.get('/api/research/nifty-history', async (req: any, res: any) => {
     const interval = String(req.query.interval || '5minute');
-    if (!CHUNK_DAYS[interval]) return res.status(400).json({ ok: false, error: 'interval must be 5minute or 15minute' });
+    if (!CHUNK_DAYS[interval]) return res.status(400).json({ ok: false, error: 'interval must be minute, 5minute or 15minute' });
     const days = Math.max(1, Math.min(730, parseInt(String(req.query.days || '730'), 10) || 730));
     const key = `${interval}:${days}`;
     const hit = cache.get(key);
