@@ -14,6 +14,7 @@
 
 import crypto from 'crypto';
 import { getKiteClient, getGiftNiftyInstrument, getNfoInstruments } from './kite_service';
+import biasCheck from './bias.cjs';
 
 const IST_MS = 5.5 * 3600 * 1000;
 const CACHE_MS = 20_000;
@@ -234,6 +235,25 @@ export function registerMarketSnapshot(app: any) {
           .finally(() => { inFlight = null; });
       }
       const out = await inFlight;
+      // US30 / US futures for the 09:32 scheduled bias note (6 Nov 2026). That
+      // note used to look the Dow's close up with a web search inside its own
+      // cloud session, and every day it gave up and wrote "US close unconfirmed".
+      // The server already reads the same numbers from Yahoo for the "Check bias"
+      // button, so they ride along here. Best-effort: a failure lands in errors
+      // and never costs the rest of the snapshot.
+      if (out.status === 200 && out.body && !out.body.us) {
+        try {
+          const us: any = await biasCheck.defaultGetUsMarkets({ niftyOpenIso: out.body.nifty?.today_5m?.[0]?.t ?? null });
+          const d = us?.dow_cash_last_close || null;
+          out.body.us = {
+            dow_last_close: d ? { session_date: d.session_date_ist, close: d.close, change_pts: d.change_pts, change_pct: d.change_pct } : null,
+            futures: ['dow_fut', 'sp_fut', 'nasdaq_fut'].reduce((acc: any, k) => { if (us?.[k]) acc[k] = { last: us[k].last, change_pct: us[k].change_pct, change_since_nifty_open_pct: us[k].change_since_nifty_open_pct }; return acc; }, {}),
+            source: 'Yahoo Finance',
+          };
+          if (!d) out.body.errors = [...(out.body.errors || []), 'us.dow_last_close: not available'];
+          if (us?.errors?.length) out.body.errors = [...(out.body.errors || []), ...us.errors.map((e: string) => `us: ${e}`)];
+        } catch (e: any) { out.body.errors = [...(out.body.errors || []), `us: ${clean(e)}`]; }
+      }
       if (out.status === 200) cache = { at: Date.now(), status: out.status, body: out.body };
       res.status(out.status).json({ ...out.body, cache_age_s: 0 });
     } catch (e: any) {
