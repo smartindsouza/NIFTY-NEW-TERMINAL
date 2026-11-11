@@ -31,6 +31,7 @@ import biasCheck from './server/bias.cjs';
 const { createBiasRouter } = biasCheck as any;
 import { registerTriggers, armedTriggerTokens, onTickForTriggers } from './server/triggers';
 // Telegram channel calls → automatic 1-lot entries with the message's SL (23 Oct 2026).
+import { registerReversalWatch } from './server/reversal_watch';
 import { registerChartRef } from './server/chart_ref';
 import { lastUs30Source } from './server/us30';
 import { registerTradeGuard, guardEntryBlock } from './server/trade_guard';
@@ -3461,6 +3462,16 @@ setInterval(() => {
   // Read-only market snapshot for the external 09:32 IST analysis (SNAPSHOT_API_KEY).
   registerMarketSnapshot(app);
   try { registerChartRef(app); } catch (e) { console.error('[chart-ref] failed to start', e); }
+  // Reversal watch (11 Nov 2026): alert-only structure watch on every open option
+  // position — see server/reversal_watch.ts. Never touches an order.
+  try {
+    registerReversalWatch(app, {
+      getKiteClient,
+      getGift: async () => { const g: any = await getGiftNiftyInstrument(); return g?.token ? { token: Number(g.token) } : null; },
+      getBseIndexToken: async (n: string) => { const t: any = await getBseIndexToken(n); return t ? Number(t) : null; },
+      notify: (text: string) => signalNotify(text),
+    });
+  } catch (e) { console.error('[reversal-watch] failed to start — trading unaffected', e); }
   try { registerTradeGuard(app, express, { db, getKiteClient }); } catch (e) { console.error('[guard] failed to start — orders are unaffected', e); }
   // Today's Bias: the 09:33 IST note posted by the scheduled task (same key).
   registerBias(app, db);

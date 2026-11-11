@@ -1,0 +1,186 @@
+// REVERSAL WATCH (11 Nov 2026). Martin: "whenever an active trade card appears,
+// start watching it" — and alert him when the market structure turns against the
+// trade, so he can exit. ALERT ONLY: this never places, modifies or exits an
+// order; his SL/TP engine keeps running exactly as before.
+//
+// HOW IT READS A REVERSAL
+// For each open option position the trade's direction on the underlying is:
+//   long CE / short PE → bullish trade;  long PE / short CE → bearish trade.
+// Every 5 minutes, right after a 5-min candle closes, it reads today's 5-min
+// candles of the underlying (NIFTY, and GIFT NIFTY alongside it for NIFTY
+// options) and finds the last confirmed swing:
+//   bullish trade → the last swing LOW (the last higher low);
+//   bearish trade → the last swing HIGH (the last lower high).
+// A completed 5-min candle CLOSING beyond that level — on NIFTY or on GIFT — is
+// the reversal (change of character) and sends one push. A wick through does
+// not count. Before the first swing of the day exists, the level is the range
+// of the candles up to the entry. As the trade runs, new swings form and the
+// level trails behind them by itself.
+//
+// Alerts go out through the same Telegram bot as the auto-trade alerts, times in
+// 12-hour format (his request). One alert per level per position.
+
+type C = { t: number; o: number; h: number; l: number; c: number };   // t = candle start, ms
+export type Dir = 'bull' | 'bear';
+
+const IST = 5.5 * 3600e3;
+export const time12 = (ms: number) => {
+  const d = new Date(ms + IST); let h = d.getUTCHours(); const m = d.getUTCMinutes();
+  const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
+  return `${h}:${String(m).padStart(2, '0')} ${ap}`;
+};
+const fmt = (x: number) => Math.round(x).toLocaleString('en-IN');
+
+export function tradeDir(tradingsymbol: string, qty: number): Dir | null {
+  const m = /(CE|PE)$/i.exec(String(tradingsymbol || ''));
+  if (!m || !qty) return null;
+  const ce = m[1].toUpperCase() === 'CE';
+  return (ce === qty > 0) ? 'bull' : 'bear';
+}
+
+// Swing points confirmed by `L` candles on each side.
+export function swings(c: C[], L = 2) {
+  const highs: { i: number; p: number }[] = [], lows: { i: number; p: number }[] = [];
+  for (let k = L; k < c.length - L; k++) {
+    let hi = true, lo = true;
+    for (let j = k - L; j <= k + L; j++) {
+      if (j === k) continue;
+      if (c[j].h >= c[k].h) hi = false;
+      if (c[j].l <= c[k].l) lo = false;
+    }
+    if (hi) highs.push({ i: k, p: c[k].h });
+    if (lo) lows.push({ i: k, p: c[k].l });
+  }
+  return { highs, lows };
+}
+
+// The level a reversal must close beyond, using only candles BEFORE the last
+// closed one (so the candle being judged cannot set its own level).
+export function structureLevel(c: C[], dir: Dir, entryMs: number, L = 2): number | null {
+  if (c.length < 2) return null;
+  const prior = c.slice(0, -1);
+  const sw = swings(prior, L);
+  // Only a swing on the trade's side of price at entry counts. A CE bought at
+  // 12:45 while NIFTY already sat below the morning's swing low must not be
+  // "reversed" by that old level on its very first candle (seen replaying
+  // 11 Nov). Reference = the last close at or before the entry.
+  const atEntry = [...prior].reverse().find(x => x.t <= entryMs) || prior[0];
+  const ref = atEntry.c;
+  const pts = (dir === 'bull' ? sw.lows.filter(x => x.p < ref || prior[x.i].t > entryMs) : sw.highs.filter(x => x.p > ref || prior[x.i].t > entryMs));
+  if (pts.length) return pts[pts.length - 1].p;
+  const upto = prior.filter(x => x.t <= entryMs);
+  const base = upto.length ? upto : prior.slice(0, 1);
+  return dir === 'bull' ? Math.min(...base.map(x => x.l)) : Math.max(...base.map(x => x.h));
+}
+
+export function reversalHit(c: C[], dir: Dir, entryMs: number): { level: number; close: number; at: number } | null {
+  const level = structureLevel(c, dir, entryMs);
+  if (level === null) return null;
+  const last = c[c.length - 1];
+  if (last.t + 5 * 60000 <= entryMs) return null;          // a candle that closed before the trade began
+  const hit = dir === 'bull' ? last.c < level : last.c > level;
+  return hit ? { level, close: last.c, at: last.t } : null;
+}
+
+type Deps = {
+  getKiteClient: () => any;
+  getGift: () => Promise<{ token: number } | null>;
+  getBseIndexToken: (name: string) => Promise<number | null>;
+  notify: (text: string) => Promise<any> | any;
+};
+type Watched = { sym: string; qty: number; dir: Dir; under: 'NIFTY' | 'BANKNIFTY' | 'SENSEX'; since: number; alerted: Set<string>; announced: boolean };
+const watched = new Map<string, Watched>();
+let lastCandleCheck = 0;
+let lastStatus: any = { running: false, watching: [] };
+
+const istParts = (ms: number) => { const d = new Date(ms + IST); return { day: d.getUTCDay(), mins: d.getUTCHours() * 60 + d.getUTCMinutes(), date: d.toISOString().slice(0, 10) }; };
+const kiteTime = (ms: number) => { const d = new Date(ms + IST); const p = (n: number) => String(n).padStart(2, '0'); return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:00`; };
+function underlyingOf(sym: string): Watched['under'] | null {
+  if (/^BANKNIFTY/i.test(sym)) return 'BANKNIFTY';
+  if (/^NIFTY/i.test(sym)) return 'NIFTY';
+  if (/^SENSEX/i.test(sym)) return 'SENSEX';
+  return null;
+}
+
+async function candlesToday(kc: any, token: number, now: number): Promise<C[]> {
+  const { date } = istParts(now);
+  const open = Date.parse(`${date}T09:15:00+05:30`);
+  const raw: any[] = (await kc.getHistoricalData(token, '5minute', kiteTime(open), kiteTime(now))) || [];
+  return raw.map(r => ({ t: new Date(r.date).getTime(), o: +r.open, h: +r.high, l: +r.low, c: +r.close }))
+    .filter(x => x.t >= open && x.t + 5 * 60000 <= now);                  // completed candles only
+}
+
+async function tick(D: Deps) {
+  const now = Date.now();
+  const { day, mins } = istParts(now);
+  if (day === 0 || day === 6 || mins < 9 * 60 + 15 || mins > 15 * 60 + 35) { lastStatus = { running: true, market: 'closed', watching: [] }; return; }
+  const kc = D.getKiteClient();
+  if (!kc || !kc.access_token) { lastStatus = { running: true, error: 'Zerodha not logged in', watching: [] }; return; }
+
+  // 1) Which positions are open — the same ones the active trade card shows.
+  const pos: any[] = ((await kc.getPositions())?.net || []).filter((p: any) => Number(p.quantity) !== 0 && (p.exchange === 'NFO' || p.exchange === 'BFO'));
+  const live = new Set<string>();
+  for (const p of pos) {
+    const sym = String(p.tradingsymbol), qty = Number(p.quantity);
+    const dir = tradeDir(sym, qty), under = underlyingOf(sym);
+    if (!dir || !under) continue;
+    const key = `${sym}|${dir}`;
+    live.add(key);
+    if (!watched.has(key)) watched.set(key, { sym, qty, dir, under, since: now, alerted: new Set(), announced: false });
+    else watched.get(key)!.qty = qty;
+  }
+  for (const k of [...watched.keys()]) if (!live.has(k)) watched.delete(k);   // closed → stop watching
+
+  // 2) Structure check once per closed 5-min candle (a few seconds after it closes),
+  //    and straight away for a position seen for the first time.
+  const slot = Math.floor(now / 300000);
+  const fresh = [...watched.values()].some(w => !w.announced);
+  if (!fresh && (slot === lastCandleCheck || (now % 300000) < 8000)) { publish(); return; }
+  lastCandleCheck = slot;
+
+  const tokens: Record<string, number | null> = { NIFTY: 256265, BANKNIFTY: 260105, SENSEX: null };
+  if ([...watched.values()].some(w => w.under === 'SENSEX')) tokens.SENSEX = await D.getBseIndexToken('SENSEX').catch(() => null);
+  const gift = [...watched.values()].some(w => w.under === 'NIFTY') ? await D.getGift().catch(() => null) : null;
+  const cache = new Map<number, C[]>();
+  const get = async (t: number) => { if (!cache.has(t)) cache.set(t, await candlesToday(kc, t, now).catch(() => [])); return cache.get(t)!; };
+
+  for (const w of watched.values()) {
+    const charts: { name: string; c: C[] }[] = [];
+    const ut = tokens[w.under];
+    if (ut) charts.push({ name: w.under === 'NIFTY' ? 'NIFTY' : w.under === 'BANKNIFTY' ? 'BANK NIFTY' : 'SENSEX', c: await get(ut) });
+    if (w.under === 'NIFTY' && gift?.token) charts.push({ name: 'GIFT NIFTY', c: await get(gift.token) });
+    const against = w.dir === 'bull' ? 'below' : 'above';
+
+    if (!w.announced) {
+      const lv = charts.map(ch => { const l = structureLevel([...ch.c, ch.c[ch.c.length - 1] || { t: now, o: 0, h: 0, l: 0, c: 0 }], w.dir, now); return l !== null ? `${ch.name} ${fmt(l)}` : null; }).filter(Boolean);
+      await D.notify(`👀 Watching ${w.sym} (${w.dir === 'bull' ? 'bullish' : 'bearish'} trade). I'll alert you if a 5-min candle closes ${against} the last swing ${w.dir === 'bull' ? 'low' : 'high'}${lv.length ? `: ${lv.join(', ')}` : ''}. Levels trail as new swings form. Alert only — your SL/TP are unchanged.`);
+      w.announced = true;
+    }
+    for (const ch of charts) {
+      const hit = reversalHit(ch.c, w.dir, w.since);
+      if (!hit) continue;
+      const k = `${ch.name}|${hit.level}`;
+      if (w.alerted.has(k)) continue;
+      w.alerted.add(k);
+      await D.notify(`⚠️ REVERSAL vs your ${w.sym}: ${ch.name} 5-min candle ${time12(hit.at)}–${time12(hit.at + 300000)} closed ${fmt(hit.close)}, ${against} its last swing ${w.dir === 'bull' ? 'low' : 'high'} ${fmt(hit.level)}. Structure has turned against the trade — consider exiting. (Alert only; nothing was sold.)`);
+    }
+  }
+  publish();
+}
+
+function publish() {
+  lastStatus = { running: true, at: Date.now(), watching: [...watched.values()].map(w => ({ sym: w.sym, dir: w.dir, under: w.under, since: w.since, alerts: [...w.alerted] })) };
+}
+
+export function registerReversalWatch(app: any, deps: Deps) {
+  let busy = false;
+  setInterval(async () => {
+    if (busy) return; busy = true;
+    try { await tick(deps); } catch (e: any) { lastStatus = { ...lastStatus, error: e?.message || String(e) }; }
+    finally { busy = false; }
+  }, 30000);
+  app.get('/api/reversal-watch/status', (_req: any, res: any) => res.json(lastStatus));
+  console.log('[reversal-watch] registered (alert only)');
+}
+
+export const __test = { tick, watched, reset() { watched.clear(); lastCandleCheck = 0; } };
