@@ -32,6 +32,7 @@ const { createBiasRouter } = biasCheck as any;
 import { registerTriggers, armedTriggerTokens, onTickForTriggers } from './server/triggers';
 // Telegram channel calls → automatic 1-lot entries with the message's SL (23 Oct 2026).
 import { registerReversalWatch } from './server/reversal_watch';
+import { registerDhan } from './server/dhan_service';
 import { registerChartRef } from './server/chart_ref';
 import { lastUs30Source } from './server/us30';
 import { registerTradeGuard, guardEntryBlock } from './server/trade_guard';
@@ -3462,6 +3463,7 @@ setInterval(() => {
   // Read-only market snapshot for the external 09:32 IST analysis (SNAPSHOT_API_KEY).
   registerMarketSnapshot(app);
   try { registerChartRef(app); } catch (e) { console.error('[chart-ref] failed to start', e); }
+  try { registerDhan(app, { db }); } catch (e) { console.error('[dhan] failed to start', e); }
   // Reversal watch (11 Nov 2026): alert-only structure watch on every open option
   // position — see server/reversal_watch.ts. Never touches an order.
   try {
