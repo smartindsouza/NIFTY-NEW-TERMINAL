@@ -24,7 +24,13 @@ export function isTickerConnected(): boolean {
 
 export function startTicker(apiKey: string, accessToken: string, onTick: Broadcaster) {
   broadcaster = onTick;
-  if (ticker) { try { ticker.disconnect(); } catch {} ticker = null; }
+  // Turn auto-reconnect OFF before disconnecting. kiteconnect's KiteTicker, on the
+  // close that follows disconnect(), calls attemptReconnection(), which — because
+  // disconnect() set should_reconnect=false — runs process.exit(1). That silently
+  // killed the server every time the live feed was restarted with a Zerodha
+  // ticker running (found 11 Nov 2026 when switching the feed to Dhan: three
+  // restarts, no error logged). With auto_reconnect off, the close is ignored.
+  if (ticker) { try { ticker.autoReconnect?.(false); } catch {} try { ticker.disconnect(); } catch {} ticker = null; }
   latest.clear();
   ticker = apiKey === 'dhan' ? new DhanTicker() : new KiteTicker({ api_key: apiKey, access_token: accessToken });
   tickerKind = apiKey === 'dhan' ? 'dhan' : 'kite';
