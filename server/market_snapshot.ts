@@ -158,6 +158,19 @@ export async function buildMarketSnapshot(deps: SnapshotDeps): Promise<{ status:
           }
         }
       } catch (e: any) { errors.push(`gift_nifty.overnight: ${clean(e, kc)}`); }
+      // GIFT NIFTY's own completed 5-min candles from the prior NSE close to now
+      // (11 Nov 2026). The 09:32 bias note reads GIFT's market structure — the
+      // overnight swings and how it is trading into and after 09:15 — alongside
+      // NIFTY's, the way Martin reads the GIFT chart in the app. Last 240 candles
+      // (~20 hours) keeps the payload small.
+      try {
+        await sleep(350);                               // historical limit is 3 req/s
+        const g5 = ((await kc.getHistoricalData(gi.token, '5minute', kiteTime(from), kiteTime(nowMs))) || [])
+          .filter((c: any) => { const t = candleMs(c); return t >= from && t + 5 * 60000 <= nowMs; })
+          .map((c: any) => ({ t: istIso(candleMs(c)), o: r2(c.open), h: r2(c.high), l: r2(c.low), c: r2(c.close) }));
+        gift_nifty.candles_5m = g5.slice(-240);
+        if (!g5.length) errors.push('gift_nifty.candles_5m: no GIFT NIFTY 5-min candles since the prior close');
+      } catch (e: any) { errors.push(`gift_nifty.candles_5m: ${clean(e, kc)}`); }
     }
   } catch (e: any) { errors.push(`gift_nifty: ${clean(e, kc)}`); }
 
