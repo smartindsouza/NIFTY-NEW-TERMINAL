@@ -5,7 +5,10 @@
 //   GET /api/research/nifty-history?interval=minute|5minute|15minute&days=1..730
 // One fetch at a time, results kept for 6 hours, so repeated calls cost Zerodha
 // nothing. Requests are spaced like the existing backtests (400 ms apart).
-import { getKiteClient } from './kite_service';
+import { getKiteClient, getIndexFuturesTokens } from './kite_service';
+// series=fut (11 Nov 2026, for Martin's VWAP options backtest): NIFTY FUTURES
+// candles WITH VOLUME, from Kite's continuous series (rolled across expiries), so
+// VWAP can be computed — the index itself has no volume.
 
 const IST = 5.5 * 3600000;
 const toIst = (ms: number) => new Date(ms + IST).toISOString().slice(0, 19).replace('T', ' ');
@@ -15,7 +18,7 @@ const CHUNK_DAYS: Record<string, number> = { 'minute': 60, '5minute': 90, '15min
 const cache = new Map<string, { at: number; rows: number[][] }>();
 let busy: Promise<any> | null = null;
 
-async function fetchHistory(interval: string, days: number): Promise<number[][]> {
+async function fetchHistory(interval: string, days: number, fut = false): Promise<number[][]> {
   const kc: any = getKiteClient();
   if (!kc || !kc.access_token) throw new Error('Zerodha is not logged in today');
   const chunk = CHUNK_DAYS[interval];
@@ -23,9 +26,13 @@ async function fetchHistory(interval: string, days: number): Promise<number[][]>
   let to = Date.now(); let left = days;
   const spans: [number, number][] = [];
   while (left > 0) { const s = Math.min(chunk, left); spans.unshift([to - s * 86400000, to]); to -= s * 86400000; left -= s; }
+  let token = 256265;
+  if (fut) { const fx = await getIndexFuturesTokens('NIFTY'); if (!fx?.length) throw new Error('no NIFTY futures contract found'); token = fx[0].token; }
   for (const [f, t] of spans) {
-    const hist = await kc.getHistoricalData(256265, interval, toIst(f), toIst(t));
-    for (const c of hist || []) rows.push([new Date(c.date).getTime(), +c.open, +c.high, +c.low, +c.close]);
+    const hist = fut
+      ? await kc.getHistoricalData(token, interval, toIst(f), toIst(t), true, false)    // continuous = rolled series
+      : await kc.getHistoricalData(token, interval, toIst(f), toIst(t));
+    for (const c of hist || []) rows.push(fut ? [new Date(c.date).getTime(), +c.open, +c.high, +c.low, +c.close, +(c.volume || 0)] : [new Date(c.date).getTime(), +c.open, +c.high, +c.low, +c.close]);
     await new Promise((r) => setTimeout(r, 400));
   }
   rows.sort((a, b) => a[0] - b[0]);
@@ -37,15 +44,17 @@ export function registerResearchExport(app: any) {
     const interval = String(req.query.interval || '5minute');
     if (!CHUNK_DAYS[interval]) return res.status(400).json({ ok: false, error: 'interval must be minute, 5minute or 15minute' });
     const days = Math.max(1, Math.min(730, parseInt(String(req.query.days || '730'), 10) || 730));
-    const key = `${interval}:${days}`;
+    const fut = String(req.query.series || '') === 'fut';
+    const columns = fut ? ['t_ms', 'open', 'high', 'low', 'close', 'volume'] : ['t_ms', 'open', 'high', 'low', 'close'];
+    const key = `${interval}:${days}:${fut ? 'fut' : 'idx'}`;
     const hit = cache.get(key);
-    if (hit && Date.now() - hit.at < 6 * 3600000) return res.json({ ok: true, interval, days, cached: true, columns: ['t_ms', 'open', 'high', 'low', 'close'], rows: hit.rows });
+    if (hit && Date.now() - hit.at < 6 * 3600000) return res.json({ ok: true, interval, days, series: fut ? 'fut' : 'index', cached: true, columns, rows: hit.rows });
     if (busy) return res.status(429).json({ ok: false, error: 'another history fetch is running — try again in a minute' });
     try {
-      busy = fetchHistory(interval, days);
+      busy = fetchHistory(interval, days, fut);
       const rows = await busy;
       cache.set(key, { at: Date.now(), rows });
-      res.json({ ok: true, interval, days, cached: false, columns: ['t_ms', 'open', 'high', 'low', 'close'], rows });
+      res.json({ ok: true, interval, days, series: fut ? 'fut' : 'index', cached: false, columns, rows });
     } catch (e: any) { res.status(503).json({ ok: false, error: e?.message || String(e) }); }
     finally { busy = null; }
   });
