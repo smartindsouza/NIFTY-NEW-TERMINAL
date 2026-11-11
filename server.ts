@@ -3484,6 +3484,19 @@ setInterval(() => {
     const k = getDhanKite(); const what = String(req.query.what || 'quote');
     try {
       if (what === 'broker') return res.json({ active: activeBroker(), feed: currentTickerKind() });
+      if (what === 'feed') {
+        // A separate, short-lived Dhan feed connection (Dhan allows 5): subscribe
+        // NIFTY, Bank Nifty and one option for a few seconds and report the ticks.
+        const { DhanTicker } = await import('./server/dhan_ticker');
+        const t = new DhanTicker(); const got: any[] = []; const errs: string[] = [];
+        t.on('ticks', (x: any[]) => got.push(...x)); t.on('error', (e: any) => errs.push(String(e?.message || e)));
+        t.on('connect', () => t.subscribe([256265, 260105, Number(req.query.opt || 0)].filter(Boolean)));
+        t.autoReconnect(false); await t.connect();
+        await new Promise(r => setTimeout(r, Number(req.query.ms || 6000)));
+        const connected = t.connected(); t.disconnect();
+        const last: Record<string, any> = {}; for (const x of got) last[x.instrument_token] = x;
+        return res.json({ connected, ticks: got.length, errors: errs, last });
+      }
       if (what === 'instruments') {
         const all = await k.getInstruments(); const nfo = all.filter((r: any) => r.exchange === 'NFO' && r.name === 'NIFTY');
         const exps = [...new Set(nfo.map((r: any) => (r.expiry instanceof Date ? r.expiry.toISOString().slice(0, 10) : '')))].sort().slice(0, 4);
