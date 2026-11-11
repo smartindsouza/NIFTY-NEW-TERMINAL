@@ -143,10 +143,16 @@ export function KiteLogin() {
               <div className="flex flex-col items-start gap-3">
                 <Button variant="outline" className={authStatus.simulated ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20 hover:bg-emerald-500/20 pointer-events-none" : "bg-green-500/10 text-green-500 border-green-500/20 hover:bg-green-500/20 pointer-events-none"}>
                   <CheckCircle2 className="w-4 h-4 mr-2" />
-                  Kite Connected Successfully {authStatus.simulated ? "(Simulated Demo Sandbox)" : "(Live)"}
+                  {/* The server reports which broker is live (11 Nov 2026, Zerodha -> Dhan
+                      move). This label used to say "Kite Connected" for any connected
+                      status, so with Dhan running it still claimed a Zerodha session. */}
+                  {authStatus.broker === 'dhan' ? 'Dhan Connected (Live)'
+                    : <>Kite Connected Successfully {authStatus.simulated ? "(Simulated Demo Sandbox)" : "(Live)"}</>}
                 </Button>
                 <p className="text-xs text-muted-foreground mb-2">
-                  {authStatus.simulated 
+                  {authStatus.broker === 'dhan'
+                    ? "Prices, charts and your Dhan positions come from Dhan, which logs in by itself each day. Zerodha is not being used — no Zerodha login needed."
+                    : authStatus.simulated 
                     ? "Interactive Sandbox Mode is active. Live option chain quotes, reporting books, and mock order routers are powered by high-fidelity simulated feeds." 
                     : "Your live Zerodha Kite session is authenticated and active for today."}
                 </p>
@@ -154,10 +160,13 @@ export function KiteLogin() {
                   <Button onClick={() => setLocation('/')} className="bg-primary text-primary-foreground hover:bg-primary/90">
                     Go to Dashboard
                   </Button>
-                  <Button variant="outline" onClick={handleDisconnect} className="border-0 text-muted-foreground hover:text-foreground">
+                  {/* Disconnect clears the Zerodha token only — meaningless on Dhan. */}
+                  {authStatus.broker !== 'dhan' && (
+                  <Button variant="outline" onClick={() => handleDisconnect()} className="border-0 text-muted-foreground hover:text-foreground">
                     <LogOut className="w-4 h-4 mr-2" />
                     Disconnect Session
                   </Button>
+                  )}
                 </div>
               </div>
             ) : (
