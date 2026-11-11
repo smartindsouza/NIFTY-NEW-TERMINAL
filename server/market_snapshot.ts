@@ -190,8 +190,14 @@ export async function buildMarketSnapshot(deps: SnapshotDeps): Promise<{ status:
       const g = gq[`GLOBAL:${x}`];
       if (!g) { errors.push(`global_indices.${x}: not in quote`); continue; }
       const ltp = r2(g.last_price), prev = r2(g.ohlc?.close);
+      // Kite sends "YYYY-MM-DD HH:MM:SS" in IST and the SDK parses it in the
+      // SERVER's zone (UTC on Railway), so the Date is 5.5 h off. Rebuild it from
+      // its wall-clock fields as IST — correct whatever zone the server runs in.
       const ts = g.last_trade_time || g.timestamp;
-      const tms = ts ? new Date(ts).getTime() : NaN;
+      const d0 = ts ? new Date(ts) : null;
+      const tms = d0 && isFinite(d0.getTime())
+        ? Date.UTC(d0.getFullYear(), d0.getMonth(), d0.getDate(), d0.getHours(), d0.getMinutes(), d0.getSeconds()) - 5.5 * 3600000
+        : NaN;
       global_indices[x] = {
         ltp, prev_close: prev,
         change_pts: ltp !== null && prev ? r2(ltp - prev) : null,
