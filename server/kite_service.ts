@@ -51,8 +51,7 @@ function dhanOwnerId(): string | null {
 
 // ---- Broker move to Dhan (11 Nov 2026) ----
 // Which broker answers getKiteClient(): BROKER env (kite|dhan) if set, else a
-// saved choice (dhan_kv 'broker'), else Dhan whenever it is set up, else Zerodha
-// (Martin's Zerodha API ends 12 Nov). The Dhan side is
+// saved choice (dhan_kv 'broker'), else Zerodha. The Dhan side is
 // a stand-in that answers the same calls in Zerodha's shapes
 // (server/dhan_kite_adapter.ts), so no caller changes.
 import { makeDhanKite } from './dhan_kite_adapter';
@@ -80,13 +79,14 @@ export function activeBroker(): 'kite' | 'dhan' {
   const env = (process.env.BROKER || '').toLowerCase();
   if (env === 'dhan' || env === 'kite') return env as any;
   try { const r: any = db.prepare("SELECT value FROM dhan_kv WHERE key='broker'").get(); if (r?.value === 'dhan' || r?.value === 'kite') return r.value; } catch { }
-  // Dhan whenever it is set up (11 Nov 2026, 11:30 PM). This used to keep Zerodha
-  // for as long as a Zerodha session existed for the day, so the switch would
-  // only happen at 5:30 AM — Martin opened the app at night, still saw Zerodha,
-  // and he has left Zerodha. A Zerodha login out of habit no longer flips the app
-  // back either. Going back to Zerodha is BROKER=kite in Railway (the pre-Dhan
-  // code is also kept on the zerodha-archive branch).
-  return dhanConfigured() ? 'dhan' : 'kite';
+  // ZERODHA BY DEFAULT (11 Nov 2026, 11:50 PM). For a few hours tonight the app
+  // ran on Dhan. Dhan carries only NSE, BSE and MCX — no GIFT NIFTY, no US30, no
+  // world indices — so the GIFT chart died and US30 fell back to Yahoo's
+  // 10-minute-delayed Dow futures. Martin's decision: Zerodha stays the broker
+  // for charts and trading; Dhan is used only for the expired-option history
+  // (/api/research/dhan-rolling). Dhan is still one switch away (BROKER=dhan, or
+  // dhan_kv broker=dhan) and its orders, feed and data stand-in stay in place.
+  return 'kite';
 }
 
 export function getKiteClient() {

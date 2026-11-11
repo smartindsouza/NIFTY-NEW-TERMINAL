@@ -20,6 +20,8 @@
 
 import axios from 'axios';
 import crypto from 'crypto';
+import express from 'express';
+const expressJson = () => express.json({ limit: '64kb' });
 
 // DHAN_API_BASE exists only for the order tests (a local fake Dhan); never set it in Railway.
 const API = (process.env.DHAN_API_BASE || 'https://api.dhan.co/v2').trim();
@@ -125,6 +127,30 @@ export function registerDhan(app: any, deps: { db: any }) {
     } catch (e: any) { out.connected = false; out.error = e.message; }
     if (lastError) out.lastLoginError = lastError;
     res.json(out);
+  });
+  // EXPIRED OPTIONS (11 Nov 2026) — the reason Dhan was taken on. A thin, strictly
+  // validated pass-through to Dhan's /charts/rollingoption so the offline backtest
+  // loader (nifty_backtest/dhan_loader.py) can pull up to 5 years of expired
+  // NIFTY option candles while the Dhan token stays in Railway — the loader never
+  // holds it. Only this one read-only call can be made through it, and starts are
+  // spaced 220 ms apart (Dhan's data APIs allow 5 a second).
+  let nextRoll = 0;
+  app.post('/api/research/dhan-rolling', expressJson(), async (req: any, res: any) => {
+    const b = req.body || {};
+    const date = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v));
+    const fields = ['open', 'high', 'low', 'close', 'iv', 'volume', 'oi', 'strike', 'spot'];
+    const bad = b.exchangeSegment !== 'NSE_FNO' ? 'exchangeSegment' : !['1', '5', '15', '25', '60'].includes(String(b.interval)) ? 'interval'
+      : !/^\d{1,6}$/.test(String(b.securityId)) ? 'securityId' : !['OPTIDX', 'OPTSTK'].includes(b.instrument) ? 'instrument'
+      : !['WEEK', 'MONTH'].includes(b.expiryFlag) ? 'expiryFlag' : !(Number.isInteger(Number(b.expiryCode)) && Number(b.expiryCode) >= 0 && Number(b.expiryCode) <= 3) ? 'expiryCode'
+      : !/^ATM([+-]\d{1,2})?$/.test(String(b.strike)) ? 'strike' : !['CALL', 'PUT'].includes(b.drvOptionType) ? 'drvOptionType'
+      : !date(b.fromDate) || !date(b.toDate) ? 'dates' : !(Array.isArray(b.requiredData) && b.requiredData.every((x: any) => fields.includes(x))) ? 'requiredData' : '';
+    if (bad) return res.status(400).json({ error: `bad ${bad}` });
+    const body = { exchangeSegment: 'NSE_FNO', interval: String(b.interval), securityId: String(b.securityId), instrument: b.instrument, expiryFlag: b.expiryFlag,
+      expiryCode: Number(b.expiryCode), strike: String(b.strike), drvOptionType: b.drvOptionType, requiredData: b.requiredData, fromDate: b.fromDate, toDate: b.toDate };
+    const now = Date.now(); const at = Math.max(now, nextRoll); nextRoll = at + 220;
+    if (at > now) await new Promise(r => setTimeout(r, at - now));
+    try { res.json(await dhanCall('POST', '/charts/rollingoption', body)); }
+    catch (e: any) { res.status(e?.status || 502).json({ error: e?.message || String(e) }); }
   });
   console.log('[dhan] connection module registered');
 }
