@@ -147,12 +147,20 @@ function resolve(key: string | number): Row | null {
 }
 
 // ---------------------------------------------------------------- pacing
-// Dhan market-quote APIs allow 1 request/second; history a few per second.
-function pacer(gapMs: number) {
-  let last = 0, chain: Promise<any> = Promise.resolve();
-  return <T>(fn: () => Promise<T>): Promise<T> => {
-    const run = chain.then(async () => { const w = last + gapMs - Date.now(); if (w > 0) await new Promise(r => setTimeout(r, w)); last = Date.now(); return fn(); });
-    chain = run.catch(() => { }); return run;
+// Dhan market-quote APIs allow 1 request/second; data (candle) APIs 5/second.
+// The pacer spaces the STARTS of calls, it does not wait for each to finish.
+// The first version chained every call behind the previous one's completion, and
+// a Dhan call from Railway (sfo → Bangalore proxy → Dhan) takes ~1.4 s, so the
+// chart's ~20 cold candle requests queued single-file: the 15-min NIFTY chart took
+// 25–35 s to appear on a fresh page (11 Nov 2026, measured with Playwright). The
+// rate limit counts requests started per second, so overlapping in-flight calls
+// are fine as long as their starts are gapMs apart.
+export function pacer(gapMs: number) {
+  let next = 0;
+  return async <T>(fn: () => Promise<T>): Promise<T> => {
+    const now = Date.now(); const at = Math.max(now, next); next = at + gapMs;
+    if (at > now) await new Promise(r => setTimeout(r, at - now));
+    return fn();
   };
 }
 const quotePace = pacer(1050);

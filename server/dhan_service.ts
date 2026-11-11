@@ -90,6 +90,13 @@ export async function dhanCall(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: 
     tok = null; try { D?.db.prepare("DELETE FROM dhan_kv WHERE key='token'").run(); } catch { }
     return dhanCall(method, path, body, false);
   }
+  // Rate limited: the callers pace their starts, but a burst can still trip
+  // Dhan's per-second limit — wait just over a second and try once more. Never
+  // for order calls: a 429 there must surface, not be silently resent.
+  if (r.status === 429 && retry && !/^\/orders|^\/super|^\/forever/.test(path)) {
+    await new Promise(res => setTimeout(res, 1100));
+    return dhanCall(method, path, body, false);
+  }
   if (r.status >= 400) {
     const d: any = r.data || {};
     throw Object.assign(new Error(`Dhan ${path} HTTP ${r.status}: ${d.errorMessage || d.message || d.remarks || JSON.stringify(d).slice(0, 200)}`), { status: r.status, data: d });
