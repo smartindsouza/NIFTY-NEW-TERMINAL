@@ -710,8 +710,13 @@ export async function getTechnicalAnalysis(
           const actualSpot = resolvedSpot;
           const tolerance = Math.max(50, actualSpot * 0.05);
           
+          // ...and only onto a candle that is still forming. Kite's GLOBAL US100
+          // history ends at last night's US close while its LTP keeps moving, so
+          // without this its 02:25 candle was stretched to this afternoon's price.
+          const lastHistMs = hist.length ? new Date(hist[hist.length - 1].date).getTime() : 0;
+          const lastIsCurrent = Date.now() - lastHistMs < 2 * Math.min(timeframeMin, 1440) * 60000;
           if (
-            spotIsOwn &&
+            spotIsOwn && lastIsCurrent &&
             hist.length > 0 &&
             Math.abs(hist[hist.length - 1].close - actualSpot) < tolerance
           ) {
