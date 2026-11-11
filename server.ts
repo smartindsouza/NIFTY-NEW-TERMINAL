@@ -32,7 +32,8 @@ const { createBiasRouter } = biasCheck as any;
 import { registerTriggers, armedTriggerTokens, onTickForTriggers } from './server/triggers';
 // Telegram channel calls → automatic 1-lot entries with the message's SL (23 Oct 2026).
 import { registerReversalWatch } from './server/reversal_watch';
-import { registerDhan } from './server/dhan_service';
+import { registerDhan, dhanConfigured } from './server/dhan_service';
+import { activeBroker, getDhanKite } from './server/kite_service';
 import { registerChartRef } from './server/chart_ref';
 import { lastUs30Source } from './server/us30';
 import { registerTradeGuard, guardEntryBlock } from './server/trade_guard';
@@ -49,7 +50,7 @@ import { evaluateQuantSignals } from './server/quant_engine';
 import { generateGamePlan } from './server/game_plan_service';
 
 import { getLiveNews, rateLimitMiddleware, currentAIStatus } from './server/news_service';
-import { startTicker, setSubscriptions, isTickerConnected, getLatestTick } from './server/ticker_service';
+import { startTicker, setSubscriptions, isTickerConnected, getLatestTick, currentTickerKind } from './server/ticker_service';
 import { setDeltaFuturesToken, getDeltaFuturesToken, onFuturesTick, getDeltaSnapshot } from './server/delta_tracker';
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
@@ -1058,8 +1059,11 @@ async function refreshData() {
   };
 
 function connectTicker() {
-  const apiKey = process.env.KITE_API_KEY;
-  const token = getTodayAccessToken();
+  // Broker move (11 Nov 2026): on Dhan the same handler below is fed by Dhan's
+  // live feed (server/dhan_ticker.ts via ticker_service).
+  const onDhan = activeBroker() === 'dhan';
+  const apiKey = onDhan ? 'dhan' : process.env.KITE_API_KEY;
+  const token = onDhan ? 'dhan' : getTodayAccessToken();
   if (!apiKey || !token) return;
   startTicker(apiKey, token, (tick) => {
     currentTickExTs = tick.exTs ?? null;
@@ -1135,6 +1139,17 @@ function connectTicker() {
 
 refreshData();
 connectTicker();
+// Broker watchdog (11 Nov 2026): when the active broker changes (Zerodha session
+// gone → Dhan, or a manual switch), restart the live feed on the right one.
+setInterval(() => {
+  try {
+    const want = activeBroker();
+    if (currentTickerKind() !== want && (want === 'dhan' ? dhanConfigured() : !!getTodayAccessToken())) {
+      console.log(`[broker] live feed switching to ${want}`);
+      connectTicker();
+    }
+  } catch (e) { /* never crash the server */ }
+}, 60000);
 
 // One-time best-effort: rules armed before this deploy have no instrument_token
 // yet — resolve them so the tick engine covers them too (poll covers them either
@@ -3464,6 +3479,31 @@ setInterval(() => {
   registerMarketSnapshot(app);
   try { registerChartRef(app); } catch (e) { console.error('[chart-ref] failed to start', e); }
   try { registerDhan(app, { db }); } catch (e) { console.error('[dhan] failed to start', e); }
+  // Exercise the Dhan stand-in WITHOUT switching the app to it (step 2 checks).
+  app.get('/api/dhan/test', async (req, res) => {
+    const k = getDhanKite(); const what = String(req.query.what || 'quote');
+    try {
+      if (what === 'broker') return res.json({ active: activeBroker(), feed: currentTickerKind() });
+      if (what === 'instruments') {
+        const all = await k.getInstruments(); const nfo = all.filter((r: any) => r.exchange === 'NFO' && r.name === 'NIFTY');
+        const exps = [...new Set(nfo.map((r: any) => (r.expiry instanceof Date ? r.expiry.toISOString().slice(0, 10) : '')))].sort().slice(0, 4);
+        return res.json({ total: all.length, nifty_index: all.find((r: any) => r.instrument_token === 256265), nfo_nifty: nfo.length, expiries: exps,
+          sample: nfo.filter((r: any) => r.instrument_type !== 'FUT').slice(0, 3).map((r: any) => ({ t: r.instrument_token, s: r.tradingsymbol, e: r.expiry, k: r.strike, lot: r.lot_size, tick: r.tick_size })),
+          futs: nfo.filter((r: any) => r.instrument_type === 'FUT').map((r: any) => r.tradingsymbol) });
+      }
+      if (what === 'quote') return res.json(await k.getQuote(['NSE:NIFTY 50', 'NSE:NIFTY BANK', 'NSE:INDIA VIX', String(req.query.sym || '')].filter(Boolean)));
+      if (what === 'hist') {
+        const tok = Number(req.query.token || 256265), iv = String(req.query.interval || '5minute'), days = Number(req.query.days || 2);
+        const c = await k.getHistoricalData(tok, iv, new Date(Date.now() - days * 86400e3), new Date());
+        return res.json({ n: c.length, first: c[0], last: c.slice(-3) });
+      }
+      if (what === 'account') {
+        const [p, m, o] = await Promise.all([k.getPositions(), k.getMargins(), k.getOrders()]);
+        return res.json({ positions: p.net.length, funds: m.equity.net, orders: o.length });
+      }
+      res.status(400).json({ error: 'what = broker|instruments|quote|hist|account' });
+    } catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
+  });
   // Reversal watch (11 Nov 2026): alert-only structure watch on every open option
   // position — see server/reversal_watch.ts. Never touches an order.
   try {
@@ -4165,6 +4205,8 @@ setInterval(() => {
   });
 
   app.get('/api/auth/status', (req, res) => {
+    // On Dhan the app is connected whenever Dhan's login works (automatic TOTP).
+    if (activeBroker() === 'dhan') return res.json({ status: dhanConfigured() ? 'connected' : 'disconnected', simulated: false, broker: 'dhan' });
     try {
       const row = db.prepare('SELECT * FROM kite_tokens ORDER BY id DESC LIMIT 1').get() as any;
       if (row) {

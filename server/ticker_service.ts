@@ -1,4 +1,9 @@
 import { KiteTicker } from 'kiteconnect';
+import { DhanTicker } from './dhan_ticker';
+// Broker move (11 Nov 2026): startTicker('dhan', …) drives Dhan's feed through the
+// same KiteTicker-shaped interface; everything below is unchanged.
+let tickerKind: 'kite' | 'dhan' | null = null;
+export const currentTickerKind = () => tickerKind;
 
 export interface LiveTick {
   token: number; ltp: number; oi?: number; volume?: number; change?: number;
@@ -21,7 +26,8 @@ export function startTicker(apiKey: string, accessToken: string, onTick: Broadca
   broadcaster = onTick;
   if (ticker) { try { ticker.disconnect(); } catch {} ticker = null; }
   latest.clear();
-  ticker = new KiteTicker({ api_key: apiKey, access_token: accessToken });
+  ticker = apiKey === 'dhan' ? new DhanTicker() : new KiteTicker({ api_key: apiKey, access_token: accessToken });
+  tickerKind = apiKey === 'dhan' ? 'dhan' : 'kite';
   ticker.autoReconnect(true, 50, 5);
   ticker.on('connect', () => {
     const tokens = Array.from(subscribedTokens);

@@ -27,7 +27,38 @@ export function getKiteUserId(): string | null {
   } catch (e) { return null; }
 }
 
+// ---- Broker move to Dhan (11 Nov 2026) ----
+// Which broker answers getKiteClient(): BROKER env (kite|dhan) if set, else a
+// saved choice (dhan_kv 'broker'), else Zerodha while it has a session for today
+// and Dhan once it does not (Martin's Zerodha API ends 12 Nov). The Dhan side is
+// a stand-in that answers the same calls in Zerodha's shapes
+// (server/dhan_kite_adapter.ts), so no caller changes.
+import { makeDhanKite } from './dhan_kite_adapter';
+import { dhanConfigured } from './dhan_service';
+let dhanKite: any = null;
+function dhanOrdersEnabled(): boolean {
+  try { const r: any = db.prepare("SELECT value FROM dhan_kv WHERE key='orders_enabled'").get(); return r?.value === '1'; } catch { return false; }
+}
+let dhanOrderFns: { placeOrder?: (p: any) => Promise<any>; cancelOrder?: (id: string) => Promise<any> } = {};
+export function setDhanOrderFns(f: typeof dhanOrderFns) { dhanOrderFns = f; dhanKite = null; }
+export function getDhanKite() {
+  if (!dhanKite) dhanKite = makeDhanKite({ ordersEnabled: dhanOrdersEnabled, placeOrder: (p) => dhanOrderFns.placeOrder!(p), cancelOrder: (id) => dhanOrderFns.cancelOrder!(id) });
+  return dhanKite;
+}
+export function activeBroker(): 'kite' | 'dhan' {
+  const env = (process.env.BROKER || '').toLowerCase();
+  if (env === 'dhan' || env === 'kite') return env as any;
+  try { const r: any = db.prepare("SELECT value FROM dhan_kv WHERE key='broker'").get(); if (r?.value === 'dhan' || r?.value === 'kite') return r.value; } catch { }
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const row = db.prepare('SELECT access_token FROM kite_tokens WHERE token_date = ? ORDER BY id DESC LIMIT 1').get(today) as any;
+    if (row?.access_token && row.access_token !== 'simulated_session_token') return 'kite';
+  } catch { }
+  return dhanConfigured() ? 'dhan' : 'kite';
+}
+
 export function getKiteClient() {
+  if (activeBroker() === 'dhan') return getDhanKite();
   const apiKey = process.env.KITE_API_KEY;
   if (!apiKey) return null;
   
