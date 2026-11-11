@@ -1243,6 +1243,39 @@ const isGiftDataWindow = (unixSeconds: number): boolean => {
   return isGiftSessionOpenAt(ist.getUTCDay(), ist.getUTCHours() * 60 + ist.getUTCMinutes());
 };
 
+// US30 (11 Nov 2026) is the second reference chart. The Dow futures trade
+// Sunday 18:00 – Friday 17:00 New York time with a one-hour break at 17:00 NY
+// every day. New York's offset is read from the browser's own time-zone data so
+// the US daylight-saving switch moves the window by itself (it is ~04:30 IST
+// open / 03:30 IST break in winter, an hour earlier in summer).
+const nyOffsetMin = (): number => {
+  try {
+    const now = new Date();
+    const ny = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const utc = new Date(now.toLocaleString('en-US', { timeZone: 'UTC' }));
+    return Math.round((ny.getTime() - utc.getTime()) / 60000);
+  } catch (e) { return -300; }
+};
+export const isUs30SessionOpenAt = (istDay: number, mins: number): boolean => {
+  let t = istDay * 1440 + mins - 330 + nyOffsetMin();
+  t = ((t % 10080) + 10080) % 10080;
+  const d = Math.floor(t / 1440), m = t % 1440;
+  if (d === 6) return false;                                   // Saturday
+  if (d === 0) return m >= 18 * 60;                            // Sunday evening open
+  if (d === 5) return m < 17 * 60;                             // Friday close
+  return !(m >= 17 * 60 && m < 18 * 60);                       // daily break
+};
+// Which reference chart is on screen. Set by the chart component every render;
+// the session gates below are module-level functions that run inside callbacks
+// built once per chart, so they read this rather than a stale closure.
+let activeReferenceKind: 'GIFT' | 'US30' = 'GIFT';
+const refSessionOpenAt = (istDay: number, mins: number): boolean =>
+  activeReferenceKind === 'US30' ? isUs30SessionOpenAt(istDay, mins) : isGiftSessionOpenAt(istDay, mins);
+const refDataWindow = (unixSeconds: number): boolean => {
+  const ist = new Date(unixSeconds * 1000 + 5.5 * 60 * 60 * 1000);
+  return refSessionOpenAt(ist.getUTCDay(), ist.getUTCHours() * 60 + ist.getUTCMinutes());
+};
+
 const isDataWindow = (unixSeconds: number): boolean => {
   const ist = new Date(unixSeconds * 1000 + 5.5 * 60 * 60 * 1000);
   const day = ist.getUTCDay();
@@ -4739,7 +4772,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // Declared HERE, above the H-levels keys that read it: those keys are computed
   // during render, so leaving this further down was a temporal-dead-zone crash
   // waiting to happen rather than a style point.
-  const [underlying, setUnderlying] = useState<'NIFTY' | 'BANKNIFTY' | 'SENSEX'>(() => {
+  const [underlying, setUnderlying] = useState<'NIFTY' | 'BANKNIFTY' | 'SENSEX' | 'GIFT' | 'US30'>(() => {
     // Validated against the known set rather than trusted: an old or hand-edited
     // value must fall back to NIFTY, not leave the chart pointing at nothing.
     try {
@@ -8034,15 +8067,18 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     underlying === 'NIFTY' ? '256265'
     : underlying === 'BANKNIFTY' ? '260105'
     : underlying === 'GIFT' ? (giftTokenData?.token ? String(giftTokenData.token) : null)
+    : underlying === 'US30' ? 'US30'      // server/us30.ts: Zerodha's US30, Yahoo Dow futures as fallback
     : (sensexTokenData?.token ? String(sensexTokenData.token) : null);
   const indexLabel =
     underlying === 'NIFTY' ? 'NIFTY 50'
     : underlying === 'BANKNIFTY' ? 'NIFTY BANK'
     : underlying === 'GIFT' ? 'GIFT NIFTY'
+    : underlying === 'US30' ? 'US30'
     : 'SENSEX';
   // Reference chart: no order can be placed from it. Read through a ref in the
   // chart click handler, which is built once per chart rebuild.
-  const isReferenceChart = underlying === 'GIFT';
+  const isReferenceChart = underlying === 'GIFT' || underlying === 'US30';
+  activeReferenceKind = underlying === 'US30' ? 'US30' : 'GIFT';
   const isReferenceChartRef = useRef(isReferenceChart);
   isReferenceChartRef.current = isReferenceChart;
   const instrumentToken = selectedInstrument ? String(selectedInstrument.instrument_token) : indexToken;
@@ -8184,7 +8220,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // midnight, which is why the late-night window is tested against the NEXT
   // calendar day: 01:00 on a Saturday belongs to Friday's session, while 01:00
   // on a Monday does not, because Sunday evening has no session to continue.
-  const isGiftSessionOpen = isGiftSessionOpenAt;
+  const isGiftSessionOpen = refSessionOpenAt;   // GIFT or US30, whichever reference chart is on screen
 
   const tfMinutes = parseInt(String(timeframe), 10) || 0;
   // Also off on GIFT NIFTY. These levels are computed from the NIFTY session —
@@ -8287,7 +8323,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     // this same gate, and a morning focus/remount restarts the interval.
     refetchInterval: () => {
       const now = Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current;
-      return (isReferenceChartRef.current ? isGiftDataWindow(now) : isDataWindow(now)) ? 15000 : false;
+      return (isReferenceChartRef.current ? refDataWindow(now) : isDataWindow(now)) ? 15000 : false;
     },
     staleTime: 8000,
     enabled: Boolean(timeframe && instrumentToken)
@@ -8938,7 +8974,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           // chart sat frozen until the bell even though real prices were arriving.
           const ist = getIstDateTime(tickTime);
           const outsideSession = isReferenceChartRef.current
-            ? !isGiftSessionOpenAt(ist.dayOfWeek, Math.floor(ist.timeOfDaySec / 60))
+            ? !refSessionOpenAt(ist.dayOfWeek, Math.floor(ist.timeOfDaySec / 60))
             : (ist.dayOfWeek === 0 || ist.dayOfWeek === 6
                || ist.timeOfDaySec >= MARKET_CLOSE_SECONDS_IST + 120
                || ist.timeOfDaySec < PRE_OPEN_SECONDS_IST);
@@ -9077,7 +9113,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     const interval = setInterval(async () => {
       // Skip background polling if market is closed
       const now = Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current;
-      if (!(isReferenceChartRef.current ? isGiftDataWindow(now) : isDataWindow(now))) {
+      if (!(isReferenceChartRef.current ? refDataWindow(now) : isDataWindow(now))) {
         return;
       }
 
@@ -11459,7 +11495,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       // closes, when a closed candle is repaired, or when the newest
                       // candle's time runs out (e.g. at the session close).
                       const nowS = Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current;
-                      const over = !(isReferenceChartRef.current ? isGiftDataWindow(nowS) : isDataWindow(nowS));
+                      const over = !(isReferenceChartRef.current ? refDataWindow(nowS) : isDataWindow(nowS));
                       const baseS = chartDataRef.current?.candles || [];
                       const liveS = lastCandleDataRef.current;
                       const liveDone = !!liveS && (over || liveS.time + tfM * 60 <= nowS);
@@ -12826,7 +12862,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               </div>
               {indexMenuOpen && (
                 <div className="absolute left-0 top-full mt-1 z-[60] min-w-[150px] bg-card border border-white/10 rounded-md shadow-2xl overflow-hidden">
-                  {[{ k: 'NIFTY', label: 'NIFTY 50' }, { k: 'GIFT', label: 'GIFT NIFTY' },
+                  {[{ k: 'NIFTY', label: 'NIFTY 50' }, { k: 'GIFT', label: 'GIFT NIFTY' }, { k: 'US30', label: 'US30' },
                     { k: 'BANKNIFTY', label: 'BANK NIFTY' }, { k: 'SENSEX', label: 'SENSEX' }].map((o) => (
                     <button key={o.k}
                       onClick={() => { setUnderlying(o.k as any); setSelectedInstrument(null); setIndexMenuOpen(false); }}

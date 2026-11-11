@@ -31,6 +31,7 @@ import biasCheck from './server/bias.cjs';
 const { createBiasRouter } = biasCheck as any;
 import { registerTriggers, armedTriggerTokens, onTickForTriggers } from './server/triggers';
 // Telegram channel calls → automatic 1-lot entries with the message's SL (23 Oct 2026).
+import { lastUs30Source } from './server/us30';
 import { registerTradeGuard, guardEntryBlock } from './server/trade_guard';
 import { registerSignalTrader, signalOnTick, signalTokens, signalNoteManualRearm, signalManages, signalManagedLevels, signalNotify } from './server/signal_trader';
 import { registerFamilyTrader, familyOnTick, familyTokens } from './server/family_trader';
@@ -2690,6 +2691,9 @@ setInterval(() => {
 
   // Example API routes
   // Why are the newest candles missing? One tap, small answer — see taFreshness.
+  // Where the US30 chart's candles came from last (Zerodha or the Yahoo fallback).
+  app.get('/api/us30/source', (_req, res) => { res.json(lastUs30Source); });
+
   app.get('/api/ta/freshness', async (req, res) => {
     try {
       const tf = parseInt(String(req.query.timeframe || '5'), 10) || 5;

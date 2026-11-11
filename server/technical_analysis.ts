@@ -1,4 +1,5 @@
-import { getKiteClient, getIndexFuturesTokens } from "./kite_service.js";
+import { isUs30Token, fetchUs30Candles } from './us30';
+import { getKiteClient, getIndexFuturesTokens, findInstrumentAnyExchange } from "./kite_service.js";
 import { getLatestTick } from "./ticker_service.js";
 import { aggregateCandles } from "./aggregator.js";
 import { scoreBounceAt } from "./bounce_conviction.js";
@@ -457,6 +458,8 @@ export async function getTechnicalAnalysis(
         // getLTP remains the fallback for anything not on the tick stream, or when
         // the last tick is stale enough that it should not be trusted.
         const tokenNum = parseInt(instrument_token, 10);
+        // US30 is fed from Yahoo, not Kite: there is no NSE quote to ask for.
+        if (isUs30Token(instrument_token)) throw new Error('US30: price comes from its candles');
         const tick = isFinite(tokenNum) ? getLatestTick(tokenNum) : undefined;
         const tickAgeMs = tick?.ts ? Date.now() - tick.ts : Infinity;
         if (tick && tick.ltp > 0 && tickAgeMs < 15000) {
@@ -577,13 +580,23 @@ export async function getTechnicalAnalysis(
 
         fromDate = toISTString(new Date(Date.now() - daysToFetch * 24 * 60 * 60 * 1000));
 
-        // We use the provided instrument_token
-        const rawHist = await throttleRequest(() => kc.getHistoricalData(
-          parseInt(instrument_token, 10),
-          intervalName as any,
-          fromDate,  // IST-formatted string — Kite always receives correct time
-          toDate,    // IST-formatted string — Kite always receives correct time
-        ), `historical_${intervalName}`);
+        // We use the provided instrument_token. US30 (11 Nov 2026, server/us30.ts)
+        // is the one chart not on Kite: Dow futures from Yahoo, already at the
+        // requested timeframe on a wall-clock grid, so the 09:15-anchored
+        // aggregation below is skipped for it.
+        let rawHist: any[];
+        if (isUs30Token(instrument_token)) {
+          const u = await fetchUs30Candles(timeframeMin, { findAny: findInstrumentAnyExchange, kc });
+          rawHist = u.candles;
+          baseIntervalMin = u.baseMin;
+        } else {
+          rawHist = await throttleRequest(() => kc.getHistoricalData(
+            parseInt(instrument_token, 10),
+            intervalName as any,
+            fromDate,  // IST-formatted string — Kite always receives correct time
+            toDate,    // IST-formatted string — Kite always receives correct time
+          ), `historical_${intervalName}`);
+        }
         
         console.log(`[Kite API Request] Symbol: ${symbol}, Token: ${instrument_token}, Timeframe: ${timeframeMin}m, Candles: ${rawHist?.length || 0}`);
 
