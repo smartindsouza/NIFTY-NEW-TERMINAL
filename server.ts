@@ -31,6 +31,7 @@ import biasCheck from './server/bias.cjs';
 const { createBiasRouter } = biasCheck as any;
 import { registerTriggers, armedTriggerTokens, onTickForTriggers } from './server/triggers';
 // Telegram channel calls → automatic 1-lot entries with the message's SL (23 Oct 2026).
+import { registerChartRef } from './server/chart_ref';
 import { lastUs30Source } from './server/us30';
 import { registerTradeGuard, guardEntryBlock } from './server/trade_guard';
 import { registerSignalTrader, signalOnTick, signalTokens, signalNoteManualRearm, signalManages, signalManagedLevels, signalNotify } from './server/signal_trader';
@@ -3459,6 +3460,7 @@ setInterval(() => {
 
   // Read-only market snapshot for the external 09:32 IST analysis (SNAPSHOT_API_KEY).
   registerMarketSnapshot(app);
+  try { registerChartRef(app); } catch (e) { console.error('[chart-ref] failed to start', e); }
   try { registerTradeGuard(app, express, { db, getKiteClient }); } catch (e) { console.error('[guard] failed to start — orders are unaffected', e); }
   // Today's Bias: the 09:33 IST note posted by the scheduled task (same key).
   registerBias(app, db);

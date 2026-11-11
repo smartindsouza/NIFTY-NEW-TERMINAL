@@ -1267,9 +1267,20 @@ export const isUs30SessionOpenAt = (istDay: number, mins: number): boolean => {
 // Which reference chart is on screen. Set by the chart component every render;
 // the session gates below are module-level functions that run inside callbacks
 // built once per chart, so they read this rather than a stale closure.
-let activeReferenceKind: 'GIFT' | 'US30' = 'GIFT';
-const refSessionOpenAt = (istDay: number, mins: number): boolean =>
-  activeReferenceKind === 'US30' ? isUs30SessionOpenAt(istDay, mins) : isGiftSessionOpenAt(istDay, mins);
+let activeReferenceKind: 'GIFT' | 'US30' | 'NSE' | 'MCX' | 'GLOBAL' = 'GIFT';
+// Charts opened from the Market Context sidebar (11 Nov 2026) bring their own
+// kind: an NSE/BSE index keeps NSE hours, an MCX future 09:00–23:30, and a Kite
+// GLOBAL index any weekday time (their own exchanges' hours differ per index;
+// polling a closed one just returns the same last candle, which costs nothing).
+const refSessionOpenAt = (istDay: number, mins: number): boolean => {
+  switch (activeReferenceKind) {
+    case 'US30': return isUs30SessionOpenAt(istDay, mins);
+    case 'NSE': return istDay >= 1 && istDay <= 5 && mins >= 9 * 60 && mins < 15 * 60 + 45;
+    case 'MCX': return istDay >= 1 && istDay <= 5 && mins >= 9 * 60 && mins < 23 * 60 + 55;
+    case 'GLOBAL': return (istDay >= 1 && istDay <= 5) || (istDay === 6 && mins < 6 * 60);
+    default: return isGiftSessionOpenAt(istDay, mins);
+  }
+};
 const refDataWindow = (unixSeconds: number): boolean => {
   const ist = new Date(unixSeconds * 1000 + 5.5 * 60 * 60 * 1000);
   return refSessionOpenAt(ist.getUTCDay(), ist.getUTCHours() * 60 + ist.getUTCMinutes());
@@ -4771,7 +4782,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // Declared HERE, above the H-levels keys that read it: those keys are computed
   // during render, so leaving this further down was a temporal-dead-zone crash
   // waiting to happen rather than a style point.
-  const [underlying, setUnderlying] = useState<'NIFTY' | 'BANKNIFTY' | 'SENSEX' | 'GIFT' | 'US30'>(() => {
+  const [underlying, setUnderlying] = useState<'NIFTY' | 'BANKNIFTY' | 'SENSEX' | 'GIFT' | 'US30' | 'REF'>(() => {
+    // A chart asked for from the Market Context sidebar on another page.
+    try { if (sessionStorage.getItem('refChartOpen') === '1' && sessionStorage.getItem('refChart')) return 'REF'; } catch (e) {}
     // Validated against the known set rather than trusted: an old or hand-edited
     // value must fall back to NIFTY, not leave the chart pointing at nothing.
     try {
@@ -4783,6 +4796,21 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   useEffect(() => {
     try { localStorage.setItem('chartUnderlying', underlying); } catch(e) {}
   }, [underlying]);
+  // Market Context sidebar → any Zerodha instrument as a reference chart.
+  type RefChart = { token: string; label: string; kind: 'NSE' | 'MCX' | 'GLOBAL'; exchange: string; tradingsymbol: string };
+  const [refChart, setRefChart] = useState<RefChart | null>(() => {
+    try { const v = JSON.parse(sessionStorage.getItem('refChart') || 'null'); return v && v.token ? v : null; } catch (e) { return null; }
+  });
+  useEffect(() => {
+    try { sessionStorage.removeItem('refChartOpen'); } catch (e) {}
+    const onOpen = (e: any) => {
+      const d = e?.detail; if (!d?.token) return;
+      setRefChart(d); setUnderlying('REF'); setSelectedInstrument(null);
+      try { sessionStorage.removeItem('refChartOpen'); } catch (er) {}
+    };
+    window.addEventListener('open-ref-chart', onOpen as any);
+    return () => window.removeEventListener('open-ref-chart', onOpen as any);
+  }, []);
 
   // Each index has its OWN levels. Keys are suffixed per index so NIFTY, Bank
   // Nifty and SENSEX cannot overwrite one another on the device, on the server, or
@@ -8067,17 +8095,19 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     : underlying === 'BANKNIFTY' ? '260105'
     : underlying === 'GIFT' ? (giftTokenData?.token ? String(giftTokenData.token) : null)
     : underlying === 'US30' ? 'US30'      // server/us30.ts: Zerodha's US30, Yahoo Dow futures as fallback
+    : underlying === 'REF' ? (refChart?.token ?? null)
     : (sensexTokenData?.token ? String(sensexTokenData.token) : null);
   const indexLabel =
     underlying === 'NIFTY' ? 'NIFTY 50'
     : underlying === 'BANKNIFTY' ? 'NIFTY BANK'
     : underlying === 'GIFT' ? 'GIFT NIFTY'
     : underlying === 'US30' ? 'US30'
+    : underlying === 'REF' ? (refChart?.label ?? 'CHART')
     : 'SENSEX';
   // Reference chart: no order can be placed from it. Read through a ref in the
   // chart click handler, which is built once per chart rebuild.
-  const isReferenceChart = underlying === 'GIFT' || underlying === 'US30';
-  activeReferenceKind = underlying === 'US30' ? 'US30' : 'GIFT';
+  const isReferenceChart = underlying === 'GIFT' || underlying === 'US30' || underlying === 'REF';
+  activeReferenceKind = underlying === 'US30' ? 'US30' : underlying === 'REF' ? (refChart?.kind ?? 'GLOBAL') : 'GIFT';
   const isReferenceChartRef = useRef(isReferenceChart);
   isReferenceChartRef.current = isReferenceChart;
   const instrumentToken = selectedInstrument ? String(selectedInstrument.instrument_token) : indexToken;

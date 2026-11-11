@@ -1,7 +1,8 @@
 import { useState, useEffect, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronDown, TrendingUp, TrendingDown, Globe, X } from "lucide-react";
+import { ChevronLeft, ChevronDown, TrendingUp, TrendingDown, Globe, X, LineChart } from "lucide-react";
+import { useLocation } from "wouter";
 import { notificationService } from "../lib/notificationService";
 import { toast } from "sonner";
 
@@ -123,7 +124,7 @@ function MiniStatus({ open }: { open?: boolean }) {
   );
 }
 
-function Row({ m }: { m: Market }) {
+function Row({ m, onOpen }: { m: Market; onOpen?: () => void }) {
   if (!m.available) {
     return (
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-white/5">
@@ -149,10 +150,13 @@ function Row({ m }: { m: Market }) {
   const up = (m.changePct ?? 0) >= 0;
   const color = up ? "text-emerald-400" : "text-rose-400";
   return (
-    <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-white/5">
+    <div onClick={onOpen} role={onOpen ? 'button' : undefined}
+      title={onOpen ? `Open the ${m.label} chart (Zerodha data)` : undefined}
+      className={`flex items-center justify-between gap-2 px-3 py-2 border-b border-white/5 ${onOpen ? 'cursor-pointer hover:bg-white/[0.04] active:bg-white/[0.07]' : ''}`}>
       <div className="min-w-0">
         <div className="text-sm text-foreground flex items-center gap-1.5 min-w-0">
           <span className="truncate">{m.label}</span>
+          {onOpen && <LineChart className="w-3 h-3 text-primary/70 shrink-0" />}
           <MiniStatus open={m.open} />
           {m.prevSrc === 'price' && (
             // Flat by ARITHMETIC, not by market: no prior close was obtainable,
@@ -244,6 +248,31 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
       try { localStorage.setItem("mc_collapsed", JSON.stringify(next)); } catch {}
       return next;
     });
+
+  // Tap a row → open that market's chart from Zerodha data (11 Nov 2026). Which
+  // rows have a Zerodha equivalent comes from /api/chart-ref (server/chart_ref.ts);
+  // rows without one (FTSE 250, KOSPI, Brent) stay plain.
+  const [, setLocation] = useLocation();
+  const { data: refMap } = useQuery({
+    queryKey: ["chart-ref-all"],
+    queryFn: async () => { const r = await fetch("/api/chart-ref?key=_all"); if (!r.ok) throw new Error("chart-ref"); return r.json(); },
+    enabled: open, staleTime: 6 * 3600e3, retry: 1,
+  });
+  const openChart = (m: Market) => {
+    const ref = refMap?.[m.key];
+    if (!ref?.available) return undefined;
+    return () => {
+      const d = { token: ref.token, label: ref.label, kind: ref.kind, exchange: ref.exchange, tradingsymbol: ref.tradingsymbol };
+      try {
+        sessionStorage.setItem('refChart', JSON.stringify(d));
+        sessionStorage.setItem('refChartOpen', '1');
+        sessionStorage.removeItem('selectedInstrument');   // never reopen a stale option chart on top
+      } catch (e) {}
+      try { window.dispatchEvent(new CustomEvent('open-ref-chart', { detail: d })); } catch (e) {}
+      setOpen(false);
+      if (!window.location.pathname.startsWith('/advanced-chart')) setLocation('/advanced-chart');
+    };
+  };
 
   const { data } = useQuery({
     queryKey: ["market-context"],
@@ -361,7 +390,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
             right={<StatusPill open={status.indian} />}
           />
           {!collapsed.indian && indian.map((m) => (
-            <Row key={m.key} m={m} />
+            <Row key={m.key} m={m} onOpen={openChart(m)} />
           ))}
 
           <SectionHeader
@@ -382,7 +411,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
             </div>
           )}
           {!collapsed.us && us.map((m) => (
-            <Row key={m.key} m={m} />
+            <Row key={m.key} m={m} onOpen={openChart(m)} />
           ))}
           {!collapsed.us && us.length > 0 && us.every((m) => !m.available) && (
             <div className="px-3 py-2 text-[10px] text-slate-500 leading-relaxed">
@@ -401,7 +430,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
             <div className="px-3 py-3 text-xs text-slate-500">Loading…</div>
           )}
           {!collapsed.uk && uk.map((m) => (
-            <Row key={m.key} m={m} />
+            <Row key={m.key} m={m} onOpen={openChart(m)} />
           ))}
           {!collapsed.uk && uk.length > 0 && uk.every((m) => !m.available) && (
             <div className="px-3 py-2 text-[10px] text-slate-500 leading-relaxed">
@@ -420,7 +449,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
             <div className="px-3 py-3 text-xs text-slate-500">Loading…</div>
           )}
           {!collapsed.global && globalMkts.map((m) => (
-            <Row key={m.key} m={m} />
+            <Row key={m.key} m={m} onOpen={openChart(m)} />
           ))}
           {!collapsed.global && globalMkts.length > 0 && globalMkts.every((m) => !m.available) && (
             <div className="px-3 py-2 text-[10px] text-slate-500 leading-relaxed">
@@ -430,7 +459,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
         </div>
 
         <div className="px-3 py-2 border-t border-border text-[9px] text-slate-500 leading-tight">
-          Indian: live via Kite. US, UK, global &amp; commodities: via a free third-party feed (may lag or drop out) — context only, confirm before trading. Open/Closed reflects regular session hours; exchange holidays aren't tracked.
+          Indian: live via Kite. US, UK, global &amp; commodities: via a free third-party feed (may lag or drop out) — context only, confirm before trading. Tap a row with the chart icon to open its chart from Zerodha data. Open/Closed reflects regular session hours; exchange holidays aren't tracked.
         </div>
       </div>
     </>,

@@ -90,6 +90,16 @@ let lastAllInstrumentsFetch = 0;
 // Find an instrument in Zerodha's FULL dump, any exchange (11 Nov 2026). The
 // order search above deliberately keeps to NSE/NFO/BSE/BFO; this is for
 // reference charts such as US30, which Kite lists under its global indices.
+export async function filterInstrumentsAnyExchange(pred: (i: any) => boolean): Promise<any[]> {
+  const kc = getKiteClient();
+  if (!kc) return [];
+  if (!allInstrumentsCache || (Date.now() - lastAllInstrumentsFetch > 24 * 60 * 60 * 1000)) {
+    allInstrumentsCache = await kc.getInstruments();
+    lastAllInstrumentsFetch = Date.now();
+  }
+  return (allInstrumentsCache || []).filter(pred);
+}
+
 export async function findInstrumentAnyExchange(pred: (i: any) => boolean): Promise<any | null> {
   const kc = getKiteClient();
   if (!kc) return null;
