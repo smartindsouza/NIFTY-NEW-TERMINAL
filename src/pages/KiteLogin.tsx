@@ -23,6 +23,17 @@ export function KiteLogin() {
     }
   });
 
+  // Dhan (11 Nov 2026): when the server is on Dhan this page shows Dhan's
+  // connection instead of the Zerodha login steps — Dhan logs itself in by TOTP
+  // every day, so there is nothing to do here.
+  const onDhan = authStatus?.broker === 'dhan';
+  const { data: dhan, isLoading: dhanLoading } = useQuery({
+    queryKey: ['dhan-status'],
+    enabled: onDhan,
+    refetchInterval: 60000,
+    queryFn: async () => (await axios.get('/api/dhan/status')).data,
+  });
+
   const hasProcessedRef = useRef(false);
 
   // Handle callback redirect automatically if the URL has ?request_token=... or errors
@@ -90,6 +101,68 @@ export function KiteLogin() {
   };
 
   const appUrl = window.location.origin + '/kite-login';
+
+  // "2026-11-12 22:41" (IST wall clock from the server) → "12 Nov, 10:41 PM".
+  const ist12 = (v?: string | null) => {
+    const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+    if (!m) return v || '—';
+    const h = Number(m[4]);
+    const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(m[2]) - 1];
+    return `${Number(m[3])} ${mon}, ${h % 12 || 12}:${m[5]} ${h < 12 ? 'AM' : 'PM'}`;
+  };
+  const dayOnly = (v?: string | null) => {
+    const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return v || '—';
+    return `${Number(m[3])} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(m[2]) - 1]} ${m[1]}`;
+  };
+
+  if (onDhan) {
+    const ok = dhan?.connected === true;
+    const rows: [string, any][] = [
+      ['Account', dhan?.profile?.name || '—'],
+      ['Login', dhan?.loginRoute || '—'],
+      ['Session valid until', ist12(dhan?.tokenValidUntilIst)],
+      ['Market data', dhan?.dataApi || '—'],
+      ['Data plan', dhan?.profile?.dataPlan ? `${dhan.profile.dataPlan}${dhan?.profile?.dataValidity ? ` · until ${dayOnly(dhan.profile.dataValidity)}` : ''}` : '—'],
+      ['NIFTY 50', dhan?.niftyLtp != null ? Number(dhan.niftyLtp).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '—'],
+    ];
+    return (
+      <div className="p-4 md:p-8 max-w-[1600px] w-full mx-auto animate-in fade-in duration-500">
+        <div className="relative bg-card border border-border rounded-xl p-4 md:p-6 mb-8 overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/40 before:to-transparent">
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-foreground mb-2 whitespace-nowrap">Broker: Dhan</h1>
+        </div>
+        <Card className="bg-card border-0 relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-1 h-full bg-primary/50"></div>
+          <CardHeader>
+            <CardTitle className="text-lg">Dhan connection</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <Button variant="outline" className={ok ? "bg-green-500/10 text-green-500 border-green-500/20 pointer-events-none" : "bg-red-500/10 text-red-500 border-red-500/20 pointer-events-none"}>
+              {ok ? <CheckCircle2 className="w-4 h-4 mr-2" /> : <Info className="w-4 h-4 mr-2" />}
+              {dhanLoading ? 'Checking Dhan…' : ok ? 'Dhan Connected (Live)' : 'Dhan not connected'}
+            </Button>
+            {!dhanLoading && !ok && (
+              <p className="text-sm text-red-500">{dhan?.error || dhan?.lastLoginError || 'Dhan did not answer.'}</p>
+            )}
+            <div className="divide-y divide-border rounded-md border border-border">
+              {rows.map(([k, v]) => (
+                <div key={k} className="flex items-center justify-between gap-4 px-3 py-2.5 text-sm">
+                  <span className="text-muted-foreground">{k}</span>
+                  <span className="text-foreground text-right">{v}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Prices, charts, positions and orders all go through Dhan. It logs in by itself every day, so there is nothing to do here, and no Zerodha login is needed.
+            </p>
+            <Button onClick={() => setLocation('/')} className="bg-primary text-primary-foreground hover:bg-primary/90">
+              Go to Dashboard
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 md:p-8 max-w-[1600px] w-full mx-auto animate-in fade-in duration-500">

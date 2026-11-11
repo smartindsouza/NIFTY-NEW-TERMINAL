@@ -51,8 +51,8 @@ function dhanOwnerId(): string | null {
 
 // ---- Broker move to Dhan (11 Nov 2026) ----
 // Which broker answers getKiteClient(): BROKER env (kite|dhan) if set, else a
-// saved choice (dhan_kv 'broker'), else Zerodha while it has a session for today
-// and Dhan once it does not (Martin's Zerodha API ends 12 Nov). The Dhan side is
+// saved choice (dhan_kv 'broker'), else Dhan whenever it is set up, else Zerodha
+// (Martin's Zerodha API ends 12 Nov). The Dhan side is
 // a stand-in that answers the same calls in Zerodha's shapes
 // (server/dhan_kite_adapter.ts), so no caller changes.
 import { makeDhanKite } from './dhan_kite_adapter';
@@ -80,11 +80,12 @@ export function activeBroker(): 'kite' | 'dhan' {
   const env = (process.env.BROKER || '').toLowerCase();
   if (env === 'dhan' || env === 'kite') return env as any;
   try { const r: any = db.prepare("SELECT value FROM dhan_kv WHERE key='broker'").get(); if (r?.value === 'dhan' || r?.value === 'kite') return r.value; } catch { }
-  try {
-    const today = new Date().toISOString().split('T')[0];
-    const row = db.prepare('SELECT access_token FROM kite_tokens WHERE token_date = ? ORDER BY id DESC LIMIT 1').get(today) as any;
-    if (row?.access_token && row.access_token !== 'simulated_session_token') return 'kite';
-  } catch { }
+  // Dhan whenever it is set up (11 Nov 2026, 11:30 PM). This used to keep Zerodha
+  // for as long as a Zerodha session existed for the day, so the switch would
+  // only happen at 5:30 AM — Martin opened the app at night, still saw Zerodha,
+  // and he has left Zerodha. A Zerodha login out of habit no longer flips the app
+  // back either. Going back to Zerodha is BROKER=kite in Railway (the pre-Dhan
+  // code is also kept on the zerodha-archive branch).
   return dhanConfigured() ? 'dhan' : 'kite';
 }
 

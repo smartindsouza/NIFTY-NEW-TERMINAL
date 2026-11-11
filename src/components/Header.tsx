@@ -284,7 +284,7 @@ export function Header() {
           location === '/kite-login' && 'bg-white/5 text-foreground'
         )}>
           <span className="absolute left-full ml-4 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-popover border border-0 rounded-lg text-[10px] font-bold tracking-wider uppercase font-mono whitespace-nowrap opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300 pointer-events-none z-[100] text-popover-foreground ">
-            Kite Connect: {authStatus?.status === 'connected' ? 'CONNECTED' : 'EXPIRED'}
+            {authStatus?.broker === 'dhan' ? 'Dhan' : 'Kite Connect'}: {authStatus?.status === 'connected' ? 'CONNECTED' : 'EXPIRED'}
           </span>
           {authStatus?.status === 'connected' ? <CheckCircle2 className="w-5 h-5" /> : <LogIn className="w-5 h-5" />}
         </Link>
@@ -360,7 +360,7 @@ export function Header() {
               )}
             >
               {authStatus?.status === 'connected' ? <CheckCircle2 className="w-5 h-5" /> : <LogIn className="w-5 h-5" />}
-              <span className="text-[9px] font-medium">Kite</span>
+              <span className="text-[9px] font-medium">{authStatus?.broker === 'dhan' ? 'Dhan' : 'Kite'}</span>
             </Link>
           </div>
           {/* Live status row */}
