@@ -158,6 +158,25 @@ function pacer(gapMs: number) {
 const quotePace = pacer(1050);
 const histPace = pacer(260);
 
+// Index previous close. Zerodha's quote ohlc.close is always the PREVIOUS day's
+// close; Dhan's index quote showed TODAY's close after hours (11 Nov: 25,255.05 =
+// last price), while its option quotes do give the previous close. For indices
+// the previous close is taken from Dhan's daily candles (the last one before
+// today — Dhan adds today's daily candle only after end-of-day), once a day.
+const prevCloseCache = new Map<number, { day: string; close: number }>();
+async function indexPrevClose(row: Row): Promise<number | null> {
+  const today = new Date(Date.now() + IST).toISOString().slice(0, 10);
+  const hit = prevCloseCache.get(row.instrument_token);
+  if (hit && hit.day === today) return hit.close;
+  try {
+    const c = await historical(row.instrument_token, 'day', new Date(Date.now() - 12 * 86400e3), new Date());
+    const before = c.filter((x: any) => new Date(x.date.getTime() + IST).toISOString().slice(0, 10) < today);
+    const close = before.length ? before[before.length - 1].close : null;
+    if (close) prevCloseCache.set(row.instrument_token, { day: today, close });
+    return close;
+  } catch { return hit?.close ?? null; }
+}
+
 async function marketfeed(kind: 'quote' | 'ltp', keys: (string | number)[]) {
   await ensureInstruments();
   const want: Record<string, number[]> = {}; const back = new Map<string, string>();
@@ -176,6 +195,12 @@ async function marketfeed(kind: 'quote' | 'ltp', keys: (string | number)[]) {
       : { instrument_token: row.instrument_token, last_price: q.last_price, ohlc: q.ohlc, volume: q.volume, oi: q.oi, oi_day_high: q.oi_day_high, oi_day_low: q.oi_day_low,
           net_change: q.net_change, average_price: q.average_price, buy_quantity: q.buy_quantity, sell_quantity: q.sell_quantity, last_quantity: q.last_quantity,
           lower_circuit_limit: q.lower_circuit_limit, upper_circuit_limit: q.upper_circuit_limit, depth: q.depth, timestamp: new Date(), last_trade_time: q.last_trade_time };
+  }
+  if (kind === 'quote') for (const [key, q] of Object.entries<any>(out)) {
+    const row = resolve(key)!;
+    if (row._seg !== SEG.IDX_I || !q.ohlc) continue;
+    const pc = await indexPrevClose(row);
+    if (pc) { q.ohlc = { ...q.ohlc, close: pc }; q.net_change = Math.round((q.last_price - pc) * 100) / 100; }
   }
   return out;
 }

@@ -101,7 +101,9 @@ export class DhanTicker {
       ticks.push({ instrument_token: token, last_price: r2(p.ltp), oi: this.lastOi.get(token), volume_traded: p.volume,
         change: prev ? ((p.ltp - prev) / prev) * 100 : undefined,
         ohlc: p.open != null ? { open: r2(p.open), high: r2(p.high), low: r2(p.low), close: prev != null ? r2(prev) : undefined } : undefined,
-        exchange_timestamp: p.ltt ? new Date(p.ltt * 1000) : undefined });
+        // Dhan's LTT is IST wall-clock seconds labelled as epoch (an option's
+        // 15:39:59 IST last trade arrived as 15:39:59Z) — shift to true epoch.
+        exchange_timestamp: p.ltt ? new Date((p.ltt - 19800) * 1000) : undefined });
     }
     if (ticks.length) this.emit('ticks', ticks);
   }
