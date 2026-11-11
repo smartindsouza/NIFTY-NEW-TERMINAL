@@ -145,7 +145,8 @@ export function registerDhan(app: any, deps: { db: any }) {
       : !/^ATM([+-]\d{1,2})?$/.test(String(b.strike)) ? 'strike' : !['CALL', 'PUT'].includes(b.drvOptionType) ? 'drvOptionType'
       : !date(b.fromDate) || !date(b.toDate) ? 'dates' : !(Array.isArray(b.requiredData) && b.requiredData.every((x: any) => fields.includes(x))) ? 'requiredData' : '';
     if (bad) return res.status(400).json({ error: `bad ${bad}` });
-    const body = { exchangeSegment: 'NSE_FNO', interval: String(b.interval), securityId: String(b.securityId), instrument: b.instrument, expiryFlag: b.expiryFlag,
+    // Types exactly as Dhan's own example (interval a string, securityId and expiryCode numbers).
+    const body = { exchangeSegment: 'NSE_FNO', interval: String(b.interval), securityId: Number(b.securityId), instrument: b.instrument, expiryFlag: b.expiryFlag,
       expiryCode: Number(b.expiryCode), strike: String(b.strike), drvOptionType: b.drvOptionType, requiredData: b.requiredData, fromDate: b.fromDate, toDate: b.toDate };
     const now = Date.now(); const at = Math.max(now, nextRoll); nextRoll = at + 220;
     if (at > now) await new Promise(r => setTimeout(r, at - now));
