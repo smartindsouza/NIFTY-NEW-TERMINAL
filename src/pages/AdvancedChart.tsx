@@ -1243,11 +1243,13 @@ const isGiftDataWindow = (unixSeconds: number): boolean => {
   return isGiftSessionOpenAt(ist.getUTCDay(), ist.getUTCHours() * 60 + ist.getUTCMinutes());
 };
 
-// US30 (11 Nov 2026) is the second reference chart. The Dow futures trade
-// Sunday 18:00 – Friday 17:00 New York time with a one-hour break at 17:00 NY
-// every day. New York's offset is read from the browser's own time-zone data so
-// the US daylight-saving switch moves the window by itself (it is ~04:30 IST
-// open / 03:30 IST break in winter, an hour earlier in summer).
+// US30 (11 Nov 2026) is the second reference chart. It is Zerodha's GLOBAL US30,
+// the cash Dow, which trades 09:30–16:00 New York time, Monday to Friday — that
+// is 20:00–02:30 IST in the US winter and 19:00–01:30 IST in summer. New York's
+// offset is read from the browser's own time-zone data so the daylight-saving
+// switch moves the window by itself. (If Zerodha ever stops serving it, the
+// server falls back to the Dow futures, which trade longer; the chart then just
+// stops polling outside cash hours, which costs nothing.)
 const nyOffsetMin = (): number => {
   try {
     const now = new Date();
@@ -1260,10 +1262,7 @@ export const isUs30SessionOpenAt = (istDay: number, mins: number): boolean => {
   let t = istDay * 1440 + mins - 330 + nyOffsetMin();
   t = ((t % 10080) + 10080) % 10080;
   const d = Math.floor(t / 1440), m = t % 1440;
-  if (d === 6) return false;                                   // Saturday
-  if (d === 0) return m >= 18 * 60;                            // Sunday evening open
-  if (d === 5) return m < 17 * 60;                             // Friday close
-  return !(m >= 17 * 60 && m < 18 * 60);                       // daily break
+  return d >= 1 && d <= 5 && m >= 9 * 60 + 30 && m < 16 * 60 + 2;   // NY cash session (+2 min for the last print)
 };
 // Which reference chart is on screen. Set by the chart component every render;
 // the session gates below are module-level functions that run inside callbacks

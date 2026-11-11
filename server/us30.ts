@@ -1,4 +1,4 @@
-// US30 (Dow Jones) chart data — 11 Nov 2026.
+// US30 (Dow Jones) chart data — 11 Nov 2026. Live: Zerodha GLOBAL US30 (token 398601), the cash Dow.
 //
 // SOURCE: Zerodha first. Kite lists "US30" under its global indices (Martin's
 // Kite screenshot, 11 Nov), so the instrument is looked up in Kite's full dump
