@@ -45,7 +45,14 @@ export function getDhanKite() {
   if (!dhanKite) dhanKite = makeDhanKite({ ordersEnabled: dhanOrdersEnabled, placeOrder: (p) => dhanOrderFns.placeOrder!(p), cancelOrder: (id) => dhanOrderFns.cancelOrder!(id) });
   return dhanKite;
 }
+// A short trial on Dhan while the market is closed (set by /api/dhan/test?what=trial):
+// lets the whole app be checked on Dhan without touching trading hours.
+let trialUntil = 0;
+export function startDhanTrial(minutes: number) { trialUntil = Date.now() + minutes * 60e3; }
+export function endDhanTrial() { trialUntil = 0; }
+export const dhanTrialActive = () => Date.now() < trialUntil;
 export function activeBroker(): 'kite' | 'dhan' {
+  if (Date.now() < trialUntil && dhanConfigured()) return 'dhan';
   const env = (process.env.BROKER || '').toLowerCase();
   if (env === 'dhan' || env === 'kite') return env as any;
   try { const r: any = db.prepare("SELECT value FROM dhan_kv WHERE key='broker'").get(); if (r?.value === 'dhan' || r?.value === 'kite') return r.value; } catch { }

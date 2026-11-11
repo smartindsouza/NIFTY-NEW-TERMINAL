@@ -33,7 +33,7 @@ import { registerTriggers, armedTriggerTokens, onTickForTriggers } from './serve
 // Telegram channel calls → automatic 1-lot entries with the message's SL (23 Oct 2026).
 import { registerReversalWatch } from './server/reversal_watch';
 import { registerDhan, dhanConfigured } from './server/dhan_service';
-import { activeBroker, getDhanKite } from './server/kite_service';
+import { activeBroker, getDhanKite, startDhanTrial, endDhanTrial } from './server/kite_service';
 import { registerChartRef } from './server/chart_ref';
 import { lastUs30Source } from './server/us30';
 import { registerTradeGuard, guardEntryBlock } from './server/trade_guard';
@@ -3484,6 +3484,13 @@ setInterval(() => {
     const k = getDhanKite(); const what = String(req.query.what || 'quote');
     try {
       if (what === 'broker') return res.json({ active: activeBroker(), feed: currentTickerKind() });
+      if (what === 'trial') {
+        // 30-minute whole-app trial on Dhan, refused during market hours (09:00–15:45 IST weekdays).
+        const ist = new Date(Date.now() + 5.5 * 3600e3); const m = ist.getUTCHours() * 60 + ist.getUTCMinutes(); const wd = ist.getUTCDay();
+        if (req.query.stop) { endDhanTrial(); return res.json({ trial: false, active: activeBroker() }); }
+        if (wd >= 1 && wd <= 5 && m >= 540 && m < 945) return res.status(403).json({ error: 'trial is only allowed outside market hours' });
+        startDhanTrial(Math.min(30, Number(req.query.min || 30))); return res.json({ trial: true, active: activeBroker() });
+      }
       if (what === 'feed') {
         // A separate, short-lived Dhan feed connection (Dhan allows 5): subscribe
         // NIFTY, Bank Nifty and one option for a few seconds and report the ticks.
