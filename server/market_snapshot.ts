@@ -174,6 +174,33 @@ export async function buildMarketSnapshot(deps: SnapshotDeps): Promise<{ status:
     }
   } catch (e: any) { errors.push(`gift_nifty: ${clean(e, kc)}`); }
 
+  // 4b) GLOBAL INDICES from Zerodha (11 Nov 2026). Kite lists these under its
+  // GLOBAL exchange (Martin's Kite "Global Indices" watchlist). One quote call:
+  // last price, previous close, change and the time of the last print, so the
+  // bias note can tell a market that is trading now (Asia in the morning) from
+  // one whose number is last night's close (US, Europe).
+  const GLOBAL_SYMBOLS = ['US30', 'US100', 'US500', 'JAPAN225', 'HANGSENG', 'SHANGHAICHINA', 'AUS200', 'UK100', 'GERMANY40', 'FRANCE40', 'US10YRYIELD'];
+  let global_indices: any = null;
+  try {
+    await sleep(1100);                                   // quote limit is 1 req/s
+    const keys = GLOBAL_SYMBOLS.map(x => `GLOBAL:${x}`);
+    const gq = (await kc.getQuote(keys)) || {};
+    global_indices = {};
+    for (const x of GLOBAL_SYMBOLS) {
+      const g = gq[`GLOBAL:${x}`];
+      if (!g) { errors.push(`global_indices.${x}: not in quote`); continue; }
+      const ltp = r2(g.last_price), prev = r2(g.ohlc?.close);
+      const ts = g.last_trade_time || g.timestamp;
+      const tms = ts ? new Date(ts).getTime() : NaN;
+      global_indices[x] = {
+        ltp, prev_close: prev,
+        change_pts: ltp !== null && prev ? r2(ltp - prev) : null,
+        change_pct: ltp !== null && prev ? r2(((ltp - prev) / prev) * 100) : null,
+        last_trade_ist: isFinite(tms) ? istIso(tms) : null,
+      };
+    }
+  } catch (e: any) { errors.push(`global_indices: ${clean(e, kc)}`); }
+
   // 5) Options (optional): nearest NIFTY expiry — ATM CE/PE OI and total PCR.
   let options: any = null;
   try {
@@ -205,7 +232,7 @@ export async function buildMarketSnapshot(deps: SnapshotDeps): Promise<{ status:
 
   return {
     status: 200,
-    body: { as_of: asOf, session_valid: true, nifty, banknifty, india_vix, gift_nifty, options, errors },
+    body: { as_of: asOf, session_valid: true, nifty, banknifty, india_vix, gift_nifty, global_indices, options, errors },
   };
 }
 

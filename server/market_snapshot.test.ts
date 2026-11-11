@@ -30,6 +30,7 @@ function fakeKite() {
         else if (s === 'NSE:NIFTY BANK') out[s] = { instrument_token: 260105, last_price: 56420.75, ohlc: { close: 56310.2 } };
         else if (s === 'NSE:INDIA VIX') out[s] = { instrument_token: 264969, last_price: 11.42, ohlc: { close: 11.88 } };
         else if (s.startsWith('NSEIX:')) out[s] = { instrument_token: 900001, last_price: 25131.5, ohlc: { close: 25088 } };
+        else if (s.startsWith('GLOBAL:')) out[s] = { last_price: s === 'GLOBAL:US30' ? 52217.99 : 1010, ohlc: { close: s === 'GLOBAL:US30' ? 52410.75 : 1000 }, last_trade_time: new Date(at('2026-05-29', '01:59')) };
         else if (s.startsWith('NFO:')) {
           const m = s.match(/(\d+)(CE|PE)$/)!; const k = +m[1].slice(-5);
           const dist = Math.abs(k - 25100) / 50;
