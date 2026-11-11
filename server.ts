@@ -3465,7 +3465,10 @@ setInterval(() => {
   // Reversal watch (11 Nov 2026): alert-only structure watch on every open option
   // position — see server/reversal_watch.ts. Never touches an order.
   try {
-    registerReversalWatch(app, {
+    registerReversalWatch(app, express, {
+      db,
+      exitPosition: (sym: string, reason: string) => closePositionBySymbol(sym, reason),
+      isAutoTrade: (sym: string) => signalManages(sym),
       getKiteClient,
       getGift: async () => { const g: any = await getGiftNiftyInstrument(); return g?.token ? { token: Number(g.token) } : null; },
       getBseIndexToken: async (n: string) => { const t: any = await getBseIndexToken(n); return t ? Number(t) : null; },

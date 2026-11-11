@@ -19,6 +19,14 @@
 //
 // Alerts go out through the same Telegram bot as the auto-trade alerts, times in
 // 12-hour format (his request). One alert per level per position.
+//
+// STRUCTURE SL (11 Nov 2026, his rule, switchable): "the reversal triggers above
+// 25,262 — put my SL there." When on, the underlying's swing level IS the trade's
+// SL: a completed 5-min candle of the underlying (NIFTY / Bank Nifty / SENSEX —
+// not GIFT, whose break stays an alert) CLOSING beyond it exits the whole
+// position. The level only ever tightens as new swings form, and each move is
+// announced. The option-premium SL/TP keep running as a backstop, and Telegram
+// auto-trades (their own ladder) are never touched. A wick through does not exit.
 
 type C = { t: number; o: number; h: number; l: number; c: number };   // t = candle start, ms
 export type Dir = 'bull' | 'bear';
@@ -83,12 +91,15 @@ export function reversalHit(c: C[], dir: Dir, entryMs: number): { level: number;
 }
 
 type Deps = {
+  db?: any;
+  exitPosition?: (sym: string, reason: string) => Promise<{ ok: boolean; error?: string; alreadyClosed?: boolean }>;
+  isAutoTrade?: (sym: string) => boolean;
   getKiteClient: () => any;
   getGift: () => Promise<{ token: number } | null>;
   getBseIndexToken: (name: string) => Promise<number | null>;
   notify: (text: string) => Promise<any> | any;
 };
-type Watched = { sym: string; qty: number; dir: Dir; under: 'NIFTY' | 'BANKNIFTY' | 'SENSEX'; since: number; alerted: Set<string>; announced: boolean };
+type Watched = { sym: string; qty: number; dir: Dir; under: 'NIFTY' | 'BANKNIFTY' | 'SENSEX'; since: number; alerted: Set<string>; announced: boolean; slLevel: number | null; slOn: boolean; exiting: boolean };
 const watched = new Map<string, Watched>();
 let lastCandleCheck = 0;
 let lastStatus: any = { running: false, watching: [] };
@@ -126,7 +137,7 @@ async function tick(D: Deps) {
     if (!dir || !under) continue;
     const key = `${sym}|${dir}`;
     live.add(key);
-    if (!watched.has(key)) watched.set(key, { sym, qty, dir, under, since: now, alerted: new Set(), announced: false });
+    if (!watched.has(key)) watched.set(key, { sym, qty, dir, under, since: now, alerted: new Set(), announced: false, slLevel: null, slOn: structureSlEnabled(D) && !(D.isAutoTrade?.(sym)), exiting: false });
     else watched.get(key)!.qty = qty;
   }
   for (const k of [...watched.keys()]) if (!live.has(k)) watched.delete(k);   // closed → stop watching
@@ -151,12 +162,41 @@ async function tick(D: Deps) {
     if (w.under === 'NIFTY' && gift?.token) charts.push({ name: 'GIFT NIFTY', c: await get(gift.token) });
     const against = w.dir === 'bull' ? 'below' : 'above';
 
+    // Structure SL: tighten the level from the underlying's own chart, then check
+    // the candle that just closed against it.
+    const main = charts[0];
+    if (w.slOn && main && main.c.length >= 2 && !w.exiting) {
+      const nl = structureLevel(main.c, w.dir, w.since);
+      if (nl !== null) {
+        const tighter = w.slLevel === null || (w.dir === 'bull' ? nl > w.slLevel : nl < w.slLevel);
+        if (tighter) {
+          const was = w.slLevel; w.slLevel = nl;
+          if (was !== null && Math.abs(nl - was) >= 5) await D.notify(`🔁 Structure SL for ${w.sym} moved ${fmt(was)} → ${fmt(nl)} (new swing ${w.dir === 'bull' ? 'low' : 'high'} on ${main.name}). Exits if a 5-min candle closes ${against} it.`);
+        }
+      }
+      const last = main.c[main.c.length - 1];
+      if (w.slLevel !== null && last.t + 300000 > w.since && (w.dir === 'bull' ? last.c < w.slLevel : last.c > w.slLevel)) {
+        w.exiting = true;
+        const r = D.exitPosition ? await D.exitPosition(w.sym, 'STRUCTURE_SL') : { ok: false, error: 'exit not wired' };
+        await D.notify(r.ok
+          ? `🛑 Structure SL hit — sold ${w.sym}. ${main.name} 5-min candle ${time12(last.t)}–${time12(last.t + 300000)} closed ${fmt(last.c)}, ${against} the SL level ${fmt(w.slLevel)}.`
+          : r.alreadyClosed ? `Structure SL for ${w.sym}: position already closed.`
+          : `❗ Structure SL hit on ${w.sym} (${main.name} closed ${fmt(last.c)} ${against} ${fmt(w.slLevel)}) but the exit FAILED: ${r.error}. Exit it yourself now.`);
+        if (!r.ok && !r.alreadyClosed) w.exiting = false;
+        continue;
+      }
+    }
+
     if (!w.announced) {
-      const lv = charts.map(ch => { const l = structureLevel([...ch.c, ch.c[ch.c.length - 1] || { t: now, o: 0, h: 0, l: 0, c: 0 }], w.dir, now); return l !== null ? `${ch.name} ${fmt(l)}` : null; }).filter(Boolean);
-      await D.notify(`👀 Watching ${w.sym} (${w.dir === 'bull' ? 'bullish' : 'bearish'} trade). I'll alert you if a 5-min candle closes ${against} the last swing ${w.dir === 'bull' ? 'low' : 'high'}${lv.length ? `: ${lv.join(', ')}` : ''}. Levels trail as new swings form. Alert only — your SL/TP are unchanged.`);
+      const lv = charts.filter(ch => !(w.slOn && ch === main)).map(ch => { const l = structureLevel([...ch.c, ch.c[ch.c.length - 1] || { t: now, o: 0, h: 0, l: 0, c: 0 }], w.dir, now); return l !== null ? `${ch.name} ${fmt(l)}` : null; }).filter(Boolean);
+      const slNote = w.slOn
+        ? (w.slLevel !== null ? ` Structure SL ON: the position is SOLD if a ${charts[0]?.name} 5-min candle closes ${against} ${fmt(w.slLevel)} (trails as new swings form; your option SL stays as a backstop).` : ' Structure SL ON — level set once the chart has enough candles.')
+        : ' Alert only — your SL/TP are unchanged.';
+      await D.notify(`👀 Watching ${w.sym} (${w.dir === 'bull' ? 'bullish' : 'bearish'} trade). ${lv.length ? `Reversal alert if a 5-min candle closes ${against} the last swing ${w.dir === 'bull' ? 'low' : 'high'}: ${lv.join(', ')}.` : ''}${slNote}`);
       w.announced = true;
     }
     for (const ch of charts) {
+      if (w.slOn && ch === main) continue;            // the Structure SL above handles (and exits on) this chart
       const hit = reversalHit(ch.c, w.dir, w.since);
       if (!hit) continue;
       const k = `${ch.name}|${hit.level}`;
@@ -169,11 +209,31 @@ async function tick(D: Deps) {
 }
 
 function publish() {
-  lastStatus = { running: true, at: Date.now(), watching: [...watched.values()].map(w => ({ sym: w.sym, dir: w.dir, under: w.under, since: w.since, alerts: [...w.alerted] })) };
+  lastStatus = { running: true, at: Date.now(), structureSl: lastSetting, watching: [...watched.values()].map(w => ({ sym: w.sym, dir: w.dir, under: w.under, since: w.since, alerts: [...w.alerted], structureSl: w.slOn, slLevel: w.slLevel })) };
 }
 
-export function registerReversalWatch(app: any, deps: Deps) {
+let lastSetting = true;
+function structureSlEnabled(D: Deps): boolean {
+  try {
+    const r: any = D.db?.prepare("SELECT value FROM reversal_watch_kv WHERE key = 'structure_sl'").get();
+    lastSetting = r ? r.value === '1' : true;        // on by default — he asked for it
+  } catch { }
+  return lastSetting;
+}
+
+export function registerReversalWatch(app: any, express: any, deps: Deps) {
   let busy = false;
+  try { deps.db?.exec('CREATE TABLE IF NOT EXISTS reversal_watch_kv (key TEXT PRIMARY KEY, value TEXT)'); } catch { }
+  structureSlEnabled(deps);
+  app.post('/api/reversal-watch/settings', express.json(), (req: any, res: any) => {
+    try {
+      const on = !!req.body?.structureSl;
+      deps.db.prepare("INSERT INTO reversal_watch_kv (key, value) VALUES ('structure_sl', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(on ? '1' : '0');
+      lastSetting = on;
+      // applies to positions opened from now on; ones already watched keep what they started with
+      res.json({ success: true, structureSl: on });
+    } catch (e: any) { res.status(500).json({ success: false, error: e?.message || String(e) }); }
+  });
   setInterval(async () => {
     if (busy) return; busy = true;
     try { await tick(deps); } catch (e: any) { lastStatus = { ...lastStatus, error: e?.message || String(e) }; }

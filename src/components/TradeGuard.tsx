@@ -49,6 +49,18 @@ function TradeGuardSheet({ st, onSaved, onClose }: { st: Status | null; onSaved:
   const r = st?.rules;
   const [f, setF] = useState<Rules>(r || { enabled: true, startTime: '10:00', maxTrades: 4, maxLoss: 3000 });
   const [busy, setBusy] = useState(false);
+  // Structure SL (server/reversal_watch.ts): its own switch, applies at once —
+  // turning it off is never a way around the guard, it only stops the auto-exit.
+  const [ssl, setSsl] = useState<boolean | null>(null);
+  useEffect(() => { fetch('/api/reversal-watch/status').then(r => r.json()).then(j => setSsl(j?.structureSl !== false)).catch(() => setSsl(null)); }, []);
+  const toggleSsl = async (on: boolean) => {
+    setSsl(on);
+    try {
+      const r = await fetch('/api/reversal-watch/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ structureSl: on }) });
+      const j = await r.json(); if (!j?.success) throw new Error(j?.error || 'Could not save');
+      toast.success(on ? 'Structure SL on for new trades' : 'Structure SL off — alerts only for new trades');
+    } catch (e: any) { setSsl(!on); toast.error(e?.message || 'Could not save'); }
+  };
   const save = async () => {
     setBusy(true);
     try {
@@ -104,6 +116,12 @@ function TradeGuardSheet({ st, onSaved, onClose }: { st: Status | null; onSaved:
             <label className="flex items-center justify-between text-sm gap-3">
               <span>Stop for the day at a loss of ₹</span>
               <input type="number" min={100} step={500} value={f.maxLoss} onChange={(e) => setF({ ...f, maxLoss: Number(e.target.value) })} className="w-24 h-9 px-2 rounded-md bg-background border border-border font-mono text-sm" />
+            </label>
+          </div>
+          <div className="border-t border-border pt-3">
+            <label className="flex items-center justify-between text-sm gap-3">
+              <span>Structure SL<span className="block text-[11px] text-muted-foreground">Sells the position when a 5-min NIFTY candle closes beyond the last swing against your trade (PE: above the last swing high · CE: below the last swing low). Trails as new swings form. Your option SL stays as a backstop.</span></span>
+              <input type="checkbox" disabled={ssl === null} checked={!!ssl} onChange={(e) => toggleSsl(e.target.checked)} className="w-5 h-5 accent-emerald-500 shrink-0" />
             </label>
           </div>
           <div className="text-[11px] text-muted-foreground leading-relaxed">
