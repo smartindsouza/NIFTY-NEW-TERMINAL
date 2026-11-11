@@ -9,6 +9,7 @@
 // Full mode (21) for OI as well. Previous close arrives in its own packet (6) and
 // is kept so ticks carry Zerodha's ohlc.close (= previous close) and % change.
 import WebSocket from 'ws';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import { dhanToken } from './dhan_service';
 import { SEG, SEG_NAME, decodeToken, encodeToken } from './dhan_kite_adapter';
 
@@ -55,7 +56,11 @@ export class DhanTicker {
     let token: string;
     try { token = await dhanToken(); } catch (e: any) { this.emit('error', e); return this.retry(); }
     const url = `wss://api-feed.dhan.co?version=2&token=${encodeURIComponent(token)}&clientId=${encodeURIComponent(process.env.DHAN_CLIENT_ID || '')}&authType=2`;
-    const ws = new WebSocket(url); this.ws = ws;
+    // Dhan's feed servers only accept the whitelisted IP: a direct connection from
+    // Railway timed out (11 Nov 2026), so the socket goes through the same fixed-IP
+    // proxy (HTTPS_PROXY, 64.227.131.47) as every other Dhan call.
+    const proxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '';
+    const ws = new WebSocket(url, proxy ? { agent: new HttpsProxyAgent(proxy) } : undefined); this.ws = ws;
     ws.on('open', () => { this.retryMs = 3000; this.send(15 + 2, [...this.subs]); this.emit('connect'); });
     ws.on('message', (data: Buffer) => this.onData(data));
     ws.on('error', (e) => this.emit('error', e));
