@@ -27,11 +27,29 @@ async function fetchHistory(interval: string, days: number, fut = false): Promis
   const spans: [number, number][] = [];
   while (left > 0) { const s = Math.min(chunk, left); spans.unshift([to - s * 86400000, to]); to -= s * 86400000; left -= s; }
   let token = 256265;
-  if (fut) { const fx = await getIndexFuturesTokens('NIFTY'); if (!fx?.length) throw new Error('no NIFTY futures contract found'); token = fx[0].token; }
+  // Kite serves the continuous (rolled) futures series for DAY candles only
+  // ("invalid interval for continuous data" intraday), so intraday futures come
+  // from the nearest live contracts one by one, each over its own listed life —
+  // roughly the last 2–3 months. Older intraday futures volume is not available
+  // from Zerodha.
+  if (fut) {
+    const fx = await getIndexFuturesTokens('NIFTY');
+    if (!fx?.length) throw new Error('no NIFTY futures contract found');
+    for (const c of fx.slice(0, 3)) {
+      for (const [f, t] of spans) {
+        try {
+          const hist = await kc.getHistoricalData(c.token, interval, toIst(f), toIst(t));
+          for (const k of hist || []) rows.push([new Date(k.date).getTime(), +k.open, +k.high, +k.low, +k.close, +(k.volume || 0), Date.parse(c.expiry)]);
+        } catch { }
+        await new Promise((r) => setTimeout(r, 400));
+      }
+    }
+    rows.sort((a, b) => a[0] - b[0] || a[6] - b[6]);
+    // keep the nearest expiry for each timestamp (the front month)
+    return rows.filter((r, i) => i === 0 || r[0] !== rows[i - 1][0]).map(r => r.slice(0, 6));
+  }
   for (const [f, t] of spans) {
-    const hist = fut
-      ? await kc.getHistoricalData(token, interval, toIst(f), toIst(t), true, false)    // continuous = rolled series
-      : await kc.getHistoricalData(token, interval, toIst(f), toIst(t));
+    const hist = await kc.getHistoricalData(token, interval, toIst(f), toIst(t));
     for (const c of hist || []) rows.push(fut ? [new Date(c.date).getTime(), +c.open, +c.high, +c.low, +c.close, +(c.volume || 0)] : [new Date(c.date).getTime(), +c.open, +c.high, +c.low, +c.close]);
     await new Promise((r) => setTimeout(r, 400));
   }
