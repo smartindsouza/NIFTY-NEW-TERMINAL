@@ -20,11 +20,33 @@ db.prepare(`
  *  same newest-row-for-today rule getKiteClient uses, so the two can never
  *  disagree about whose account is active. */
 export function getKiteUserId(): string | null {
+  // On Dhan there is no Zerodha login, and this id scopes the journal, exit rules
+  // and premium-exit rules to "the account that is logged in". It stays Martin's
+  // Zerodha user id, so his journal history, open rows and armed rules carry on
+  // across the broker move instead of starting an empty book owned by nobody.
+  if (activeBroker() === 'dhan') return dhanOwnerId();
   try {
     const today = new Date().toISOString().split('T')[0];
     const row = db.prepare('SELECT kite_user_id FROM kite_tokens WHERE token_date = ? ORDER BY id DESC LIMIT 1').get(today) as any;
     return row?.kite_user_id || null;
   } catch (e) { return null; }
+}
+
+// The owner id while on Dhan: remembered in dhan_kv once, taken from the newest
+// Zerodha login (kite_tokens is Martin's alone — his wife's account uses its own
+// login and never writes there, server/family_trader.ts). Remembered because
+// "Disconnect Session" on the Zerodha page deletes every kite_tokens row.
+function dhanOwnerId(): string | null {
+  try {
+    const r: any = db.prepare("SELECT value FROM dhan_kv WHERE key='owner_uid'").get();
+    if (r?.value) return String(r.value);
+  } catch { }
+  try {
+    const k: any = db.prepare("SELECT kite_user_id FROM kite_tokens WHERE kite_user_id IS NOT NULL AND kite_user_id != '' ORDER BY id DESC LIMIT 1").get();
+    const uid = k?.kite_user_id ? String(k.kite_user_id) : null;
+    if (uid) { try { db.prepare("INSERT INTO dhan_kv (key, value) VALUES ('owner_uid', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(uid); } catch { } }
+    return uid;
+  } catch { return null; }
 }
 
 // ---- Broker move to Dhan (11 Nov 2026) ----
@@ -36,13 +58,15 @@ export function getKiteUserId(): string | null {
 import { makeDhanKite } from './dhan_kite_adapter';
 import { dhanConfigured } from './dhan_service';
 let dhanKite: any = null;
+// Orders through Dhan are ON once Dhan is the broker (step 3, 11 Nov 2026), so
+// the app's Buy/Exit and every exit rule work there. dhan_kv orders_enabled = '0'
+// is an off switch. The Telegram auto-trader has its own extra hold on Dhan
+// (server/signal_trader.ts — LIVE must be chosen again on Dhan).
 function dhanOrdersEnabled(): boolean {
-  try { const r: any = db.prepare("SELECT value FROM dhan_kv WHERE key='orders_enabled'").get(); return r?.value === '1'; } catch { return false; }
+  try { const r: any = db.prepare("SELECT value FROM dhan_kv WHERE key='orders_enabled'").get(); return r?.value !== '0'; } catch { return true; }
 }
-let dhanOrderFns: { placeOrder?: (p: any) => Promise<any>; cancelOrder?: (id: string) => Promise<any> } = {};
-export function setDhanOrderFns(f: typeof dhanOrderFns) { dhanOrderFns = f; dhanKite = null; }
 export function getDhanKite() {
-  if (!dhanKite) dhanKite = makeDhanKite({ ordersEnabled: dhanOrdersEnabled, placeOrder: (p) => dhanOrderFns.placeOrder!(p), cancelOrder: (id) => dhanOrderFns.cancelOrder!(id) });
+  if (!dhanKite) dhanKite = makeDhanKite({ ordersEnabled: dhanOrdersEnabled });
   return dhanKite;
 }
 // A short trial on Dhan while the market is closed (set by /api/dhan/test?what=trial):

@@ -26,6 +26,7 @@ let fillMode: 'fill' | 'nofill' | 'reject' = 'fill';
 const SYM = 'NIFTY26O2722650CE', TOK = 111;
 let fundsAvail: number | null = 50000;
 let kiteIn = true;
+let brokerNow = 'kite';
 const kc: any = {
   async orderMargins(o: any[]) { return [{ total: o[0].price * o[0].quantity, charges: { total: 30 } }]; },
   async getMargins() { if (fundsAvail == null) throw new Error('rate limited'); return { equity: { available: { live_balance: fundsAvail } } }; },
@@ -76,6 +77,7 @@ registerSignalTrader(app, {
     return { ok: true };
   },
   kiteLoggedInToday: () => kiteIn, isTradingDay: (d) => d !== '2026-10-27',
+  broker: () => brokerNow,
 });
 // the existing exit engine, faked: SL touched → position flattened, rule DONE
 function tick(ltp: number) {
@@ -391,6 +393,31 @@ __test.setSettings({ lots: 1 });
   assert.equal(orders.filter((o: any) => o.partial).length, pb); ok('My Order trades are not split at TP1');
   tick(171); await settle(); assert.equal(rules.get(SYM).sl, 160); assert.ok(!rules.get(SYM).tpOn); ok('My Order keeps the classic ladder: TP2 → SL to TP1, no 2× target');
   await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
+  srv.close();
+}
+
+// 12g) DHAN HOLD (11 Nov 2026): LIVE chosen on Zerodha does not trade on Dhan
+// until LIVE is picked again while the app is on Dhan.
+{
+  const srv = app.listen(0); const port = (srv.address() as any).port;
+  const api = async (path: string, body?: any) => (await fetch(`http://127.0.0.1:${port}${path}`, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {})).json();
+  __test.setClockOffset(Date.UTC(2026, 9, 28, 7, 30) - Date.now());        // Wed 28 Oct 13:00 IST (a fresh day: no trades yet)
+  let r: any = await api('/api/signals/settings', { pin: '123456', mode: 'LIVE', lots: 2, maxTrades: 99 });
+  assert.equal(r.settings.liveBroker, 'kite'); ok('LIVE chosen on Zerodha is remembered as kite');
+  brokerNow = 'dhan';
+  r = await api('/api/signals/status'); assert.equal(r.broker, 'dhan'); assert.equal(r.dhanHold, true); ok('status reports the Dhan hold');
+  const before = orders.length; __test.clearPriceCache(); price.set(SYM, 147);
+  const ah = msg(CALL); await __test.handleMessage(ah, 'push'); await __test.handleMessage(msg(LEVELS, ah.id), 'push'); await settle(900);
+  assert.equal(orders.length, before); assert.equal(calls().at(-1).status, 'SKIPPED'); assert.match(calls().at(-1).reason, /pick Live again/);
+  ok('on Dhan with LIVE from Zerodha: channel call skipped, no order');
+  r = await api('/api/signals/settings', { pin: '123456', mode: 'LIVE' });
+  assert.equal(r.settings.liveBroker, 'dhan'); r = await api('/api/signals/status'); assert.equal(r.dhanHold, false);
+  __test.clearPriceCache(); price.set(SYM, 147);
+  const ag = msg(CALL); await __test.handleMessage(ag, 'push'); await __test.handleMessage(msg(LEVELS, ag.id), 'push'); await settle(900);
+  assert.ok(orders.length > before, 'an order after re-picking LIVE'); assert.equal(trades().at(-1).mode, 'LIVE');
+  ok('LIVE picked again on Dhan: the next call is bought');
+  await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
+  brokerNow = 'kite';
   srv.close();
 }
 

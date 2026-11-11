@@ -21,7 +21,8 @@
 import axios from 'axios';
 import crypto from 'crypto';
 
-const API = 'https://api.dhan.co/v2';
+// DHAN_API_BASE exists only for the order tests (a local fake Dhan); never set it in Railway.
+const API = (process.env.DHAN_API_BASE || 'https://api.dhan.co/v2').trim();
 let D: { db: any } | null = null;
 
 const env = (k: string) => (process.env[k] || '').trim();

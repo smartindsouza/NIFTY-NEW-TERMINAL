@@ -12,8 +12,9 @@
 //                     "NFO:<symbol>" or a token).
 //   getHistoricalData — Dhan intraday/daily candles; 3/10/30-min built from 1/5/15.
 //   getPositions/getOrders/getOrderHistory/getTrades/getMargins — read-only maps.
-//   placeOrder/cancelOrder/orderMargins — step 3, OFF until tested with Martin
-//                     (setting `orders_enabled` in dhan_kv).
+//   placeOrder/cancelOrder/modifyOrder/orderMargins — step 3 (11 Nov 2026):
+//                     Dhan /v2/orders and /margincalculator; dhan_kv
+//                     orders_enabled = '0' switches orders off.
 //
 // TOKENS. Zerodha's well-known index tokens are kept (256265 NIFTY 50, 260105
 // NIFTY BANK, …) because the code hardcodes them. Every other Dhan instrument
@@ -334,8 +335,112 @@ async function margins() {
 }
 
 // ---------------------------------------------------------------- the stand-in
-export function makeDhanKite(opts: { ordersEnabled: () => boolean; placeOrder?: (p: any) => Promise<any>; cancelOrder?: (id: string) => Promise<any> }) {
-  const notYet = (what: string) => async () => { throw new Error(`${what} through Dhan is not switched on yet (step 3 of the move — tested with you first).`); };
+// ---------------------------------------------------------------- orders (step 3, 11 Nov 2026)
+// The app only ever sends 'regular' LIMIT orders (an entry priced at the live
+// price ± a buffer, or a flattening exit), in Zerodha's shape. They are turned
+// into Dhan's POST /v2/orders here. Dhan takes F&O quantity in UNITS (one NIFTY
+// lot = 65), the same as Zerodha, so callers' quantities pass through — but a
+// quantity that is not a whole number of lots is refused here rather than at the
+// exchange, since a lots-vs-units mix-up is the classic first-order mistake on
+// Dhan (DH-905 threads on Dhan's forum).
+//
+// Order calls must leave from the whitelisted static IP: dhanCall goes through
+// axios and HTTPS_PROXY (64.227.131.47), which is the IP set on Dhan.
+const PROD_OUT: Record<string, string> = { MIS: 'INTRADAY', NRML: 'MARGIN', CNC: 'CNC', INTRADAY: 'INTRADAY', MARGIN: 'MARGIN' };
+const TYPE_OUT: Record<string, string> = { LIMIT: 'LIMIT', MARKET: 'MARKET', SL: 'STOP_LOSS', 'SL-M': 'STOP_LOSS_MARKET' };
+const clientId = () => (process.env.DHAN_CLIENT_ID || '').trim();
+const orderPace = pacer(120);   // Dhan allows 25 order calls a second; this is far inside it
+// correlationId: ≤ 30 chars of [A-Za-z0-9 _-]. Unique per order, so an order
+// whose reply was lost can be found again (GET /orders/external/{id}).
+const corrId = (tag?: any) => `${String(tag || 'app').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 12) || 'app'}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+export function buildDhanOrder(p: any, row: Row, cid: string, corr: string) {
+  const qty = Math.round(Number(p.quantity));
+  if (!(qty > 0)) throw new Error(`Dhan order: bad quantity ${p.quantity}`);
+  if (row.lot_size > 1 && qty % row.lot_size !== 0) throw new Error(`Dhan order: quantity ${qty} is not a whole number of lots (lot size ${row.lot_size} for ${row.tradingsymbol})`);
+  const orderType = TYPE_OUT[String(p.order_type || 'LIMIT').toUpperCase()];
+  if (!orderType) throw new Error(`Dhan order: order type ${p.order_type} not supported`);
+  const productType = PROD_OUT[String(p.product || 'MIS').toUpperCase()];
+  if (!productType) throw new Error(`Dhan order: product ${p.product} not supported`);
+  const side = String(p.transaction_type || '').toUpperCase();
+  if (side !== 'BUY' && side !== 'SELL') throw new Error(`Dhan order: transaction type ${p.transaction_type} not supported`);
+  const price = orderType === 'MARKET' || orderType === 'STOP_LOSS_MARKET' ? 0 : Number(p.price);
+  if (orderType !== 'MARKET' && orderType !== 'STOP_LOSS_MARKET' && !(price > 0)) throw new Error(`Dhan order: a ${orderType} order needs a price`);
+  return {
+    dhanClientId: cid, correlationId: corr, transactionType: side, exchangeSegment: SEG_NAME[row._seg], productType, orderType,
+    validity: String(p.validity || 'DAY').toUpperCase() === 'IOC' ? 'IOC' : 'DAY', securityId: String(row._id), quantity: qty,
+    disclosedQuantity: 0, price: Math.round(price * 100) / 100, triggerPrice: Math.round((Number(p.trigger_price) || 0) * 100) / 100,
+    afterMarketOrder: false, amoTime: '', boProfitValue: 0, boStopLossValue: 0,
+  };
+}
+
+async function placeOrderDhan(variety: any, p: any): Promise<{ order_id: string }> {
+  if (variety && variety !== 'regular') throw new Error(`Dhan: '${variety}' orders are not supported (only regular)`);
+  await ensureInstruments();
+  const row = resolve(p.instrument_token || `${p.exchange || 'NFO'}:${p.tradingsymbol}`);
+  if (!row) throw new Error(`Dhan: no instrument ${p.exchange || 'NFO'}:${p.tradingsymbol}`);
+  const corr = corrId(p.tag);
+  const body = buildDhanOrder(p, row, clientId(), corr);
+  let r: any;
+  try {
+    r = await orderPace(() => dhanCall('POST', '/orders', body));
+  } catch (e: any) {
+    // No HTTP status = the reply never arrived (timeout, dropped connection). The
+    // order may still have reached Dhan, so look it up by its correlation id
+    // before reporting a failure — otherwise a live order could be reported as
+    // "rejected" and the caller would never manage it.
+    if (e?.status) throw new Error(`Dhan refused the order: ${e.message}`);
+    for (const wait of [1000, 2500]) {
+      await new Promise(res => setTimeout(res, wait));
+      try { const o = await dhanCall('GET', `/orders/external/${encodeURIComponent(corr)}`); const one = Array.isArray(o) ? o[0] : o; if (one?.orderId) return { order_id: String(one.orderId) }; } catch { }
+    }
+    throw new Error(`Dhan order: no reply and not found afterwards (${e?.message || e}) — check the Dhan app`);
+  }
+  const id = r?.orderId != null ? String(r.orderId) : '';
+  if (!id) throw new Error(`Dhan order: no order id in reply ${JSON.stringify(r).slice(0, 200)}`);
+  if (r.orderStatus === 'REJECTED') {
+    let why = '';
+    try { const o = await dhanCall('GET', `/orders/${encodeURIComponent(id)}`); why = (Array.isArray(o) ? o[0] : o)?.omsErrorDescription || ''; } catch { }
+    throw Object.assign(new Error(`Dhan rejected the order${why ? `: ${why}` : ''}`), { order_id: id });
+  }
+  console.log(`[dhan] order ${id} ${body.transactionType} ${body.quantity} ${row.tradingsymbol} ${body.orderType}${body.price ? ' @ ' + body.price : ''} ${body.productType} -> ${r.orderStatus}`);
+  return { order_id: id };
+}
+async function cancelOrderDhan(_variety: any, id: string) {
+  const r = await orderPace(() => dhanCall('DELETE', `/orders/${encodeURIComponent(String(id))}`));
+  return { order_id: String(r?.orderId ?? id) };
+}
+async function modifyOrderDhan(_variety: any, id: string, p: any) {
+  const cur = (await orderHistory(String(id)))[0];
+  const orderType = TYPE_OUT[String(p.order_type || cur?.order_type || 'LIMIT').toUpperCase()] || 'LIMIT';
+  const body = { dhanClientId: clientId(), orderId: String(id), orderType, quantity: Math.round(Number(p.quantity ?? cur?.quantity)),
+    price: Number(p.price ?? cur?.price) || 0, triggerPrice: Number(p.trigger_price ?? cur?.trigger_price) || 0, disclosedQuantity: 0,
+    validity: String(p.validity || 'DAY').toUpperCase() === 'IOC' ? 'IOC' : 'DAY' };
+  const r = await orderPace(() => dhanCall('PUT', `/orders/${encodeURIComponent(String(id))}`, body));
+  return { order_id: String(r?.orderId ?? id) };
+}
+// Zerodha's orderMargins in its shape ([{ total, charges: { total } }]) from Dhan's
+// margin calculator. A MARKET/zero price is priced at the live LTP — Dhan would
+// otherwise compute an option buy's margin as nil.
+async function orderMarginsDhan(list: any[]) {
+  await ensureInstruments();
+  const out: any[] = [];
+  for (const p of list || []) {
+    const row = resolve(`${p.exchange || 'NFO'}:${p.tradingsymbol}`);
+    if (!row) { out.push({ total: 0, charges: { total: 0 } }); continue; }
+    let price = Number(p.price) || 0;
+    if (!(price > 0)) { try { const q = await marketfeed('ltp', [`${row.exchange}:${row.tradingsymbol}`]); price = Number(Object.values<any>(q)[0]?.last_price) || 0; } catch { } }
+    const m = await dhanCall('POST', '/margincalculator', { dhanClientId: clientId(), exchangeSegment: SEG_NAME[row._seg], transactionType: String(p.transaction_type || 'BUY').toUpperCase(),
+      quantity: Math.round(Number(p.quantity)), productType: PROD_OUT[String(p.product || 'MIS').toUpperCase()] || 'INTRADAY', securityId: String(row._id), price, triggerPrice: Number(p.trigger_price) || 0 });
+    out.push({ total: Number(m?.totalMargin) || 0, span: Number(m?.spanMargin) || 0, exposure: Number(m?.exposureMargin) || 0,
+      option_premium: 0, charges: { total: Number(m?.brokerage) || 0 }, _dhan: m });
+  }
+  return out;
+}
+
+export function makeDhanKite(opts: { ordersEnabled: () => boolean }) {
+  const notYet = (what: string) => async () => { throw new Error(`${what}: Dhan login only — Zerodha is not in use.`); };
+  const off = () => { throw new Error('Orders through Dhan are switched off (dhan_kv orders_enabled = 0).'); };
   return {
     broker: 'dhan',
     get access_token() { return dhanConfigured() ? 'dhan' : null; },
@@ -346,8 +451,9 @@ export function makeDhanKite(opts: { ordersEnabled: () => boolean; placeOrder?: 
     getOHLC: (keys: any) => marketfeed('quote', ([] as any[]).concat(keys)),
     getHistoricalData: historical,
     getPositions: positions, getOrders: orders, getOrderHistory: orderHistory, getTrades: trades, getMargins: margins,
-    placeOrder: async (variety: any, p: any) => { if (!opts.ordersEnabled() || !opts.placeOrder) return notYet('Placing orders')(); return opts.placeOrder({ variety, ...p }); },
-    cancelOrder: async (_v: any, id: string) => { if (!opts.ordersEnabled() || !opts.cancelOrder) return notYet('Cancelling orders')(); return opts.cancelOrder(id); },
-    orderMargins: async () => [],
+    placeOrder: async (variety: any, p: any) => { if (!opts.ordersEnabled()) off(); return placeOrderDhan(variety, p); },
+    cancelOrder: async (variety: any, id: string) => { if (!opts.ordersEnabled()) off(); return cancelOrderDhan(variety, id); },
+    modifyOrder: async (variety: any, id: string, p: any) => { if (!opts.ordersEnabled()) off(); return modifyOrderDhan(variety, id, p); },
+    orderMargins: orderMarginsDhan,
   };
 }

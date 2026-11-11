@@ -33,6 +33,7 @@ import { registerTriggers, armedTriggerTokens, onTickForTriggers } from './serve
 // Telegram channel calls → automatic 1-lot entries with the message's SL (23 Oct 2026).
 import { registerReversalWatch } from './server/reversal_watch';
 import { registerDhan, dhanConfigured } from './server/dhan_service';
+import { buildDhanOrder, instrumentByKey } from './server/dhan_kite_adapter';
 import { activeBroker, getDhanKite, startDhanTrial, endDhanTrial } from './server/kite_service';
 import { registerChartRef } from './server/chart_ref';
 import { lastUs30Source } from './server/us30';
@@ -571,7 +572,7 @@ async function closePositionBySymbol(tradingsymbol: string, reason: string = 'MA
     try { positions = await kc.getPositions(); } catch (e: any) { return { ok: false, error: 'Could not read positions: ' + (e?.message || e) }; }
     const net = (positions && positions.net) || [];
     const pos = net.find((p: any) => p.tradingsymbol === tradingsymbol && p.quantity !== 0);
-    if (!pos) return { ok: false, alreadyClosed: true, error: `No open position found for ${tradingsymbol} on Zerodha (it may already be closed).` };
+    if (!pos) return { ok: false, alreadyClosed: true, error: `No open position found for ${tradingsymbol} on ${activeBroker() === 'dhan' ? 'Dhan' : 'Zerodha'} (it may already be closed).` };
     const qty = Math.abs(pos.quantity);
     const side = pos.quantity > 0 ? 'SELL' : 'BUY'; // long -> sell to close; short -> buy to close
     const exitResult = await placeKiteLimitExit({ exchange: pos.exchange || 'NFO', tradingsymbol, qty, product: pos.product || 'NRML', side });
@@ -3521,7 +3522,22 @@ setInterval(() => {
         const [p, m, o] = await Promise.all([k.getPositions(), k.getMargins(), k.getOrders()]);
         return res.json({ positions: p.net.length, funds: m.equity.net, orders: o.length });
       }
-      res.status(400).json({ error: 'what = broker|instruments|quote|hist|account' });
+      // Step 3 check (11 Nov 2026): the exact Dhan order body for ONE lot of the
+      // nearest NIFTY option at a strike (default: nearest 50 to spot), plus Dhan's
+      // margin for it. Builds the order, NEVER sends it — no order endpoint is called.
+      if (what === 'order-dry') {
+        const opt = await findNearestExpiryOption('NIFTY', Number(req.query.strike) || Math.round((latestSpot || 25000) / 50) * 50,
+          String(req.query.type || 'CE').toUpperCase() === 'PE' ? 'PE' : 'CE', new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10));
+        if (!opt) return res.status(404).json({ error: 'no contract' });
+        await k.getInstruments('NFO');
+        const row: any = instrumentByKey(`${opt.exchange}:${opt.tradingsymbol}`);
+        if (!row) return res.status(404).json({ error: `Dhan has no ${opt.exchange}:${opt.tradingsymbol}` });
+        const price = Number(req.query.price) || 100;
+        const body = buildDhanOrder({ transaction_type: 'BUY', quantity: opt.lot_size, product: 'MIS', order_type: 'LIMIT', price, validity: 'DAY' }, row, '(client id)', 'dry-run');
+        const mg = await k.orderMargins([{ exchange: opt.exchange, tradingsymbol: opt.tradingsymbol, transaction_type: 'BUY', product: 'MIS', order_type: 'LIMIT', quantity: opt.lot_size, price }]);
+        return res.json({ contract: opt.tradingsymbol, expiry: opt.expiry, lot: opt.lot_size, wouldSend: body, margin: mg[0]?.total, charges: mg[0]?.charges?.total, sent: false });
+      }
+      res.status(400).json({ error: 'what = broker|instruments|quote|hist|account|order-dry' });
     } catch (e: any) { res.status(500).json({ error: e?.message || String(e) }); }
   });
   // Reversal watch (11 Nov 2026): alert-only structure watch on every open option
@@ -3600,7 +3616,10 @@ setInterval(() => {
     guardEntryBlock,
     // The 09:10 readiness message: today's real (not simulated) Kite session and
     // the NSE calendar's trading days.
+    broker: () => activeBroker(),
     kiteLoggedInToday: () => {
+      // On Dhan "logged in" means Dhan is set up; it logs itself in by TOTP.
+      if (activeBroker() === 'dhan') return dhanConfigured();
       try {
         const row: any = db.prepare('SELECT access_token, token_date FROM kite_tokens ORDER BY id DESC LIMIT 1').get();
         return !!row && row.access_token !== 'simulated_session_token' && row.token_date === new Date().toISOString().split('T')[0];
@@ -4157,7 +4176,7 @@ setInterval(() => {
             exchange_order_id: exchangeOrderId,
             status,
             rawResponse: orderResponse,
-            message: `Placed order ${orderId} successfully on Kite.` 
+            message: `Placed order ${orderId} successfully on ${activeBroker() === 'dhan' ? 'Dhan' : 'Kite'}.` 
           };
           console.log(`[Order API] POST /api/orders success response:`, JSON.stringify(responsePayload));
           recordJournalEntry(false, false);

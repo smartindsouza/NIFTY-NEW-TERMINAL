@@ -50,6 +50,8 @@ export interface SignalDeps {
   journalOpen: (o: any) => void;
   // the 09:10 readiness message
   kiteLoggedInToday: () => boolean;
+  // Which broker the app is on ('kite' | 'dhan') — the Dhan hold below.
+  broker?: () => string;
   isTradingDay: (dateIst: string) => boolean;
 }
 
@@ -57,6 +59,8 @@ type Mode = 'OFF' | 'PRACTICE' | 'LIVE';
 interface Settings {
   mode: Mode; lots: number | 'MAX'; maxLotsCap: number; maxTrades: number; allowAbove: number; waitMin: number;
   lastEntry: string; squareOff: string; channelId: string | null; channelTitle: string | null;
+  // The broker the app was on when LIVE was last chosen (see heldOnDhan).
+  liveBroker?: string;
 }
 const DEFAULTS: Settings = {
   mode: 'OFF', lots: 2, maxLotsCap: 20, maxTrades: 3, allowAbove: 2, waitMin: 10,
@@ -329,6 +333,16 @@ function prepareContract(callId: number): Promise<boolean> {
 function setCall(id: number, status: string, reason: string | null = null) {
   D.db.prepare('UPDATE signal_calls SET status=?, reason=?, updated_at=? WHERE id=?').run(status, reason, Date.now(), id);
 }
+// DHAN HOLD (11 Nov 2026). Auto-trade was set to LIVE while the app traded on
+// Zerodha. The move to Dhan switches orders to a different broker overnight, and
+// Martin's plan is to prove Dhan orders with one manual lot first. So channel
+// trades do not go LIVE on Dhan until LIVE is chosen again while the app is on
+// Dhan — re-picking LIVE is the go-ahead, no new switch to learn. Until then the
+// call is skipped with the reason, and the 09:10 message says so. "My Order"
+// (his own manual order through this engine) is not held.
+const heldOnDhan = () => D?.broker?.() === 'dhan' && settings.liveBroker !== 'dhan';
+const brokerName = () => (D?.broker?.() === 'dhan' ? 'Dhan' : 'Zerodha');
+
 async function skip(id: number, reason: string, quiet = false) {
   setCall(id, 'SKIPPED', reason);
   const c: any = D.db.prepare('SELECT * FROM signal_calls WHERE id = ?').get(id);
@@ -357,8 +371,9 @@ async function completeCall(callId: number, lv: ParsedLevels, levelsMsgId: numbe
   if (t.mins > hm(settings.lastEntry)) return skip(callId, `after the last entry time (${settings.lastEntry})`);
   if (tradesToday() >= settings.maxTrades) return skip(callId, `already ${settings.maxTrades} trades today`);
   if (settings.mode === 'LIVE') {
+    if (heldOnDhan()) return skip(callId, 'LIVE was chosen on Zerodha — on Dhan, channel trades wait until you pick Live again in the app (after your 1-lot test)');
     const kc = D.getKiteClient();
-    if (!kc || !kc.access_token) return skip(callId, 'Zerodha is not logged in today');
+    if (!kc || !kc.access_token) return skip(callId, `${brokerName()} is not logged in today`);
   }
   const ready = await prepareContract(callId);
   if (!ready) return skip(callId, `could not find the ${call.underlying} ${call.strike} ${call.optionType} contract`);
@@ -502,6 +517,7 @@ async function enter(c: any, ltp: number, cap: number) {
   setCall(c.id, 'ORDERED');
   let fillPx = ltp, filledQty = qty, orderId: string | null = null;
 
+  if (mode === 'LIVE' && !manual && heldOnDhan()) return skip(c.id, 'LIVE was chosen on Zerodha — on Dhan, channel trades wait until you pick Live again in the app (after your 1-lot test)');
   if (mode === 'LIVE') {
     const kc = D.getKiteClient();
     try {
@@ -719,10 +735,11 @@ function readinessTick(t: ReturnType<typeof istParts>) {
   if (!tgLoggedIn) problems.push('Telegram is not logged in (Setup, step 2)');
   else if (!channelEntity) problems.push(`the channel "${settings.channelTitle || '?'}" could not be opened`);
   let kiteOk = false; try { kiteOk = D.kiteLoggedInToday(); } catch { }
-  if (settings.mode === 'LIVE' && !kiteOk) problems.push('Zerodha is not logged in');
+  if (settings.mode === 'LIVE' && !kiteOk) problems.push(`${brokerName()} is not logged in`);
+  if (settings.mode === 'LIVE' && heldOnDhan()) problems.push('LIVE was chosen on Zerodha — on Dhan, channel trades are held until you pick Live again in the app (after your 1-lot test)');
   const size = settings.lots === 'MAX' ? `max lots (up to ${settings.maxLotsCap})` : `${settings.lots} lot${settings.lots === 1 ? '' : 's'}`;
   if (problems.length) void notify(`⚠️ Auto-trade is ${settings.mode} but NOT ready:\n• ${problems.join('\n• ')}`);
-  else void notify(`✅ Auto-trade ready (${settings.mode}): reading "${settings.channelTitle}", Zerodha logged in, ${size}, max ${settings.maxTrades} trades.`);
+  else void notify(`✅ Auto-trade ready (${settings.mode}): reading "${settings.channelTitle}", ${brokerName()} logged in, ${size}, max ${settings.maxTrades} trades.`);
 }
 
 async function housekeepingInner() {
@@ -1008,7 +1025,7 @@ export function registerSignalTrader(app: any, deps: SignalDeps) {
       .map((t: any) => ({ ...t, ladder: (() => { try { return JSON.parse(t.ladder); } catch { return null; } })() }));
     const events = D.db.prepare('SELECT at, text FROM signal_events WHERE day = ? ORDER BY id DESC LIMIT 60').all(day);
     res.json({
-      settings, pinConfigured: !!process.env.SIGNALS_PIN,
+      settings, pinConfigured: !!process.env.SIGNALS_PIN, broker: D?.broker?.() || 'kite', dhanHold: heldOnDhan(),
       telegram: { apiConfigured: !!apiCreds(), status: tgStatus, loggedIn: tgLoggedIn, me: tgMe?.name || null, awaitingCode: !!pendingLogin,
         channelOpen: !!channelEntity, channelOpenedAt: channelResolvedAt || null, lastUpdateAt: lastUpdateAt || null, lastChannelPushAt: lastChannelPushAt || null },
       bot: { configured: !!BOT(), username: botUser, linked: !!getKV('signals_bot_chat') },
@@ -1028,6 +1045,7 @@ export function registerSignalTrader(app: any, deps: SignalDeps) {
     if (b.mode && ['OFF', 'PRACTICE', 'LIVE'].includes(b.mode)) {
       if (b.mode !== 'OFF' && !settings.channelId) return res.json({ ok: false, error: 'Pick the channel first.' });
       settings.mode = b.mode;
+      if (b.mode === 'LIVE') settings.liveBroker = D?.broker?.() || 'kite';
     }
     if (b.lots !== undefined) settings.lots = String(b.lots).toUpperCase() === 'MAX' ? 'MAX' : Math.round(num(b.lots, MIN_LOTS, 25, settings.lots === 'MAX' ? MIN_LOTS : settings.lots));
     if (b.maxLotsCap !== undefined) settings.maxLotsCap = Math.round(num(b.maxLotsCap, 1, 25, settings.maxLotsCap));
