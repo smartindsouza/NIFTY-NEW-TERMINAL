@@ -44,6 +44,9 @@ export interface SignalDeps {
   exitPosition: (tradingsymbol: string, reason: string) => Promise<{ ok: boolean; error?: string; alreadyClosed?: boolean }>;
   // TP1 half-booking (2 Nov 2026): sell part of the position, capped at what is open.
   exitPartial?: (tradingsymbol: string, qty: number, reason: string) => Promise<{ ok: boolean; error?: string }>;
+  // Trade guard (11 Nov 2026, server/trade_guard.ts): Martin's own daily rules.
+  // Applies to MY ORDER entries only — Telegram channel trades keep their own limits.
+  guardEntryBlock?: (opts?: { ignoreTime?: boolean }) => Promise<string | null>;
   journalOpen: (o: any) => void;
   // the 09:10 readiness message
   kiteLoggedInToday: () => boolean;
@@ -495,6 +498,7 @@ async function enter(c: any, ltp: number, cap: number) {
   const qty = lots * c.lot_size;
   const mode: Mode = c.mode === 'LIVE' ? 'LIVE' : 'PRACTICE';
   if (!manual && tradesToday() >= settings.maxTrades) return skip(c.id, `already ${settings.maxTrades} trades today`);
+  if (manual && D.guardEntryBlock) { const g = await D.guardEntryBlock(); if (g) return skip(c.id, g); }
   setCall(c.id, 'ORDERED');
   let fillPx = ltp, filledQty = qty, orderId: string | null = null;
 
@@ -1156,6 +1160,9 @@ export function registerSignalTrader(app: any, deps: SignalDeps) {
       if (bad) return res.json({ ok: false, error: bad });
       if (istParts().mins > hm(settings.lastEntry)) return res.json({ ok: false, error: `It is past the last entry time (${settings.lastEntry}).` });
       if (r.ltp == null) return res.json({ ok: false, error: 'No live price for this option yet — try again in a moment.' });
+      // Arming before the guard's start time is fine (it can fire after); a day
+      // already at its trade or loss limit is refused now rather than at fill time.
+      if (D.guardEntryBlock) { const g = await D.guardEntryBlock({ ignoreTime: true }); if (g) return res.json({ ok: false, error: g, guard: true }); }
       const busy = D.db.prepare(`SELECT 1 FROM signal_calls c LEFT JOIN signal_trades t ON t.call_id = c.id
         WHERE c.tradingsymbol = ? AND (c.status IN ('WATCHING','ORDERED') OR t.status IN ('OPEN','MANUAL','CLOSING'))`).get(r.opt.tradingsymbol);
       if (busy) return res.json({ ok: false, error: `${r.opt.tradingsymbol} already has an order or open trade here.` });

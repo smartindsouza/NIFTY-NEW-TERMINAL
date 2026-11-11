@@ -3,6 +3,7 @@ import { useTodayBias, isRecord as isBiasRecord, istToday as biasIstToday, BIAS_
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
 import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search, ChartNoAxesCombined, TrendingUp, Star, Bell, ClipboardPen } from "lucide-react";
 import MyOrderModal from "../components/MyOrderModal";
+import { TradeGuardButton } from "../components/TradeGuard";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { useUserSettings, useResolvedTheme } from "../hooks/useUserSettings";
@@ -13942,6 +13943,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             <ClipboardPen size={17} />
           </button>
           ) : null}
+          {/* Trade guard (11 Nov 2026): one shield per screen — on the single chart,
+              or on the spot pane in split view, never twice. */}
+          {!isReferenceChart && paneRole !== 'option' && (
+            <TradeGuardButton className="md:order-2" />
+          )}
           {(
           <div className={`ml-auto md:ml-0 ${isReferenceChart ? 'hidden' : 'flex'} ${sharedHidden} items-center justify-center gap-2 h-9 w-9 shrink-0 md:order-2 cursor-pointer rounded-md border border-0 transition-colors ${quickTradeEnabled ? "bg-primary/20" : "bg-muted/40"}`} onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled for 1 minute' : 'Quick Trade disabled', { id: 'qt-toggle' }); } catch (e) {} }} title="Quick Trade — switches itself off 1 minute after it is turned on">
              {/* Icon on both platforms now; the desktop label and toggle are gone.

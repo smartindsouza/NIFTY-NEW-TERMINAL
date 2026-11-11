@@ -31,6 +31,7 @@ import biasCheck from './server/bias.cjs';
 const { createBiasRouter } = biasCheck as any;
 import { registerTriggers, armedTriggerTokens, onTickForTriggers } from './server/triggers';
 // Telegram channel calls → automatic 1-lot entries with the message's SL (23 Oct 2026).
+import { registerTradeGuard, guardEntryBlock } from './server/trade_guard';
 import { registerSignalTrader, signalOnTick, signalTokens, signalNoteManualRearm, signalManages, signalManagedLevels, signalNotify } from './server/signal_trader';
 import { registerFamilyTrader, familyOnTick, familyTokens } from './server/family_trader';
 import { currentLeg, needsLegAverage } from './server/leg_average';
@@ -3454,6 +3455,7 @@ setInterval(() => {
 
   // Read-only market snapshot for the external 09:32 IST analysis (SNAPSHOT_API_KEY).
   registerMarketSnapshot(app);
+  try { registerTradeGuard(app, express, { db, getKiteClient }); } catch (e) { console.error('[guard] failed to start — orders are unaffected', e); }
   // Today's Bias: the 09:33 IST note posted by the scheduled task (same key).
   registerBias(app, db);
 
@@ -3513,6 +3515,7 @@ setInterval(() => {
     journalOpen: (o) => journalOpenTrade(o),
     // TP1 half-booking: the same capped partial exit the trailing engine uses.
     exitPartial: (tradingsymbol, qty, reason) => closePartialBySymbol(tradingsymbol, qty, reason),
+    guardEntryBlock,
     // The 09:10 readiness message: today's real (not simulated) Kite session and
     // the NSE calendar's trading days.
     kiteLoggedInToday: () => {
@@ -3964,6 +3967,15 @@ setInterval(() => {
 
       if (!tradingsymbol || !quantity) {
         return res.status(400).json({ success: false, error: "Missing tradingsymbol or quantity" });
+      }
+
+      // TRADE GUARD (11 Nov 2026, server/trade_guard.ts). Only an OPENING order —
+      // the ticket and Quick Trade send journal:true; Exit All and every exit path
+      // do not — and only a real one (test mode places nothing). Exits are never
+      // checked, so the guard can never trap him in a position.
+      if (req.body?.journal === true && !test_mode) {
+        const g = await guardEntryBlock();
+        if (g) return res.status(403).json({ success: false, guard: true, error: g });
       }
 
       // Kite Connect rejects plain MARKET orders ("Market orders without market
