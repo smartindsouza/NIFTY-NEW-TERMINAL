@@ -27,6 +27,12 @@
 // position. The level only ever tightens as new swings form, and each move is
 // announced. The option-premium SL/TP keep running as a backstop, and Telegram
 // auto-trades (their own ladder) are never touched. A wick through does not exit.
+//
+// TIMEFRAME (11 Nov 2026, his choice of the two): the Structure SL reads 5-min or
+// 15-min swings. Backtest the same evening — his 56 real entries: 5-min −489 pts,
+// 15-min +1,442 (his actual exits −176); 2 years of momentum entries: 5-min +849,
+// 15-min +3,325, positive in both years. 15-min is the default; the SL sits
+// further away (typically ~30–60 NIFTY points), so each loss is bigger.
 
 type C = { t: number; o: number; h: number; l: number; c: number };   // t = candle start, ms
 export type Dir = 'bull' | 'bear';
@@ -99,7 +105,7 @@ type Deps = {
   getBseIndexToken: (name: string) => Promise<number | null>;
   notify: (text: string) => Promise<any> | any;
 };
-type Watched = { sym: string; qty: number; dir: Dir; under: 'NIFTY' | 'BANKNIFTY' | 'SENSEX'; since: number; alerted: Set<string>; announced: boolean; slLevel: number | null; slOn: boolean; exiting: boolean };
+type Watched = { sym: string; qty: number; dir: Dir; under: 'NIFTY' | 'BANKNIFTY' | 'SENSEX'; since: number; alerted: Set<string>; announced: boolean; slLevel: number | null; slOn: boolean; slTf: 5 | 15; exiting: boolean };
 const watched = new Map<string, Watched>();
 let lastCandleCheck = 0;
 let lastStatus: any = { running: false, watching: [] };
@@ -113,20 +119,20 @@ function underlyingOf(sym: string): Watched['under'] | null {
   return null;
 }
 
-async function candlesToday(kc: any, token: number, now: number): Promise<C[]> {
+async function candlesToday(kc: any, token: number, now: number, tf: 5 | 15 = 5): Promise<C[]> {
   const { date } = istParts(now);
   const open = Date.parse(`${date}T09:15:00+05:30`);
-  const raw: any[] = (await kc.getHistoricalData(token, '5minute', kiteTime(open), kiteTime(now))) || [];
+  const raw: any[] = (await kc.getHistoricalData(token, tf === 15 ? '15minute' : '5minute', kiteTime(open), kiteTime(now))) || [];
   return raw.map(r => ({ t: new Date(r.date).getTime(), o: +r.open, h: +r.high, l: +r.low, c: +r.close }))
-    .filter(x => x.t >= open && x.t + 5 * 60000 <= now);                  // completed candles only
+    .filter(x => x.t >= open && x.t + tf * 60000 <= now);                 // completed candles only
 }
 
 async function tick(D: Deps) {
   const now = Date.now();
   const { day, mins } = istParts(now);
-  if (day === 0 || day === 6 || mins < 9 * 60 + 15 || mins > 15 * 60 + 35) { lastStatus = { running: true, market: 'closed', watching: [] }; return; }
+  if (day === 0 || day === 6 || mins < 9 * 60 + 15 || mins > 15 * 60 + 35) { lastStatus = { running: true, market: 'closed', structureSl: lastSetting, timeframe: lastTf, watching: [] }; return; }
   const kc = D.getKiteClient();
-  if (!kc || !kc.access_token) { lastStatus = { running: true, error: 'Zerodha not logged in', watching: [] }; return; }
+  if (!kc || !kc.access_token) { lastStatus = { running: true, error: 'Zerodha not logged in', structureSl: lastSetting, timeframe: lastTf, watching: [] }; return; }
 
   // 1) Which positions are open — the same ones the active trade card shows.
   const pos: any[] = ((await kc.getPositions())?.net || []).filter((p: any) => Number(p.quantity) !== 0 && (p.exchange === 'NFO' || p.exchange === 'BFO'));
@@ -137,7 +143,7 @@ async function tick(D: Deps) {
     if (!dir || !under) continue;
     const key = `${sym}|${dir}`;
     live.add(key);
-    if (!watched.has(key)) watched.set(key, { sym, qty, dir, under, since: now, alerted: new Set(), announced: false, slLevel: null, slOn: structureSlEnabled(D) && !(D.isAutoTrade?.(sym)), exiting: false });
+    if (!watched.has(key)) watched.set(key, { sym, qty, dir, under, since: now, alerted: new Set(), announced: false, slLevel: null, slOn: structureSlEnabled(D) && !(D.isAutoTrade?.(sym)), slTf: lastTf, exiting: false });
     else watched.get(key)!.qty = qty;
   }
   for (const k of [...watched.keys()]) if (!live.has(k)) watched.delete(k);   // closed → stop watching
@@ -152,13 +158,16 @@ async function tick(D: Deps) {
   const tokens: Record<string, number | null> = { NIFTY: 256265, BANKNIFTY: 260105, SENSEX: null };
   if ([...watched.values()].some(w => w.under === 'SENSEX')) tokens.SENSEX = await D.getBseIndexToken('SENSEX').catch(() => null);
   const gift = [...watched.values()].some(w => w.under === 'NIFTY') ? await D.getGift().catch(() => null) : null;
-  const cache = new Map<number, C[]>();
-  const get = async (t: number) => { if (!cache.has(t)) cache.set(t, await candlesToday(kc, t, now).catch(() => [])); return cache.get(t)!; };
+  const cache = new Map<string, C[]>();
+  const get = async (t: number, tf: 5 | 15 = 5) => { const k = `${t}|${tf}`; if (!cache.has(k)) cache.set(k, await candlesToday(kc, t, now, tf).catch(() => [])); return cache.get(k)!; };
 
   for (const w of watched.values()) {
     const charts: { name: string; c: C[] }[] = [];
     const ut = tokens[w.under];
-    if (ut) charts.push({ name: w.under === 'NIFTY' ? 'NIFTY' : w.under === 'BANKNIFTY' ? 'BANK NIFTY' : 'SENSEX', c: await get(ut) });
+    // The underlying's own chart: on the Structure SL's timeframe when that is on
+    // (5 or 15 min), else 5-min like the alerts. GIFT stays on 5-min alerts.
+    const mainTf: 5 | 15 = w.slOn ? w.slTf : 5;
+    if (ut) charts.push({ name: w.under === 'NIFTY' ? 'NIFTY' : w.under === 'BANKNIFTY' ? 'BANK NIFTY' : 'SENSEX', c: await get(ut, mainTf) });
     if (w.under === 'NIFTY' && gift?.token) charts.push({ name: 'GIFT NIFTY', c: await get(gift.token) });
     const against = w.dir === 'bull' ? 'below' : 'above';
 
@@ -171,15 +180,15 @@ async function tick(D: Deps) {
         const tighter = w.slLevel === null || (w.dir === 'bull' ? nl > w.slLevel : nl < w.slLevel);
         if (tighter) {
           const was = w.slLevel; w.slLevel = nl;
-          if (was !== null && Math.abs(nl - was) >= 5) await D.notify(`🔁 Structure SL for ${w.sym} moved ${fmt(was)} → ${fmt(nl)} (new swing ${w.dir === 'bull' ? 'low' : 'high'} on ${main.name}). Exits if a 5-min candle closes ${against} it.`);
+          if (was !== null && Math.abs(nl - was) >= 5) await D.notify(`🔁 Structure SL for ${w.sym} moved ${fmt(was)} → ${fmt(nl)} (new swing ${w.dir === 'bull' ? 'low' : 'high'} on ${main.name}). Exits if a ${w.slTf}-min candle closes ${against} it.`);
         }
       }
       const last = main.c[main.c.length - 1];
-      if (w.slLevel !== null && last.t + 300000 > w.since && (w.dir === 'bull' ? last.c < w.slLevel : last.c > w.slLevel)) {
+      if (w.slLevel !== null && last.t + w.slTf * 60000 > w.since && (w.dir === 'bull' ? last.c < w.slLevel : last.c > w.slLevel)) {
         w.exiting = true;
         const r = D.exitPosition ? await D.exitPosition(w.sym, 'STRUCTURE_SL') : { ok: false, error: 'exit not wired' };
         await D.notify(r.ok
-          ? `🛑 Structure SL hit — sold ${w.sym}. ${main.name} 5-min candle ${time12(last.t)}–${time12(last.t + 300000)} closed ${fmt(last.c)}, ${against} the SL level ${fmt(w.slLevel)}.`
+          ? `🛑 Structure SL hit — sold ${w.sym}. ${main.name} ${w.slTf}-min candle ${time12(last.t)}–${time12(last.t + w.slTf * 60000)} closed ${fmt(last.c)}, ${against} the SL level ${fmt(w.slLevel)}.`
           : r.alreadyClosed ? `Structure SL for ${w.sym}: position already closed.`
           : `❗ Structure SL hit on ${w.sym} (${main.name} closed ${fmt(last.c)} ${against} ${fmt(w.slLevel)}) but the exit FAILED: ${r.error}. Exit it yourself now.`);
         if (!r.ok && !r.alreadyClosed) w.exiting = false;
@@ -190,7 +199,7 @@ async function tick(D: Deps) {
     if (!w.announced) {
       const lv = charts.filter(ch => !(w.slOn && ch === main)).map(ch => { const l = structureLevel([...ch.c, ch.c[ch.c.length - 1] || { t: now, o: 0, h: 0, l: 0, c: 0 }], w.dir, now); return l !== null ? `${ch.name} ${fmt(l)}` : null; }).filter(Boolean);
       const slNote = w.slOn
-        ? (w.slLevel !== null ? ` Structure SL ON: the position is SOLD if a ${charts[0]?.name} 5-min candle closes ${against} ${fmt(w.slLevel)} (trails as new swings form; your option SL stays as a backstop).` : ' Structure SL ON — level set once the chart has enough candles.')
+        ? (w.slLevel !== null ? ` Structure SL ON: the position is SOLD if a ${charts[0]?.name} ${w.slTf}-min candle closes ${against} ${fmt(w.slLevel)} (trails as new swings form; your option SL stays as a backstop).` : ' Structure SL ON — level set once the chart has enough candles.')
         : ' Alert only — your SL/TP are unchanged.';
       await D.notify(`👀 Watching ${w.sym} (${w.dir === 'bull' ? 'bullish' : 'bearish'} trade). ${lv.length ? `Reversal alert if a 5-min candle closes ${against} the last swing ${w.dir === 'bull' ? 'low' : 'high'}: ${lv.join(', ')}.` : ''}${slNote}`);
       w.announced = true;
@@ -209,14 +218,17 @@ async function tick(D: Deps) {
 }
 
 function publish() {
-  lastStatus = { running: true, at: Date.now(), structureSl: lastSetting, watching: [...watched.values()].map(w => ({ sym: w.sym, dir: w.dir, under: w.under, since: w.since, alerts: [...w.alerted], structureSl: w.slOn, slLevel: w.slLevel })) };
+  lastStatus = { running: true, at: Date.now(), structureSl: lastSetting, timeframe: lastTf, watching: [...watched.values()].map(w => ({ sym: w.sym, dir: w.dir, under: w.under, since: w.since, alerts: [...w.alerted], structureSl: w.slOn, slTf: w.slTf, slLevel: w.slLevel })) };
 }
 
 let lastSetting = true;
+let lastTf: 5 | 15 = 15;
 function structureSlEnabled(D: Deps): boolean {
   try {
     const r: any = D.db?.prepare("SELECT value FROM reversal_watch_kv WHERE key = 'structure_sl'").get();
     lastSetting = r ? r.value === '1' : true;        // on by default — he asked for it
+    const t: any = D.db?.prepare("SELECT value FROM reversal_watch_kv WHERE key = 'structure_sl_tf'").get();
+    lastTf = t && t.value === '5' ? 5 : 15;          // 15-min by default (backtest above)
   } catch { }
   return lastSetting;
 }
@@ -227,11 +239,11 @@ export function registerReversalWatch(app: any, express: any, deps: Deps) {
   structureSlEnabled(deps);
   app.post('/api/reversal-watch/settings', express.json(), (req: any, res: any) => {
     try {
-      const on = !!req.body?.structureSl;
-      deps.db.prepare("INSERT INTO reversal_watch_kv (key, value) VALUES ('structure_sl', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(on ? '1' : '0');
-      lastSetting = on;
+      const up = (k: string, v: string) => deps.db.prepare("INSERT INTO reversal_watch_kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(k, v);
+      if (req.body?.structureSl !== undefined) { lastSetting = !!req.body.structureSl; up('structure_sl', lastSetting ? '1' : '0'); }
+      if (req.body?.timeframe !== undefined) { lastTf = Number(req.body.timeframe) === 5 ? 5 : 15; up('structure_sl_tf', String(lastTf)); }
       // applies to positions opened from now on; ones already watched keep what they started with
-      res.json({ success: true, structureSl: on });
+      res.json({ success: true, structureSl: lastSetting, timeframe: lastTf });
     } catch (e: any) { res.status(500).json({ success: false, error: e?.message || String(e) }); }
   });
   setInterval(async () => {
@@ -239,7 +251,7 @@ export function registerReversalWatch(app: any, express: any, deps: Deps) {
     try { await tick(deps); } catch (e: any) { lastStatus = { ...lastStatus, error: e?.message || String(e) }; }
     finally { busy = false; }
   }, 30000);
-  app.get('/api/reversal-watch/status', (_req: any, res: any) => res.json(lastStatus));
+  app.get('/api/reversal-watch/status', (_req: any, res: any) => res.json({ ...lastStatus, structureSl: lastSetting, timeframe: lastTf }));
   console.log('[reversal-watch] registered (alert only)');
 }
 

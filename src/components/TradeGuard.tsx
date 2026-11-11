@@ -52,15 +52,17 @@ function TradeGuardSheet({ st, onSaved, onClose }: { st: Status | null; onSaved:
   // Structure SL (server/reversal_watch.ts): its own switch, applies at once —
   // turning it off is never a way around the guard, it only stops the auto-exit.
   const [ssl, setSsl] = useState<boolean | null>(null);
-  useEffect(() => { fetch('/api/reversal-watch/status').then(r => r.json()).then(j => setSsl(j?.structureSl !== false)).catch(() => setSsl(null)); }, []);
-  const toggleSsl = async (on: boolean) => {
-    setSsl(on);
+  const [sslTf, setSslTf] = useState<5 | 15>(15);
+  useEffect(() => { fetch('/api/reversal-watch/status').then(r => r.json()).then(j => { setSsl(j?.structureSl !== false); setSslTf(j?.timeframe === 5 ? 5 : 15); }).catch(() => setSsl(null)); }, []);
+  const saveSsl = async (body: any, ok: string, undo: () => void) => {
     try {
-      const r = await fetch('/api/reversal-watch/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ structureSl: on }) });
+      const r = await fetch('/api/reversal-watch/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const j = await r.json(); if (!j?.success) throw new Error(j?.error || 'Could not save');
-      toast.success(on ? 'Structure SL on for new trades' : 'Structure SL off — alerts only for new trades');
-    } catch (e: any) { setSsl(!on); toast.error(e?.message || 'Could not save'); }
+      toast.success(ok);
+    } catch (e: any) { undo(); toast.error(e?.message || 'Could not save'); }
   };
+  const toggleSsl = (on: boolean) => { setSsl(on); saveSsl({ structureSl: on }, on ? 'Structure SL on for new trades' : 'Structure SL off — alerts only for new trades', () => setSsl(!on)); };
+  const pickTf = (tf: 5 | 15) => { const was = sslTf; setSslTf(tf); saveSsl({ timeframe: tf }, `Structure SL uses ${tf}-min swings for new trades`, () => setSslTf(was)); };
   const save = async () => {
     setBusy(true);
     try {
@@ -120,9 +122,19 @@ function TradeGuardSheet({ st, onSaved, onClose }: { st: Status | null; onSaved:
           </div>
           <div className="border-t border-border pt-3">
             <label className="flex items-center justify-between text-sm gap-3">
-              <span>Structure SL<span className="block text-[11px] text-muted-foreground">Sells the position when a 5-min NIFTY candle closes beyond the last swing against your trade (PE: above the last swing high · CE: below the last swing low). Trails as new swings form. Your option SL stays as a backstop.</span></span>
+              <span>Structure SL<span className="block text-[11px] text-muted-foreground">Sells the position when a NIFTY candle closes beyond the last swing against your trade (PE: above the last swing high · CE: below the last swing low). Trails as new swings form. Your option SL stays as a backstop.</span></span>
               <input type="checkbox" disabled={ssl === null} checked={!!ssl} onChange={(e) => toggleSsl(e.target.checked)} className="w-5 h-5 accent-emerald-500 shrink-0" />
             </label>
+            {ssl && (
+              <div className="mt-2 flex items-center justify-between gap-3 text-sm">
+                <span>Swings from<span className="block text-[11px] text-muted-foreground">15-min: wider SL, shaken out less (tested better). 5-min: tighter SL.</span></span>
+                <div className="flex rounded-lg bg-muted p-0.5 shrink-0">
+                  {([15, 5] as const).map(tf => (
+                    <button key={tf} onClick={() => pickTf(tf)} className={`px-3 h-8 rounded-md text-xs font-semibold transition-colors ${sslTf === tf ? 'bg-emerald-500 text-black' : 'text-muted-foreground'}`}>{tf}-min</button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           <div className="text-[11px] text-muted-foreground leading-relaxed">
             Only new entries you place (order ticket, Quick Trade, My Order) are blocked — never an exit, SL, TP or Exit All. Telegram auto-trades keep their own limits. Stricter changes apply now; relaxed ones start the next trading day.
