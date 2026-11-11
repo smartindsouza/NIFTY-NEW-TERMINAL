@@ -1,5 +1,5 @@
 import { isUs30Token, fetchUs30Candles } from './us30';
-import { getKiteClient, getIndexFuturesTokens, findInstrumentAnyExchange } from "./kite_service.js";
+import { getKiteClient, getIndexFuturesTokens, findInstrumentAnyExchange, filterInstrumentsAnyExchange } from "./kite_service.js";
 import { getLatestTick } from "./ticker_service.js";
 import { aggregateCandles } from "./aggregator.js";
 import { scoreBounceAt } from "./bounce_conviction.js";
@@ -445,11 +445,24 @@ export async function getTechnicalAnalysis(
     const kc = getKiteClient();
     if (kc && (kc as any).access_token) {
       let resolvedSpot = spot;
+      // Did resolvedSpot come from THIS instrument (its tick or its own LTP)? The
+      // fallback `spot` is NIFTY's, and patching it onto another instrument's last
+      // candle drew 25,138 on the Hang Seng chart (11 Nov 2026) — the 5% tolerance
+      // below happened to let it through. Only an own price may patch a candle.
+      let spotIsOwn = instrument_token === '256265';
       try {
         const cleanSymbol = symbol.replace("NSE:", "").replace("NFO:", "").replace("BSE:", "").trim();
         let formatSymbol = `NSE:${cleanSymbol}`;
         if (symbol.startsWith("NFO:")) {
           formatSymbol = symbol;
+        }
+        // Charts opened from the Market Context sidebar can be on BSE, MCX or
+        // Kite's GLOBAL exchange: ask for the LTP on the instrument's own exchange.
+        if (!symbol.includes(':') && /^\d+$/.test(String(instrument_token)) && !['256265', '260105'].includes(String(instrument_token))) {
+          try {
+            const inst = (await filterInstrumentsAnyExchange((i: any) => String(i.instrument_token) === String(instrument_token)))[0];
+            if (inst?.exchange && inst?.tradingsymbol) formatSymbol = `${inst.exchange}:${inst.tradingsymbol}`;
+          } catch (e) { /* keep the NSE guess */ }
         }
         // The live WebSocket tick is the same number getLTP would return, already
         // in memory. Preferring it removes a throttled broker round trip (350ms of
@@ -463,11 +476,11 @@ export async function getTechnicalAnalysis(
         const tick = isFinite(tokenNum) ? getLatestTick(tokenNum) : undefined;
         const tickAgeMs = tick?.ts ? Date.now() - tick.ts : Infinity;
         if (tick && tick.ltp > 0 && tickAgeMs < 15000) {
-          resolvedSpot = tick.ltp;
+          resolvedSpot = tick.ltp; spotIsOwn = true;
         } else {
           const ltpRes = await throttleRequest(() => kc.getLTP([formatSymbol]), `ltp_${formatSymbol}`);
           if (ltpRes && ltpRes[formatSymbol]) {
-            resolvedSpot = ltpRes[formatSymbol].last_price;
+            resolvedSpot = ltpRes[formatSymbol].last_price; spotIsOwn = true;
           }
         }
       } catch (ltpErr: any) {
@@ -504,7 +517,7 @@ export async function getTechnicalAnalysis(
          ) {
             const lastCandle = cachedItem.data.candles[cachedItem.data.candles.length - 1];
             const tol = Math.max(50, resolvedSpot * 0.05);
-            if (Math.abs(lastCandle.close - resolvedSpot) < tol) {
+            if (spotIsOwn && Math.abs(lastCandle.close - resolvedSpot) < tol) {
               lastCandle.close = resolvedSpot;
               lastCandle.high = Math.max(lastCandle.high, resolvedSpot);
               lastCandle.low = Math.min(lastCandle.low, resolvedSpot);
@@ -698,6 +711,7 @@ export async function getTechnicalAnalysis(
           const tolerance = Math.max(50, actualSpot * 0.05);
           
           if (
+            spotIsOwn &&
             hist.length > 0 &&
             Math.abs(hist[hist.length - 1].close - actualSpot) < tolerance
           ) {
