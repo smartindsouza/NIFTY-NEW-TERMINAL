@@ -239,7 +239,13 @@ async function historical(token: number, interval: string, from: any, to: any, _
     }
     cand.sort((a, b) => a.date - b.date);
     const uniq = cand.filter((x, i) => i === 0 || x.date.getTime() !== cand[i - 1].date.getTime());
-    const inRange = uniq.filter(x => x.date.getTime() >= f && x.date.getTime() <= t);
+    // Dhan prints a post-close value (seen at 19:50 IST on 11 Nov) as an extra
+    // candle; Zerodha never did. Index/equity candles outside 09:00–15:30 are
+    // dropped. F&O now trades until 15:40 (the closing auction runs in cash), so
+    // derivative candles are kept to 15:40. MCX keeps its evening session.
+    const endMin = row._seg === SEG.NSE_FNO || row._seg === SEG.BSE_FNO ? 15 * 60 + 40 : 15 * 60 + 30;
+    const inSession = (x: any) => { if (row._seg === SEG.MCX_COMM) return true; const m = Math.floor(((x.date.getTime() + IST) % 86400e3) / 60e3); return m >= 9 * 60 && m < endMin; };
+    const inRange = uniq.filter(x => x.date.getTime() >= f && x.date.getTime() <= t && inSession(x));
     return want === bi ? inRange : agg(inRange, want, row._seg === SEG.MCX_COMM ? 9 * 60 : 9 * 60 + 15);
   }
   return cand.sort((a, b) => a.date - b.date);
