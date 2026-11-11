@@ -2,7 +2,7 @@
 // before a sharp move" study to be re-run on ~2 years of data instead of the
 // ~3 months the chart caches. This hands out NIFTY 50 index candles only (public
 // market data, no account data), read through today's Zerodha session.
-//   GET /api/research/nifty-history?interval=minute|5minute|15minute&days=1..730
+//   GET /api/research/nifty-history?interval=minute|5minute|15minute&days=1..1500
 // One fetch at a time, results kept for 6 hours, so repeated calls cost Zerodha
 // nothing. Requests are spaced like the existing backtests (400 ms apart).
 import { getKiteClient, getIndexFuturesTokens } from './kite_service';
@@ -61,7 +61,10 @@ export function registerResearchExport(app: any) {
   app.get('/api/research/nifty-history', async (req: any, res: any) => {
     const interval = String(req.query.interval || '5minute');
     if (!CHUNK_DAYS[interval]) return res.status(400).json({ ok: false, error: 'interval must be minute, 5minute or 15minute' });
-    const days = Math.max(1, Math.min(730, parseInt(String(req.query.days || '730'), 10) || 730));
+    // Up to ~4 years (12 Nov 2026): the expired-option backtest now runs on Dhan
+    // data back to Nov 2022, and the NIFTY candles it trades on must cover the
+    // same span. Kite still serves it in the same 60/90/180-day chunks.
+    const days = Math.max(1, Math.min(1500, parseInt(String(req.query.days || '730'), 10) || 730));
     const fut = String(req.query.series || '') === 'fut';
     const columns = fut ? ['t_ms', 'open', 'high', 'low', 'close', 'volume'] : ['t_ms', 'open', 'high', 'low', 'close'];
     const key = `${interval}:${days}:${fut ? 'fut' : 'idx'}`;
