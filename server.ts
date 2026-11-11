@@ -3489,7 +3489,7 @@ setInterval(() => {
         // NIFTY, Bank Nifty and one option for a few seconds and report the ticks.
         const { DhanTicker } = await import('./server/dhan_ticker');
         const t = new DhanTicker(); const got: any[] = []; const errs: string[] = [];
-        t.on('ticks', (x: any[]) => got.push(...x)); t.on('error', (e: any) => errs.push(String(e?.message || e)));
+        t.on('ticks', (x: any[]) => got.push(...x)); t.on('error', (e: any) => errs.push([e?.code, e?.message, ...(e?.errors || []).map((x: any) => `${x.code} ${x.address || ''}:${x.port || ''} ${x.message}`)].filter(Boolean).join(' | ')));
         t.on('connect', () => t.subscribe([256265, 260105, Number(req.query.opt || 0)].filter(Boolean)));
         t.autoReconnect(false); await t.connect();
         await new Promise(r => setTimeout(r, Number(req.query.ms || 6000)));
