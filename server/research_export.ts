@@ -3,6 +3,7 @@
 // ~3 months the chart caches. This hands out NIFTY 50 index candles only (public
 // market data, no account data), read through today's Zerodha session.
 //   GET /api/research/nifty-history?interval=minute|5minute|15minute&days=1..1500
+//       [&symbol=NIFTY|BANKNIFTY] [&end=YYYY-MM-DD]
 // One fetch at a time, results kept for 6 hours, so repeated calls cost Zerodha
 // nothing. Requests are spaced like the existing backtests (400 ms apart).
 import { getKiteClient, getIndexFuturesTokens } from './kite_service';
@@ -18,15 +19,25 @@ const CHUNK_DAYS: Record<string, number> = { 'minute': 60, '5minute': 90, '15min
 const cache = new Map<string, { at: number; rows: number[][] }>();
 let busy: Promise<any> | null = null;
 
-async function fetchHistory(interval: string, days: number, fut = false): Promise<number[][]> {
+// symbol + end (13 Nov 2026, for the breaker-block validity study). The conditions
+// that separate breakers that hold from breakers that fail were found on NIFTY,
+// Nov 2022 – Nov 2026, and a rule is only worth building into the indicator if it
+// also holds on candles it was never fitted to. So the export can now hand out an
+// OLDER window (`end=YYYY-MM-DD` moves the right edge back; `days` still counts
+// back from there) and a SECOND index (`symbol=BANKNIFTY`). Still index candles
+// only, still no account data. The tokens are Zerodha's fixed index tokens; an
+// unknown symbol is refused rather than guessed, because a wrong token would
+// quietly return some other instrument's candles.
+const INDEX_TOKENS: Record<string, number> = { NIFTY: 256265, BANKNIFTY: 260105 };
+
+async function fetchHistory(interval: string, days: number, fut = false, token = 256265, endMs = Date.now()): Promise<number[][]> {
   const kc: any = getKiteClient();
   if (!kc || !kc.access_token) throw new Error('Zerodha is not logged in today');
   const chunk = CHUNK_DAYS[interval];
   const rows: number[][] = [];
-  let to = Date.now(); let left = days;
+  let to = endMs; let left = days;
   const spans: [number, number][] = [];
   while (left > 0) { const s = Math.min(chunk, left); spans.unshift([to - s * 86400000, to]); to -= s * 86400000; left -= s; }
-  let token = 256265;
   // Kite serves the continuous (rolled) futures series for DAY candles only
   // ("invalid interval for continuous data" intraday), so intraday futures come
   // from the nearest live contracts one by one, each over its own listed life —
@@ -66,16 +77,31 @@ export function registerResearchExport(app: any) {
     // same span. Kite still serves it in the same 60/90/180-day chunks.
     const days = Math.max(1, Math.min(1500, parseInt(String(req.query.days || '730'), 10) || 730));
     const fut = String(req.query.series || '') === 'fut';
+    const symbol = String(req.query.symbol || 'NIFTY').toUpperCase();
+    const token = INDEX_TOKENS[symbol];
+    if (!token) return res.status(400).json({ ok: false, error: `symbol must be one of ${Object.keys(INDEX_TOKENS).join(', ')}` });
+    const endStr = String(req.query.end || '');
+    let endMs = Date.now();
+    if (endStr) {
+      // 18:00 IST on that day, so the whole session of the end date is included.
+      endMs = /^\d{4}-\d{2}-\d{2}$/.test(endStr) ? Date.parse(`${endStr}T18:00:00+05:30`) : NaN;
+      if (!Number.isFinite(endMs) || endMs > Date.now() + 86400000) return res.status(400).json({ ok: false, error: 'end must be a past date, YYYY-MM-DD' });
+    }
+    if (fut && (symbol !== 'NIFTY' || endStr)) return res.status(400).json({ ok: false, error: 'series=fut is NIFTY only and has no end date' });
     const columns = fut ? ['t_ms', 'open', 'high', 'low', 'close', 'volume'] : ['t_ms', 'open', 'high', 'low', 'close'];
-    const key = `${interval}:${days}:${fut ? 'fut' : 'idx'}`;
-    const hit = cache.get(key);
-    if (hit && Date.now() - hit.at < 6 * 3600000) return res.json({ ok: true, interval, days, series: fut ? 'fut' : 'index', cached: true, columns, rows: hit.rows });
+    const key = `${interval}:${days}:${fut ? 'fut' : 'idx'}:${symbol}`;
+    // A window with an explicit end is a one-off research pull of up to ~370,000
+    // rows; keeping several of those for six hours would hold a few hundred MB in
+    // the same process that runs the tick feed and the exit engine. So they are
+    // served and dropped. The plain "up to now" windows are cached as before.
+    const hit = endStr ? undefined : cache.get(key);
+    if (hit && Date.now() - hit.at < 6 * 3600000) return res.json({ ok: true, interval, days, series: fut ? 'fut' : 'index', symbol, cached: true, columns, rows: hit.rows });
     if (busy) return res.status(429).json({ ok: false, error: 'another history fetch is running — try again in a minute' });
     try {
-      busy = fetchHistory(interval, days, fut);
+      busy = fetchHistory(interval, days, fut, token, endMs);
       const rows = await busy;
-      cache.set(key, { at: Date.now(), rows });
-      res.json({ ok: true, interval, days, series: fut ? 'fut' : 'index', cached: false, columns, rows });
+      if (!endStr) cache.set(key, { at: Date.now(), rows });
+      res.json({ ok: true, interval, days, series: fut ? 'fut' : 'index', symbol, end: endStr || null, cached: false, columns, rows });
     } catch (e: any) { res.status(503).json({ ok: false, error: e?.message || String(e) }); }
     finally { busy = null; }
   });
