@@ -5957,8 +5957,31 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     const entry = slEntryRef.current, pos = slActivePosRef.current;
     if (!entry || !pos || tp1Reached()) return false;
     const long = (pos.side || 'BUY') !== 'SELL';
-    if (label === 'SL') return long ? price > entry : price < entry;
+    if (label === 'SL') {
+      // The stop MAY cross the entry to lock profit (13 Nov 2026, Martin) — it
+      // used to stop dead at the entry until TP1, so a trade in profit could not
+      // have its stop lifted past cost. It is held two ticks short of the live
+      // premium instead: at or past it, arming would sell the position at once.
+      // This pane often does NOT know the live premium (the stored position keeps
+      // the price it was first seen at), so with none to hand the line is left
+      // free and the SERVER decides — it reads the live tick, refuses a stop at
+      // or past it, and the line then snaps back with the reason shown.
+      if (!(long ? price > entry : price < entry)) return false;
+      const cap = slProfitCap();
+      return cap !== null && (long ? price > cap : price < cap);
+    }
     return long ? price < entry : price > entry;     // TARGET / TP line
+  };
+  /** The furthest the stop may go past the entry right now: two ticks short of
+   *  the live premium, or the entry itself when the trade is not in profit by
+   *  that much. null when this pane has no live premium — the server decides. */
+  const slProfitCap = (): number | null => {
+    const entry = slEntryRef.current, pos = slActivePosRef.current;
+    const live = Number(pos?.lastPrice ?? pos?.ltp);
+    if (!entry || !pos || !(live > 0)) return null;
+    const long = (pos.side || 'BUY') !== 'SELL';
+    const cap = +snapTick(long ? live - 2 * TICK : live + 2 * TICK).toFixed(2);
+    return (long ? cap > entry : cap < entry) ? cap : entry;
   };
   const startExitLineDrag = () => {
     const move = (ev: PointerEvent) => {
@@ -5995,7 +6018,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       // at the entry and cannot be dragged above it, and the target line stops
       // at the entry and cannot go below it (mirrored for a short), until the
       // first target has been reached. The server refuses the same thing.
-      if (crossesEntryWall(sl.label, newPrice)) newPrice = slEntryRef.current as number;
+      // The stop's limit is the live premium when the trade is in profit (see
+      // crossesEntryWall); otherwise, and always for the target, the entry.
+      if (crossesEntryWall(sl.label, newPrice)) newPrice = (sl.label === 'SL' ? slProfitCap() : null) ?? (slEntryRef.current as number);
       if (sl.price === newPrice) return;
       sl.price = newPrice;
       const entry = slEntryRef.current;
@@ -6374,7 +6399,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       // The server kept a rule it manages (Telegram trade): show ITS levels.
       if (d && d.success && d.kept && d.rule) premRuleRef.current = { symbol: pos.symbol, sl: Number(d.rule.sl), tp: Number(d.rule.tp) };
       if (d && !d.success && d.entryWall) {
-        // Refused only because it crossed the entry before TP1: the armed rule is
+        // Refused by the entry rule (target across the entry before TP1, or a stop
+        // at or past the live premium): the armed rule is
         // unchanged and still protecting the trade, so say so plainly and put the
         // lines back where the real stop and target are.
         premRuleRef.current = prevRule;

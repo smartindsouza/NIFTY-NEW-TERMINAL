@@ -44,8 +44,11 @@ console.log(`\n${n} passed`);
 const { entryWallError } = await import('./entry_wall');
 const W = (x: any) => entryWallError({ long: true, entry: 145, sl: 130, tp: 174, slOn: true, tpOn: true, tp1Hit: false, ...x });
 ok('wall: default -10%/+20% passes', () => assert.equal(W({}), null));
-ok('wall: SL above entry refused before TP1, allowed at the entry and after TP1', () => {
-  assert.match(W({ sl: 146 })!, /SL can't be above the entry \(145\)/);
+ok('wall: SL above entry needs the live price beyond it; allowed at the entry and after TP1', () => {
+  assert.match(W({ sl: 146 })!, /until the live price is known/);
+  assert.equal(W({ sl: 150, ltp: 158 }), null);                       // in profit: lock some of it
+  assert.match(W({ sl: 158, ltp: 158 })!, /must stay below the current price \(158\)/);
+  assert.match(W({ sl: 150, ltp: 140 })!, /must stay below the current price/);
   assert.equal(W({ sl: 145 }), null);
   assert.equal(W({ sl: 160, tp1Hit: true }), null);
 });
@@ -53,6 +56,8 @@ ok('wall: target below entry refused before TP1', () => assert.match(W({ tp: 140
 ok('wall: a switched-off leg is not checked', () => { assert.equal(W({ sl: 150, slOn: false }), null); assert.equal(W({ tp: 140, tpOn: false }), null); });
 ok('wall: mirrored for a short', () => {
   assert.match(entryWallError({ long: false, entry: 200, sl: 195, tp: 160, slOn: true, tpOn: true, tp1Hit: false })!, /below the entry/);
+  assert.equal(entryWallError({ long: false, entry: 200, sl: 195, tp: 160, slOn: true, tpOn: true, tp1Hit: false, ltp: 185 }), null);
+  assert.match(entryWallError({ long: false, entry: 200, sl: 195, tp: 160, slOn: true, tpOn: true, tp1Hit: false, ltp: 196 })!, /must stay above the current price/);
   assert.equal(entryWallError({ long: false, entry: 200, sl: 220, tp: 160, slOn: true, tpOn: true, tp1Hit: false }), null);
 });
 console.log(`${n} passed (with wall)`);

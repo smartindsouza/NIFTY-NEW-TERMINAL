@@ -1586,14 +1586,18 @@ setInterval(() => {
       }
       const entryPx = Number(entry) > 0 ? Number(entry) : (pos.average_price || 0);
       // THE ENTRY IS A WALL UNTIL TP1 (30 Oct 2026, Martin): before the first
-      // target is reached the stop may not be set above the entry, nor the target
-      // below it (mirrored for a short). The chart stops the lines at the entry;
-      // this refuses anything that gets past it. Once TP1 has been reached (the
-      // trailing engine booked its half / climbed a rung) the stop may go above.
+      // target is reached the target may not be set below the entry (mirrored for
+      // a short). Since 13 Nov 2026 the STOP may cross the entry to lock profit,
+      // provided the live premium is still beyond it — see server/entry_wall.ts.
+      // The chart stops the lines in the same places; this refuses anything that
+      // gets past it.
       if (entryPx > 0 && req.body?.source !== 'auto') {
         const pt: any = trailStates.get(tradingsymbol);
         const tp1Hit = !!(pt && Math.abs(Number(pt.entry) - entryPx) < 0.01 && (pt.tp1Done || Number(pt.rung) > 1));
-        const wall = entryWallError({ long, entry: entryPx, sl: slN, tp: tpN, slOn: !!slOnN, tpOn: !!tpOnN, tp1Hit });
+        const wall = entryWallError({ long, entry: entryPx, sl: slN, tp: tpN, slOn: !!slOnN, tpOn: !!tpOnN, tp1Hit,
+          // The live tick when the ticker has one — getPositions' last_price can lag
+          // by seconds, and this is the price the stop is being placed against.
+          ltp: Number(getLatestTick(pos.instrument_token)?.ltp) || Number(pos.last_price) || null });
         if (wall) return res.json({ success: false, error: wall, entryWall: true });
       }
       // Resolve the contract's instrument token so the ticker can stream it (the
