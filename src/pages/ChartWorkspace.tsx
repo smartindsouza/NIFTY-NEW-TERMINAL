@@ -130,8 +130,14 @@ export function ChartWorkspace() {
     <>
     {/* relative z + its own background: expanded, it sits ON TOP of the RSI pane
         (the chart keeps a 450px floor, so the panes cannot shrink further).
-        pr-20 keeps the "Check bias" button clear of the floating Diag button. */}
-    <div data-layout="below-charts" className="relative z-[25] bg-background shrink-0 pl-2 pr-20 py-1.5 border-t border-white/10 max-h-[40vh] overflow-y-auto">
+        pr-20 keeps the "Check bias" button clear of the floating Diag button.
+        z-[32], not z-[25]: the chart's two overlay canvases (level lines and their
+        pills, the R:R box) are z-30 and z-[31] and span the whole chart box, which
+        on a short window runs under this card because of that 450px floor. At 25
+        the card sat BELOW them, so 15M LOW / RED INNER / SUPPORT were drawn straight
+        across its text. Kept under z-40 so the chart's own buttons and every
+        dialog still open over it. */}
+    <div data-layout="below-charts" className="relative z-[32] bg-background shrink-0 pl-2 pr-20 py-1.5 border-t border-white/10 max-h-[40vh] overflow-y-auto">
       <bias-panel compact="" />
     </div>
     </>

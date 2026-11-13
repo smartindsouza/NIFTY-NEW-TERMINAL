@@ -14190,7 +14190,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 // same 20px height, same 1.25px outline, same fill and text colours
                 // in each theme. The pill is drawn on the canvas with these exact
                 // values, so they are repeated here rather than approximated.
-                className="absolute right-[65px] w-5 h-5 rounded-full flex items-center justify-center z-[60] transition-opacity hover:opacity-80"
+                // z-[45], not z-[60]: at 60 it TIED with the phone's "More" sheet
+                // (Header, fixed z-[60]) and, coming later in the page, won the tie —
+                // the + floated on top of the sheet's icons wherever the crosshair
+                // had last been. 45 still clears the overlay canvases (30/31) and
+                // the armed-order chips (40), and sits under the nav bar and every
+                // sheet and dialog (50 and up).
+                className="absolute right-[65px] w-5 h-5 rounded-full flex items-center justify-center z-[45] transition-opacity hover:opacity-80"
                 style={{
                   top: `${crosshairInfo.y}px`,
                   transform: 'translateY(-50%)', // Center vertically
