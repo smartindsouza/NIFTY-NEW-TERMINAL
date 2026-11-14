@@ -69,10 +69,35 @@ export const GAP_CONFIG = {
   // Only nationally fixed dates are pre-listed. An unlisted holiday is harmless:
   // the snapshot job also self-detects a closed market (no fresh NIFTY candles
   // for today) and skips, so this list is a fast-path, not the only guard.
+  //
+  // THE FULL 2026 LIST (15 Nov 2026). This fallback is not a fast-path in
+  // production — it is the ONLY list: NSE's site refuses the server, so
+  // /api/calendar/holidays has been answering source "static-fallback" with the
+  // four dates below it started with. That surfaced when the Expiry Skew history
+  // loader asked Dhan for 14 Sep, 20 Oct and 10 Nov (all closed) and, worse,
+  // dated two weekly expiries on holiday Tuesdays (20 Oct, 10 Nov) when the
+  // contracts had expired on the Monday. Dates from NSE's 2026 circular as
+  // published by brokers, and checked against the record: every weekday NIFTY did
+  // not trade from 1 Jan to 11 Nov 2026 is on this list (14 of 14) and no listed
+  // day traded. 24 Nov and 25 Dec are still to come. Needs the 2027 circular in
+  // December.
   nseHolidays: [
+    '2026-01-15', // Maharashtra municipal elections
     '2026-01-26', // Republic Day
-    '2026-08-15', // Independence Day
+    '2026-03-03', // Holi
+    '2026-03-26', // Shri Ram Navami
+    '2026-03-31', // Shri Mahavir Jayanti
+    '2026-04-03', // Good Friday
+    '2026-04-14', // Dr. Baba Saheb Ambedkar Jayanti
+    '2026-05-01', // Maharashtra Day
+    '2026-05-28', // Bakri Id
+    '2026-06-26', // Muharram
+    '2026-08-15', // Independence Day (a Saturday)
+    '2026-09-14', // Ganesh Chaturthi
     '2026-10-02', // Gandhi Jayanti
+    '2026-10-20', // Dussehra
+    '2026-11-10', // Diwali Balipratipada
+    '2026-11-24', // Prakash Gurpurb Sri Guru Nanak Dev
     '2026-12-25', // Christmas
   ],
 

@@ -40,13 +40,15 @@ for (const l of dhanLegs(FX)) for (let i = 0; i < l.leg.timestamp.length; i++) {
   const key = `${l.side}:${l.leg.strike[i]}`; let mm = rows.get(key); if (!mm) { mm = new Map(); rows.set(key, mm); }
   if (!mm.has(m)) mm.set(m, { o: l.leg.open[i], c: l.leg.close[i], v: l.leg.volume[i], oi: l.leg.oi[i] });
 }
-let kiteUp = true, histCalls = 0, failToken = 0;
+let kiteUp = true, histCalls = 0, failToken = 0, kiteBroken = false;
 const kc: any = {
   access_token: 'x',
   async getHistoricalData(token: number, interval: string, _from: string, to: string, _c: boolean, oi: boolean) {
     assert.equal(interval, 'minute'); histCalls++;
+    if (kiteBroken) throw new Error('Too many requests');
     if (token === failToken) throw new Error('simulated candle failure');
     const toMs = Date.parse(to.replace(' ', 'T') + '+05:30'), out: any[] = [];
+    if (_from.slice(0, 10) !== DAY) return out;                // any other day: the market was shut, no candles
     for (let m = 0; m < 375; m++) {
       const t = dayStart + m * 60000; if (t > toMs) break;
       const forming = toMs < t + 60000;                        // Zerodha returns the minute still printing — the engine must not use it
@@ -70,13 +72,18 @@ const rolling = async (body: any) => {
   const leg = body.fromDate === DAY || body.toDate === DAY ? legOf.get(`${body.drvOptionType}:${body.strike}`) : null;
   return { data: { [body.drvOptionType === 'CALL' ? 'ce' : 'pe']: leg || { timestamp: [] } } };
 };
-const holidays = new Set(['2026-11-10']);
-const tradingDay = (d: string) => { const wd = new Date(d + 'T00:00:00Z').getUTCDay(); return wd !== 0 && wd !== 6 && !holidays.has(d) && (d > '2026-11-06' || HIST.days.includes(d)); };
+// THE CALENDAR HERE KNOWS NO HOLIDAYS — every weekday is a trading day — because
+// that is what the live app's calendar amounted to when this was written. What
+// really traded comes from the daily-candle list (Dhan), as in production.
+const tradingDay = (d: string) => { const wd = new Date(d + 'T00:00:00Z').getUTCDay(); return wd !== 0 && wd !== 6; };
+const REAL_DAYS: string[] = [...HIST.days, DAY, '2026-11-11', '2026-11-12', '2026-11-13'];      // 14 Sep, 20 Oct and 10 Nov were holidays
+let openDaysCalls = 0, openDaysDown = false;
+const openDays = async () => { openDaysCalls++; if (openDaysDown) throw new Error('daily candles unavailable'); return REAL_DAYS; };
 const notes: string[] = [];
 const world = (db: any) => ({ db, notify: (t: string) => { notes.push(t); }, now: () => T, kite: () => (kiteUp ? kc : null), instruments: async () => instruments, rolling,
-  dhanReady: () => true, tradingDay, tick: (token: number) => (token === 256265 ? { ltp: num(FX.spotOpen[Math.floor((T - dayStart) / 60000)]), ts: T } : undefined), paceMs: 0 });
+  dhanReady: () => true, tradingDay, openDays, tick: (token: number) => (token === 256265 ? { ltp: num(FX.spotOpen[Math.floor((T - dayStart) / 60000)]), ts: T } : undefined), paceMs: 0 });
 const seedHistory = (days: string[] = HIST.days) => { for (const d of days) __test.storeHistDay(d, HIST.expiry[d], HIST.rows[d].map((r: number[]) => ({ b: r[0], spot: NaN, atm: NaN, skew: num(r[1]), oi_imb30: num(r[2]), oi_imb_day: num(r[3]), vol_imb30: num(r[4]) })), 'dhan'); };
-const fresh = (): any => { const db = new Database(':memory:'); initExpirySkew(world(db)); notes.length = 0; kiteUp = true; failToken = 0; return db; };
+const fresh = (): any => { const db = new Database(':memory:'); initExpirySkew(world(db)); notes.length = 0; kiteUp = true; failToken = 0; kiteBroken = false; openDaysDown = false; return db; };
 const barTime = (b: number, sec = 8) => dayStart + (b + 1) * 5 * 60000 + sec * 1000;
 // SKEW_DUMP_DIR=<folder> also writes what the page would be sent at three moments of the day (for looking at the page offline).
 const dump = async (name: string) => { if (process.env.SKEW_DUMP_DIR) fs.writeFileSync(path.join(process.env.SKEW_DUMP_DIR, `status_${name}.json`), JSON.stringify(await __test.status())); };
@@ -172,6 +179,30 @@ const dump = async (name: string) => { if (process.env.SKEW_DUMP_DIR) fs.writeFi
   ok('one contract failing to load delays the bar instead of storing a reading with a hole in it');
 }
 
+// ================= 3b) Zerodha failing every call: stand back, then carry on =================
+{
+  const db = fresh(); seedHistory(); kiteBroken = true;
+  T = barTime(8);
+  for (let i = 0; i < 5; i++) { await __test.liveCycle(); T += 5000; }
+  let calls = histCalls; assert.ok(__test.live.pausedUntil > T); assert.match(__test.live.note, /Paused for 1 minute/);
+  for (let i = 0; i < 10; i++) { await __test.liveCycle(); T += 5000; }
+  assert.equal(histCalls, calls, 'no calls during the one-minute pause');
+  T = barTime(8, 100); for (let i = 0; i < 5; i++) { await __test.liveCycle(); T += 5000; }
+  calls = histCalls; assert.match(__test.live.note, /Paused for 5 minutes/, 'still failing after the pause: five minutes this time');
+  for (let i = 0; i < 40; i++) { await __test.liveCycle(); T += 5000; }
+  assert.equal(histCalls, calls, 'no calls during the five-minute pause'); assert.equal(db.prepare('SELECT COUNT(*) c FROM skew_live').get().c, 0);
+  kiteBroken = false; T = barTime(9, 200); await __test.liveCycle();
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM skew_live').get().c, 2, 'bars 8 and 9 caught up once Zerodha answers again'); assert.equal((await __test.status()).live.pausedUntil, null);
+  ok('repeated failures pause the engine (1 minute, then 5) instead of hammering Zerodha, and it catches up afterwards');
+
+  // one bad burst must not cost the bar: back inside the four-minute limit, a signal is still traded
+  const db2 = fresh(); seedHistory(); for (let b = 8; b <= 37; b++) { T = barTime(b); await __test.liveCycle(); }
+  kiteBroken = true; T = barTime(38); for (let i = 0; i < 5; i++) { await __test.liveCycle(); T += 5000; }
+  kiteBroken = false; T = barTime(38, 95); await __test.liveCycle();
+  const t: any = db2.prepare('SELECT * FROM skew_trades WHERE day = ?').get(DAY); assert.equal(t.status, 'OPEN'); assert.equal(t.b, 38); assert.ok(t.late_sec > 90 && t.late_sec < 110);
+  ok('a burst of errors exactly at the signal bar: the trade is still taken once the one-minute pause ends');
+}
+
 // ================= 4) no history, not logged in, switched off =================
 {
   let db = fresh(); seedHistory(HIST.days.slice(-19));
@@ -191,18 +222,63 @@ const dump = async (name: string) => { if (process.env.SKEW_DUMP_DIR) fs.writeFi
   ok('on a Sunday it does nothing and the status points at Monday\'s session and expiry');
 }
 
-// ================= 5) the history loader on an empty database =================
+// ================= 5) the history loader on an empty database, with a calendar that knows no holidays =================
 {
-  const db = fresh(); T = at('08:00:00', '2026-11-11'); dhanCalls = 0;
-  const targets = __test.targetDays(); assert.equal(targets.length, 63); assert.equal(targets[targets.length - 1], DAY);   // this world only has 62 trading days before the 9th
+  const db = fresh(); T = at('08:00:00', '2026-11-12'); dhanCalls = 0;
+  assert.equal(__test.tradingDay('2026-11-10'), true, 'before the record is loaded the calendar is all there is, and it is wrong about the 10th');
+  await __test.refreshOpenDays();
+  for (const h of ['2026-11-10', '2026-10-20', '2026-09-14']) assert.equal(__test.tradingDay(h), false, `${h} was a holiday: no daily candle`);
+  assert.equal(__test.tradingDay('2026-11-09'), true); assert.equal(__test.tradingDay('2026-11-08'), false); assert.equal(__test.tradingDay('2026-11-17'), true, 'a date not yet in the record falls back to the calendar');
+  const targets = __test.targetDays(); assert.equal(targets.length, 64); assert.equal(targets[targets.length - 1], '2026-11-11'); assert.ok(targets.includes(DAY));
+  assert.ok(!targets.includes('2026-11-10') && !targets.includes('2026-10-20') && !targets.includes('2026-09-14'), 'holidays are not asked for');
   await __test.runBackfill('test');
-  const days: any[] = db.prepare('SELECT * FROM skew_days ORDER BY day').all();
-  assert.equal(days.filter(d => d.status === 'ok').length, 1); assert.equal(days.find(d => d.status === 'ok').day, DAY); assert.equal(days.find(d => d.status === 'ok').expiry, '2026-11-09');
-  assert.equal(days.filter(d => d.status === 'empty').length, 62); assert.equal(dhanCalls % 42, 0);
+  const days: any[] = db.prepare('SELECT * FROM skew_days ORDER BY day').all(), good = days.filter(d => d.status === 'ok');
+  assert.equal(good.length, 1); assert.equal(good[0].day, DAY); assert.equal(good[0].expiry, '2026-11-09', 'Monday expiry, although the calendar thinks Tuesday the 10th was open'); assert.equal(good[0].expiry_src, 'rule');
+  assert.equal(days.filter(d => d.status === 'empty').length, 62); assert.deepEqual(days.filter(d => d.status === 'pending').map(d => d.day), ['2026-11-11'], 'yesterday with no rows yet is kept for another look, not written off');
+  assert.equal(dhanCalls % 42, 0);
   const want = readingsForDay(vendorDay(FX, false)), got: any[] = db.prepare('SELECT * FROM skew_hist WHERE day = ? ORDER BY b').all(DAY); assert.equal(got.length, 55);
   got.forEach((g, i) => { for (const f of FEATS) { const w = (want[i] as any)[f]; if (w === w) assert.ok(Math.abs(g[f] - w) < 1e-9); else assert.equal(g[f], null); } });
-  ok(`history loader: ${dhanCalls} calls for 63 days, the one day Dhan has is stored whole, empty old days are written off`);
-  assert.deepEqual(__test.missingDays(), []); ok('…and are not asked for again');
+  ok(`history loader: ${dhanCalls} calls for 64 days; holidays are never asked for; the expiry is right without the calendar's help`);
+  assert.deepEqual(__test.missingDays(), []); const calls = openDaysCalls, dc = dhanCalls; await __test.runBackfill('again'); assert.equal(openDaysCalls, calls); assert.equal(dhanCalls, dc);
+  ok('…nothing is asked for again straight away, and the list of market days is fetched once a day');
+  T += 3 * 3600000; assert.deepEqual(__test.missingDays(), ['2026-11-11']); ok('…but yesterday is asked for again two hours later');
+}
+
+// ================= 6) a day stored with the wrong expiry (what v288 did) is found and loaded again =================
+{
+  const db = fresh(); seedHistory(); T = at('08:00:00', '2026-11-12');
+  // v288's mistake: the 9th stored as if its contract expired on the 10th, a holiday
+  const wrong = vendorDay(FX, false); wrong.expiry = '2026-11-10';
+  __test.storeHistDay(DAY, '2026-11-10', readingsForDay(wrong), 'dhan');
+  db.prepare("UPDATE skew_days SET expiry_src = NULL WHERE day = ?").run(DAY);                    // as rows written before the column existed
+  const bad: any[] = db.prepare('SELECT skew FROM skew_hist WHERE day = ? ORDER BY b').all(DAY), right = readingsForDay(vendorDay(FX, false));
+  assert.ok(Math.abs(bad[30].skew - right[30].skew) > 0.5, 'a day more to expiry visibly changes the skew');
+  dhanCalls = 0; await __test.runBackfill('test');
+  const row: any = db.prepare('SELECT * FROM skew_days WHERE day = ?').get(DAY); assert.equal(row.status, 'ok'); assert.equal(row.expiry, '2026-11-09'); assert.equal(row.expiry_src, 'rule');
+  const fixed: any[] = db.prepare('SELECT skew FROM skew_hist WHERE day = ? ORDER BY b').all(DAY); fixed.forEach((g, i) => { if (right[i].skew === right[i].skew) assert.ok(Math.abs(g.skew - right[i].skew) < 1e-9); });
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM skew_days WHERE status = 'ok'").get().c, 63, 'the 62 days that were right are untouched');
+  ok(`a stored day whose expiry fell on a holiday is reloaded with the real expiry (${dhanCalls} calls); correct days are left alone`);
+
+  // the expiry Zerodha's contract list gave is never second-guessed by the rule
+  __test.storeHistDay(DAY, '2026-11-09', right, 'kite'); db.prepare("UPDATE skew_days SET expiry = '2026-11-12' WHERE day = ?").run(DAY);   // pretend the listed contracts said the 12th
+  T += 3 * 3600000; await __test.runBackfill('test');
+  const z: any = db.prepare('SELECT * FROM skew_days WHERE day = ?').get(DAY); assert.equal(z.src, 'dhan'); assert.equal(z.expiry, '2026-11-12'); assert.equal(z.expiry_src, 'zerodha');
+  T += 3 * 3600000; await __test.runBackfill('again'); assert.equal(db.prepare('SELECT status FROM skew_days WHERE day = ?').get(DAY).status, 'ok');
+  ok('when Dhan replaces a day stored from Zerodha it keeps the expiry the listed contracts gave, and does not re-queue it');
+
+  // Dhan's daily candles unavailable: carry on with the calendar rather than stop
+  const db3 = fresh(); openDaysDown = true; T = at('08:00:00', '2026-11-12'); await __test.runBackfill('test');
+  assert.ok(db3.prepare("SELECT COUNT(*) c FROM skew_days").get().c > 0); ok('if the list of market days cannot be fetched the loader still runs on the calendar');
+}
+
+// ================= 7) a holiday the calendar does not know: no candles, nothing stored =================
+{
+  const db = fresh(); seedHistory(); T = at('10:00:08', '2026-11-10');
+  await __test.liveCycle(); T += 100000; await __test.liveCycle();
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM skew_live').get().c, 0); assert.match(__test.live.note, /market looks closed/);
+  T = at('15:55:00', '2026-11-10'); const r: any = await __test.storeTodayAsHistory('2026-11-10'); assert.ok(r.skipped);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM skew_days WHERE day = '2026-11-10'").get().c, 0);
+  ok('on a holiday the calendar missed, an empty day is not written to the log or the history');
 }
 
 console.log(`\n${n} passed`);

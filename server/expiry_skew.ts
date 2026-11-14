@@ -34,7 +34,7 @@
 import express from 'express';
 import { getKiteClient, getNfoInstruments, activeBroker } from './kite_service';
 import { getLatestTick } from './ticker_service';
-import { dhanRolling, dhanConfigured } from './dhan_service';
+import { dhanRolling, dhanConfigured, dhanCall } from './dhan_service';
 import { isTradingDay } from './calendar_service';
 import {
   FIRST_BAR, LAST_BAR, EXIT_MINUTE, ITM_POINTS, THRESHOLD, WINDOW_DAYS, MIN_DAYS, STEP, SPAN, FEATS, SLIP_POINTS,
@@ -54,6 +54,7 @@ export type SkewDeps = {
   rolling?: (body: any) => Promise<any>;
   dhanReady?: () => boolean;
   tradingDay?: (d: string) => boolean;
+  openDays?: () => Promise<string[]>;
   tick?: (token: number) => { ltp: number; ts: number } | undefined;
   paceMs?: number;
 };
@@ -72,13 +73,58 @@ const minuteMs = (day: string, m: number) => Date.parse(`${day}T09:15:00+05:30`)
 export const clock12 = (m: number) => { const t = 555 + Math.round(m), h = Math.floor(t / 60), mi = t % 60; return `${((h + 11) % 12) + 1}:${String(mi).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const numOrNull = (v: number) => (v === v && Number.isFinite(v) ? v : null);
-const tradingDay = (d: string) => (D?.tradingDay ? D.tradingDay(d) : isTradingDay(d));
+const kvGet = (k: string): string | null => { try { const r: any = D.db.prepare('SELECT value FROM skew_kv WHERE key = ?').get(k); return r ? String(r.value) : null; } catch { return null; } };
+const kvSet = (k: string, v: string) => D.db.prepare('INSERT INTO skew_kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(k, v);
+
+// ---------------------------------------------------------------- which days the market was open
+// WHY THE HOLIDAY CALENDAR IS NOT ENOUGH. The first history load (v288) dated two
+// weekly expiries on Tuesdays the market was shut — 20 Oct and 10 Nov 2026, when
+// the contracts had really expired on the Monday — and asked Dhan for three
+// holidays. The app's calendar comes from NSE's site, which refuses the server,
+// so it had been running on a four-date fallback. A wrong expiry is not cosmetic
+// here: the time to expiry goes straight into the implied volatility, and eight
+// of 61 stored days came out with the wrong skew.
+// So for the PAST the engine no longer asks a calendar what should have happened;
+// it asks what did: one Dhan call returns NIFTY's daily candles, and a weekday
+// with no candle was a holiday. The calendar (now carrying the full 2026 list) is
+// used only for dates that have not happened yet. Stored once a day.
+// The record ends at the last day that traded, so a holiday is only known for
+// certain once a later day has traded; for the day or two in between the
+// calendar still decides. If it gets that wrong, requeueWrongExpiries() below
+// puts it right as soon as the record catches up.
+let openCache: { from: string; to: string; set: Set<string>; fetchedDay: string } | null = null;
+function openDays() {
+  if (!openCache) { try { const raw = kvGet('open_days'); if (raw) { const o = JSON.parse(raw); openCache = { from: o.from, to: o.to, set: new Set<string>(o.days), fetchedDay: o.fetchedDay }; } } catch { } }
+  return openCache;
+}
+async function dhanOpenDays(from: string, to: string): Promise<string[]> {
+  const d = await dhanCall('POST', '/charts/historical', { securityId: '13', exchangeSegment: 'IDX_I', instrument: 'INDEX', expiryCode: 0, oi: false, fromDate: from, toDate: to });
+  // Daily candles are stamped at the day's start; six hours in is the same date whichever way the stamp leans.
+  return ((d?.timestamp || []) as number[]).map(ts => istDay(Number(ts) * 1000 + 6 * 3600000));
+}
+async function refreshOpenDays(force = false) {
+  const today = istDay(), cur = openDays();
+  if (!force && cur && cur.fetchedDay === today) return;
+  try {
+    const got = D.openDays ? await D.openDays() : await dhanOpenDays(addDays(today, -170), today);
+    // Never today: its candle may or may not exist yet, and today's own answer comes from the live feed.
+    const list = [...new Set(got)].filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && d < today).sort();
+    if (list.length < 40) throw new Error(`only ${list.length} days came back`);
+    kvSet('open_days', JSON.stringify({ from: list[0], to: list[list.length - 1], days: list, fetchedDay: today }));
+    openCache = null; openDays();
+  } catch (e: any) { console.error('[skew] trading-day list not refreshed:', e?.message || e); }
+}
+const calendarDay = (d: string) => (D?.tradingDay ? D.tradingDay(d) : isTradingDay(d));
+/** Was / is the market open that day. Past: what happened. Future: the calendar. Weekends never (special sessions are not sessions this rule trades). */
+const tradingDay = (d: string) => {
+  const wd = new Date(d + 'T00:00:00Z').getUTCDay(); if (wd === 0 || wd === 6) return false;
+  const o = D?.db ? openDays() : null;
+  return o && d >= o.from && d <= o.to ? o.set.has(d) : calendarDay(d);
+};
 const nextTradingDay = (d: string) => { let x = d; for (let i = 0; i < 12; i++) { x = addDays(x, 1); if (tradingDay(x)) return x; } return x; };
 const tdteOf = (day: string, expiry: string) => { let n = 0; for (let d = addDays(day, 1); d <= expiry; d = addDays(d, 1)) if (tradingDay(d)) n++; return n; };
 
 // ---------------------------------------------------------------- settings
-const kvGet = (k: string): string | null => { try { const r: any = D.db.prepare('SELECT value FROM skew_kv WHERE key = ?').get(k); return r ? String(r.value) : null; } catch { return null; } };
-const kvSet = (k: string, v: string) => D.db.prepare('INSERT INTO skew_kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(k, v);
 const enabled = () => kvGet('enabled') !== '0';
 
 // ---------------------------------------------------------------- history (Dhan)
@@ -95,14 +141,14 @@ function histAggs(): DayAgg[] {
   aggCache = { v: histVersion, aggs }; return aggs;
 }
 
-function storeHistDay(day: string, expiry: string, rows: Reading[], src: 'dhan' | 'kite', note = '') {
+function storeHistDay(day: string, expiry: string, rows: Reading[], src: 'dhan' | 'kite', expirySrc: 'zerodha' | 'rule' = src === 'kite' ? 'zerodha' : 'rule', note = '') {
   const ins = D.db.prepare('INSERT OR REPLACE INTO skew_hist (day, b, skew, oi_imb30, oi_imb_day, vol_imb30) VALUES (?,?,?,?,?,?)');
   const tx = D.db.transaction(() => {
     D.db.prepare('DELETE FROM skew_hist WHERE day = ?').run(day);
     for (const r of rows) ins.run(day, r.b, numOrNull(r.skew), numOrNull(r.oi_imb30), numOrNull(r.oi_imb_day), numOrNull(r.vol_imb30));
-    D.db.prepare(`INSERT INTO skew_days (day, status, src, expiry, bars, fetched_at, note) VALUES (?, 'ok', ?, ?, ?, ?, ?)
-      ON CONFLICT(day) DO UPDATE SET status='ok', src=excluded.src, expiry=excluded.expiry, bars=excluded.bars, fetched_at=excluded.fetched_at, note=excluded.note`)
-      .run(day, src, expiry, rows.filter(r => r.skew === r.skew).length, now(), note);
+    D.db.prepare(`INSERT INTO skew_days (day, status, src, expiry, expiry_src, bars, fetched_at, note) VALUES (?, 'ok', ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(day) DO UPDATE SET status='ok', src=excluded.src, expiry=excluded.expiry, expiry_src=excluded.expiry_src, bars=excluded.bars, fetched_at=excluded.fetched_at, note=excluded.note`)
+      .run(day, src, expiry, expirySrc, rows.filter(r => r.skew === r.skew).length, now(), note);
   });
   tx(); histVersion++;
 }
@@ -124,10 +170,32 @@ function missingDays(): string[] {
   return targetDays().filter(d => { const h = have.get(d); return !h || ((h.status === 'pending' || (h.status === 'ok' && h.src === 'kite')) && due(h)); });
 }
 
+/** The expiry a past day's contract had. If that day was stored from Zerodha, the
+ *  expiry written then came from the listed contracts and is the authority;
+ *  otherwise the Tuesday rule on the days the market was really open. */
+function expiryForPast(day: string): { expiry: string; src: 'zerodha' | 'rule' } {
+  const kept: any = D.db.prepare("SELECT expiry FROM skew_days WHERE day = ? AND expiry_src = 'zerodha' AND expiry IS NOT NULL").get(day);
+  return kept?.expiry ? { expiry: String(kept.expiry), src: 'zerodha' } : { expiry: weeklyExpiryFor(day, tradingDay), src: 'rule' };
+}
+/** A day stored with an expiry the Tuesday rule no longer agrees with — a holiday
+ *  learnt after the fact — is put back in the queue. Only once the expiry date is
+ *  itself in the past (inside the known record), so the answer cannot flip again. */
+function requeueWrongExpiries() {
+  const o = openDays(); if (!o) return 0; let n = 0;
+  for (const r of D.db.prepare("SELECT day, expiry FROM skew_days WHERE status = 'ok' AND src = 'dhan' AND COALESCE(expiry_src, 'rule') = 'rule'").all() as any[]) {
+    const want = weeklyExpiryFor(r.day, tradingDay);
+    if (want <= o.to && r.expiry !== want) {
+      D.db.prepare("UPDATE skew_days SET status = 'pending', tried_at = NULL, note = ? WHERE day = ?").run(`expiry was stored as ${r.expiry}, the contract expired ${want}`, r.day); n++;
+    }
+  }
+  if (n) { histVersion++; console.log(`[skew] ${n} stored day(s) had the wrong expiry date and will be loaded again`); }
+  return n;
+}
+
 /** Both days of a calendar pair (Dhan answers a one-day span with two days). */
 async function dhanPair(first: string, wanted: Set<string>): Promise<Map<string, DayBuilder>> {
   const days = new Map<string, DayBuilder>();
-  const expiryOf = (d: string) => weeklyExpiryFor(d, tradingDay);
+  const expiryOf = (d: string) => expiryForPast(d).expiry;
   const call = D.rolling || dhanRolling;
   for (const side of ['CALL', 'PUT'] as const) {
     for (const off of OFFSETS) {
@@ -157,8 +225,11 @@ const dayLooksWhole = (d: DayData, minStrikes = 15) => {
 async function runBackfill(reason: string) {
   if (hist.running) return;
   if (!(D.dhanReady ? D.dhanReady() : dhanConfigured())) { hist.lastError = 'Dhan is not set up, so the 60-day history cannot be loaded'; return; }
-  const todo = missingDays(); if (!todo.length) return;
-  hist.running = true; hist.startedAt = now(); hist.total = todo.length; hist.done = 0; hist.lastError = ''; hist.calls = 0;
+  hist.running = true;
+  let todo: string[] = [];
+  try { await refreshOpenDays(); requeueWrongExpiries(); todo = missingDays(); }
+  catch (e: any) { hist.lastError = e?.message || String(e); }
+  if (!todo.length) { hist.running = false; return; } hist.startedAt = now(); hist.total = todo.length; hist.done = 0; hist.lastError = ''; hist.calls = 0;
   console.log(`[skew] history load (${reason}): ${todo.length} day(s) ${todo[0]} … ${todo[todo.length - 1]}`);
   try {
     for (let i = 0; i < todo.length;) {
@@ -170,7 +241,7 @@ async function runBackfill(reason: string) {
       for (const day of wanted) {
         const b = got.get(day), data = b && b.rows > 0 ? b.finish() : null;
         if (data && dayLooksWhole(data)) {
-          storeHistDay(day, data.expiry, readingsForDay(data), 'dhan');
+          storeHistDay(day, data.expiry, readingsForDay(data), 'dhan', expiryForPast(day).src);
           gradeFromDayData(data);
         } else {
           // No rows: a holiday the calendar does not know, or a day Dhan has not
@@ -237,7 +308,7 @@ async function candles(kc: any, token: number, day: string, withOi: boolean, max
   return out;
 }
 
-const live = { busy: false, lastCycleAt: 0, lastBarAt: 0, lastError: '', note: '', cycles: 0 };
+const live = { busy: false, lastCycleAt: 0, lastBarAt: 0, lastError: '', note: '', cycles: 0, errors: 0, trips: 0, pausedUntil: 0 };
 
 /** One day rebuilt from Zerodha for the given bars. `failed` counts contracts
  *  whose candles could not be fetched — the caller decides whether to retry. */
@@ -347,7 +418,7 @@ function gradeFromDayData(d: DayData) {
 async function liveCycle() {
   if (live.busy || !enabled()) return;
   const day = istDay(), m = sessionMin();
-  if (!tradingDay(day)) return;
+  if (!tradingDay(day) || now() < live.pausedUntil) return;
   live.busy = true; live.lastCycleAt = now(); live.cycles++;
   try {
     await exitDue();
@@ -364,10 +435,15 @@ async function liveCycle() {
     // The newest bar needs its last minute. Until 90 s after the close, wait for
     // it rather than store a reading with a hole in it.
     const lastM = (latest + 1) * 5 - 1, haveLast = got.data.spotClose[lastM] === got.data.spotClose[lastM];
+    // Not one NIFTY candle since 09:15: the market is shut (a holiday the
+    // calendar does not know). Storing 55 empty bars would put a day that never
+    // happened on the page and in the log.
+    let anySpot = false; for (let q = 0; q <= lastM && !anySpot; q++) anySpot = got.data.spotClose[q] === got.data.spotClose[q];
+    if (!anySpot) { live.note = 'No NIFTY candles today — the market looks closed'; return; }
     if ((!haveLast || got.failed > 0) && due.includes(latest) && sinceClose < 90) { live.note = haveLast ? `${got.failed} contract(s) failed to load — retrying` : 'Waiting for the last minute\'s candle'; return; }
     const ref = refStats(histAggs(), day);
     for (const b of due) storeLive(day, readingAt(got.data, b), ref, (m - (b + 1) * 5) * 60, got.failed ? `kite, ${got.failed} missing` : 'kite');
-    live.lastBarAt = now(); live.note = ref ? '' : `History has fewer than ${MIN_DAYS} days — readings are stored but cannot be scored yet`;
+    live.lastBarAt = now(); live.errors = 0; live.trips = 0; live.note = ref ? '' : `History has fewer than ${MIN_DAYS} days — readings are stored but cannot be scored yet`;
     if (ref) await actOnSignal(day, got.chain);
     // For the record: the entry minute's candle open (the backtest's entry price).
     const t: any = D.db.prepare("SELECT * FROM skew_trades WHERE day = ? AND status = 'OPEN' AND entry_ref IS NULL").get(day);
@@ -375,7 +451,20 @@ async function liveCycle() {
       const kc = kite(); const cs = kc ? await candles(kc, Number(t.token), day, false, 20000) : [];
       const c = cs.find(x => x.t === minuteMs(day, (t.b + 1) * 5)); if (c) D.db.prepare('UPDATE skew_trades SET entry_ref = ? WHERE day = ?').run(c.open, day);
     }
-  } catch (e: any) { live.lastError = e?.message || String(e); console.error('[skew] live cycle:', live.lastError); }
+  } catch (e: any) {
+    live.lastError = e?.message || String(e); console.error('[skew] live cycle:', live.lastError);
+    // A cycle runs every five seconds. Something that fails every time (Zerodha
+    // refusing history calls, a contract list in an unexpected shape) would
+    // otherwise be retried all day against the same three-a-second allowance the
+    // charts depend on. Five failures in a row and it stands back: one minute the
+    // first time — short enough that a signal on that bar is still inside the
+    // four-minute limit when it comes back — and five minutes each time after,
+    // until a bar is stored again.
+    if (++live.errors >= 5) {
+      const mins = live.trips === 0 ? 1 : 5; live.errors = 0; live.trips++; live.pausedUntil = now() + mins * 60000;
+      live.note = `Paused for ${mins} minute${mins > 1 ? 's' : ''} after repeated errors: ${live.lastError}`;
+    }
+  }
   finally { live.busy = false; }
 }
 
@@ -417,7 +506,8 @@ async function status() {
   const closed = trades.filter(t => t.status === 'CLOSED' && t.pnl !== null).reverse();
   let eq = 0, peak = 0, dd = 0; for (const t of closed) { eq += t.pnl; peak = Math.max(peak, eq); dd = Math.min(dd, eq - peak); }
   const wins = closed.filter(t => t.pnl > 0);
-  let expiry: string | null = null; try { expiry = trading && kite() ? (await chainFor(day))?.expiry || null : null; } catch { }
+  // The listed contracts say when the next expiry is; the Tuesday rule is only the fallback (it is as good as the calendar behind it).
+  let expiry: string | null = null; try { expiry = kite() ? (await chainFor(session))?.expiry || null : null; } catch { }
   if (!expiry) expiry = weeklyExpiryFor(session, tradingDay);
   const daysRow: any = D.db.prepare("SELECT COUNT(*) n, MIN(day) a, MAX(day) b, COALESCE(SUM(src = 'kite'), 0) k FROM skew_days WHERE status = 'ok'").get();
   const last = bars.length ? bars[bars.length - 1] : null;
@@ -429,8 +519,9 @@ async function status() {
     expiry, tdte: tdteOf(session, expiry),
     latest: last, bars, today,
     history: { days: daysRow?.n || 0, from: daysRow?.a || null, to: daysRow?.b || null, fromZerodha: daysRow?.k || 0, usable: !!ref, refDays: ref?.days || 0, refFrom: ref?.from || null, refTo: ref?.to || null, needed: MIN_DAYS, window: WINDOW_DAYS,
-      loading: hist.running, loaded: hist.done, toLoad: hist.total, current: hist.current, lastError: hist.lastError || null, dhan: D.dhanReady ? D.dhanReady() : dhanConfigured() },
-    live: { lastCycleAt: live.lastCycleAt || null, lastBarAt: live.lastBarAt || null, note: live.note || null, lastError: live.lastError || null, zerodha: !!kite() },
+      loading: hist.running, loaded: hist.done, toLoad: hist.total, current: hist.current, lastError: hist.lastError || null, dhan: D.dhanReady ? D.dhanReady() : dhanConfigured(),
+      marketDaysKnown: openDays() ? { from: openDays()!.from, to: openDays()!.to, days: openDays()!.set.size } : null },
+    live: { lastCycleAt: live.lastCycleAt || null, lastBarAt: live.lastBarAt || null, note: live.note || null, lastError: live.lastError || null, zerodha: !!kite(), pausedUntil: live.pausedUntil > now() ? live.pausedUntil : null },
     record: { closed: closed.length, total: Math.round(eq), perTrade: closed.length ? Math.round(eq / closed.length) : null, wins: wins.length, winPct: closed.length ? Math.round(100 * wins.length / closed.length) : null,
       worst: closed.length ? Math.round(Math.min(...closed.map(t => t.pnl))) : null, drawdown: Math.round(dd), missed: trades.filter(t => t.status === 'MISSED').length, noPrice: trades.filter(t => t.status === 'NO_PRICE').length, since: kvGet('started') },
     trades: trades.slice(0, 120), backtest: BACKTEST,
@@ -440,7 +531,7 @@ async function status() {
 // ---------------------------------------------------------------- wiring
 /** Tables and dependencies only — no timers, no routes (the test stops here). */
 export function initExpirySkew(deps: SkewDeps) {
-  D = deps; aggCache = null; chainCache = null; candleCache.clear(); liveLtp.clear();
+  D = deps; aggCache = null; chainCache = null; openCache = null; candleCache.clear(); liveLtp.clear(); live.errors = 0; live.trips = 0; live.pausedUntil = 0; live.note = ''; live.lastError = '';
   D.db.exec(`
     CREATE TABLE IF NOT EXISTS skew_kv (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE IF NOT EXISTS skew_days (day TEXT PRIMARY KEY, status TEXT, src TEXT, expiry TEXT, bars INTEGER, fetched_at INTEGER, note TEXT, tried_at INTEGER);
@@ -452,6 +543,8 @@ export function initExpirySkew(deps: SkewDeps) {
       entry_px REAL, entry_src TEXT, entry_ref REAL, exit_px REAL, exit_src TEXT, exit_at INTEGER, exit_ref REAL, pts REAL, fee REAL, pnl REAL,
       status TEXT, note TEXT, created_at INTEGER, updated_at INTEGER);
   `);
+  // v288 created skew_days without this column.
+  try { D.db.exec('ALTER TABLE skew_days ADD COLUMN expiry_src TEXT'); } catch { }
   if (!kvGet('started')) kvSet('started', istDay());
 }
 
@@ -470,7 +563,7 @@ export function registerExpirySkew(app: any, deps: SkewDeps) {
   // It is a few minutes of spaced Dhan calls the first time and one day's worth
   // (about ten seconds) each morning after that.
   setTimeout(() => { void runBackfill('startup'); }, 25000);
-  setInterval(() => { if (!hist.running && missingDays().length) void runBackfill('scheduled'); }, 20 * 60000);
+  setInterval(() => { if (!hist.running && (missingDays().length || openDays()?.fetchedDay !== istDay())) void runBackfill('scheduled'); }, 20 * 60000);
   // Today: look every five seconds; a cycle only does work when a bar has closed.
   setInterval(() => { void liveCycle(); }, 5000);
   // 3:50 PM: keep today as history (from Zerodha) so tomorrow never starts a day short.
@@ -499,7 +592,8 @@ export function registerExpirySkew(app: any, deps: SkewDeps) {
     res.json({ ok: true, day, info: D.db.prepare('SELECT * FROM skew_days WHERE day = ?').get(day) || null, ref,
       hist: h.map(r => ({ ...r, ...scoreOf(r, ref) })), live: D.db.prepare('SELECT * FROM skew_live WHERE day = ? ORDER BY b').all(day) });
   });
-  app.get('/api/skew/days', (_req: any, res: any) => res.json({ ok: true, days: D.db.prepare('SELECT * FROM skew_days ORDER BY day').all(), missing: missingDays(), loader: hist }));
+  app.get('/api/skew/days', (_req: any, res: any) => { const o = openDays(); res.json({ ok: true, days: D.db.prepare('SELECT * FROM skew_days ORDER BY day').all(), missing: missingDays(), loader: hist,
+    marketDays: o ? { from: o.from, to: o.to, fetchedDay: o.fetchedDay, days: [...o.set].sort() } : null }); });
   app.post('/api/skew/backfill', guard, (_req: any, res: any) => { if (hist.running) return res.json({ ok: true, started: false, running: true }); void runBackfill('manual'); res.json({ ok: true, started: true, missing: missingDays().length }); });
   // One past day built BOTH ways (Zerodha candles and Dhan's file) — the check that
   // the live path and the tested path give the same reading on a real day. Works
@@ -530,4 +624,4 @@ export function registerExpirySkew(app: any, deps: SkewDeps) {
   console.log('[skew] Expiry Skew registered — PRACTICE ONLY: logs signals and practice trades, never places an order');
 }
 
-export const __test = { status, liveCycle, runBackfill, storeTodayAsHistory, targetDays, missingDays, histAggs, storeHistDay, exitDue, live, hist };
+export const __test = { status, liveCycle, runBackfill, storeTodayAsHistory, targetDays, missingDays, histAggs, storeHistDay, exitDue, refreshOpenDays, tradingDay, live, hist };
