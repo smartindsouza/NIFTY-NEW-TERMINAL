@@ -97,3 +97,40 @@ Telegram, alerts), page `src/pages/TelegramSignals.tsx`.
   fails the checks (each skip is reported with its reason).
 - Tests: `npx tsx server/signal_parser.test.ts` and
   `npx tsx server/signal_trader.e2e.ts` (fake Kite + fake Telegram, no network).
+
+## Expiry Skew (`/expiry-skew`, `/api/skew/*`) — Practice only
+
+Martin's own option-chain indicator. Every 5 minutes it scores two readings
+against their last 60 trading days: **skew** (implied volatility of the put 200
+points below NIFTY minus the call 200 above) and **flow** (put vs call open
+interest and volume added near the money). The first score of ±1.5 between
+10:00 AM and 2:30 PM logs a practice buy of the option 200 points in the money,
+closed at 3:15 PM. **It never places an order** — it is handed no order function.
+Code: `server/expiry_skew_calc.ts` (the calculation, a port of the research
+code), `server/expiry_skew.ts` (history, live readings, practice log), page
+`src/pages/ExpirySkew.tsx`. The study behind it is the project doc
+`option-strategy-search-nov-2026`.
+
+- **History** (the 60 days each reading is scored against) comes from Dhan's
+  expired-option feed, loaded in the background at start-up (a few minutes the
+  first time) and one day each morning after.
+- **Today** comes from Zerodha minute candles with open interest, so Zerodha must
+  be logged in before 10:00 AM. A signal bar computed more than four minutes late
+  is logged as missed, not traded.
+- `GET /api/skew/status` (what the page shows) · `GET /api/skew/day?day=` (stored
+  numbers for a day) · `GET /api/skew/days` (history loader) ·
+  `GET /api/skew/compare?day=` (one past day built from Zerodha and from Dhan,
+  side by side) · `POST /api/skew/settings {enabled}`.
+- The rule is frozen (14 Nov 2026). Do not tune it while it is on test.
+- Tests: `npx tsx server/expiry_skew.test.ts` (the calculation against the
+  research numbers on a real day) and `npx tsx server/expiry_skew.e2e.ts` (the
+  whole engine replaying that day with a fake Zerodha and a fake Dhan).
+
+## NIFTY futures feed recorder (`/api/research/fut-ticks`)
+
+Keeps every update of the front-month NIFTY future (price, last quantity, volume,
+best bid/ask, OI) in its own database file `fut_ticks.db`, 09:15 AM – 3:40 PM, for
+45 days — the raw material for judging a footprint chart on evidence. Records
+only. `GET /api/research/fut-ticks/days` lists what is stored;
+`GET /api/research/fut-ticks?day=YYYY-MM-DD` returns a day (prices ×100).
+Code: `server/fut_recorder.ts`. Test: `npx tsx server/fut_recorder.test.ts`.

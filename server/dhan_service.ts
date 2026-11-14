@@ -107,6 +107,19 @@ export async function dhanCall(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: 
   return r.data;
 }
 
+// ONE PACER for every expired-option call (14 Nov 2026). The research pass-through
+// below spaced its own starts 220 ms apart with a counter private to that route.
+// The Expiry Skew history loader (server/expiry_skew.ts) now makes the same Dhan
+// call from inside the server, and two callers each keeping their own 220 ms gap
+// can together send nine a second against Dhan's five. So the counter lives here
+// and both go through this function.
+let nextRoll = 0;
+export async function dhanRolling(body: any): Promise<any> {
+  const now = Date.now(); const at = Math.max(now, nextRoll); nextRoll = at + 220;
+  if (at > now) await new Promise(r => setTimeout(r, at - now));
+  return dhanCall('POST', '/charts/rollingoption', body);
+}
+
 export function registerDhan(app: any, deps: { db: any }) {
   D = deps;
   D.db.exec('CREATE TABLE IF NOT EXISTS dhan_kv (key TEXT PRIMARY KEY, value TEXT)');
@@ -134,7 +147,6 @@ export function registerDhan(app: any, deps: { db: any }) {
   // NIFTY option candles while the Dhan token stays in Railway — the loader never
   // holds it. Only this one read-only call can be made through it, and starts are
   // spaced 220 ms apart (Dhan's data APIs allow 5 a second).
-  let nextRoll = 0;
   app.post('/api/research/dhan-rolling', expressJson(), async (req: any, res: any) => {
     const b = req.body || {};
     const date = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v));
@@ -148,9 +160,7 @@ export function registerDhan(app: any, deps: { db: any }) {
     // Types exactly as Dhan's own example (interval a string, securityId and expiryCode numbers).
     const body = { exchangeSegment: 'NSE_FNO', interval: String(b.interval), securityId: Number(b.securityId), instrument: b.instrument, expiryFlag: b.expiryFlag,
       expiryCode: Number(b.expiryCode), strike: String(b.strike), drvOptionType: b.drvOptionType, requiredData: b.requiredData, fromDate: b.fromDate, toDate: b.toDate };
-    const now = Date.now(); const at = Math.max(now, nextRoll); nextRoll = at + 220;
-    if (at > now) await new Promise(r => setTimeout(r, at - now));
-    try { res.json(await dhanCall('POST', '/charts/rollingoption', body)); }
+    try { res.json(await dhanRolling(body)); }
     catch (e: any) { res.status(e?.status || 502).json({ error: e?.message || String(e) }); }
   });
   console.log('[dhan] connection module registered');

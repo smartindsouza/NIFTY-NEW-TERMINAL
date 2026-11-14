@@ -16,6 +16,15 @@ let ticker: any = null;
 let subscribedTokens = new Set<number>();
 const latest = new Map<number, LiveTick>();
 let broadcaster: Broadcaster | null = null;
+// RAW TAP (14 Nov 2026). LiveTick above keeps price, volume and OI only. The
+// futures recorder (server/fut_recorder.ts) needs what a footprint is made of —
+// the last trade's quantity and the best bid and ask at that moment — which
+// arrive on Zerodha's full-mode tick and were being dropped here. Rather than
+// widen LiveTick (kept for every instrument in `latest`, read by the exit engine)
+// one optional listener sees the untouched tick first. It must never throw into
+// this loop: the next line after it is the one that drives stops and exits.
+let rawTap: ((t: any) => void) | null = null;
+export function setRawTickTap(fn: ((t: any) => void) | null) { rawTap = fn; }
 
 export function getLatestTick(token: number): LiveTick | undefined { return latest.get(token); }
 export function isTickerConnected(): boolean {
@@ -41,6 +50,7 @@ export function startTicker(apiKey: string, accessToken: string, onTick: Broadca
   });
   ticker.on('ticks', (ticks: any[]) => {
     for (const t of ticks) {
+      if (rawTap) { try { rawTap(t); } catch {} }
       const tick: LiveTick = { token: t.instrument_token, ltp: t.last_price, oi: t.oi,
         volume: t.volume_traded, change: t.change, ohlc: t.ohlc, ts: Date.now(),
         exTs: (() => { const v = t.exchange_timestamp || t.last_trade_time; const ms = v instanceof Date ? v.getTime() : v ? new Date(v).getTime() : NaN; return Number.isFinite(ms) ? ms : null; })() };

@@ -44,6 +44,8 @@ import { currentLeg, needsLegAverage } from './server/leg_average';
 import { entryWallError } from './server/entry_wall';
 import { registerResearchExport } from './server/research_export';
 import { registerGoldenSweep } from './server/golden_sweep';
+import { registerExpirySkew } from './server/expiry_skew';
+import { registerFutRecorder } from './server/fut_recorder';
 import { registerLatencyDiag, noteServerTick } from './server/latency_diag';
 import { registerLeverage } from './server/leverage';
 import { GAP_CONFIG } from './server/config/gapScorecard';
@@ -3635,6 +3637,14 @@ setInterval(() => {
   try { registerLatencyDiag(app, express); } catch (e) { console.error('[latency] not registered', e); }
   // Golden-zone Swap-Sweep: WATCH-ONLY alerts and a live record (no orders).
   try { registerGoldenSweep(app, { db, notify: (t: string) => signalNotify(t) }); } catch (e) { console.error('[golden-sweep] not registered', e); }
+  // EXPIRY SKEW (14 Nov 2026): Martin's own option-chain indicator, PRACTICE ONLY.
+  // It is handed the database and the alert sender and nothing else — no order
+  // function, no exit function — so it cannot trade even by mistake. See
+  // server/expiry_skew.ts for why it is on test rather than live.
+  try { registerExpirySkew(app, { db, notify: (t: string) => signalNotify(t) }); } catch (e) { console.error('[skew] not registered — the rest of the app is unaffected', e); }
+  // NIFTY futures feed recorder: keeps the feed so a footprint can be judged on
+  // evidence. Records only; its own database file.
+  try { registerFutRecorder(app); } catch (e) { console.error('[fut-rec] not registered — the rest of the app is unaffected', e); }
   // NIFTY 50 history for offline research (read-only index candles).
   try { registerResearchExport(app); } catch (e) { console.error('[research] export not registered', e); }
   // SECOND ACCOUNT (wife's Zerodha): follows the channel's calls with its own
