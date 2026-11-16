@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect, useLayoutEffect } from "react";
 import { useTodayBias, isRecord as isBiasRecord, istToday as biasIstToday, BIAS_LINES_KEY, useBiasCardHidden } from "../lib/bias";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, ChevronsUp, ChevronsDown, ChevronRight, Copy, Trash2, Search, PencilRuler, Minus, Slash, RectangleHorizontal, AlignJustify, TrendingDown, Type as TypeIcon, Move as MoveIcon, ArrowLeft, CalendarRange, ChartNoAxesCombined, TrendingUp, Star, Bell, ClipboardPen, ChevronsUpDown, ZoomIn, ZoomOut, Link2, CandlestickChart } from "lucide-react";
+import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, ChevronsUp, ChevronsDown, ChevronRight, Copy, Trash2, Search, PencilRuler, Minus, Slash, RectangleHorizontal, AlignJustify, TrendingDown, Type as TypeIcon, Move as MoveIcon, ArrowLeft, CalendarRange, ChartNoAxesCombined, TrendingUp, Star, Bell, ClipboardPen, ChevronsUpDown, Link2, CandlestickChart } from "lucide-react";
 import MyOrderModal from "../components/MyOrderModal";
 import { navigate } from "wouter/use-browser-location";
 import { TradeGuardButton } from "../components/TradeGuard";
@@ -6850,13 +6850,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       const docked = entryY !== null && Math.abs(y - entryY) < 32;
       let x = clearOfLabels(y);
       if (docked) x = Math.max(x, dockX);
-      // ON THE SCALPPRO SCREEN THE PLOT'S RIGHT-HAND CORNERS BELONG TO ZOOM (in
-      // at the top, out at the bottom, where Lemonn has them). A chip level
-      // with one of them stops short of it instead of lying under it: the
-      // button is the upper layer, so a touch on that end of the chip zoomed
-      // the chart. Seen with a short's TP, which sits low in the plot (16 Nov
-      // 2026). 32 = the button's 28 and a gap; 48 = its reach plus half a chip.
-      const rightEdge = plotW - 2 - (scalp && (y < 48 || y > plotH - 48) ? 32 : 0);
       // Two chips at nearly the same height: the second goes after the first.
       for (const o of placed) if (Math.abs(y - o.y) < 40 && x < o.x + o.w + 6) x = o.x + o.w + 6;
       show(el);
@@ -6867,7 +6860,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       // Fitting means measuring, so the answer is kept until the words, the
       // place or the width of the plot change.
       const rupees = (text.match(/[+-]₹[\d,]+/) || [''])[0];
-      const key = `${text}|${Math.round(x)}|${Math.round(rightEdge)}|${docked ? 1 : 0}`;
+      const key = `${text}|${Math.round(x)}|${Math.round(plotW)}|${docked ? 1 : 0}`;
       const kept = chipFitRef.current[which];
       let chosen = kept && kept.key === key ? kept.text : null;
       if (chosen === null) {
@@ -6875,7 +6868,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         chosen = '';
         for (const t of tries) {
           if (textEl) { setText(textEl, t); textEl.style.display = t ? '' : 'none'; }
-          if (!t || x + el.offsetWidth <= rightEdge) { chosen = t; break; }
+          if (!t || x + el.offsetWidth <= plotW - 2) { chosen = t; break; }
         }
         chipFitRef.current[which] = { key, text: chosen };
       }
@@ -6886,7 +6879,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       }
       const w = el.offsetWidth;
       // Never under the price axis: a chip that cannot be seen cannot be used.
-      x = Math.max(2, Math.min(x, rightEdge - w));
+      x = Math.max(2, Math.min(x, plotW - w - 2));
       put(el, x, y);
       placed.push({ x, w, y });
       if (docked) dockX = x + w + 6;
@@ -14113,14 +14106,19 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       const pEl = headPriceRef.current, cEl = headChangeRef.current;
       if (!pEl) return;
       const px = Number(lastCandleDataRef.current?.close);
-      const text = px > 0 ? `${isReferenceChartRef.current ? '' : '₹'}${fmt(px)}` : '—';
+      // On the ScalpPro screen the line is written the way Lemonn writes it:
+      // "25,291.10 146.80 ▲ (0.58%)" and "61.10 -0.90 ▼ (1.45%)" — no rupee
+      // sign, the change first, the percentage in brackets without a sign.
+      const text = px > 0 ? `${isReferenceChartRef.current || scalp ? '' : '₹'}${fmt(px)}` : '—';
       if (pEl.textContent !== text) pEl.textContent = text;
       if (!cEl) return;
       const prev = prevSessionCloseRef.current;
       let ct = '', color = '';
       if (px > 0 && prev && prev > 0) {
         const d = px - prev, pct = (d / prev) * 100;
-        ct = `${d >= 0 ? '▲' : '▼'} ${Math.abs(pct).toFixed(2)}% (${d >= 0 ? '+' : '−'}${fmt(Math.abs(d))})`;
+        ct = scalp
+          ? `${d < 0 ? '-' : ''}${fmt(Math.abs(d))} ${d >= 0 ? '▲' : '▼'} (${Math.abs(pct).toFixed(2)}%)`
+          : `${d >= 0 ? '▲' : '▼'} ${Math.abs(pct).toFixed(2)}% (${d >= 0 ? '+' : '−'}${fmt(Math.abs(d))})`;
         color = d >= 0 ? '#10b981' : '#f43f5e';
       }
       if (cEl.textContent !== ct) cEl.textContent = ct;
@@ -14268,18 +14266,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   }, [barRowShown]);
 
   const tfLabelOf = (tf: any) => (({ '1': '1m', '3': '3m', '5': '5m', '15': '15m', '60': '1h', '240': '4h', '1440': '1D', '10080': '1W', '43200': '1M' } as Record<string, string>)[String(tf)] || `${tf}m`);
-  // Zoom from the newest candle: fewer (in) or more (out) candles on screen, the
-  // right edge staying where it is.
-  const zoomChart = (factor: number) => {
-    try {
-      const ts = mainChartRef.current?.timeScale();
-      const r = ts?.getVisibleLogicalRange();
-      if (!ts || !r) return;
-      const span = Math.max(8, Math.min(3000, (r.to - r.from) * factor));
-      ts.setVisibleLogicalRange({ from: r.to - span, to: r.to });
-      refitPriceScaleRef.current();
-    } catch (e) {}
-  };
 
   // THE OPTION'S NAME, AND ITS OTHER SIDE. "NIFTY 17 NOV 25200" and the side as
   // a button of its own: one tap on Call or Put opens the same strike and
@@ -14290,7 +14276,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     const m = ts.match(/^(.*\d)(CE|PE)$/);
     if (!m) return null;
     const w = prettyOptionName(ts).split(' ');                 // "NIFTY 25200 CE 17 NOV"
-    const base = w.length >= 4 ? [w[0], ...w.slice(3), w[1]].join(' ') : ts;
+    // "NIFTY 17NOV 25200": the day and month run together, as Lemonn writes a
+    // weekly. A monthly ("NOV 2026" — a year, not a day) keeps its space.
+    const exp = w.slice(3);
+    const base = w.length >= 4 ? `${w[0]} ${exp.join(/^\d+$/.test(exp[0] || '') ? '' : ' ')} ${w[1]}` : ts;
     return { base, side: m[2] as 'CE' | 'PE', sibling: m[1] + (m[2] === 'CE' ? 'PE' : 'CE') };
   })();
   const [flipBusy, setFlipBusy] = useState(false);
@@ -14788,7 +14777,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             the side is a button of its own — one tap flips Call and Put. */}
         {scalp && (
           <div data-scalp-head={paneRole} className="relative shrink-0 px-2.5 pt-1.5 pb-1 bg-background" onPointerDown={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
+            <div className="flex items-center gap-2 text-[14px] font-semibold text-foreground">
               {isSpotPane ? (
                 <button type="button" data-scalp="index" onClick={() => setIndexMenuOpen(o => !o)}
                   className="flex items-center gap-1 underline decoration-foreground/30 underline-offset-4">
@@ -14805,8 +14794,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               ) : <span className="text-muted-foreground">—</span>}
             </div>
             <div className="flex items-baseline gap-1.5 whitespace-nowrap">
-              <span ref={headPriceRef} data-head="price" className="text-[13px] font-semibold tabular-nums text-foreground">—</span>
-              <span ref={headChangeRef} data-head="change" className="text-[11px] font-semibold tabular-nums" />
+              <span ref={headPriceRef} data-head="price" className="text-[13px] font-medium tabular-nums text-foreground">—</span>
+              <span ref={headChangeRef} data-head="change" className="text-[13px] font-medium tabular-nums" />
             </div>
             {isSpotPane && indexMenuOpen && (
               <div data-scalp="index-menu" className="absolute left-2 top-full z-[60] min-w-[150px] bg-card border border-white/10 rounded-md shadow-2xl overflow-hidden">
@@ -16263,7 +16252,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               see max-md:isolate there.) */}
           {/* scalp → overflow-hidden: on the ScalpPro screen a chart can be dragged
               down to nothing (the handle gives the other chart the screen), and
-              the buttons that sit over it — zoom, interval, the "i" — are placed
+              the buttons that sit over it — the interval, the "i" — are placed
               from its edges, so with no height they came out over the name above
               and the Buy / Sell bar below. Cut off at the chart's own box. */}
           <div data-layout="chart" className={`relative max-md:isolate max-md:z-[1] flex-grow flex w-full bg-card rounded-none min-h-0 md:min-h-[450px] ${scalp ? 'overflow-hidden' : ''}`} onMouseLeave={() => setCrosshairInfo(null)}>
@@ -16967,27 +16956,20 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 </div>
               </div>
             )}
-            {/* SCALPPRO: zoom in and out beside the price axis, and the interval
-                in the corner where the two axes meet — each chart has its own,
-                as in Lemonn. z-[44]: above the chips and the drawing tools. */}
+            {/* SCALPPRO: the interval in the corner where the two axes meet — each
+                chart has its own, as in Lemonn. z-[44]: above the chips and the
+                drawing tools. (Lemonn also has zoom in / out buttons beside the
+                price axis, and v303 had them here. Martin, the same evening:
+                "Remove the zoom out and zoom in buttons from the scalp pro
+                charts". A pinch zooms, as on every chart in the app.) */}
             {scalp && (
-              <>
-                <button type="button" data-scalp="zoom-in" aria-label="Zoom in" onClick={() => zoomChart(0.7)}
-                  className="absolute right-[58px] top-1.5 z-[44] h-7 w-7 rounded-full flex items-center justify-center text-muted-foreground active:bg-foreground/10">
-                  <ZoomIn size={16} />
-                </button>
-                <button type="button" data-scalp="zoom-out" aria-label="Zoom out" onClick={() => zoomChart(1 / 0.7)}
-                  className="absolute right-[58px] bottom-8 z-[44] h-7 w-7 rounded-full flex items-center justify-center text-muted-foreground active:bg-foreground/10">
-                  <ZoomOut size={16} />
-                </button>
-                <label data-scalp="interval" className="absolute right-0 bottom-0 z-[44] h-[26px] min-w-[52px] flex items-center justify-center gap-0.5 px-1 text-[11px] font-semibold text-foreground bg-card">
-                  {tfLabelOf(timeframe)}<ChevronDown size={11} className="text-muted-foreground" />
-                  <select value={timeframe} onChange={(e) => setTimeframe(e.target.value)} aria-label="Interval" className="absolute inset-0 h-full w-full opacity-0">
-                    <option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="15">15m</option>
-                    <option value="60">1h</option><option value="240">4h</option><option value="1440">1D</option>
-                  </select>
-                </label>
-              </>
+              <label data-scalp="interval" className="absolute right-0 bottom-0 z-[44] h-[26px] min-w-[52px] flex items-center justify-center gap-0.5 px-1 text-[12px] font-semibold text-foreground bg-card">
+                {tfLabelOf(timeframe)}<span className="text-[9px] leading-none">▼</span>
+                <select value={timeframe} onChange={(e) => setTimeframe(e.target.value)} aria-label="Interval" className="absolute inset-0 h-full w-full opacity-0">
+                  <option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="15">15m</option>
+                  <option value="60">1h</option><option value="240">4h</option><option value="1440">1D</option>
+                </select>
+              </label>
             )}
             {/* The option pane before it has an option: without a contract this
                 component falls back to the index, and the index must not flash
@@ -17064,48 +17046,52 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           {/* THE SCALPPRO BAR (see THE BUY / SELL BAR). Buy on the left, the size
               in the middle, Sell on the right; what each needs and the funds
               under them. While a trade is open in this contract the button that
-              would go against it is Exit. */}
+              would go against it is Exit. The look is Lemonn's, measured off
+              Martin's screenshot of it (16 Nov 2026: "does not match the lemon
+              screen 100%. Fix it."): a lime Buy (#bbe44a) with dark words, Sell
+              as an outline, 12px corners. The lime is theirs and deliberately
+              not one of the app's theme colours — it is the same in every theme. */}
           {scalpBarOn && (
-            <div data-scalp-bar="" className="shrink-0 border-t border-border bg-background px-2 pt-2 pb-1.5 select-none">
+            <div data-scalp-bar="" className="shrink-0 border-t border-border bg-background px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] select-none">
               <div className="flex items-center gap-2">
                 {scalpPos && scalpPos.side === 'SELL' ? (
                   <button type="button" data-scalp="exit" disabled={!!scalpBusy} onClick={scalpExit}
-                    className="flex-1 h-11 rounded-lg bg-rose-500 text-white text-[13px] font-bold flex items-center justify-center disabled:opacity-60 active:opacity-80">
+                    className="flex-1 h-10 rounded-[12px] bg-rose-500 text-white text-[13px] font-semibold flex items-center justify-center disabled:opacity-60 active:opacity-80">
                     {scalpBusy === 'EXIT' ? <Loader2 size={16} className="animate-spin" /> : 'Exit'}
                   </button>
                 ) : (
                   <button type="button" data-scalp="buy" disabled={!!scalpBusy || !(scalpLot > 0)} onClick={() => scalpPlace('BUY')}
-                    className="flex-1 h-11 rounded-lg bg-emerald-500 text-white text-[13px] font-bold flex items-center justify-center disabled:opacity-60 active:opacity-80">
+                    className="flex-1 h-10 rounded-[12px] bg-[#bbe44a] text-black text-[13px] font-semibold flex items-center justify-center disabled:opacity-60 active:opacity-80">
                     {scalpBusy === 'BUY' ? <Loader2 size={16} className="animate-spin" /> : 'Buy at Mkt'}
                   </button>
                 )}
                 <div className="shrink-0 flex items-center gap-1.5">
                   <button type="button" data-scalp="lots-minus" aria-label="One lot less" disabled={scalpLots <= 1 || !!scalpBusy}
                     onClick={() => setScalpLots(l => Math.max(1, l - 1))}
-                    className="h-8 w-8 rounded-full border border-border flex items-center justify-center text-foreground disabled:opacity-40 active:bg-foreground/10"><Minus size={14} /></button>
+                    className="h-8 w-8 rounded-full border border-border bg-card flex items-center justify-center text-foreground disabled:opacity-40 active:bg-foreground/10"><Minus size={15} /></button>
                   <div className="min-w-[46px] text-center leading-tight">
-                    <div data-scalp="qty" className="text-[14px] font-bold tabular-nums text-foreground">{scalpQty > 0 ? scalpQty : '—'}</div>
-                    <div data-scalp="lots" className="text-[9px] text-muted-foreground">{scalpLots} lot{scalpLots > 1 ? 's' : ''}</div>
+                    <div data-scalp="qty" className="text-[16px] font-semibold tabular-nums text-foreground">{scalpQty > 0 ? scalpQty : '—'}</div>
+                    <div data-scalp="lots" className="text-[10px] text-muted-foreground">{scalpLots} lot{scalpLots > 1 ? 's' : ''}</div>
                   </div>
                   <button type="button" data-scalp="lots-plus" aria-label="One lot more" disabled={scalpLots >= 25 || !!scalpBusy}
                     onClick={() => setScalpLots(l => Math.min(25, l + 1))}
-                    className="h-8 w-8 rounded-full border border-border flex items-center justify-center text-foreground disabled:opacity-40 active:bg-foreground/10"><Plus size={14} /></button>
+                    className="h-8 w-8 rounded-full border border-border bg-card flex items-center justify-center text-foreground disabled:opacity-40 active:bg-foreground/10"><Plus size={15} /></button>
                 </div>
                 {scalpPos && scalpPos.side !== 'SELL' ? (
                   <button type="button" data-scalp="exit" disabled={!!scalpBusy} onClick={scalpExit}
-                    className="flex-1 h-11 rounded-lg bg-rose-500 text-white text-[13px] font-bold flex items-center justify-center disabled:opacity-60 active:opacity-80">
+                    className="flex-1 h-10 rounded-[12px] bg-rose-500 text-white text-[13px] font-semibold flex items-center justify-center disabled:opacity-60 active:opacity-80">
                     {scalpBusy === 'EXIT' ? <Loader2 size={16} className="animate-spin" /> : 'Exit'}
                   </button>
                 ) : (
                   <button type="button" data-scalp="sell" disabled={!!scalpBusy || !(scalpLot > 0)} onClick={() => scalpPlace('SELL')}
-                    className="flex-1 h-11 rounded-lg border border-foreground/60 text-foreground text-[13px] font-bold flex items-center justify-center disabled:opacity-60 active:bg-foreground/10">
+                    className="flex-1 h-10 rounded-[12px] border-[1.5px] border-foreground text-foreground text-[13px] font-semibold flex items-center justify-center disabled:opacity-60 active:bg-foreground/10">
                     {scalpBusy === 'SELL' ? <Loader2 size={16} className="animate-spin" /> : 'Sell at Mkt'}
                   </button>
                 )}
               </div>
-              <div className="flex items-center mt-1 text-[9px] text-muted-foreground tabular-nums">
+              <div className="flex items-center mt-1.5 text-[10px] font-semibold text-muted-foreground tabular-nums">
                 <span data-scalp="req-buy" className="flex-1 text-center">{scalpPos && scalpPos.side === 'SELL' ? '' : `Req: ${scalpRs(scalpReqNow.buy)}`}</span>
-                <span data-scalp="funds" className="shrink-0 px-1">Funds: {scalpRs(availBalance)}</span>
+                <span data-scalp="funds" className="shrink-0 px-1 text-[9px] font-normal">Funds: {scalpRs(availBalance)}</span>
                 <span data-scalp="req-sell" className="flex-1 text-center">{scalpPos && scalpPos.side !== 'SELL' ? '' : `Req: ${scalpRs(scalpReqNow.sell)}`}</span>
               </div>
             </div>

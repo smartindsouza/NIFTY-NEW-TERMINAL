@@ -21,6 +21,17 @@ export function Header() {
     try { const s = JSON.parse(localStorage.getItem('navOrder') || '[]'); return Array.isArray(s) ? s : []; } catch { return []; }
   });
   const dragHref = useRef<string | null>(null);
+  // THE SCALPPRO SCREEN HAS NO BOTTOM BAR (16 Nov 2026, Martin, with a screenshot
+  // of Lemonn's: "hide the bottom bar when in the scalp pro screen"). That
+  // screen is the chart route with a flag in the session, opened and closed by
+  // an event (see ChartWorkspace); this follows both. Its own back arrow is the
+  // way out, and it brings the bar back.
+  const [scalpOpen, setScalpOpen] = useState<boolean>(() => { try { return sessionStorage.getItem('scalpPro') === '1'; } catch { return false; } });
+  useEffect(() => {
+    const onScalp = (e: any) => setScalpOpen(!!e?.detail);
+    window.addEventListener('terminal:scalp', onScalp as any);
+    return () => window.removeEventListener('terminal:scalp', onScalp as any);
+  }, []);
 
   const { data: authStatus } = useQuery({
     queryKey: ['auth-status'],
@@ -164,10 +175,17 @@ export function Header() {
   // "Alerts" pointed at the notification log, which is not what Martin reaches
   // for on the phone. Notifications stays available in the More sheet, since
   // moreLinks is everything not primary and picks it up automatically.
-  const primaryHrefs = ['/', '/advanced-chart', '/option-chain', '/news'];
+  //
+  // The third slot is the Trade Journal (16 Nov 2026, Martin: "remove the option
+  // chain screen from the bottom tab and replace it with trade journal"). The
+  // Option Chain is one tap from the chart page (the button under the chart)
+  // and, like everything not primary, in the More sheet.
+  const primaryHrefs = ['/', '/advanced-chart', '/journal', '/news'];
   const shortLabels: Record<string, string> = {
-    '/': 'Home', '/advanced-chart': 'Chart', '/option-chain': 'Chain', '/news': 'News',
+    '/': 'Home', '/advanced-chart': 'Chart', '/journal': 'Journal', '/news': 'News',
   };
+  // The journal's second screen (/journal/analysis) is still the Journal tab.
+  const isActive = (href: string) => location === href || (href === '/journal' && location.startsWith('/journal/'));
   const primaryLinks = primaryHrefs
     .map((h) => orderedLinks.find((l) => l.href === h))
     .filter(Boolean) as typeof links;
@@ -211,7 +229,7 @@ export function Header() {
       <div className="overflow-y-auto overflow-x-hidden px-1 flex-1 min-h-0 flex justify-center w-full [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <nav className="flex flex-col items-center gap-1.5 w-full">
           {orderedLinks.map((link) => {
-            const active = location === link.href;
+            const active = isActive(link.href);
             const Icon = link.icon;
             const isNewsTab = link.href === '/news';
             const isNotifTab = link.href === '/notifications';
@@ -334,7 +352,7 @@ export function Header() {
           <div className="grid grid-cols-4 gap-3">
             {moreLinks.map((link) => {
               const Icon = link.icon;
-              const active = location === link.href;
+              const active = isActive(link.href);
               const showBlink = (link.href === '/news' && hasUnseenNiftyNews);
               return (
                 <Link
@@ -377,13 +395,15 @@ export function Header() {
       </div>
     )}
 
+    {!(scalpOpen && location === '/advanced-chart') && (
     <nav
+      data-bottom-nav=""
       className="md:hidden fixed bottom-0 left-0 right-0 z-50 h-[calc(4rem+env(safe-area-inset-bottom))] bg-sidebar border-t border-sidebar-border flex items-stretch justify-around px-1"
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       {primaryLinks.map((link) => {
         const Icon = link.icon;
-        const active = location === link.href;
+        const active = isActive(link.href);
         const showBlink = (link.href === '/notifications' && unreadCount > 0);
         return (
           <Link
@@ -420,6 +440,7 @@ export function Header() {
         <span className="text-[9px] font-medium">More</span>
       </button>
     </nav>
+    )}
     </>
   );
 }

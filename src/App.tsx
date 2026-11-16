@@ -212,7 +212,12 @@ export default function App() {
               <Route path="/historical-analytics" component={HistoricalAnalytics} />
               <Route path="/terminal-control" component={TerminalControl} />
               <Route path="/notifications" component={Notifications} />
-              <Route path="/journal" component={TradeJournal} />
+              {/* /journal and /journal/analysis are ONE route on purpose: the
+                  analysis page is the journal's second screen, and as a route of
+                  its own it would be a second mount — the journal loaded again,
+                  the period chosen forgotten. A path, so the phone's back goes
+                  back to the journal. */}
+              <Route path="/journal/:view?" component={TradeJournal} />
               <Route path="/gap-risk" component={GapRisk} />
               <Route path="/gap-scorecard" component={GapScorecard} />
               <Route path="/h-levels" component={HLevels} />

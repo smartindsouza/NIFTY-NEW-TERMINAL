@@ -321,6 +321,15 @@ tool bar and the split view are untouched.
 - **A second row in the bar:** Option Chain (opens the Chain page) and ScalpPro
   (below).
 
+## The phone's bottom bar
+
+`src/components/Header.tsx`. Home, Chart, Journal, News, then Diag and More.
+The third tab was the Option Chain until 16 Nov 2026 (Martin: "remove the option
+chain screen from the bottom tab and replace it with trade journal"); the chain
+is one tap from the chart page (the button under the chart) and in the More
+sheet, which holds every page that is not a tab. The bar is not shown on the
+ScalpPro screen.
+
 ## ScalpPro: two charts and a Buy / Sell bar (phone)
 
 `src/pages/ChartWorkspace.tsx` (`ScalpScreen`) and `src/pages/AdvancedChart.tsx`
@@ -330,14 +339,19 @@ desktop split view uses, stacked.
 
 - **Top chart: the index. Bottom chart: an option** — the one last on screen in
   this session, or, with none, the at-the-money Call of the nearest expiry. Each
-  has its name and live price above it, zoom in / out beside its price axis and
-  its own interval in the corner.
+  has its name and live price above it, written as Lemonn writes them
+  ("25,291.10 146.80 ▲ (0.58%)"), and its own interval in the corner. There are
+  no zoom buttons (v303 had Lemonn's; Martin asked for them to go): a pinch
+  zooms, as on every chart.
+- **The app's bottom bar is not shown on this screen**, as Lemonn's is not on
+  its ScalpPro. The back arrow at the top returns to the chart page and the bar.
   - Tap the index name for NIFTY 50 / BANK NIFTY / SENSEX.
   - Tap **Call** or **Put** after the option's name to flip to the other side of
     the same strike and expiry.
 - **The handle between the charts** drags either one up to the whole screen;
   where it is left is kept on that phone (`scalpSplit`).
-- **The bar at the bottom** trades the option in the lower chart:
+- **The bar at the bottom** trades the option in the lower chart. Its look is
+  Lemonn's — a lime Buy with dark words, Sell as an outline:
   - **Buy at Mkt / Sell at Mkt place the order on one tap. There is no ticket
     and no confirmation** — Martin's answer, 16 Nov 2026, when asked whether
     they should confirm first. A second tap within 1.2s, or while the first is

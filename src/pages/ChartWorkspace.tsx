@@ -161,8 +161,12 @@ function ScalpScreen({ onClose }: { onClose: () => void }) {
   };
 
   return (
+    // Down to the bottom of the screen: the app's own bottom bar is not shown
+    // while this screen is up (see scalpOpen in Header.tsx), as Lemonn's is not
+    // on its ScalpPro. The Buy / Sell bar keeps clear of the home indicator
+    // itself.
     <div ref={rootRef} data-scalp-screen="" className="flex flex-col w-full min-h-0 bg-background"
-      style={{ height: top === null ? '70dvh' : `calc(100dvh - ${top}px - 4rem - env(safe-area-inset-bottom))` }}>
+      style={{ height: top === null ? '80dvh' : `calc(100dvh - ${top}px)` }}>
       <div className="shrink-0 flex items-center gap-1 h-10 px-1 border-b border-white/10">
         <button type="button" data-scalp="back" aria-label="Back" onClick={onClose}
           className="h-9 w-9 flex items-center justify-center rounded-full text-foreground/90 active:bg-foreground/10">
@@ -173,7 +177,9 @@ function ScalpScreen({ onClose }: { onClose: () => void }) {
       <div ref={bodyRef} className="flex flex-col flex-1 min-h-0">
         {/* Neither pane is ever squeezed below what it must keep: its two lines
             of name and price (46px), and for the option pane the Buy / Sell bar
-            under them as well — dragged all the way down, the handle stops there. */}
+            under them as well (82px, and the home indicator's strip below it now
+            that the app's bottom bar is not under this screen) — dragged all the
+            way down, the handle stops there. */}
         <div data-scalp-pane="spot" className="overflow-hidden" style={{ flex: `${frac} 1 0%`, minHeight: 46 }}>
           <AdvancedChart key="scalp-spot" paneRole="spot" split scalp />
         </div>
@@ -182,7 +188,7 @@ function ScalpScreen({ onClose }: { onClose: () => void }) {
           style={{ touchAction: 'none' }}>
           <div className="w-10 h-1 rounded-full bg-foreground/30" />
         </div>
-        <div data-scalp-pane="option" className="overflow-hidden" style={{ flex: `${1 - frac} 1 0%`, minHeight: 126 }}>
+        <div data-scalp-pane="option" className="overflow-hidden" style={{ flex: `${1 - frac} 1 0%`, minHeight: 'calc(134px + env(safe-area-inset-bottom))' }}>
           <AdvancedChart key="scalp-option" paneRole="option" split scalp />
         </div>
       </div>
@@ -227,9 +233,11 @@ export function ChartWorkspace() {
     window.addEventListener('terminal:scalp', onScalp as any);
     return () => window.removeEventListener('terminal:scalp', onScalp as any);
   }, []);
+  // Announced, not just set: the app's bottom bar listens too (it steps aside
+  // while this screen is up) and must hear that it has closed.
   const closeScalp = () => {
-    try { sessionStorage.removeItem('scalpPro'); sessionStorage.removeItem('selectedInstrument'); } catch (e) {}
-    setScalp(false);
+    try { sessionStorage.removeItem('selectedInstrument'); } catch (e) {}
+    try { window.dispatchEvent(new CustomEvent('terminal:scalp', { detail: false })); } catch (e) { setScalp(false); }
   };
 
   // The bias card's × hides it; Indicators → NIFTY Bias card brings it back.
