@@ -444,3 +444,13 @@ own copy; anything restyled after that stays as set.
   sheet's first row removes it. Capital for the rupee figures is at the bottom of
   the sheet.
 
+
+## Messages (toasts): one at a time, each one clean
+
+`src/lib/sonnerShim.ts` (every `import { toast } from "sonner"` in the app goes
+through it). Status messages share one id, so a new one takes the place of the
+one before it instead of stacking. The library does that by merging the new
+message into the old, so the shim names every field a message can carry as
+empty unless the call sets it: a message never shows a second line, a colour or
+a lifetime left over from an earlier one. A message that is on its way out takes
+no touches (`src/index.css`), so it cannot swallow a tap meant for the chart.
