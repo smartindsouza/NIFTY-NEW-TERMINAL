@@ -32,7 +32,8 @@ import {
   CandlestickSeries, 
   HistogramSeries, 
   LineSeries, 
-  createSeriesMarkers 
+  createSeriesMarkers,
+  TrackingModeExitMode,
 } from "lightweight-charts";
 import { useMarginPreview, getMarginDiagnostics, patchMarginDiagnostics } from "../hooks/useMarginPreview";
 import { getWsDiagnostics, subscribeToTicks, addWsMessageListener } from "../hooks/useWebSocket";
@@ -1177,6 +1178,19 @@ const SCALP_BTN = 'flex-1 min-w-0 border text-[12px] leading-none font-bold flex
 const SCALP_BTN_FILL = `${SCALP_BTN} h-9 rounded-[13px] border-transparent active:opacity-80`;
 const SCALP_BTN_LINE = `${SCALP_BTN} h-[34px] rounded-[12px] border-foreground text-foreground active:bg-foreground/10`;
 const SCALP_STEP = 'shrink-0 h-8 w-8 rounded-full border-2 border-foreground/15 bg-card flex items-center justify-center text-foreground/80 disabled:text-foreground/65 active:bg-foreground/10';
+// THE CHART PAGE'S TWO TABS ON A PHONE ARE LEMONN'S FOLDER TABS (16 Nov 2026).
+// Martin, of the tab-shaped top row ScalpPro got in v308: "Use the same design
+// at the top for the main nifty screen". The chart on screen is the tab — 37pt
+// tall, top corners at 13pt, feet flaring out at 10pt, in the chart's own
+// colour so the tab, the price under it and the chart are one piece — and the
+// other chart's name is plain words beside it. On the desktop they stay the
+// two outlined boxes they were.
+const PHONE_TAB_ON = 'max-md:relative max-md:overflow-visible max-md:h-[37px] max-md:rounded-b-none max-md:rounded-t-[13px] max-md:border-b-0 max-md:border-foreground/15 max-md:bg-card';
+const PHONE_TAB_OFF = 'max-md:h-[37px] max-md:border-transparent max-md:bg-transparent';
+const PhoneTabFeet = () => (<>
+  <span className="md:hidden absolute -left-[10px] bottom-0 h-[10px] w-[10px] pointer-events-none" aria-hidden="true" style={{ background: 'radial-gradient(circle at 0 0, transparent 9.5px, var(--card) 10px)' }} />
+  <span className="md:hidden absolute -right-[10px] bottom-0 h-[10px] w-[10px] pointer-events-none" aria-hidden="true" style={{ background: 'radial-gradient(circle at 100% 0, transparent 9.5px, var(--card) 10px)' }} />
+</>);
 // A SCALPPRO PRICE LINE'S DASHES: 4pt on, 4pt off, in the element's own colour
 // (a CSS dashed border's dashes are whatever the browser makes them).
 const SCALP_DASH: React.CSSProperties = { backgroundImage: 'repeating-linear-gradient(to right, currentColor 0 4px, transparent 4px 8px)' };
@@ -7458,8 +7472,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         setLineToolPop(null);
         setCrosshairInfo(null);
         // The library keeps its crosshair up after a long press until the next
-        // tap; with the line placed it has done its job.
+        // tap; with the line placed it has done its job — and so has the candle's
+        // O H L C line, which a crosshair cleared from here does not take down
+        // (the library only reports the ones a finger or a mouse moved).
         try { mainChartRef.current?.clearCrosshairPosition(); } catch (e) {}
+        try { const p = chartContainerRef.current?.querySelector('.ohlc-panel') as HTMLElement | null; if (p) p.style.display = 'none'; } catch (e) {}
     }
   };
   // ----- the selected line's tools -----
@@ -11718,6 +11735,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       crosshair: {
         mode: CrosshairMode.Normal,
       },
+      // A long press's crosshair ends when the finger lifts (the library's own
+      // choice is to keep it until the next tap). With that, a chart left alone
+      // after a long press kept the crosshair, the O H L C line and the + for
+      // good — and once those were put away on a timer, the NEXT long press was
+      // taken for the tap that ends the old one and brought nothing up. What
+      // stays on screen for a moment after the lift is the app's own to keep
+      // (see WHAT A LONG PRESS BRINGS UP GOES AWAY AGAIN).
+      trackingMode: { exitMode: TrackingModeExitMode.OnTouchEnd },
       timeScale: {
         // On ScalpPro the two axis lines are as strong as Lemonn's (theirs is
         // #414141 on #161616, which is white at 18%); the app's own, at 10%,
@@ -12440,6 +12465,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
     const rsiDataMap = new Map(rsiData.map((d: any) => [d.time, d.value]));
 
+    // Until when what a long press brought up is left on screen after the finger
+    // lifts (see WHAT A LONG PRESS BRINGS UP GOES AWAY AGAIN, below).
+    let crossHoldUntil = 0;
+
     mainChart.subscribeCrosshairMove(param => {
       if (!param.sourceEvent) return;
       try {
@@ -12447,6 +12476,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         let currentVolume = null;
 
         if (!param.point || param.point.x < 0 || param.point.y < 0) {
+          // A finger has just lifted after a long press: the + and the O H L C
+          // line stay for the moment it takes to use them (crossAway takes them
+          // down), so the crosshair leaving is not acted on here.
+          if (Date.now() < crossHoldUntil) return;
           try { rsiChart.clearCrosshairPosition(); } catch(e) {}
           setRsiHoverValue(null);
           if (ohlcPanel) ohlcPanel.style.display = 'none';
@@ -12498,6 +12531,39 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         // ignore disposed
       }
     });
+
+    // WHAT A LONG PRESS BRINGS UP GOES AWAY AGAIN (phones, 16 Nov 2026). A long
+    // press puts up the crosshair, the candle's O H L C line and the round + that
+    // adds a line at that price. The library kept its crosshair until the next
+    // tap, so all three stayed on the chart for as long as it was left alone —
+    // Martin: "the plus button on the chart does not disappear when not in
+    // use", and of the O H L C line, it "must appear only on long press on the
+    // chart ... Otherwise keep it hidden". Now the crosshair goes when the
+    // finger lifts (trackingMode, above), and the + and the O H L C line stay
+    // three and a half seconds more — long enough to tap the + — and are then
+    // put away. A new touch on the chart puts them away at once unless it turns
+    // into another long press. The + is not part of the chart, so touching it
+    // is not a touch on the chart. Only ever on a chart that is still the one
+    // on screen. (The listeners are on the way DOWN to the chart, so the hold
+    // is set before the library hears the same lift and reports the crosshair
+    // gone.)
+    const crossHost = chartContainerRef.current;
+    let crossAwayTimer: any = null;
+    const crossAway = () => {
+      if (mainChartRef.current !== mainChart || isHoveringButtonRef.current) return;
+      try { mainChart.clearCrosshairPosition(); } catch (e) {}
+      try { rsiChart.clearCrosshairPosition(); } catch (e) {}
+      if (ohlcPanel) ohlcPanel.style.display = 'none';
+      setRsiHoverValue(null);
+      setCrosshairInfo(null);
+    };
+    const onCrossTouchEnd = () => { crossHoldUntil = Date.now() + 3500; clearTimeout(crossAwayTimer); crossAwayTimer = setTimeout(() => { crossHoldUntil = 0; crossAway(); }, 3500); };
+    const onCrossTouchStart = () => { clearTimeout(crossAwayTimer); if (crossHoldUntil) { crossHoldUntil = 0; crossAway(); } };
+    if (crossHost) {
+      crossHost.addEventListener('touchend', onCrossTouchEnd, { capture: true, passive: true });
+      crossHost.addEventListener('touchcancel', onCrossTouchEnd, { capture: true, passive: true });
+      crossHost.addEventListener('touchstart', onCrossTouchStart, { capture: true, passive: true });
+    }
 
     rsiChart.subscribeCrosshairMove(param => {
       if (!param.sourceEvent) return;
@@ -12672,6 +12738,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
     return () => {
       tornDown = true;
+      clearTimeout(crossAwayTimer);
+      if (crossHost) {
+        crossHost.removeEventListener('touchend', onCrossTouchEnd, { capture: true } as any);
+        crossHost.removeEventListener('touchcancel', onCrossTouchEnd, { capture: true } as any);
+        crossHost.removeEventListener('touchstart', onCrossTouchStart, { capture: true } as any);
+      }
       sizeTimers.forEach(t => clearTimeout(t));
       syncChartSizeRef.current = () => {};
       window.removeEventListener('resize', syncChartSize);
@@ -15209,7 +15281,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             )}
           </div>
         )}
-        <div className={`items-center gap-2 px-0 pb-0 shrink-0 border-b border-white/10 bg-background md:px-2 ${isFocusedChart || scalp ? 'hidden' : 'flex'}`}>
+        <div data-layout="head" className={`items-center max-md:items-end max-md:h-11 gap-2 px-0 pb-0 shrink-0 border-b border-white/10 bg-background md:px-2 ${isFocusedChart || scalp ? 'hidden' : 'flex'}`}>
           {/* The option pane hides the header, so without this the spot pane would
               be exactly one header taller and the two chart boxes would never line
               up. Same reservation trick as the option-reality strip: identical
@@ -15220,8 +15292,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           {/* PHONE HEADER, left: back to the screen he came from. */}
           {!isPane && (
             <button type="button" onClick={goBackFromChart} aria-label="Back" title="Back" data-head="back"
-              className="md:hidden shrink-0 h-9 w-9 -mr-1 flex items-center justify-center rounded-full text-foreground/90 active:bg-foreground/10">
-              <ArrowLeft size={20} />
+              className="md:hidden shrink-0 h-11 w-9 -mr-1 flex items-center justify-center text-foreground active:opacity-60">
+              <ArrowLeft size={27} strokeWidth={1.8} />
             </button>
           )}
 
@@ -15244,7 +15316,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                wraps onto a second line when the row is too narrow for both. Flex
                items never overlap; a minimum width never crushes; wrapping never
                clips the bar's dropdown menus the way a scroller would. */
-            className={`${searchExpanded || phoneSearchOpen ? 'hidden' : 'flex'} items-center gap-1.5 px-1.5 py-1 min-w-[150px] flex-1`}
+            className={`${searchExpanded || phoneSearchOpen ? 'hidden' : 'flex'} items-center max-md:items-end gap-1.5 max-md:gap-2.5 px-1.5 max-md:pl-[14px] py-1 max-md:py-0 max-md:-mb-px min-w-[150px] flex-1`}
             onPointerDown={(e) => e.stopPropagation()}>
             {!isOptionPane && (
             /* flex-1 basis-0 on a phone: the two tabs split the row down the
@@ -15253,21 +15325,22 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               {/* The NAME switches straight to this chart; only the chevron opens
                   the list. Going back to the spot chart used to mean opening a
                   menu and picking the index that was already selected. */}
-              <div className={`flex items-stretch rounded-md border overflow-hidden transition-colors ${
-                  !selectedInstrument ? 'border-primary/50 bg-primary/15' : 'border-border/60 bg-card'}`}>
+              <div data-head-tab={!selectedInstrument ? 'on' : 'off'} className={`flex items-stretch rounded-md border overflow-hidden transition-colors ${
+                  !selectedInstrument ? `border-primary/50 bg-primary/15 ${PHONE_TAB_ON}` : `border-border/60 bg-card ${PHONE_TAB_OFF}`}`}>
+                {!selectedInstrument && <PhoneTabFeet />}
                 <button
                   onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(false); setSelectedInstrument(null); }}
                   title={`Show ${indexLabel}`}
-                  className={`flex-1 min-w-0 truncate text-left px-2.5 h-8 text-xs font-mono font-bold transition-colors ${
-                    !selectedInstrument ? 'text-primary' : 'text-muted-foreground'}`}
+                  className={`flex-1 min-w-0 truncate text-left px-2.5 max-md:pl-3 max-md:pr-1 h-8 max-md:h-full text-xs font-mono font-bold transition-colors ${
+                    !selectedInstrument ? 'text-primary max-md:text-foreground' : 'text-muted-foreground'}`}
                 >
                   {indexLabel}
                 </button>
                 <button
                   onClick={() => { setOptionMenuOpen(false); setIndexMenuOpen(o => !o); }}
                   aria-label="Choose index"
-                  className={`shrink-0 px-1.5 h-8 flex items-center transition-colors ${
-                    !selectedInstrument ? 'text-primary' : 'text-muted-foreground'}`}
+                  className={`shrink-0 px-1.5 max-md:pl-1 max-md:pr-2 h-8 max-md:h-full flex items-center transition-colors ${
+                    !selectedInstrument ? 'text-primary max-md:text-foreground' : 'text-muted-foreground'}`}
                 >
                   <ChevronDown size={13} className={indexMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
                 </button>
@@ -15297,24 +15370,25 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               const optionTarget = selectedInstrument || stillOpen || openCharts[openCharts.length - 1];
               return (
               <div className="relative min-w-0 flex-1 basis-0 md:flex-none md:basis-auto">
-                <div className={`flex items-stretch rounded-md border overflow-hidden transition-colors ${
-                    selectedInstrument ? 'border-primary/50 bg-primary/15' : 'border-border/60 bg-card'}`}>
+                <div data-head-tab={selectedInstrument ? 'on' : 'off'} className={`flex items-stretch rounded-md border overflow-hidden transition-colors ${
+                    selectedInstrument ? `border-primary/50 bg-primary/15 ${PHONE_TAB_ON}` : `border-border/60 bg-card ${PHONE_TAB_OFF}`}`}>
+                  {selectedInstrument && <PhoneTabFeet />}
                   {/* Strike and side only — "24500CE". The full contract name never
                       fitted, and the underlying and expiry are on screen anyway. */}
                   <button
                     onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(false); if (optionTarget) setSelectedInstrument(optionTarget); }}
                     title={optionTarget ? prettyOptionName(optionTarget.tradingsymbol,
                       contractExpiry?.symbol === optionTarget.tradingsymbol ? contractExpiry.expiry : null) : 'Option charts'}
-                    className={`flex-1 min-w-0 truncate text-left px-2.5 h-8 text-xs font-mono font-bold transition-colors ${
-                      selectedInstrument ? 'text-primary' : 'text-muted-foreground'}`}
+                    className={`flex-1 min-w-0 truncate text-left px-2.5 max-md:pl-3 max-md:pr-1 h-8 max-md:h-full text-xs font-mono font-bold transition-colors ${
+                      selectedInstrument ? 'text-primary max-md:text-foreground' : 'text-muted-foreground'}`}
                   >
                     {optionTarget ? shortOptionName(optionTarget.tradingsymbol) : `Options (${openCharts.length})`}
                   </button>
                   <button
                     onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(o => !o); }}
                     aria-label="Choose option chart"
-                    className={`shrink-0 px-1.5 h-8 flex items-center transition-colors ${
-                      selectedInstrument ? 'text-primary' : 'text-muted-foreground'}`}
+                    className={`shrink-0 px-1.5 max-md:pl-1 max-md:pr-2 h-8 max-md:h-full flex items-center transition-colors ${
+                      selectedInstrument ? 'text-primary max-md:text-foreground' : 'text-muted-foreground'}`}
                   >
                     <ChevronDown size={13} className={optionMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
                   </button>
@@ -15396,7 +15470,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           ) : (
             <button type="button" onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(false); setPhoneSearchOpen(true); }}
               aria-label="Search symbol" title="Search symbol" data-head="search"
-              className="md:hidden shrink-0 h-9 w-9 mr-0.5 flex items-center justify-center rounded-full text-foreground/90 active:bg-foreground/10">
+              className="md:hidden shrink-0 h-11 w-9 mr-0.5 flex items-center justify-center text-foreground/90 active:opacity-60">
               <Search size={19} />
             </button>
           ))}
@@ -16601,7 +16675,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               Lemonn has them, and the clock that used to sit beside the title.
               The two spans are filled in by a timer (see THE PRICE IN THE HEADER). */}
           {!isPane && !isFocusedChart && (
-            <div data-layout="price" className="md:hidden shrink-0 flex items-end justify-between gap-3 px-2.5 pt-1 pb-1.5 bg-background">
+            <div data-layout="price" className="md:hidden shrink-0 flex items-end justify-between gap-3 px-2.5 pt-1.5 pb-1.5 bg-card">
               <div className="min-w-0 flex items-baseline gap-2 whitespace-nowrap">
                 <span ref={headPriceRef} data-head="price" className="text-[22px] leading-7 font-bold tracking-tight text-foreground tabular-nums">—</span>
                 <span ref={headChangeRef} data-head="change" className="text-[11px] font-semibold tabular-nums" />
@@ -17037,6 +17111,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             )}
             {crosshairInfo && (
               <button
+                data-cross-plus=""
                 onClick={handleAddManualLine}
                 onMouseEnter={() => { isHoveringButtonRef.current = true; }}
                 onMouseLeave={() => { isHoveringButtonRef.current = false; }}

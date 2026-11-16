@@ -294,6 +294,12 @@ tool bar and the split view are untouched.
   search in the header with its results below. Under it, the live price with the
   day's change (against the last close of the previous session) and the clock.
   The "Advanced Trading Chart" title row is gone on a phone.
+  - **The two choosers are folder tabs** (v309; Martin, of ScalpPro's top row:
+    "Use the same design at the top for the main nifty screen"). The chart on
+    screen is the tab, in the chart's own colour, so the tab, the price under
+    it and the chart are one piece; the other chart's name is plain words
+    beside it. A name switches to that chart; its chevron opens its list. On
+    the desktop they are the two outlined boxes they were.
 - **A row of five under the chart:** Range, Interval, Indicators, Drawings,
   Settings.
   - **Range** — 1D, 2D, 5D, 1M, All: how many sessions back from the newest
@@ -488,6 +494,12 @@ own copy; anything restyled after that stays as set.
 - **Add:** tap and hold on the chart, then tap the round **+** beside the price
   axis (hover and click it on a desktop). The line is thin and yellow and goes
   where the crosshair was.
+- **A long press is the only thing that brings the + up on a phone, and it does
+  not stay** (v309). The crosshair goes when the finger lifts; the + and the
+  candle's O H L C / Vol line stay three and a half seconds more — long enough
+  to tap the + — and are then put away. A new touch on the chart puts them
+  away at once. A tap or a pan never shows them. (Before, all three stayed on
+  the chart until the next tap.)
 - **A line that is selected** (just added, or tapped) shows a handle in the
   middle and a small bar of tools at the top left: colour, thickness (1-4px),
   copy, the full editor (price, style, label, alert) and delete. A tap anywhere
