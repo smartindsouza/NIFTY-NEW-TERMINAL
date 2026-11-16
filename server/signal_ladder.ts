@@ -19,7 +19,8 @@
 // tick moves the ladder through all of them at once.
 
 // RULE SET "double" (4 Nov 2026, Martin — Telegram channel trades):
-//   • TP1 hit  → SL to the entry (and half the lots are sold, in signal_trader.ts)
+//   • TP1 hit  → SL to the entry (and, when the trade holds 2 or more lots, half
+//                of them are sold — in signal_trader.ts; one lot sells nothing)
 //   • TP2 hit  → nothing moves: the SL stays at the entry
 //   • TP3 hit  → SL to TP1
 //   • price reaches 2 × entry (the capital used has doubled) → everything left is sold

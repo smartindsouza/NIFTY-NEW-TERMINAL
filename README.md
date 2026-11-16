@@ -89,10 +89,17 @@ Telegram, alerts), page `src/pages/TelegramSignals.tsx`.
   while the price is at or below that and above the SL; waits up to `waitMin`
   (10) minutes, else skips. Nearest expiry, exact strike, MIS. Max `maxTrades`
   (3) a day, no entries after `lastEntry` (15:00).
-- **Stop:** exactly the message's SL, armed in `premium_exit_rules` (TP leg off).
-  TP1 → SL to the fill price · TP2 → SL to TP1 · TP3 → SL to TP2 and you are
-  asked "Exit now / Keep trailing"; Keep trails in (TP3 − TP2) steps. Square-off
-  at `squareOff` (15:15). Moving the SL on the chart hands the trade to you.
+- **Lots per trade:** 1 to 25, or "Max possible" (as many as the funds allow, up
+  to `maxLotsCap`; one lot if the funds cannot be read). One lot was not allowed
+  from 2 to 16 Nov 2026 and is again. The number saved is only ever changed on
+  the page, behind the PIN.
+- **Stop and targets** (channel trades): the SL is exactly the message's, armed
+  in `premium_exit_rules`. TP1 → SL to the fill price, **and with 2 or more
+  lots half of them are sold** (2 → 1, 3 → 1, 4 → 2; a trade holding one lot
+  sells nothing at TP1) · TP2 → the SL stays · TP3 → SL to TP1 · at 2 × the fill
+  price everything left is sold. Square-off at `squareOff` (15:15). Moving the SL
+  on the chart hands the trade to you. (My Order trades keep the older ladder:
+  TP2 → SL to TP1, TP3 → SL to TP2 and trailing, no half and no 2 × target.)
 - **Ignored:** every other message, messages older than 3 minutes, anything that
   fails the checks (each skip is reported with its reason).
 - Tests: `npx tsx server/signal_parser.test.ts` and

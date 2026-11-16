@@ -23,6 +23,7 @@ const orders: any[] = [];
 const rules = new Map<string, any>();            // the premium_exit_rules stand-in
 const log: string[] = [];
 let fillMode: 'fill' | 'nofill' | 'reject' = 'fill';
+let fillOnly: number | null = null;              // a BUY that fills only this much of what was asked
 const SYM = 'NIFTY26O2722650CE', TOK = 111;
 let fundsAvail: number | null = 50000;
 let kiteIn = true;
@@ -36,13 +37,14 @@ const kc: any = {
     if (fillMode === 'reject') throw new Error('Insufficient funds');
     const id = String(1000 + orders.length);
     const px = Math.min(p.price, price.get(p.tradingsymbol)!);
-    orders.push({ id, ...p, fillPx: px, state: fillMode === 'fill' ? 'COMPLETE' : 'OPEN', at: Date.now() });
-    if (fillMode === 'fill') positions.set(p.tradingsymbol, (positions.get(p.tradingsymbol) || 0) + (p.transaction_type === 'BUY' ? p.quantity : -p.quantity));
+    const got = fillOnly != null && p.transaction_type === 'BUY' ? Math.min(fillOnly, p.quantity) : p.quantity;
+    orders.push({ id, ...p, fillPx: px, filled: got, state: fillMode === 'fill' ? 'COMPLETE' : 'OPEN', at: Date.now() });
+    if (fillMode === 'fill') positions.set(p.tradingsymbol, (positions.get(p.tradingsymbol) || 0) + (p.transaction_type === 'BUY' ? got : -p.quantity));
     return { order_id: id };
   },
   async getOrderHistory(id: string) {
     const o = orders.find(x => x.id === id);
-    return [{ status: o.state, filled_quantity: o.state === 'COMPLETE' ? o.quantity : 0, average_price: o.state === 'COMPLETE' ? o.fillPx : 0 }];
+    return [{ status: o.state, filled_quantity: o.state === 'COMPLETE' ? o.filled : 0, average_price: o.state === 'COMPLETE' ? o.fillPx : 0 }];
   },
   async cancelOrder(_v: string, id: string) { const o = orders.find(x => x.id === id); if (o.state === 'OPEN') o.state = 'CANCELLED'; },
   async getPositions() {
@@ -100,8 +102,8 @@ const trades = () => db.prepare('SELECT * FROM signal_trades ORDER BY id').all()
 const events = () => (db.prepare('SELECT text FROM signal_events ORDER BY id').all() as any[]).map(e => e.text);
 let n = 0; const ok = (name: string) => { n++; console.log('ok', name); };
 
-assert.equal(__test.settings.lots, 2); ok('default lots for channel trades is 2');
-__test.setSettings({ channelId: '42', channelTitle: 'Nifty Sensex VIP setups', mode: 'LIVE', lots: 1 });   // older flows below were written for 1 lot
+assert.equal(__test.settings.lots, 1); ok('default lots for channel trades is 1 again (it was 2 from 2 to 16 Nov)');
+__test.setSettings({ channelId: '42', channelTitle: 'Nifty Sensex VIP setups', mode: 'LIVE', lots: 1 });
 
 // 1) OFF: nothing is traded
 __test.setSettings({ mode: 'OFF' });
@@ -130,7 +132,12 @@ await __test.handleMessage({ ...a }, 'poll'); assert.equal(orders.length, 1); ok
 // 4) ladder through the exit engine — channel trades use the "double" rules (4 Nov 2026)
 assert.equal(rules.get(SYM).tpOn, true); assert.equal(rules.get(SYM).tp, 294); ok('armed: SL 130 and the 2× entry target 294 on the exit engine');
 tick(160); assert.equal(rules.get(SYM).sl, 130);
-tick(164); await settle(); assert.equal(rules.get(SYM).sl, 147); ok('TP1 → SL to entry 147');
+tick(164); await settle(300); assert.equal(rules.get(SYM).sl, 147); ok('TP1 → SL to entry 147');
+// ONE LOT (16 Nov 2026): no half to sell — nothing sold, nothing recorded, and the buy alert never said "sell half"
+assert.equal(orders.filter((o: any) => o.partial).length, 0); assert.equal(positions.get(SYM), 65);
+assert.equal(trades()[0].part_status, null); assert.equal(trades()[0].part_qty, null);
+assert.ok(events().some(e => /BOUGHT NIFTY 22650 CE[\s\S]*Rules: TP1 → SL to entry · TP3 → SL to TP1/.test(e)) && !events().some(e => /sell half|sold half|booked half/.test(e)));
+ok('1 lot: TP1 sells nothing (no order, nothing recorded), and the alert says "TP1 → SL to entry" with no "sell half"');
 tick(179); await settle(); assert.equal(rules.get(SYM).sl, 147); assert.ok(events().some(e => e.includes('TP2 hit — SL stays at entry'))); ok('TP2 → SL stays at entry 147');
 tick(199); await settle(); assert.equal(rules.get(SYM).sl, 164); ok('TP3 → SL to TP1 164');
 tick(260); await settle(); assert.equal(rules.get(SYM).sl, 164); ok('above TP3 the SL stays at TP1 (no trailing)');
@@ -232,7 +239,8 @@ a = msg(CALL); await __test.handleMessage(a, 'push'); await __test.handleMessage
 assert.match(calls().at(-1).reason, /not enough funds/); ok('MAX: not enough for 1 lot → skipped, no order');
 fundsAvail = null; __test.clearPriceCache(); price.set(SYM, 147);
 a = msg(CALL); await __test.handleMessage(a, 'push'); await __test.handleMessage(msg(LEVELS, a.id), 'push'); await settle(800);
-lastBuy = orders.filter(o => o.transaction_type === 'BUY').at(-1); assert.equal(lastBuy.quantity, 130); ok('MAX: funds unreadable → the 2-lot minimum, said so');
+lastBuy = orders.filter(o => o.transaction_type === 'BUY').at(-1); assert.equal(lastBuy.quantity, 65);
+assert.ok(events().some(e => /MAX sizing failed \(rate limited\) — bought 1 lot/.test(e))); ok('MAX: funds unreadable → 1 lot, said so (2 lots while 2 was the minimum)');
 await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
 __test.setSettings({ lots: 1 });
 
@@ -329,12 +337,13 @@ __test.setSettings({ lots: 1 });
   r = await lv({ sl: 150 }); assert.equal(r.ok, false); assert.match(r.error, /not being managed/); ok('closed trade: drag refused');
 }
 
-// 12f) MINIMUM 2 LOTS + HALF AT TP1 (2 Nov 2026)
+// 12f) HALF AT TP1 (2 Nov 2026) — ONLY WITH 2 OR MORE LOTS; ONE LOT ALLOWED AGAIN (16 Nov 2026)
 {
   const srv = app.listen(0); const port = (srv.address() as any).port;
   const api = async (path: string, body?: any) => (await fetch(`http://127.0.0.1:${port}${path}`, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {})).json();
   let r: any = await api('/api/signals/settings', { pin: '123456', lots: 1 });
-  assert.equal(r.settings.lots, 2); ok('settings: 1 lot is raised to the minimum of 2');
+  assert.equal(r.settings.lots, 1); ok('settings: 1 lot is accepted again (it was raised to 2)');
+  r = await api('/api/signals/settings', { pin: '123456', lots: 0 }); assert.equal(r.settings.lots, 1); ok('settings: 0 lots is not a size — 1');
   r = await api('/api/signals/settings', { pin: '123456', lots: 3 }); assert.equal(r.settings.lots, 3);
   __test.setClockOffset(Date.UTC(2026, 9, 26, 7, 0) - Date.now());        // 12:30 IST
   for (const [lots, wantHalf] of [[2, 65], [3, 65], [4, 130]] as [number, number][]) {
@@ -366,11 +375,44 @@ __test.setSettings({ lots: 1 });
   assert.ok(events().some((e: string) => /selling half FAILED/.test(e))); ok('half refused by the broker: alert, full position kept, not retried');
   partialFail = false;
   await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
-  // MAX sizing: funds for only 1 lot → the channel trade is skipped (minimum 2)
+  // MAX sizing: funds for only 1 lot → one lot is bought (it was skipped while 2 was the minimum),
+  // and that one lot sells nothing at TP1
   __test.setSettings({ lots: 'MAX' as any }); fundsAvail = 12000; __test.clearPriceCache(); price.set(SYM, 147);
   a6 = msg(CALL); await __test.handleMessage(a6, 'push'); await __test.handleMessage(msg(LEVELS, a6.id), 'push'); await settle(900);
-  assert.equal(calls().at(-1).status, 'SKIPPED'); assert.match(calls().at(-1).reason, /minimum for channel trades is 2/); ok('MAX with funds for 1 lot: skipped, says why');
+  assert.equal(calls().at(-1).status, 'ENTERED'); assert.equal(trades().at(-1).qty, 65);
+  const pm = orders.filter((o: any) => o.partial).length;
+  tick(165); await settle(300); tick(166); await settle(200);
+  assert.equal(orders.filter((o: any) => o.partial).length, pm); assert.equal(positions.get(SYM), 65); assert.equal(trades().at(-1).part_status, null);
+  assert.equal(rules.get(SYM).sl, 147); ok('MAX with funds for 1 lot: 1 lot bought; at TP1 nothing sold, SL to entry');
+  await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
   fundsAvail = 50000;
+  // a 2-lot order that only half fills is a 1-lot trade: nothing to sell at TP1, and the alert does not say it will
+  __test.setSettings({ mode: 'LIVE', lots: 2, maxTrades: 99 }); fillOnly = 65; __test.clearPriceCache(); price.set(SYM, 147);
+  const evHalf = events().length;
+  a6 = msg(CALL); await __test.handleMessage(a6, 'push'); await __test.handleMessage(msg(LEVELS, a6.id), 'push'); await settle(900);
+  fillOnly = null;
+  assert.equal(orders.filter(o => o.transaction_type === 'BUY').at(-1).quantity, 130); assert.equal(trades().at(-1).qty, 65);
+  const bought = events().slice(evHalf).find((e: string) => /BOUGHT/.test(e)) || '';
+  assert.match(bought, /Only 65 of 130 filled/); assert.match(bought, /Rules: TP1 → SL to entry/); assert.doesNotMatch(bought, /sell half/);
+  const ph = orders.filter((o: any) => o.partial).length;
+  tick(165); await settle(300);
+  assert.equal(orders.filter((o: any) => o.partial).length, ph); assert.equal(positions.get(SYM), 65); assert.equal(rules.get(SYM).sl, 147);
+  ok('2 lots asked, 1 filled: a 1-lot trade — the alert says so, nothing sold at TP1');
+  await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
+  // and with both lots filled the alert still promises the half, as it did
+  __test.clearPriceCache(); price.set(SYM, 147); const evTwo = events().length;
+  a6 = msg(CALL); await __test.handleMessage(a6, 'push'); await __test.handleMessage(msg(LEVELS, a6.id), 'push'); await settle(900);
+  assert.match(events().slice(evTwo).find((e: string) => /BOUGHT/.test(e)) || '', /Rules: TP1 → sell half, SL to entry/); ok('2 lots filled: the alert says "TP1 → sell half, SL to entry"');
+  await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
+  // practice, one lot, all the way: nothing booked at TP1, P&L is one piece
+  __test.setSettings({ mode: 'PRACTICE', lots: 1 }); __test.clearPriceCache(); price.set(SYM, 147);
+  a6 = msg(CALL); await __test.handleMessage(a6, 'push'); await __test.handleMessage(msg(LEVELS, a6.id), 'push'); await settle(900);
+  const evBefore = events().length;
+  tick(164); await settle(300); assert.equal(JSON.parse(trades().at(-1).ladder).sl, 147); assert.equal(trades().at(-1).part_status, null);
+  assert.ok(!events().slice(evBefore).some((e: string) => /booked half|sold half/.test(e)));
+  tick(199); await settle(200); tick(294); await settle(400);
+  const p1 = trades().at(-1); assert.equal(p1.status, 'CLOSED'); assert.equal(p1.qty, 65); assert.match(p1.exit_reason, /2× entry target 294/);
+  assert.equal(p1.pnl, (294 - 147) * 65); ok(`practice, 1 lot to the end: nothing booked at TP1, all out at 2× (294) → P&L +${p1.pnl}`);
   // practice: half booked on paper, P&L splits both parts
   __test.setSettings({ mode: 'PRACTICE', lots: 2 }); __test.clearPriceCache(); price.set(SYM, 147);
   a6 = msg(CALL); await __test.handleMessage(a6, 'push'); await __test.handleMessage(msg(LEVELS, a6.id), 'push'); await settle(900);

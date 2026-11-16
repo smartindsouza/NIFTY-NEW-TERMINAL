@@ -197,7 +197,9 @@ export default function TelegramSignals() {
               <select value={String(form.lots)} onChange={e => setForm({ ...form, lots: e.target.value === 'MAX' ? 'MAX' : Number(e.target.value) })}
                 className="h-8 px-2 rounded-md bg-popover border border-border font-mono text-foreground">
                 <option value="MAX">Max possible (funds)</option>
-                {Array.from({ length: 24 }, (_, i) => i + 2).map(n => <option key={n} value={n}>{n}</option>)}
+                {/* 1 is back (16 Nov 2026): from 2 Nov the list began at 2, because
+                    half the lots were sold at TP1. One lot simply sells nothing there. */}
+                {Array.from({ length: 25 }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n}</option>)}
               </select>
             </label>
             {form.lots === 'MAX' && (
@@ -219,7 +221,7 @@ export default function TelegramSignals() {
             ))}
           </div>
           {form.lots === 'MAX' && <div className="text-[11px] text-muted-foreground mt-2">Max possible: at each call it buys as many lots as your Zerodha funds allow at the top of the entry range (keeping 1.5% spare for charges), up to the limit you set (25 at most). If funds can't be read, it buys 1 lot and tells you.</div>}
-          <div className="text-[11px] text-muted-foreground mt-2">SL is always the one in the message. At least 2 lots. TP1 → half the lots sold, SL to entry · TP2 → SL stays at entry · TP3 → SL to TP1 · 2× the entry price → everything left is sold. Tap Exit any time to book.</div>
+          <div className="text-[11px] text-muted-foreground mt-2">SL is always the one in the message. TP1 → SL to entry, and with 2 or more lots half of them are sold (with 1 lot nothing is sold at TP1) · TP2 → SL stays at entry · TP3 → SL to TP1 · 2× the entry price → everything left is sold. Tap Exit any time to book.</div>
           <button disabled={busy} onClick={async () => { const d = await post('/api/signals/settings', {
               lots: form.lots, maxLotsCap: form.maxLotsCap, maxTrades: form.maxTrades, allowAbove: form.allowAbove, waitMin: form.waitMin, lastEntry: form.lastEntry, squareOff: form.squareOff });
               if (d.ok) { setForm({ ...d.settings }); toast.success('Saved'); } }}

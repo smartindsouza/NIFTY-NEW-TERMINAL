@@ -63,7 +63,7 @@ interface Settings {
   liveBroker?: string;
 }
 const DEFAULTS: Settings = {
-  mode: 'OFF', lots: 2, maxLotsCap: 20, maxTrades: 3, allowAbove: 2, waitMin: 10,
+  mode: 'OFF', lots: 1, maxLotsCap: 20, maxTrades: 3, allowAbove: 2, waitMin: 10,
   lastEntry: '15:00', squareOff: '15:15', channelId: null, channelTitle: null,
 };
 
@@ -118,12 +118,25 @@ const setKV = (k: string, v: any) => {
   D.db.prepare('INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at')
     .run(k, JSON.stringify(v), Date.now());
 };
-// MINIMUM 2 LOTS (2 Nov 2026, Martin): channel trades are at least 2 lots, so
-// half can be booked at TP1. An older saved "1" is raised to 2 on load.
-const MIN_LOTS = 2;
+// ONE LOT IS ALLOWED AGAIN (16 Nov 2026, Martin: "bring back the single lot for
+// telegram auto trade. When 1 lot is purchased drop the 50% booking option when
+// TP is reached. Let it book 50% only when more than 1 lots are bought.")
+//
+// From 2 Nov channel trades were at least 2 lots, so that half could be booked
+// at TP1: a saved "1" was raised to 2 when the app loaded, the server refused
+// anything below 2, and "Max possible" skipped a call the funds could only buy
+// one lot of. That floor is gone, here and in the three places that leaned on
+// it. A trade of one lot has no half to sell, so at TP1 it only moves its SL to
+// the entry (bookHalfAtTp1 has always stood down below two lots); everything
+// else in the rules is the same whatever the size.
+//
+// A setting already saved is NOT changed by this: the 2 that the old floor wrote
+// over his 1 stays 2 until he picks 1 on the page. How many lots the next call
+// buys is his to set, behind his PIN, and not something a deploy should move.
 function loadSettings() {
   settings = { ...DEFAULTS, ...(getKV('signals_settings') || {}) };
-  if (settings.lots !== 'MAX' && !(Number(settings.lots) >= MIN_LOTS)) { settings.lots = MIN_LOTS; try { saveSettings(); } catch { } }
+  // Only what cannot be traded at all is put right: a missing or zero count.
+  if (settings.lots !== 'MAX' && !(Number(settings.lots) >= 1)) settings.lots = 1;
 }
 function saveSettings() { setKV('signals_settings', settings); }
 
@@ -505,10 +518,10 @@ async function enter(c: any, ltp: number, cap: number) {
     ({ lots, note: sizeNote } = await s.p);
     sizing.delete(c.id);
     if (lots < 1) return skip(c.id, `not enough funds for 1 lot (${sizeNote})`);
-    // Funds could not be read: sizing fell back to 1 lot so a hiccup never costs
-    // the trade. For channel trades that fallback is the minimum, 2 lots.
-    if (!manual && lots === 1 && /could not read funds|not logged in|sizing failed/.test(String(sizeNote))) { lots = MIN_LOTS; sizeNote = String(sizeNote).replace(/1 lot$/, `${MIN_LOTS} lots (the minimum)`); }
-    if (!manual && lots < MIN_LOTS) return skip(c.id, `funds allow only ${lots} lot — the minimum for channel trades is ${MIN_LOTS} (${sizeNote})`);
+    // (2-16 Nov: funds for only one lot skipped a channel call, and funds that
+    // could not be read bought two — both because two was the minimum. With one
+    // lot allowed again, one lot is bought in either case, as before 2 Nov: a
+    // sizing hiccup never costs the trade, and never guesses big.)
   } else lots = want;
   const qty = lots * c.lot_size;
   const mode: Mode = c.mode === 'LIVE' ? 'LIVE' : 'PRACTICE';
@@ -571,7 +584,9 @@ async function enter(c: any, ltp: number, cap: number) {
   openTrades.set(tradeId, ladder);
   await notify(`${manual ? '🧾 MY ORDER — ' : ''}${mode === 'LIVE' ? '✅ BOUGHT' : '🧪 PRACTICE BUY'} ${c.underlying} ${c.strike} ${c.option_type} (${c.expiry})\n` +
     `${filledQty} qty (${Math.round(filledQty / c.lot_size)} lot${filledQty / c.lot_size === 1 ? '' : 's'}) @ ${rs(fillPx)}\nSL ${rs(c.sl)} · TP1 ${rs(c.tp1)} · TP2 ${rs(c.tp2)} · TP3 ${rs(c.tp3)}` +
-    (ladder.rules === 'double' ? `\nRules: TP1 → sell half, SL to entry · TP3 → SL to TP1 · all out at 2× entry ${rs(ladder.target!)}` : '') +
+    // "sell half" is said only when there is a half to sell: two or more lots
+    // actually FILLED, which is what bookHalfAtTp1 goes by at TP1.
+    (ladder.rules === 'double' ? `\nRules: TP1 → ${filledQty >= 2 * c.lot_size ? 'sell half, ' : ''}SL to entry · TP3 → SL to TP1 · all out at 2× entry ${rs(ladder.target!)}` : '') +
     (sizeNote ? `\n${sizeNote}` : '') + (filledQty < qty ? `\nOnly ${filledQty} of ${qty} filled — the rest was cancelled.` : ''),
     [{ text: '🚪 Exit now', data: `exit:${tradeId}` }]);
 }
@@ -625,6 +640,10 @@ async function applyLadder(id: number, acts: LadderAction[]) {
 // half the lots, rounded down to whole lots (2 → 1, 3 → 1, 4 → 2). The rest
 // stays on with the ladder as before (SL to entry at TP1, TP1 at TP2, trailing
 // after TP3). Recorded BEFORE the order goes out, so it can only happen once.
+// ONE LOT (allowed again from 16 Nov): nothing is sold at TP1 — "book 50% only
+// when more than 1 lots are bought" — and nothing is recorded, so the trade's
+// P&L is worked out as one piece. It goes by the lots the trade HOLDS, so a
+// two-lot order that only half filled is a one-lot trade here.
 async function bookHalfAtTp1(id: number, t: any, st: LadderState) {
   const c: any = D.db.prepare('SELECT source, lot_size FROM signal_calls WHERE id = ?').get(t.call_id);
   if (!c || (c.source && c.source !== 'telegram')) return;
@@ -1047,7 +1066,7 @@ export function registerSignalTrader(app: any, deps: SignalDeps) {
       settings.mode = b.mode;
       if (b.mode === 'LIVE') settings.liveBroker = D?.broker?.() || 'kite';
     }
-    if (b.lots !== undefined) settings.lots = String(b.lots).toUpperCase() === 'MAX' ? 'MAX' : Math.round(num(b.lots, MIN_LOTS, 25, settings.lots === 'MAX' ? MIN_LOTS : settings.lots));
+    if (b.lots !== undefined) settings.lots = String(b.lots).toUpperCase() === 'MAX' ? 'MAX' : Math.round(num(b.lots, 1, 25, settings.lots === 'MAX' ? 1 : settings.lots));
     if (b.maxLotsCap !== undefined) settings.maxLotsCap = Math.round(num(b.maxLotsCap, 1, 25, settings.maxLotsCap));
     if (b.maxTrades !== undefined) settings.maxTrades = Math.round(num(b.maxTrades, 1, 10, settings.maxTrades));
     if (b.allowAbove !== undefined) settings.allowAbove = num(b.allowAbove, 0, 20, settings.allowAbove);
