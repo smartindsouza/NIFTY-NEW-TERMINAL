@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect, useLayoutEffect } from "react";
 import { useTodayBias, isRecord as isBiasRecord, istToday as biasIstToday, BIAS_LINES_KEY, useBiasCardHidden } from "../lib/bias";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, ChevronsUp, ChevronsDown, ChevronRight, Copy, Trash2, Search, PencilRuler, Minus, Slash, RectangleHorizontal, AlignJustify, TrendingDown, Type as TypeIcon, Move as MoveIcon, ChartNoAxesCombined, TrendingUp, Star, Bell, ClipboardPen } from "lucide-react";
+import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, ChevronsUp, ChevronsDown, ChevronRight, Copy, Trash2, Search, PencilRuler, Minus, Slash, RectangleHorizontal, AlignJustify, TrendingDown, Type as TypeIcon, Move as MoveIcon, ArrowLeft, CalendarRange, ChartNoAxesCombined, TrendingUp, Star, Bell, ClipboardPen } from "lucide-react";
 import MyOrderModal from "../components/MyOrderModal";
 import { TradeGuardButton } from "../components/TradeGuard";
 import { toast } from "sonner";
@@ -5441,6 +5441,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const [drawFirstSet, setDrawFirstSet] = useState(false);
   const [drawTextEdit, setDrawTextEdit] = useState<null | { id: number | null; at?: DrawPoint; token?: string; value: string }>(null);
   // Where each drawing on this chart was painted in the last frame: what a tap is tested against.
+  // The phone layout's sheets (see THE LEMONN LAYOUT ON A PHONE, just above the
+  // render). Declared here, early, because chartOverlayOpen below reads them.
+  const [phoneSearchOpen, setPhoneSearchOpen] = useState(false);
+  const [phoneSettingsOpen, setPhoneSettingsOpen] = useState(false);
+  const [rangeOpen, setRangeOpen] = useState(false);
+  const [rangeChoice, setRangeChoice] = useState<string | null>(null);
+  const lemonSheetOpen = rangeOpen || phoneSettingsOpen;
   const drawGeomRef = useRef<Map<number, DrawGeom>>(new Map());
   const drawAnchorEls = useRef<(HTMLDivElement | null)[]>([]);
   const drawMoveEl = useRef<HTMLDivElement | null>(null);
@@ -5684,7 +5691,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     isEditingDz || isEditingTpSl || isEditingRsi || isEditingHLevels ||
     isEditingOpeningRange || isEditingStruct || isEditingFvg || isEditingDsZones ||
     isEditingLevelAlerts || isEditingZoneTapAlerts || isEditingBreakoutAlerts || isEditingVolume ||
-    !!drawTextEdit
+    !!drawTextEdit || lemonSheetOpen
   );
 
   const logicalRangeRef = useRef<any>(null);
@@ -14005,6 +14012,171 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     enabled: showDiagnostic,
   });
 
+  // ===== THE LEMONN LAYOUT ON A PHONE (16 Nov 2026) =====
+  // Martin, of the Lemonn chart screen: a simple layout — a header with a back
+  // button, the name and the price; the chart; one row of five buttons under it
+  // (Range, Interval, Indicators, Drawings, Settings); everything else out of
+  // the way. His answers on the details: "Trade guard and trailing TP can go
+  // under the settings. Quick trade can appear as a floating button that can be
+  // moved anywhere on the screen by holding and dragging it. Let the default
+  // position be top right." He keeps his own bottom bar.
+  //
+  // Phone only (below the md width): the desktop tool bar and the split view are
+  // as they were. What has changed is WHERE things are, not what they do — each
+  // control here runs the same code its old button did.
+
+  // The header's back arrow: the screen he came from, or Home when the chart is
+  // where the app was opened.
+  const goBackFromChart = () => {
+    try { if (window.history.length > 1) window.history.back(); else window.location.assign('/'); } catch (e) {}
+  };
+  // THE PRICE IN THE HEADER. Written straight into the page a few times a second
+  // from the same live candle the chart draws — not through React state, which
+  // would re-render this whole page on every tick for one line of text.
+  const headPriceRef = useRef<HTMLSpanElement | null>(null);
+  const headChangeRef = useRef<HTMLSpanElement | null>(null);
+  // Yesterday's close: the last candle of the session before the newest one (on
+  // a daily or longer chart, simply the candle before).
+  const prevSessionClose = useMemo(() => {
+    const cs: any[] = chartData?.candles || [];
+    if (cs.length < 2) return null;
+    if ((parseInt(timeframe, 10) || 5) >= 1440) return Number(cs[cs.length - 2].close) || null;
+    const dayOf = (c: any) => Math.floor((Number(c.time) + 19800) / 86400);       // the IST day
+    const lastDay = dayOf(cs[cs.length - 1]);
+    for (let i = cs.length - 2; i >= 0; i--) if (dayOf(cs[i]) !== lastDay) return Number(cs[i].close) || null;
+    return null;
+  }, [chartData, timeframe]);
+  const prevSessionCloseRef = useRef<number | null>(null);
+  prevSessionCloseRef.current = prevSessionClose;
+  useEffect(() => {
+    const fmt = (v: number) => v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const paint = () => {
+      const pEl = headPriceRef.current, cEl = headChangeRef.current;
+      if (!pEl) return;
+      const px = Number(lastCandleDataRef.current?.close);
+      const text = px > 0 ? `${isReferenceChartRef.current ? '' : '₹'}${fmt(px)}` : '—';
+      if (pEl.textContent !== text) pEl.textContent = text;
+      if (!cEl) return;
+      const prev = prevSessionCloseRef.current;
+      let ct = '', color = '';
+      if (px > 0 && prev && prev > 0) {
+        const d = px - prev, pct = (d / prev) * 100;
+        ct = `${d >= 0 ? '▲' : '▼'} ${Math.abs(pct).toFixed(2)}% (${d >= 0 ? '+' : '−'}${fmt(Math.abs(d))})`;
+        color = d >= 0 ? '#10b981' : '#f43f5e';
+      }
+      if (cEl.textContent !== ct) cEl.textContent = ct;
+      if (cEl.style.color !== color) cEl.style.color = color;
+    };
+    paint();
+    const iv = setInterval(paint, 400);
+    return () => clearInterval(iv);
+  }, []);
+
+  // RANGE: how much of the chart is on screen, counted in sessions back from the
+  // newest candle. A choice lasts until the chart is rebuilt for another
+  // timeframe or instrument, which puts its own default window up.
+  // (rangeOpen and rangeChoice are declared with the other sheet states, far above.)
+  useEffect(() => { setRangeChoice(null); }, [timeframe, instrumentToken]);
+  const applyRange = (key: '1D' | '2D' | '5D' | '1M' | 'ALL') => {
+    setRangeOpen(false);
+    const chart = mainChartRef.current, ser = mainSeriesRef.current;
+    if (!chart || !ser) return;
+    try {
+      const rows = ser.data() as any[];
+      const n = rows.length;
+      if (!n) return;
+      let from = 0;
+      if (key !== 'ALL') {
+        const want = key === '1D' ? 1 : key === '2D' ? 2 : key === '5D' ? 5 : 22;    // sessions; a month is about 22
+        const dayOf = (r: any) => Math.floor((Number(r.time) + 19800) / 86400);
+        let seen = 1, day = dayOf(rows[n - 1]);
+        for (let i = n - 2; i >= 0; i--) {
+          const d = dayOf(rows[i]);
+          if (d === day) continue;
+          if (seen === want) { from = i + 1; break; }
+          seen++; day = d;
+        }
+        // Never fewer than a dozen candles: "1 day" of daily candles is one candle.
+        from = Math.min(from, Math.max(0, n - 12));
+      }
+      chart.timeScale().setVisibleLogicalRange({ from: from - 0.5, to: n - 1 + 3 });
+      refitPriceScaleRef.current();
+      setRangeChoice(key);
+      setShowJumpToLatest(false);
+    } catch (e) {}
+  };
+
+  // QUICK TRADE, ONE SWITCH. The tool bar's button (desktop) and the floating
+  // one (phone) both come here.
+  const toggleQuickTrade = () => {
+    const next = !quickTradeEnabled;
+    setQuickTradeEnabled(next);
+    try { toast(next ? 'Quick Trade on · 1 min' : 'Quick Trade off', { id: 'qt-toggle' }); } catch (e) {}
+  };
+  // QUICK TRADE FLOATS (phone). A tap switches it; a drag moves it, and it stays
+  // where it is put (kept on this phone). x is measured from the RIGHT edge and y
+  // from the top, so "top right" stays top right when the phone is turned.
+  const qtFabRef = useRef<HTMLDivElement | null>(null);
+  const [qtFabPos, setQtFabPos] = useState<{ x: number; y: number } | null>(() => {
+    try { const v = JSON.parse(localStorage.getItem('quickTradeFab') || 'null'); return v && Number.isFinite(v.x) && Number.isFinite(v.y) ? { x: v.x, y: v.y } : null; }
+    catch (e) { return null; }
+  });
+  // Never saved yet: the top right of the chart, clear of the price axis.
+  useEffect(() => {
+    if (qtFabPos) return;
+    const place = () => {
+      const cont = chartContainerRef.current;
+      if (!cont) return false;
+      const r = cont.getBoundingClientRect();
+      if (!(r.width > 0)) return false;
+      let axisW = 56;
+      try { axisW = mainChartRef.current?.priceScale('right').width() || 56; } catch (e) {}
+      setQtFabPos({ x: Math.round(window.innerWidth - r.right + axisW + 8), y: Math.round(r.top + 8) });
+      return true;
+    };
+    if (place()) return;
+    const iv = setInterval(() => { if (place()) clearInterval(iv); }, 500);
+    return () => clearInterval(iv);
+  }, [qtFabPos]);
+  const startQtFabDrag = (e: React.PointerEvent) => {
+    const el = qtFabRef.current;
+    if (!el) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try { el.setPointerCapture(e.pointerId); } catch (err) {}
+    const r0 = el.getBoundingClientRect();
+    const startX = e.clientX, startY = e.clientY;
+    let moved = false, x = window.innerWidth - r0.right, y = r0.top;
+    const move = (ev: PointerEvent) => {
+      const dx = ev.clientX - startX, dy = ev.clientY - startY;
+      if (!moved && Math.abs(dx) + Math.abs(dy) < 8) return;       // a tap wobbles; a drag travels
+      moved = true;
+      x = Math.max(4, Math.min(window.innerWidth - r0.width - 4, window.innerWidth - r0.right - dx));
+      y = Math.max(4, Math.min(window.innerHeight - r0.height - 4, r0.top + dy));
+      el.style.right = `${Math.round(x)}px`; el.style.top = `${Math.round(y)}px`;
+    };
+    const end = () => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', end);
+      document.removeEventListener('pointercancel', cancel);
+      if (!moved) { toggleQuickTrade(); return; }
+      const pos = { x: Math.round(x), y: Math.round(y) };
+      setQtFabPos(pos);
+      try { localStorage.setItem('quickTradeFab', JSON.stringify(pos)); } catch (err) {}
+    };
+    // A cancelled touch (a call coming in, the app going to the background) is
+    // neither a tap nor a move worth keeping.
+    const cancel = () => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', end);
+      document.removeEventListener('pointercancel', cancel);
+      if (moved) { const pos = { x: Math.round(x), y: Math.round(y) }; setQtFabPos(pos); }
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', end);
+    document.addEventListener('pointercancel', cancel);
+  };
+
   // DESKTOP HEIGHT. The root used to be height:auto with a min-height of the
   // screen, so the chart's flex-grow had nothing to grow into and stopped at its
   // 450px floor — the rest of the screen was the page's own p-8 + pb-20, the
@@ -14184,7 +14356,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       {/* Desktop header is two rows now: title + clock above, live badges below.
           Height therefore has to size to content rather than the old fixed h-11.
           Mobile keeps its single column and its chevron-dropdown for the badges. */}
-      <div className={`flex flex-col md:flex-row md:justify-between md:items-start gap-2 md:gap-3 pb-2 mb-2 md:mb-2 md:flex-nowrap md:border-b md:border-border/60 md:h-auto md:min-h-11 md:py-1`}>
+      {/* On a phone this row (the "Advanced Trading Chart" title, the clock and
+          the badge drop-down) is replaced by the Lemonn header: back, the chart's
+          name, search, and the price under them. It stays for a chart opened on
+          its own from another page (?optToken), which has no name row. */}
+      <div className={`${isFocusedChart ? 'flex' : 'max-md:hidden flex'} flex-col md:flex-row md:justify-between md:items-start gap-2 md:gap-3 pb-2 mb-2 md:mb-2 md:flex-nowrap md:border-b md:border-border/60 md:h-auto md:min-h-11 md:py-1`}>
         {/* The title, clock, live tick, trend and delta badges are properties of
             the SESSION, not of one chart — and in split view the spot pane above
             already shows them. Rendering them again over the option chart just
@@ -14384,6 +14560,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               by the two panes happening to contain the same things. */}
           {isOptionPane && split && <div className="hidden md:block h-9 shrink-0" aria-hidden="true" />}
 
+          {/* PHONE HEADER, left: back to the screen he came from. */}
+          {!isPane && (
+            <button type="button" onClick={goBackFromChart} aria-label="Back" title="Back" data-head="back"
+              className="md:hidden shrink-0 h-9 w-9 -mr-1 flex items-center justify-center rounded-full text-foreground/90 active:bg-foreground/10">
+              <ArrowLeft size={20} />
+            </button>
+          )}
+
           {/* Two dropdowns in place of the tab strip, on every size. Desktop had
               a scrolling strip of index tabs plus one tab per opened option chart,
               which is the same crowding the phone had. The index dropdown is
@@ -14403,7 +14587,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                wraps onto a second line when the row is too narrow for both. Flex
                items never overlap; a minimum width never crushes; wrapping never
                clips the bar's dropdown menus the way a scroller would. */
-            className={`${searchExpanded ? 'hidden' : 'flex'} items-center gap-1.5 px-1.5 py-1 min-w-[150px] flex-1`}
+            className={`${searchExpanded || phoneSearchOpen ? 'hidden' : 'flex'} items-center gap-1.5 px-1.5 py-1 min-w-[150px] flex-1`}
             onPointerDown={(e) => e.stopPropagation()}>
             {!isOptionPane && (
             /* flex-1 basis-0 on a phone: the two tabs split the row down the
@@ -14543,6 +14727,23 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             )}
           </div>
 
+          {/* PHONE HEADER, right: search. It was a field in the bottom tool bar,
+              where its results opened downwards off the screen; here it opens in
+              the header, in place of the chart's name, with its results below. */}
+          {!isPane && (phoneSearchOpen ? (
+            <div className="md:hidden flex-1 min-w-0 px-1.5 py-1" data-head="search-field" onPointerDown={(e) => e.stopPropagation()}>
+              <SymbolSearch autoOpen onClose={() => setPhoneSearchOpen(false)}
+                onSelect={(i) => { setSelectedInstrument(i); setPhoneSearchOpen(false); }}
+                currentSymbol={selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel} />
+            </div>
+          ) : (
+            <button type="button" onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(false); setPhoneSearchOpen(true); }}
+              aria-label="Search symbol" title="Search symbol" data-head="search"
+              className="md:hidden shrink-0 h-9 w-9 mr-0.5 flex items-center justify-center rounded-full text-foreground/90 active:bg-foreground/10">
+              <Search size={19} />
+            </button>
+          ))}
+
           {/* The old tab strip is retired — the dropdowns above replace it on every
               size. Kept rendered but hidden rather than deleted in the same commit
               as a layout change, so nothing that reads its refs breaks. */}
@@ -14616,7 +14817,35 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           <TradePnl sync={premSync} />
           </div>
         <div ref={bottomBarRef} className={`fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-card md:bg-transparent border-t border-border md:border-0 px-3 py-1.5 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-nowrap md:flex-wrap justify-end md:shrink md:min-w-0 w-screen md:w-auto md:ml-auto md:mb-0 md:rounded-none md:border-0 md:bg-transparent max-w-[100vw] overflow-x-hidden md:overflow-visible`}>
-          <div className="flex flex-1 items-center gap-1.5 sm:gap-2 justify-end min-w-0 md:contents">
+          {/* ON A PHONE THIS IS THE ROW OF FIVE (see THE LEMONN LAYOUT ON A PHONE):
+              Range, Interval, Indicators, Drawings, Settings — an icon or a value
+              with its name under it, in that order whatever the order below (the
+              desktop bar is laid out by its own md:order classes). The bar keeps
+              its height, so everything measured against it still fits. */}
+          <div className="flex flex-1 items-center gap-1.5 sm:gap-2 justify-end min-w-0 md:contents max-md:justify-between max-md:gap-0">
+          {!isPane && (
+            <div className="md:hidden relative flex-1 flex justify-center order-1">
+              <button type="button" data-bar="range" title="How much of the chart is on screen"
+                onClick={() => { setPhoneSettingsOpen(false); setRangeOpen(o => !o); }}
+                className={`h-10 w-full flex flex-col items-center justify-center gap-0.5 rounded-md ${rangeOpen ? 'text-primary' : 'text-foreground/90'}`}>
+                {rangeChoice ? <span className="h-[18px] text-[15px] leading-[18px] font-semibold">{rangeChoice === 'ALL' ? 'All' : rangeChoice}</span> : <CalendarRange size={18} />}
+                <span className="text-[10px] leading-none font-medium text-muted-foreground">Range</span>
+              </button>
+              {rangeOpen && (
+                <>
+                  <div className="fixed inset-0 z-[88]" aria-hidden="true" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setRangeOpen(false); }} />
+                  <div data-range-sheet="" className="fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)] z-[90] bg-card border border-white/10 rounded-xl shadow-2xl overflow-hidden">
+                    {([['1D', '1D'], ['2D', '2D'], ['5D', '5D'], ['1M', '1M'], ['ALL', 'All']] as const).map(([k, label]) => (
+                      <button key={k} type="button" data-range-pick={k} onClick={() => applyRange(k)}
+                        className={`w-full flex items-center justify-between px-3 py-2.5 text-left text-[13px] font-medium active:bg-muted ${rangeChoice === k ? 'text-primary' : 'text-foreground'}`}>
+                        <span>{label}</span>{rangeChoice === k && <Check size={15} />}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           {/* Desktop: an icon until clicked. Mobile: unchanged — the field is
               always shown, which is what the bottom toolbar was built around. */}
           {!searchExpanded && (
@@ -14631,7 +14860,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           )}
           <div
             ref={searchWrapRef}
-            className={`flex-1 min-w-0 sm:w-auto md:order-1 ${searchExpanded && !sharedHidden ? 'md:block md:w-64 md:flex-none' : 'md:hidden'}`}
+            className={`max-md:hidden flex-1 min-w-0 sm:w-auto md:order-1 ${searchExpanded && !sharedHidden ? 'md:block md:w-64 md:flex-none' : 'md:hidden'}`}
           >
           <SymbolSearch 
             onSelect={setSelectedInstrument} 
@@ -14647,15 +14876,16 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               position boxes are now two of seven tools on one sheet (see DRAWINGS),
               so the button always opens the sheet — he may want a trend line while
               a box is up — and removing the box is the sheet's first row. */}
-          <div className={`relative shrink-0 md:order-2 ${sharedHidden}`} ref={rrMenuRef}>
+          <div className={`relative shrink-0 md:order-2 max-md:order-4 max-md:flex-1 max-md:flex max-md:justify-center ${sharedHidden}`} ref={rrMenuRef}>
             <button
-              onClick={() => setRrMenuOpen(o => !o)}
+              onClick={() => { setRangeOpen(false); setPhoneSettingsOpen(false); setRrMenuOpen(o => !o); }}
               title="Drawing tools"
               data-draw-button=""
-              className={`flex items-center justify-center h-9 w-9 rounded-md transition-colors ${
-                (rrArm || drawArm) ? 'bg-primary/25 text-primary' : (rrBox || (split && peerRrBox)) ? 'bg-emerald-500/15 text-emerald-300' : 'bg-muted/40 text-muted-foreground hover:text-foreground'}`}
+              className={`flex items-center justify-center h-9 w-9 rounded-md transition-colors max-md:h-10 max-md:w-full max-md:flex-col max-md:gap-0.5 max-md:!bg-transparent ${
+                (rrArm || drawArm) ? 'bg-primary/25 text-primary' : (rrBox || (split && peerRrBox)) ? 'bg-emerald-500/15 text-emerald-300' : 'bg-muted/40 text-muted-foreground hover:text-foreground max-md:text-foreground/90'}`}
             >
               <PencilRuler size={17} />
+              <span className="md:hidden text-[10px] leading-none font-medium text-muted-foreground">Drawings</span>
             </button>
             {rrMenuOpen && (() => {
               const pick = (k: DrawingType | 'hline' | 'long' | 'short') => {
@@ -14715,11 +14945,19 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             })()}
           </div>
 
-          <div className="flex items-center gap-2 shrink-0 md:order-4">
+          <div className="relative flex items-center gap-2 shrink-0 md:order-4 max-md:order-2 max-md:flex-1 max-md:h-10 max-md:flex-col max-md:justify-center max-md:gap-0.5" data-bar="interval">
+            {/* Phone: what is seen is these two lines; the chooser itself is laid
+                over them, invisible, so a tap anywhere on the pair opens the
+                phone's own picker. */}
+            <span className="md:hidden h-[18px] text-[15px] leading-[18px] font-semibold text-foreground/90">
+              {({ '1': '1m', '3': '3m', '5': '5m', '15': '15m', '60': '1h', '240': '4h', '1440': '1D', '10080': '1W', '43200': '1M' } as Record<string, string>)[String(timeframe)] || `${timeframe}m`}
+            </span>
+            <span className="md:hidden text-[10px] leading-none font-medium text-muted-foreground">Interval</span>
             <select
               value={timeframe}
               onChange={(e) => setTimeframe(e.target.value)}
-              className="appearance-none text-center bg-muted/40 text-foreground border border-0 text-xs md:text-sm rounded-md px-3 focus:outline-none focus:ring-1 focus:ring-primary h-9 [&::-ms-expand]:hidden shrink-0"
+              aria-label="Interval"
+              className="appearance-none text-center bg-muted/40 text-foreground border border-0 text-xs md:text-sm rounded-md px-3 focus:outline-none focus:ring-1 focus:ring-primary h-9 [&::-ms-expand]:hidden shrink-0 max-md:absolute max-md:inset-0 max-md:h-full max-md:w-full max-md:opacity-0"
             >
               <option value="1">1m</option>
               <option value="3">3m</option>
@@ -14732,14 +14970,16 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               <option value="43200">1M</option>
             </select>
           </div>
-          <div className="flex rounded-md shrink-0 md:order-3">
-            <div className="relative" ref={indicatorsRef}>
+          <div className="flex rounded-md shrink-0 md:order-3 max-md:order-3 max-md:flex-1 max-md:justify-center">
+            <div className="relative max-md:w-full" ref={indicatorsRef}>
               <button
-                onClick={() => setIsIndicatorsOpen(!isIndicatorsOpen)}
-                className={`flex items-center justify-center gap-1.5 h-9 w-9 text-sm font-medium rounded-md transition-colors ${isIndicatorsOpen ? 'bg-primary/20 text-primary md:bg-background/50' : 'bg-muted/40 md:bg-transparent text-muted-foreground hover:bg-background/50 hover:text-foreground'}`}
+                data-bar="indicators"
+                onClick={() => { setRangeOpen(false); setPhoneSettingsOpen(false); setIsIndicatorsOpen(!isIndicatorsOpen); }}
+                className={`flex items-center justify-center gap-1.5 h-9 w-9 text-sm font-medium rounded-md transition-colors max-md:h-10 max-md:w-full max-md:flex-col max-md:gap-0.5 max-md:!bg-transparent ${isIndicatorsOpen ? 'bg-primary/20 text-primary md:bg-background/50' : 'bg-muted/40 md:bg-transparent text-muted-foreground hover:bg-background/50 hover:text-foreground max-md:text-foreground/90'}`}
               >
                 {/* Trend line over bars — the icon Martin picked for Indicators. */}
                 <ChartNoAxesCombined size={18} />
+                <span className="md:hidden text-[10px] leading-none font-medium text-muted-foreground">Indicators</span>
               </button>
               {/* A TAP ON THE CHART CLOSES THE LIST (16 Nov 2026). The list already
                   closed on an outside "mousedown" — but the chart cancels its own
@@ -15550,8 +15790,36 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               )}
             </div>
           </div>
+          {!isPane && (
+            <div className="md:hidden relative flex-1 flex justify-center order-5">
+              <button type="button" data-bar="settings" title="Settings"
+                onClick={() => { setRangeOpen(false); setRrMenuOpen(false); setIsIndicatorsOpen(false); setPhoneSettingsOpen(o => !o); }}
+                className={`h-10 w-full flex flex-col items-center justify-center gap-0.5 rounded-md ${phoneSettingsOpen ? 'text-primary' : 'text-foreground/90'}`}>
+                <Settings size={18} />
+                <span className="text-[10px] leading-none font-medium text-muted-foreground">Settings</span>
+              </button>
+            </div>
+          )}
           </div>
-          <div className="flex items-center gap-2 flex-none max-w-[45%] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents md:min-w-0 md:basis-auto pr-1">
+          {/* SETTINGS, ON A PHONE. These are the buttons that used to fill the right
+              half of the bottom bar — trailing SL or My Order, the trade guard,
+              reload, sync — "under the settings", as Martin asked. They are the
+              very same buttons (so nothing they do has changed), laid out as a
+              sheet with their names beside them and shown only while Settings is
+              open. The names are two words at most and there is no heading and no
+              description (Martin, 16 Nov: "as simple as the lemon app ... Keep
+              the texts such as descriptions etc to minimal or avoid it wherever
+              possible"); what a row is set to stands at the end of it. Quick Trade is not among them on a phone: it floats (below).
+              A see-through layer behind the sheet closes it on a tap elsewhere.
+              On a desktop none of this applies: md:contents, as before. */}
+          {phoneSettingsOpen && !isPane && (
+            <div className="md:hidden fixed inset-0 z-[88]" aria-hidden="true"
+              onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setPhoneSettingsOpen(false); }} />
+          )}
+          <div data-settings-sheet={phoneSettingsOpen ? 'open' : 'closed'}
+            className={`${phoneSettingsOpen && !isPane
+              ? 'max-md:flex max-md:fixed max-md:inset-x-2 max-md:bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)] max-md:z-[90] max-md:flex-col max-md:items-stretch max-md:gap-0 max-md:max-w-none max-md:overflow-visible max-md:rounded-xl max-md:border max-md:border-white/10 max-md:bg-card max-md:p-1.5 max-md:shadow-2xl'
+              : isPane ? 'flex' : 'max-md:hidden flex'} items-center gap-2 flex-none max-w-[45%] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents md:min-w-0 md:basis-auto pr-1`}>
           {/* Trailing TP, beside Quick Trade. Distinct icon and colour so the two
               switches are not mistaken for each other at a glance.
               26 Oct: shown only on an OPTION premium chart while a trade is open —
@@ -15569,9 +15837,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             }}
             title={trailTpOn ? 'Trailing TP ON — target climbs 20% a rung, stop follows one rung behind' : 'Trailing TP OFF — remaining half exits at TP2'}
             aria-label="Trailing TP"
-            className={`${isReferenceChart ? 'hidden' : 'flex'} ${sharedHidden} items-center justify-center h-9 w-9 shrink-0 md:order-2 rounded-md border border-0 transition-colors ${trailTpOn ? 'bg-emerald-500/20 text-emerald-400' : 'bg-muted/40 text-muted-foreground'}`}
+            className={`${isReferenceChart ? 'hidden' : 'flex'} ${sharedHidden} items-center justify-center h-9 w-9 shrink-0 md:order-2 rounded-md border border-0 transition-colors max-md:h-11 max-md:w-full max-md:justify-start max-md:gap-3 max-md:px-2.5 max-md:!bg-transparent ${trailTpOn ? 'bg-emerald-500/20 text-emerald-400' : 'bg-muted/40 text-muted-foreground'}`}
           >
             <TrendingUp size={17} />
+            <span className="md:hidden text-left text-[13px] font-medium text-foreground">Trailing SL</span>
+            <span className={`md:hidden ml-auto text-[12px] font-semibold ${trailTpOn ? 'text-emerald-400' : 'text-muted-foreground'}`}>{trailTpOn ? 'On' : 'Off'}</span>
           </button>
           ) : !isOptionView ? (
           <button
@@ -15580,26 +15850,34 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               const last = chartDataRef.current?.candles?.[chartDataRef.current.candles.length - 1]?.close;
               setMyOrderSpot(Number(last) > 0 ? Number(last) : null);
               setMyOrderOpen(true);
+              setPhoneSettingsOpen(false);
             }}
             title="My order — set entry, SL and TP1-3 for a strike; bought automatically when the premium reaches the entry"
             aria-label="My order"
-            className={`${isReferenceChart ? 'hidden' : 'flex'} ${sharedHidden} items-center justify-center h-9 w-9 shrink-0 md:order-2 rounded-md border border-0 transition-colors bg-muted/40 text-muted-foreground hover:text-foreground`}
+            className={`${isReferenceChart ? 'hidden' : 'flex'} ${sharedHidden} items-center justify-center h-9 w-9 shrink-0 md:order-2 rounded-md border border-0 transition-colors bg-muted/40 text-muted-foreground hover:text-foreground max-md:h-11 max-md:w-full max-md:justify-start max-md:gap-3 max-md:px-2.5 max-md:!bg-transparent`}
           >
             <ClipboardPen size={17} />
+            <span className="md:hidden text-left text-[13px] font-medium text-foreground">My order</span>
           </button>
           ) : null}
           {/* Trade guard (11 Nov 2026): one shield per screen — on the single chart,
               or on the spot pane in split view, never twice. */}
           {!isReferenceChart && paneRole !== 'option' && (
-            <TradeGuardButton className="md:order-2" />
+            <TradeGuardButton className="md:order-2 max-md:h-11 max-md:w-full max-md:justify-start max-md:gap-3 max-md:px-2.5 max-md:!bg-transparent" label />
           )}
           {(
-          <div className={`ml-auto md:ml-0 ${isReferenceChart ? 'hidden' : 'flex'} ${sharedHidden} items-center justify-center gap-2 h-9 w-9 shrink-0 md:order-2 cursor-pointer rounded-md border border-0 transition-colors ${quickTradeEnabled ? "bg-primary/20" : "bg-muted/40"}`} onClick={() => { const next = !quickTradeEnabled; setQuickTradeEnabled(next); try { toast(next ? 'Quick Trade enabled for 1 minute' : 'Quick Trade disabled', { id: 'qt-toggle' }); } catch (e) {} }} title="Quick Trade — switches itself off 1 minute after it is turned on">
+          <div className={`ml-auto md:ml-0 ${isReferenceChart ? 'hidden' : isPane ? 'flex' : 'max-md:hidden flex'} ${sharedHidden} items-center justify-center gap-2 h-9 w-9 shrink-0 md:order-2 cursor-pointer rounded-md border border-0 transition-colors ${quickTradeEnabled ? "bg-primary/20" : "bg-muted/40"}`} onClick={() => toggleQuickTrade()} title="Quick Trade — switches itself off 1 minute after it is turned on">
              {/* Icon on both platforms now; the desktop label and toggle are gone.
                  Colour carries the state, as it already did on mobile. */}
              <Zap size={18} className={quickTradeEnabled ? 'text-primary' : 'text-muted-foreground'} />
           </div>
           )}
+            <button type="button" data-settings="tpsl"
+              onClick={() => { setPhoneSettingsOpen(false); setIsEditingTpSl(true); }}
+              className={`${isReferenceChart || isPane ? 'hidden' : 'md:hidden flex'} h-11 w-full items-center justify-start gap-3 px-2.5 rounded-md text-muted-foreground`}>
+              <SlidersHorizontal size={17} />
+              <span className="text-left text-[13px] font-medium text-foreground">SL &amp; TP</span>
+            </button>
             <button
               onClick={() => {
                 setTbReloading(true);
@@ -15615,10 +15893,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 try { window.dispatchEvent(new CustomEvent('chart_reload')); } catch (e) {}
                 setTimeout(() => { try { window.location.reload(); } catch (e) {} }, 150);
               }}
-              className={`${isPane ? '' : 'md:hidden'} ${sharedHidden} shrink-0 md:order-4 flex items-center justify-center h-9 w-9 rounded-md bg-muted/40 text-foreground/80`}
+              className={`${isPane ? '' : 'md:hidden'} ${sharedHidden} shrink-0 md:order-4 flex items-center justify-center h-9 w-9 rounded-md bg-muted/40 text-foreground/80 max-md:h-11 max-md:w-full max-md:justify-start max-md:gap-3 max-md:px-2.5 max-md:!bg-transparent max-md:text-muted-foreground`}
               title={split ? 'Refresh both charts' : isPane ? 'Refresh this chart' : 'Reload chart and hard-refresh the app'}
             >
               <RefreshCw size={18} className={tbReloading ? 'animate-spin' : ''} />
+              <span className="md:hidden text-left text-[13px] font-medium text-foreground">Reload</span>
             </button>
 
             {/* Sync open positions from Zerodha. Deliberately NOT a RefreshCw —
@@ -15629,7 +15908,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 tinted green, which is what carries the meaning now that the text
                 label is gone. */}
             <button
-              onClick={() => { try { window.dispatchEvent(new CustomEvent('sync_positions_request')); } catch (e) {} }}
+              onClick={() => { setPhoneSettingsOpen(false); try { window.dispatchEvent(new CustomEvent('sync_positions_request')); } catch (e) {} }}
               /* Icon only, and on BOTH platforms. The "Sync" text made this the
                  widest control in a bar that already scrolls on a phone, so it sat
                  off the right edge — the label cost more than it explained, given
@@ -15637,12 +15916,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                  had it at all, which was not deliberate: the button is one of two
                  ways to pull positions, and hiding it left only the other. Same
                  square footprint as the reload button beside it. */
-              className={`${sharedHidden} shrink-0 md:order-4 flex items-center justify-center h-9 w-9 rounded-md transition-colors ${
+              className={`${sharedHidden} shrink-0 md:order-4 flex items-center justify-center h-9 w-9 rounded-md transition-colors max-md:h-11 max-md:w-full max-md:justify-start max-md:gap-3 max-md:px-2.5 max-md:!bg-transparent ${
                 resolvedTheme === 'light' ? 'bg-emerald-600/15 text-emerald-700 hover:bg-emerald-600/25' : 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25'}`}
               title="Sync open positions from Zerodha"
               aria-label="Sync open positions from Zerodha"
             >
               <DownloadCloud size={18} />
+              <span className="md:hidden text-left text-[13px] font-medium text-foreground">Sync positions</span>
             </button>
           {SHOW_BIAS_BADGES && (
           <div className="shrink-0 md:order-5 [&>button]:h-9"><BounceConviction taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} /></div>
@@ -15653,8 +15933,46 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         </div>
 
 
+          {/* PHONE HEADER, second line: the live price and the day's change, as
+              Lemonn has them, and the clock that used to sit beside the title.
+              The two spans are filled in by a timer (see THE PRICE IN THE HEADER). */}
+          {!isPane && !isFocusedChart && (
+            <div data-layout="price" className="md:hidden shrink-0 flex items-end justify-between gap-3 px-2.5 pt-1 pb-1.5 bg-background">
+              <div className="min-w-0 flex items-baseline gap-2 whitespace-nowrap">
+                <span ref={headPriceRef} data-head="price" className="text-[22px] leading-7 font-bold tracking-tight text-foreground tabular-nums">—</span>
+                <span ref={headChangeRef} data-head="change" className="text-[11px] font-semibold tabular-nums" />
+              </div>
+              <div className="shrink-0 [&>span]:!text-xs"><IstSessionClock /></div>
+            </div>
+          )}
+
           {/* Main Chart (Price & Volume) */}
-          <div data-layout="chart" className="relative flex-grow flex w-full bg-card rounded-none min-h-0 md:min-h-[450px]" onMouseLeave={() => setCrosshairInfo(null)}>
+          {/* max-md:isolate — ON A PHONE THE CHART KEEPS ITS LAYERS TO ITSELF. The
+              things drawn over the chart are numbered among themselves (canvases
+              30-31, armed orders 40, trade chips 41, line and drawing tools 42, the
+              hint 43, the plus 45, jump-to-latest 55…), and the bottom tool bar,
+              out of which every sheet opens, is one layer numbered 40. So an open
+              trade's chips (41) were painted ON TOP of whatever sheet was open —
+              the Trade guard sheet with "Exit · 25200 CE" and "SL" lying across
+              its rows, seen while testing the new Settings sheet; it had been so
+              since the chips arrived in v294. With the chart's layers closed off,
+              their numbers only order them against each other, and the tool bar
+              and its sheets are above the lot. Two things that live with the
+              chart's overlays but belong to the whole screen — the floating Quick
+              Trade button and the box that asks for a drawing's text — are
+              rendered outside this box for that reason (just below the page's
+              main column). Desktop is untouched: its tool bar is not a layer.
+
+              max-md:z-[1] — AND IT STAYS ABOVE THE PANES BELOW IT. Closed off, the
+              box is one layer among the page's own, and with no number of its own
+              it is painted before whatever comes after it in the page — so
+              anything that hangs out of the bottom of the chart went UNDER the
+              RSI pane instead of over it. The strike menu does hang out (it is
+              taller than a short phone chart): its last row, "CE Chart | PE
+              Chart", could not be pressed. Found by pressing every row of it on
+              the phone before this shipped. The 1 is below the header's menus
+              (30), the tool bar (40) and everything that floats. */}
+          <div data-layout="chart" className="relative max-md:isolate max-md:z-[1] flex-grow flex w-full bg-card rounded-none min-h-0 md:min-h-[450px]" onMouseLeave={() => setCrosshairInfo(null)}>
             {/* Leverage meter — why the premium is moving more (or less) than the
                 index right now. Display only: pointer-events-none, so it can never
                 block a drag, a crosshair, or a level being placed. */}
@@ -16010,30 +16328,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 </div>
               );
             })()}
-            {drawTextEdit && (
-              // Near the top of the screen, not the middle: on a phone the keyboard
-              // takes the lower half the moment the field has the cursor.
-              <div className="fixed inset-0 z-[95] flex items-start justify-center pt-24 px-4 bg-black/40" data-draw-text=""
-                onPointerDown={(e) => { if (e.target === e.currentTarget) setDrawTextEdit(null); }}>
-                <div className="w-full max-w-xs rounded-xl border border-border bg-card shadow-2xl p-3">
-                  <div className="text-xs font-semibold text-foreground mb-2">{drawTextEdit.id === null ? 'Text on the chart' : 'Change the text'}</div>
-                  <input
-                    autoFocus
-                    type="text"
-                    maxLength={80}
-                    value={drawTextEdit.value}
-                    placeholder="Type a note"
-                    onChange={(e) => { const v = e.target.value; setDrawTextEdit((cur) => (cur ? { ...cur, value: v } : cur)); }}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveDrawText(); } else if (e.key === 'Escape') setDrawTextEdit(null); }}
-                    className="w-full h-9 px-2.5 rounded-md bg-muted/40 border border-white/10 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                  <div className="flex justify-end gap-2 mt-3">
-                    <button type="button" className="h-8 px-3 rounded-md text-xs font-semibold text-foreground/80 hover:bg-foreground/10" onClick={() => setDrawTextEdit(null)}>Cancel</button>
-                    <button type="button" data-draw-text-save="" className="h-8 px-3 rounded-md text-xs font-semibold bg-primary text-white hover:bg-primary/90" onClick={() => saveDrawText()}>{drawTextEdit.id === null ? 'Add' : 'Save'}</button>
-                  </div>
-                </div>
-              </div>
-            )}
             {showJumpToLatest && !chartOverlayOpen && (
               <button
                 onClick={() => {
@@ -16303,7 +16597,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 ref={clickMenuElRef}
                 className="absolute z-[100] bg-popover border border-0 rounded-lg p-2 flex flex-col gap-1.5 w-[160px] transition-all duration-150 animate-in fade-in zoom-in-95"
                 style={{
-                  top: `${Math.max(5, Math.min(clickMenu.y, (chartContainerRef.current?.getBoundingClientRect().height || 450) - 170))}px`,
+                  // The menu is about 225px tall, and the 170 here lets it hang
+                  // out of the bottom of the chart by the difference. On a desktop
+                  // the overhang lies harmlessly over the RSI pane, and is left as
+                  // it is. On a phone the chart
+                  // can end at the fixed tool bar, which is above the chart's
+                  // layers (see max-md:isolate), so there the menu is kept inside
+                  // the chart whenever the chart is tall enough to hold it.
+                  top: `${Math.max(5, Math.min(clickMenu.y, (chartContainerRef.current?.getBoundingClientRect().height || 450) - (isPhoneChart() ? 230 : 170)))}px`,
                   left: `${Math.min(clickMenu.x, (chartContainerRef.current?.getBoundingClientRect().width || 600) - 175)}px`,
                 }}
               >
@@ -16425,6 +16726,65 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         </div>
       )}
       
+      {/* QUICK TRADE FLOATS ON A PHONE (see QUICK TRADE FLOATS). Fixed to the
+          screen rather than to the chart, so it can be put anywhere — which is
+          why it is rendered here, at the page's own level, and not inside the
+          chart's box (see max-md:isolate there). Above the tool bar, below every
+          modal. It steps aside while a sheet or a menu is open over the chart.
+
+          AND WHILE THE CHART IS BEING DRAWN ON. Being above the chart, it is
+          above everything the chart puts up for a drawing — and its own default
+          place, the top right, is where those things are: the cross that puts
+          an armed tool down sat exactly under it, so a tap meant to cancel a
+          trend line switched Quick Trade ON instead (found by the drawing test,
+          before this ever shipped). The same goes for the handle of a selected
+          line near the top and for a tool bar that has taken that corner, and
+          it would go for wherever else he drags the button to. So while a tool
+          is armed, or a line or drawing is selected, it is simply not there.
+          Nothing is lost by that: in both states a tap on the chart belongs to
+          the drawing and ends there (see HIS OWN LINES AND DRAWINGS in the
+          chart's click handler), so Quick Trade could not act anyway.
+
+          AND WHILE THE STRIKE MENU IS UP. That menu opens docked against the
+          price axis — the very strip the button's default place is on — and its
+          own cross, top right, came out underneath the button. The menu has
+          that cross and closes on a tap on the chart; the button is back the
+          moment it does. */}
+      {!isPane && !isReferenceChart && qtFabPos && !chartOverlayOpen && !clickMenu
+        && !drawArm && !rrArm && selectedLineId === null && selectedDrawId === null && (
+        <div ref={qtFabRef} data-qt-fab={quickTradeEnabled ? 'on' : 'off'} role="button" aria-label="Quick Trade" aria-pressed={quickTradeEnabled}
+          title="Quick Trade — tap to switch it on for 1 minute; drag to move it"
+          onPointerDown={startQtFabDrag}
+          className={`md:hidden fixed z-[45] h-11 w-11 rounded-full flex items-center justify-center border shadow-lg select-none transition-colors ${
+            quickTradeEnabled ? 'bg-primary text-white border-primary' : 'bg-card/95 text-muted-foreground border-border'}`}
+          style={{ right: qtFabPos.x, top: qtFabPos.y, touchAction: 'none' }}>
+          <Zap size={20} />
+        </div>
+      )}
+      {drawTextEdit && (
+        // Near the top of the screen, not the middle: on a phone the keyboard
+        // takes the lower half the moment the field has the cursor.
+        <div className="fixed inset-0 z-[95] flex items-start justify-center pt-24 px-4 bg-black/40" data-draw-text=""
+          onPointerDown={(e) => { if (e.target === e.currentTarget) setDrawTextEdit(null); }}>
+          <div className="w-full max-w-xs rounded-xl border border-border bg-card shadow-2xl p-3">
+            <div className="text-xs font-semibold text-foreground mb-2">{drawTextEdit.id === null ? 'Text on the chart' : 'Change the text'}</div>
+            <input
+              autoFocus
+              type="text"
+              maxLength={80}
+              value={drawTextEdit.value}
+              placeholder="Type a note"
+              onChange={(e) => { const v = e.target.value; setDrawTextEdit((cur) => (cur ? { ...cur, value: v } : cur)); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveDrawText(); } else if (e.key === 'Escape') setDrawTextEdit(null); }}
+              className="w-full h-9 px-2.5 rounded-md bg-muted/40 border border-white/10 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <button type="button" className="h-8 px-3 rounded-md text-xs font-semibold text-foreground/80 hover:bg-foreground/10" onClick={() => setDrawTextEdit(null)}>Cancel</button>
+              <button type="button" data-draw-text-save="" className="h-8 px-3 rounded-md text-xs font-semibold bg-primary text-white hover:bg-primary/90" onClick={() => saveDrawText()}>{drawTextEdit.id === null ? 'Add' : 'Save'}</button>
+            </div>
+          </div>
+        </div>
+      )}
       {editingLineId && (
         <LineEditorModal
           lineId={editingLineId}

@@ -78,7 +78,12 @@ export function useTradeGuard() {
   return [st, publish as (s: Status) => void] as const;
 }
 
-export function TradeGuardButton({ className }: { className?: string }) {
+// `label`: on a phone the shield is a row of the chart's Settings sheet, where an
+// icon alone would not say what it is — so its name goes beside it there, and
+// today's count (or Off) at the end of the row, red while entries are blocked.
+// No more words than that: he wants the app as bare as Lemonn's. On a desktop
+// (md and up) it is the same square button as before.
+export function TradeGuardButton({ className, label }: { className?: string; label?: boolean }) {
   const [st, setSt] = useTradeGuard();
   const [open, setOpen] = useState(false);
   const on = !!st?.rules.enabled;
@@ -90,7 +95,15 @@ export function TradeGuardButton({ className }: { className?: string }) {
         className={cn('flex items-center justify-center gap-1 h-9 px-2 shrink-0 rounded-md transition-colors text-xs font-mono',
           !on ? 'bg-muted/40 text-muted-foreground' : blocked ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/15 text-emerald-400', className)}>
         <Icon size={16} />
-        {on && st && <span className="hidden sm:inline">{st.entriesToday ?? '—'}/{st.rules.maxTrades}</span>}
+        {on && st && <span className={label ? 'hidden md:inline' : 'hidden sm:inline'}>{st.entriesToday ?? '—'}/{st.rules.maxTrades}</span>}
+        {label && (
+          <>
+            <span className="md:hidden text-[13px] font-medium font-sans text-foreground">Trade guard</span>
+            <span className={cn('md:hidden ml-auto text-[12px] font-semibold font-sans', !on ? 'text-muted-foreground' : blocked ? 'text-rose-400' : 'text-emerald-400')}>
+              {!on ? 'Off' : st ? `${st.entriesToday ?? '—'}/${st.rules.maxTrades}` : ''}
+            </span>
+          </>
+        )}
       </button>
       {open && <TradeGuardSheet st={st} onSaved={setSt} onClose={() => setOpen(false)} />}
     </>

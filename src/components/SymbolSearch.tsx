@@ -5,10 +5,21 @@ import { useSymbolSearch, Instrument } from '../hooks/useSymbolSearch';
 interface Props {
   onSelect: (instrument: Instrument) => void;
   currentSymbol: string;
+  // The phone chart's header shows this only after its search button is tapped:
+  // it starts with the field open and the keyboard up, and tells the header
+  // when it has closed (a tap elsewhere, Escape, or a symbol chosen) so the
+  // header can put the chart's name back.
+  autoOpen?: boolean;
+  onClose?: () => void;
 }
 
-export function SymbolSearch({ onSelect, currentSymbol }: Props) {
-  const [isOpen, setIsOpen] = useState(false);
+export function SymbolSearch({ onSelect, currentSymbol, autoOpen, onClose }: Props) {
+  const [isOpen, setIsOpen] = useState(!!autoOpen);
+  const wasOpen = useRef(!!autoOpen);
+  useEffect(() => {
+    if (wasOpen.current && !isOpen) onClose?.();
+    wasOpen.current = isOpen;
+  }, [isOpen]);
   const { query, setQuery, results, loading, recent, addRecent } = useSymbolSearch();
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);

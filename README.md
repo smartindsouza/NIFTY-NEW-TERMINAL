@@ -250,6 +250,44 @@ futures contract).
 - **Any chart re-fits itself when it is moved**, not only when it is resized
   ("THE CHART MOVED WITHOUT CHANGING SIZE").
 
+## Chart on a phone: header, a row of five, Settings, floating Quick Trade
+
+`src/pages/AdvancedChart.tsx` ("THE LEMONN LAYOUT ON A PHONE"). Below 768px wide
+the chart page is laid out the way the Lemonn chart screen is. Every control
+runs the code its old button ran — only where it is has changed. The desktop
+tool bar and the split view are untouched.
+
+- **Header:** a back arrow (the screen you came from, or Home), the chart's name
+  (the index and option choosers), and a search button that opens the symbol
+  search in the header with its results below. Under it, the live price with the
+  day's change (against the last close of the previous session) and the clock.
+  The "Advanced Trading Chart" title row is gone on a phone.
+- **A row of five under the chart:** Range, Interval, Indicators, Drawings,
+  Settings.
+  - **Range** — 1D, 2D, 5D, 1M, All: how many sessions back from the newest
+    candle are on screen. The button shows the choice until the timeframe or
+    the chart changes.
+  - **Interval** — the same chooser as before, drawn as the value with its name.
+- **Settings** holds what used to fill the right of the bar: Trailing SL (on the
+  option chart of an open trade; On/Off at the end of the row) or My order (on
+  an index chart), Trade guard (today's count at the end of the row, red while
+  entries are blocked), SL & TP (the levels new trades get), Reload, and Sync
+  positions (from Zerodha).
+- **Few words.** Martin, 16 Nov 2026: "as simple as the lemon app ... Keep the
+  texts such as descriptions etc to minimal or avoid it wherever possible." The
+  sheets here have no headings and no descriptions, and a row's name is two
+  words at most. New screens follow the same rule.
+- **Quick Trade floats.** A round ⚡ button over the chart: a tap switches it (on
+  for 1 minute, as before), a drag moves it anywhere, and it stays where it is
+  put on that phone (`quickTradeFab` in the browser). It starts at the top right
+  of the chart. It steps aside while a sheet or menu is open, while a drawing
+  tool is armed, while a line or drawing is selected and while the strike menu
+  is up — in each of those a tap belongs to something else, and the button would
+  otherwise sit on top of that thing's own controls.
+- **The chart keeps its layers to itself** (`max-md:isolate`): the trade chips,
+  line tools and the like are no longer painted on top of an open sheet (the
+  chips used to lie across the Trade guard sheet).
+
 ## Chart: the open trade's chips (Exit, P&L, SL, TP)
 
 `src/pages/AdvancedChart.tsx` ("TRADE CHIPS"). With a trade open, its own chart
