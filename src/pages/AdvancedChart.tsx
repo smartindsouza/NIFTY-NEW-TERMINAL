@@ -4055,6 +4055,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // exactly where it starts, instead of trusting a hard-coded height in the
   // page's calc() — which is what has been wrong all along.
   const bottomBarRef = useRef<HTMLDivElement | null>(null);
+  // The chart's own "fit yourself to the room you really have" (syncChartSize, in
+  // the chart build), reachable from outside that effect — and where the chart's
+  // box was last seen, so a frame can tell that it has moved. See THE CHART MOVED
+  // WITHOUT CHANGING SIZE in the R:R frame.
+  const syncChartSizeRef = useRef<() => void>(() => {});
+  const chartTopSeenRef = useRef<number | null>(null);
   const lastCandleDataRef = useRef<any>(null);
   // Candles that COMPLETED after the initial fetch. The fetched history is frozen
   // (tick-driven chart, no refetch), so without this archive every candle that
@@ -7446,8 +7452,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         if (el) {
           let y: number | null = null, plotW = 0, plotH = 0;
           if (lineObj && ser && chart && cont) {
-            plotW = cont.clientWidth - (chart.priceScale('right').width() || 0);
-            plotH = cont.clientHeight - (chart.timeScale().height() || 26);
+            ({ w: plotW, h: plotH } = plotSizeNow(chart, cont));     // the real plot: see plotSizeNow
             const yy = ser.priceToCoordinate(lineObj.price);
             y = yy === null || (yy as number) < 4 || (yy as number) > plotH - 4 ? null : (yy as number);
           }
@@ -7516,6 +7521,17 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       return times;
     } catch (e) { return []; }
   };
+  // THE PLOT, AS THE LIBRARY HAS ACTUALLY LAID IT OUT. Not the chart's box less
+  // the axes: on a phone the chart is sized to stop at the fixed tool bar while
+  // its box can run on underneath the bar (see syncChartSize) — with the
+  // positions banner up, by the banner's height. Handles are kept inside the
+  // plot and tool bars are placed against its edges, so both go by the real one.
+  const plotSizeNow = (chart: any, cont: HTMLElement): { w: number; h: number } => {
+    try { const ps = chart.paneSize(); if (ps && ps.width > 0 && ps.height > 0) return { w: ps.width, h: ps.height }; } catch (e) {}
+    let w = cont.clientWidth, h = cont.clientHeight;
+    try { w -= chart.priceScale('right').width() || 0; h -= chart.timeScale().height() || 26; } catch (e) {}
+    return { w, h };
+  };
   // Everything needed to put a point on the screen and to read one back off it.
   // NOT timeScale.logicalToCoordinate for a point between two candles: this
   // version of the library answers 0 for any candle number that is not whole,
@@ -7533,8 +7549,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       const times = drawTimes(ts, ser);
       if (!times.length) return null;
       const step = drawStepRef.current;
-      const plotW = cont.clientWidth - (chart.priceScale('right').width() || 0);
-      const plotH = cont.clientHeight - (ts.height() || 26);
+      const { w: plotW, h: plotH } = plotSizeNow(chart, cont);
       const xOf = (t: number): number | null => { const i = timeToIndex(times, t, step); return i === null ? null : x0 + i * sp; };
       const yOf = (price: number): number | null => { const y = ser.priceToCoordinate(price); return y === null ? null : (y as number); };
       // A point under a finger: the nearest candle, and a price that can exist.
@@ -7847,11 +7862,17 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // At the bottom its colour and thickness menus open upwards, so they are not
   // cut off by the edge of the chart; on the right it stops short of the prices.
   const toolsBarPlace = (pos: ToolsPos): { className: string; style: React.CSSProperties } => {
-    let axisW = 60, timeH = 26;
-    try { axisW = mainChartRef.current?.priceScale('right').width() || 60; timeH = mainChartRef.current?.timeScale().height() || 26; } catch (e) {}
+    // How far the plot's right and bottom edges are from the edges of the box
+    // the bar is positioned in (the price axis; the time axis and whatever of
+    // the box lies under the fixed tool bar).
+    let fromRight = 60, fromBottom = 26;
+    try {
+      const cont = chartContainerRef.current, chart = mainChartRef.current;
+      if (cont && chart) { const ps = plotSizeNow(chart, cont); fromRight = Math.max(0, cont.clientWidth - ps.w); fromBottom = Math.max(0, cont.clientHeight - ps.h); }
+    } catch (e) {}
     return {
       className: `absolute pointer-events-auto flex gap-1 ${pos[0] === 't' ? 'flex-col' : 'flex-col-reverse'} ${pos[1] === 'l' ? 'items-start' : 'items-end'}`,
-      style: { [pos[1] === 'l' ? 'left' : 'right']: pos[1] === 'l' ? 8 : axisW + 8, [pos[0] === 't' ? 'top' : 'bottom']: pos[0] === 't' ? 8 : timeH + 8 },
+      style: { [pos[1] === 'l' ? 'left' : 'right']: pos[1] === 'l' ? 8 : fromRight + 8, [pos[0] === 't' ? 'top' : 'bottom']: pos[0] === 't' ? 8 : fromBottom + 8 },
     };
   };
 
@@ -9777,17 +9798,57 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     return () => clearTimeout(t);
   }, [timeframe, instrumentToken, selectedInstrument, sensexTokenData?.token]);
 
-  // The numbers that explain a call falling on an up day. Only on an option chart.
-  const { data: optionReality } = useQuery({
-    queryKey: ['option-analytics', selectedInstrument?.tradingsymbol],
-    queryFn: async () => {
-      const r = await fetch(`/api/option-analytics?tradingsymbol=${encodeURIComponent(selectedInstrument!.tradingsymbol)}`);
-      if (!r.ok) return null;
-      return r.json();
-    },
-    enabled: !!selectedInstrument?.tradingsymbol && isOptionView,
-    refetchInterval: 20000, refetchOnWindowFocus: false,
-  });
+  // (The "option reality" request lived here — /api/option-analytics every 20 s
+  // on an option chart, for the strip under the chart. The strip went on 16 Nov
+  // 2026 and its only reader with it; see where the strip was, near the end of
+  // this page.)
+
+  // THE PART OF THIS PAGE THAT LIES UNDER THE FIXED TOOL BAR (phone, option
+  // chart). The page's height is a sum worked out in CSS, the tool bar is fixed
+  // to the bottom of the screen, and how far the one runs under the other is not
+  // a constant: nothing in the test browser, about 35px on Martin's iPhone (its
+  // safe areas), and the height of the positions banner more whenever a trade is
+  // on, because the banner pushes the page down. The strip that used to end this
+  // page allowed a fixed 3.25rem for it, which is right on no device exactly.
+  // The block that replaces the strip is exactly as tall as the overlap, measured
+  // — so the chart's box always ends where the bar begins: no band between them,
+  // nothing of the chart underneath the bar, and the box changes SIZE when the
+  // banner comes and goes, which is the thing the chart knows how to follow.
+  // Measured when the layout can have changed: on mount and as it settles, on a
+  // resize, once a second as a net, and the moment a frame sees the chart moved.
+  const underBarRef = useRef<HTMLDivElement | null>(null);
+  const fitUnderBarRef = useRef<() => void>(() => {});
+  fitUnderBarRef.current = () => {
+    const sp = underBarRef.current;
+    if (!sp) return;
+    let want = 0;
+    try {
+      const bar = bottomBarRef.current, pageEl = pageRootRef.current;
+      // The page has a fixed height, so where it ends does not depend on this
+      // block's own height: no loop. A bar that is not fixed (desktop) takes
+      // its own room in the layout and nothing lies under it.
+      if (bar && pageEl && window.getComputedStyle(bar).position === 'fixed')
+        want = Math.max(0, Math.round(pageEl.getBoundingClientRect().bottom - bar.getBoundingClientRect().top));
+    } catch (e) {}
+    const h = `${want}px`;
+    if (sp.style.height !== h) sp.style.height = h;
+  };
+  useEffect(() => {
+    const fit = () => fitUnderBarRef.current();
+    fit();
+    const timers = [120, 400, 1200, 2500].map((ms) => setTimeout(fit, ms));
+    const iv = setInterval(fit, 1000);
+    window.addEventListener('resize', fit);
+    window.addEventListener('orientationchange', fit);
+    const vv: any = (window as any).visualViewport;
+    if (vv) vv.addEventListener('resize', fit);
+    return () => {
+      timers.forEach(clearTimeout); clearInterval(iv);
+      window.removeEventListener('resize', fit);
+      window.removeEventListener('orientationchange', fit);
+      if (vv) vv.removeEventListener('resize', fit);
+    };
+  }, [isOptionView]);
 
   // OPEN CHARTS. Previously the contract chip was derived from whatever chart was
   // showing, so tapping an index erased it and the option could only be reached by
@@ -12359,6 +12420,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       } catch (e) {}
     }
     const sizeTimers = [0, 120, 400, 1200, 2500].map(ms => setTimeout(syncChartSize, ms));
+    syncChartSizeRef.current = syncChartSize;
     window.addEventListener('resize', syncChartSize);
     window.addEventListener('orientationchange', syncChartSize);
     document.addEventListener('visibilitychange', syncChartSize);
@@ -12373,6 +12435,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
     return () => {
       sizeTimers.forEach(t => clearTimeout(t));
+      syncChartSizeRef.current = () => {};
       window.removeEventListener('resize', syncChartSize);
       window.removeEventListener('orientationchange', syncChartSize);
       document.removeEventListener('visibilitychange', syncChartSize);
@@ -12430,6 +12493,25 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       if (!ctx) return;
       try {
         const rect = canvas.parentElement.getBoundingClientRect();
+        // THE CHART MOVED WITHOUT CHANGING SIZE (16 Nov 2026, Martin: "sometimes
+        // there appears a gap below the chart when exiting a trade"). While a
+        // trade is on, the positions banner sits above this page and pushes it
+        // down. On a phone the page keeps its height, so its lower part goes
+        // under the fixed tool bar and the chart is sized to stop at the bar
+        // (syncChartSize). When the trade is exited the banner goes and the page
+        // moves back up — but the chart's box has not changed SIZE, only place,
+        // so the ResizeObserver that re-fits the chart never fires and the chart
+        // stays at the shorter height: an empty band as tall as the banner under
+        // it. (The other way round on entry: the chart too tall by the banner,
+        // its time axis under the bar.) It put itself right only when something
+        // else happened to re-measure — a rebuild, a rotation — hence
+        // "sometimes". The one thing that does change is where the box's top is,
+        // and this frame measures that anyway: a top that has moved re-runs the
+        // chart's sizing at once. It writes only when the answer differs. (On an
+        // option chart the block under the box is re-measured first, so the box
+        // itself takes the room the banner gave back.)
+        const topNow = Math.round(rect.top);
+        if (topNow !== chartTopSeenRef.current) { chartTopSeenRef.current = topNow; fitUnderBarRef.current(); syncChartSizeRef.current(); }
         const dpr = window.devicePixelRatio || 1;
         // Stop at the price plot, above the time axis — the same reason as the
         // main overlay. This canvas was missed when that was fixed, which is why
@@ -16840,52 +16922,21 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         </div>
       )}
 
-      {/* OPTION REALITY CHECK. A call can fall on a day the index rises, and the
-          reasons are not visible anywhere on a price chart: the index never crossed
-          the strike, a day of time value evaporated, and calm markets make hope
-          cheaper. These are those numbers, stated plainly.
+      {/* THE OPTION REALITY STRIP IS GONE (16 Nov 2026, Martin: "remove the In the
+          money, break even and time cost texts below the chart"). It was one
+          sideways-scrolled row under every option chart — in the money / points to
+          the strike, break even, time cost, and further along hope value and IV —
+          fed by /api/option-analytics every 20 seconds; the request went with it.
+          Delta, theta a day and IV are still behind the "i" button on the chart.
 
-          Kept to ONE horizontally scrolled line: this row used to wrap, and the
-          rows it wrapped onto sat underneath the fixed bottom toolbar on a phone —
-          rendered but unreachable. Every chip is shrink-0 and nowrap so the row
-          scrolls rather than squeezing them to unreadable widths.
-
-          The clearance below it is the chart TOOLBAR's height (3.25rem), which is
-          the only thing overlapping this container. It used to reserve the bottom
-          NAV's height as well (4rem + safe area) — but the page root already ends
-          above the nav, so that height was counted twice and left a band of dead
-          space between this row and the toolbar. */}
-      {isOptionView && optionReality && (
-        <div className="h-7 flex flex-nowrap items-center gap-1.5 px-1 pb-1 max-md:mb-[3.25rem] shrink-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <span className={`shrink-0 whitespace-nowrap text-[10px] font-mono font-bold px-2 py-1 rounded ${optionReality.inTheMoney ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'}`}>
-            {optionReality.inTheMoney
-              ? `IN THE MONEY by ${Math.round(optionReality.intrinsic)}`
-              : `NEEDS ${Math.round(Math.abs(optionReality.type === 'CE' ? optionReality.strike - optionReality.spot : optionReality.spot - optionReality.strike))} PTS TO REACH STRIKE`}
-          </span>
-          <span className="shrink-0 whitespace-nowrap text-[10px] font-mono px-2 py-1 rounded bg-muted/50 text-muted-foreground">
-            BREAK EVEN {Math.round(optionReality.breakeven)}
-            <span className="text-foreground/80 font-bold"> · {optionReality.moveNeeded > 0 ? `${Math.round(optionReality.moveNeeded)} pts away` : 'passed'}</span>
-          </span>
-          {optionReality.thetaPerDayRupees != null && (
-            <span className="shrink-0 whitespace-nowrap text-[10px] font-mono px-2 py-1 rounded bg-rose-500/15 text-rose-300" title="What one lot loses per day from time alone, index unchanged">
-              TIME COST ₹{Math.abs(optionReality.thetaPerDayRupees).toLocaleString('en-IN')}/day
-              {optionReality.thetaPctPerDay ? ` (${optionReality.thetaPctPerDay}%)` : ''}
-            </span>
-          )}
-          <span className="shrink-0 whitespace-nowrap text-[10px] font-mono px-2 py-1 rounded bg-muted/50 text-muted-foreground">
-            HOPE VALUE {optionReality.timeValuePct}%
-            <span className="opacity-70"> · {optionReality.daysLeft < 1 ? 'expires today' : `${Math.floor(optionReality.daysLeft)}d left`}</span>
-          </span>
-          {optionReality.iv != null && (
-            <span className="shrink-0 whitespace-nowrap text-[10px] font-mono px-2 py-1 rounded bg-muted/50 text-muted-foreground">IV {optionReality.iv}%</span>
-          )}
-        </div>
-      )}
-
-      {/* The strip above is the option pane's only extra row. In split view its
-          height is reserved on the other side too, so both charts end up the same
-          height instead of the option side losing a row's worth. */}
-      {split && !(isOptionView && optionReality) && <div className="h-7 shrink-0" />}
+          On a phone the strip did one more job: its bottom margin, a fixed 3.25rem,
+          was what held the chart clear of the fixed tool bar. This empty block is
+          that clearance and nothing else, and it is MEASURED rather than fixed —
+          see THE PART OF THIS PAGE THAT LIES UNDER THE FIXED TOOL BAR. (In the
+          desktop split view the other half carried a blank row of the strip's
+          height so the two charts matched; with no strip on either side that row
+          is gone too, and both charts are that much taller.) */}
+      {isOptionView && <div ref={underBarRef} data-layout="under-bar" className="md:hidden shrink-0" aria-hidden="true" />}
 
       {/* "Check bias" card (public/bias-panel.js) under the chart, phone layout
           only — on desktop the workspace puts one card under BOTH panes, so the

@@ -208,6 +208,24 @@ On phones (under 768px wide) both axes are drawn at 10px, the price axis is 52px
 wide, and tick labels drop ".00" — sizes measured off the Lemonn app. Desktop text
 is unchanged. The indicators list closes on a tap anywhere on the chart.
 
+## Chart on a phone: fills down to the tool bar
+
+`src/pages/AdvancedChart.tsx`.
+
+- **No strip under the option chart.** The row of "in the money / break even /
+  time cost / hope value / IV" chips went on 16 Nov 2026, and the app no longer
+  calls `/api/option-analytics` (the endpoint is still on the server). Delta,
+  theta a day and IV are behind the **i** button on the option chart.
+- **The option chart ends exactly where the fixed tool bar begins**, whatever is
+  above it. The positions banner that appears while a trade is on pushes the
+  page down; the chart gives up exactly that much and takes it back when the
+  trade is exited. (It used to keep the shorter size after an exit, leaving an
+  empty band under the chart, and on entry could run under the tool bar.) The
+  clearance is measured ("THE PART OF THIS PAGE THAT LIES UNDER THE FIXED TOOL
+  BAR"), not a fixed number.
+- **Any chart re-fits itself when it is moved**, not only when it is resized
+  ("THE CHART MOVED WITHOUT CHANGING SIZE").
+
 ## Chart: the open trade's chips (Exit, P&L, SL, TP)
 
 `src/pages/AdvancedChart.tsx` ("TRADE CHIPS"). With a trade open, its own chart
