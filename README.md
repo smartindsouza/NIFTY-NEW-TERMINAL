@@ -228,3 +228,19 @@ shows it the way the Lemonn app does:
 Nothing here changes which levels are armed, the entry wall, or where a drop is
 sent; it replaces the on-line pills and the old "grab the line anywhere" drag.
 
+## Chart: indicator lines are thin and solid by default
+
+Every indicator line on the chart is 1px and solid unless its own settings say
+otherwise: support/resistance, PDH/PDL, H-levels, the 50% level, RSI and its
+levels, the middle Bollinger band, session breaks, bias levels, BOS/CHoCH,
+institutional levels, breakers and liquidity grabs, divergences. (Before: a mix
+of 2px, dashed and dotted.) Where two lines were told apart by solid against
+dashed they are now told apart by colour or strength, and by their labels.
+Trade lines (entry, SL, TP, armed triggers), the last-price line and hand-drawn
+lines are not indicators and keep their own styles.
+Styles are saved per device the moment the chart loads, so a device that has
+been used holds the old defaults as if they had been chosen. They are put back
+to thin and solid **once** per device (`indicatorLinesThin` in localStorage, set
+at the top of `src/pages/AdvancedChart.tsx`), including each split-view half's
+own copy; anything restyled after that stays as set.
+

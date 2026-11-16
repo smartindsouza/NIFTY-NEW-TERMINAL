@@ -1157,6 +1157,52 @@ const chartFontFamily = (customFontUrl: string) =>
   (customFontUrl ? "'UserCustomFont', " : '') +
   "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
 
+// INDICATOR LINES ARE THIN AND SOLID (16 Nov 2026). Martin: "change the lines in
+// every indicator that I have in my app to thin lines instead of dotted lines or
+// thick lines by default." The defaults are changed where each line is defined
+// (S/R, PDH/PDL, H-levels, RSI and its levels, the middle Bollinger band, 50%,
+// session breaks, bias levels, structure, institutional levels, breakers and
+// grabs, divergences). Trade lines (entry, SL, TP, triggers) and his own
+// drawings are not indicators and are left as they were.
+//
+// Changing a default does nothing on a device that has been used: every style
+// here is written back to localStorage the moment the chart loads, so his phone
+// holds the OLD defaults as if he had chosen them. This runs once per device,
+// before the chart reads anything, and puts the saved styles back to thin and
+// solid — including each split-view half's own snapshot. After that the styles
+// are his again: anything he restyles in an indicator's settings stays.
+(function indicatorLinesThinOnce() {
+  try {
+    if (typeof localStorage === 'undefined' || localStorage.getItem('indicatorLinesThin') === '1') return;
+    const flat: Record<string, number> = {
+      pdhPdlWidth: 1, pdhPdlStyle: 0, snrWidth: 1, snrStyle: 0, hLevelsWidth: 1, hLevelsStyle: 0,
+      rsiLineWidth: 1, rsiLineStyle: 0, rsiSmaLineWidth: 1, rsiSmaLineStyle: 0,
+    };
+    const thinSb = (v: any) => (v && typeof v === 'object' ? { ...v, thickness: 1, lineStyle: 0 } : v);
+    const thinIl = (v: any) => (v && typeof v === 'object' ? { ...v, dailyStyle: 0, weeklyStyle: 0, monthlyStyle: 0 } : v);
+    const reJson = (key: string, fix: (v: any) => any) => {
+      const raw = localStorage.getItem(key);
+      if (raw === null) return;
+      try { const v = JSON.parse(raw); if (v && typeof v === 'object') localStorage.setItem(key, JSON.stringify(fix(v))); } catch (e) {}
+    };
+    for (const k in flat) if (localStorage.getItem(k) !== null) localStorage.setItem(k, String(flat[k]));
+    reJson('sessionBreaks', thinSb);
+    reJson('instLevelsSettings', thinIl);
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith('paneIndicators:')) continue;
+      reJson(key, (snap) => {
+        const out = { ...snap };
+        for (const k in flat) if (k in out) out[k] = flat[k];
+        if ('sessionBreak' in out) out.sessionBreak = thinSb(out.sessionBreak);
+        if ('ilSettings' in out) out.ilSettings = thinIl(out.ilSettings);
+        return out;
+      });
+    }
+    localStorage.setItem('indicatorLinesThin', '1');
+  } catch (e) { /* private mode or a full store: the new defaults still apply to a fresh device */ }
+})();
+
 // COMPACT AXES ON PHONES (16 Nov 2026). Martin put this chart beside the Lemonn
 // app's and asked for its axis text: "smaller fonts to fit the screen and avoid
 // wastage of space". Measured off his recording, Lemonn draws both axes at 10px
@@ -2364,7 +2410,7 @@ function deriveZoneFvgs(zones: { top: number; bottom: number; time: number; endT
 // zone the phone is in. The first day in the data gets no line: nothing precedes
 // it, so there is nothing to separate it from.
 type SbSettings = { on: boolean; color: string; opacity: number; thickness: number; lineStyle: number };
-const SB_DEFAULTS: SbSettings = { on: false, color: '#94a3b8', opacity: 55, thickness: 1, lineStyle: 1 };
+const SB_DEFAULTS: SbSettings = { on: false, color: '#94a3b8', opacity: 55, thickness: 1, lineStyle: 0 };
 function deriveSessionBreaks(candles: any[]): { prevTime: number; time: number }[] {
   const out: { prevTime: number; time: number }[] = [];
   let prevDay = -1, prevTime = 0;
@@ -4450,16 +4496,16 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const [pdhPdlWidth, setPdhPdlWidth] = useState(() => {
     try {
       const saved = localStorage.getItem('pdhPdlWidth');
-      return saved ? parseInt(saved, 10) : 2;
+      return saved ? parseInt(saved, 10) : 1;
     } catch(e) {}
-    return 2;
+    return 1;
   });
   const [pdhPdlStyle, setPdhPdlStyle] = useState(() => {
     try {
       const saved = localStorage.getItem('pdhPdlStyle');
-      return saved ? parseInt(saved, 10) : 2; // Dashed
+      return saved ? parseInt(saved, 10) : 0; // Solid (see INDICATOR LINES ARE THIN AND SOLID)
     } catch(e) {}
-    return 2; // Dashed
+    return 0;
   });
 
   const [showSnR, setShowSnR] = useState(() => {
@@ -4484,17 +4530,17 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const [snrWidth, setSnrWidth] = useState(() => {
     try {
       const saved = localStorage.getItem('snrWidth');
-      return saved ? parseInt(saved, 10) : 2;
+      return saved ? parseInt(saved, 10) : 1;
     } catch(e) {}
-    return 2;
+    return 1;
   });
   const [snrStyle, setSnrStyle] = useState(() => {
     try {
       const saved = localStorage.getItem('snrStyle');
-      // Style logic similar to pdh/pdl. Let's use 1 (Dotted) or 2 (Dashed)
-      return saved ? parseInt(saved, 10) : 1;
+      // Same numbers as pdh/pdl: 0 solid, 1 dashed, 2 dotted. Solid by default.
+      return saved ? parseInt(saved, 10) : 0;
     } catch(e) {}
-    return 1;
+    return 0;
   });
 
   useEffect(() => {
@@ -4863,9 +4909,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const [hLevelsStyle, setHLevelsStyle] = useState<number>(() => {
     try {
       const saved = localStorage.getItem('hLevelsStyle');
-      return saved ? parseInt(saved, 10) : 1; // Default to 1 (Dashed)
+      return saved ? parseInt(saved, 10) : 0; // Solid by default
     } catch(e) {}
-    return 1;
+    return 0;
   });
 
   const [hLevelsWidth, setHLevelsWidth] = useState<number>(() => {
@@ -5661,8 +5707,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     return '#a855f7';
   });
   const [rsiLineWidth, setRsiLineWidth] = useState(() => {
-    try { return parseInt(localStorage.getItem('rsiLineWidth') || '2', 10); } catch(e) {}
-    return 2;
+    try { return parseInt(localStorage.getItem('rsiLineWidth') || '1', 10); } catch(e) {}
+    return 1;
   });
   const [rsiLineStyle, setRsiLineStyle] = useState(() => {
     try { return parseInt(localStorage.getItem('rsiLineStyle') || '0', 10); } catch(e) {}
@@ -9247,10 +9293,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       const trig = rec.bias === 'bullish' ? up : rec.bias === 'bearish' ? down : amber;
       const inval = rec.bias === 'bullish' ? down : rec.bias === 'bearish' ? up : 'rgba(148,163,184,0.9)';
       const out = [
-        { price: L.trigger, color: trig, lineWidth: 2, lineStyle: 0, title: 'Bias trigger' },
-        { price: L.invalidation, color: inval, lineWidth: 2, lineStyle: 2, title: 'Invalidation' },
-        { price: L.or_high, color: faint, lineWidth: 1, lineStyle: 1, title: 'OR high' },
-        { price: L.or_low, color: faint, lineWidth: 1, lineStyle: 1, title: 'OR low' },
+        // Thin and solid, like every indicator line (16 Nov 2026). The trigger
+        // and the invalidation were told apart by solid against dashed; they are
+        // different colours and each carries its name on the axis.
+        { price: L.trigger, color: trig, lineWidth: 1, lineStyle: 0, title: 'Bias trigger' },
+        { price: L.invalidation, color: inval, lineWidth: 1, lineStyle: 0, title: 'Invalidation' },
+        { price: L.or_high, color: faint, lineWidth: 1, lineStyle: 0, title: 'OR high' },
+        { price: L.or_low, color: faint, lineWidth: 1, lineStyle: 0, title: 'OR low' },
       ];
       return out.filter((x) => typeof x.price === 'number' && Number.isFinite(x.price) && x.price > 0);
     };
@@ -11111,7 +11160,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       const middleSeries = mainChart.addSeries(LineSeries, {
         color: hexToRgba(bbColor, 0.45),
         lineWidth: 1,
-        lineStyle: 1, // Dashed-like thin line (Solid with 1px is very clean, or 2 for Dashed)
+        lineStyle: 0, // solid; the fainter colour is what marks it as the middle band
         crosshairMarkerVisible: false,
         lastValueVisible: false,
         priceLineVisible: false,
@@ -11219,7 +11268,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         price: lvl.price,
         color: lvl.color,
         lineWidth: 1,
-        lineStyle: 3, // Dotted
+        lineStyle: 0, // solid, thin
         axisLabelVisible: true,
       });
     });
@@ -11270,8 +11319,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         // Draw Divergence trendline on RSI Chart
         const divLineRsi = rsiChart.addSeries(LineSeries, {
             color: div.type === 'bullish' ? '#22c55e' : '#ef4444',
-            lineWidth: 2,
-            lineStyle: 2, // Dashed
+            lineWidth: 1,
+            lineStyle: 0, // solid, thin
             priceLineVisible: false,
             lastValueVisible: false,
             crosshairMarkerVisible: false,
@@ -12087,7 +12136,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 }
               }
 
-              // Market structure: a dashed line at the broken level running from the
+              // Market structure: a line at the broken level running from the
               // swing that set it to the candle that closed through it, tagged BOS or
               // CHoCH. Index charts only, and recomputed only on a candle close.
               // SESSION BREAKS. One vertical line in the gap between a day's last
@@ -12202,7 +12251,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     if (x === null || x === undefined || x < 0 || x > textAlignX) continue;
                     // Colour and arrow follow the direction (red/down = bearish);
                     // position follows the side it formed on (above the highs or
-                    // below the lows, where the dashed line is).
+                    // below the lows, where the line is).
                     const bear = d.kind === 'bear', onHigh = d.extreme === 'high';
                     const y = mainSeriesRef.current.priceToCoordinate(d.niftyNow);
                     if (y === null) continue;
@@ -12210,7 +12259,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     const x0 = ts?.timeToCoordinate(d.swingTime as any);
                     const y0 = mainSeriesRef.current.priceToCoordinate(d.niftySwing);
                     if (x0 !== null && x0 !== undefined && y0 !== null) {
-                      ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
+                      ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.setLineDash([]);
                       ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x, y); ctx.stroke();
                       ctx.setLineDash([]);
                     }
@@ -12300,9 +12349,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   // day they do not belong to. If it is off-screen, it is not drawn.
                   if (x1 < 0) continue;
                   ctx.beginPath();
-                  ctx.setLineDash(isChoch ? [] : [4, 3]);
+                  // Both thin and solid now. A change of character still stands
+                  // out from a break of structure: it is drawn at nearly full
+                  // strength against 55%, and its label is larger and bolder.
+                  ctx.setLineDash([]);
                   ctx.strokeStyle = hexToRgba(structHex, isChoch ? 0.95 : 0.55);
-                  ctx.lineWidth = isChoch ? 1.6 : 1;
+                  ctx.lineWidth = 1;
                   ctx.moveTo(x0, y);
                   ctx.lineTo(x1, y);
                   ctx.stroke();
@@ -12483,19 +12535,19 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       if (x0 === null || x1 === null || y === null || x1 < 0 || x0 > textAlignX) continue;
                       const col = st.internal ? (st.dir === 'bull' ? COL.intBull : COL.intBear) : (st.dir === 'bull' ? COL.swBull : COL.swBear);
                       if (st.line) {
-                        ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.setLineDash(st.internal ? [4, 3] : []);
+                        ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.setLineDash([]);   // internal structure has its own colour
                         ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(Math.min(x1, textAlignX), y); ctx.stroke();
                       }
                       const xl = xOf(st.labelTime);
                       if (st.label && xl !== null && xl >= 0 && xl <= textAlignX) label(st.tag, xl, y, st.dir === 'bull' ? 'above' : 'below', col, IL_FONT_PX[st.internal ? S.intLblSz : S.swLblSz]);
                     }
-                    // DOUBLE HIGH / DOUBLE LOW — dotted
+                    // DOUBLE HIGH / DOUBLE LOW
                     for (const e of res.equals) {
                       const x0 = xOf(e.fromTime), x1 = xOf(e.toTime), y0 = yOf(e.fromLevel), y1 = yOf(e.toLevel);
                       if (x0 === null || x1 === null || y0 === null || y1 === null || x1 < 0 || x0 > textAlignX) continue;
                       const col = e.kind === 'high' ? COL.swBear : COL.swBull;
                       if (e.line) {
-                        ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.setLineDash([1.5, 3]);
+                        ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.setLineDash([]);
                         ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
                       }
                       const xl = xOf(e.labelTime);
@@ -12607,14 +12659,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       const col = z.dir === 'bull' ? BULL : BEAR, dead = z.endTime !== null;
                       const yA = Math.min(yT, yB), h = Math.max(2, Math.abs(yB - yT));
                       ctx.fillStyle = hexToRgba(col, dead ? 0.07 : 0.16); ctx.fillRect(l, yA, r - l, h);
-                      ctx.strokeStyle = hexToRgba(col, dead ? 0.3 : 0.75); ctx.lineWidth = 1; ctx.setLineDash(dead ? [3, 3] : []); ctx.strokeRect(l, yA, r - l, h);
+                      ctx.strokeStyle = hexToRgba(col, dead ? 0.3 : 0.75); ctx.lineWidth = 1; ctx.setLineDash([]); ctx.strokeRect(l, yA, r - l, h);   // a dead zone is fainter, not dashed
                       ctx.setLineDash([]);
                       ctx.font = `10px ${FONT}`; ctx.fillStyle = hexToRgba(col, dead ? 0.5 : 0.95); ctx.textBaseline = 'bottom'; ctx.textAlign = 'right';
                       ctx.fillText(`${z.dir === 'bull' ? 'Bull' : 'Bear'} Breaker`, r - 3, yA - 1);
-                      // the break: a short dashed line at the swing that was broken
+                      // the break: a short line at the swing that was broken
                       const xb = xOf(z.breakTime), ys = yOf(z.swingLevel);
                       if (xb !== null && ys !== null && x0 !== null) {
-                        ctx.strokeStyle = hexToRgba(col, 0.6); ctx.setLineDash([4, 3]);
+                        ctx.strokeStyle = hexToRgba(col, 0.6); ctx.setLineDash([]);
                         ctx.beginPath(); ctx.moveTo(Math.max(0, x0), ys); ctx.lineTo(Math.min(textAlignX, xb), ys); ctx.stroke(); ctx.setLineDash([]);
                         ctx.textAlign = 'left'; ctx.textBaseline = z.dir === 'bull' ? 'bottom' : 'top'; ctx.fillStyle = hexToRgba(col, 0.8);
                         ctx.fillText('break', Math.min(textAlignX - 30, xb + 3), z.dir === 'bull' ? ys - 1 : ys + 1);
@@ -12634,13 +12686,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                         }
                       }
                     }
-                    // liquidity grabs: the level that was swept (dotted, from where it formed) + a marker on the wick
+                    // liquidity grabs: the level that was swept (from where it formed) + a marker on the wick
                     for (const gb of res.grabs) {
                       const xg = xOf(gb.time), y = yOf(gb.level), yw = yOf(gb.extreme);
                       if (xg === null || y === null || yw === null || xg < 0 || xg > textAlignX) continue;
                       const col = gb.dir === 'bear' ? GRAB_UP : GRAB_DN;
                       const xl = xOf(gb.levelTime);
-                      ctx.strokeStyle = hexToRgba(col, 0.7); ctx.lineWidth = 1; ctx.setLineDash([1.5, 3]);
+                      ctx.strokeStyle = hexToRgba(col, 0.7); ctx.lineWidth = 1; ctx.setLineDash([]);
                       ctx.beginPath(); ctx.moveTo(Math.max(0, xl === null ? xg - 40 : xl), y); ctx.lineTo(xg + 6, y); ctx.stroke(); ctx.setLineDash([]);
                       ctx.font = `bold 9px ${FONT}`; ctx.fillStyle = col; ctx.textAlign = 'center';
                       ctx.textBaseline = gb.dir === 'bear' ? 'bottom' : 'top';
@@ -12761,7 +12813,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                    const midPoint = Math.round((activeLevels[i] + activeLevels[i+1]) / 2);
                    const y = mainSeriesRef.current.priceToCoordinate(midPoint);
                    if (y !== null) {
-                     linesToDraw.push({ text: `50% LEVEL`, y, color: fiftyPercentColor, dash: [4, 4], lineWidth: 1 });
+                     linesToDraw.push({ text: `50% LEVEL`, y, color: fiftyPercentColor, dash: [], lineWidth: 1 });
                    }
                  }
               }
