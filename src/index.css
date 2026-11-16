@@ -182,3 +182,18 @@
     text-align: center !important;
   }
 }
+
+/* A TOAST THAT IS LEAVING TAKES NO TOUCHES. For the last moments of its life
+   sonner gives a toast an invisible box twice its own height (its
+   [data-removed]::before, scaleY(2) — there so that a mouse resting on a
+   stack of toasts keeps the stack open). At the top of a phone that box
+   reaches down over the first 17px of the chart, which is where the floating
+   Quick Trade button starts out: a tap on the button in that moment went to
+   the toast instead, and Quick Trade did not switch. Found by the strike-menu
+   test (16 Nov 2026), whose second tap on the button comes one toast's life —
+   2.5s — after its first: one run in three. A toast that has begun to leave
+   has nothing left to offer a finger. pointer-events is inherited, so the
+   ::before goes with it. */
+[data-sonner-toast][data-removed='true'] {
+  pointer-events: none !important;
+}

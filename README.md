@@ -306,7 +306,49 @@ tool bar and the split view are untouched.
   otherwise sit on top of that thing's own controls.
 - **The chart keeps its layers to itself** (`max-md:isolate`): the trade chips,
   line tools and the like are no longer painted on top of an open sheet (the
-  chips used to lie across the Trade guard sheet).
+  chips used to lie across the Trade guard sheet). The RSI pane does the same,
+  so the strike menu, which is taller than a short phone chart, lies over the
+  pane and every row of it can be pressed.
+- **A second row in the bar:** Option Chain (opens the Chain page) and ScalpPro
+  (below).
+
+## ScalpPro: two charts and a Buy / Sell bar (phone)
+
+`src/pages/ChartWorkspace.tsx` (`ScalpScreen`) and `src/pages/AdvancedChart.tsx`
+("THE SCALPPRO SCREEN", the `scalp` prop). Opened by the ScalpPro button under
+the chart; laid out the way Lemonn's ScalpPro is. It is the same two panes the
+desktop split view uses, stacked.
+
+- **Top chart: the index. Bottom chart: an option** — the one last on screen in
+  this session, or, with none, the at-the-money Call of the nearest expiry. Each
+  has its name and live price above it, zoom in / out beside its price axis and
+  its own interval in the corner.
+  - Tap the index name for NIFTY 50 / BANK NIFTY / SENSEX.
+  - Tap **Call** or **Put** after the option's name to flip to the other side of
+    the same strike and expiry.
+- **The handle between the charts** drags either one up to the whole screen;
+  where it is left is kept on that phone (`scalpSplit`).
+- **The bar at the bottom** trades the option in the lower chart:
+  - **Buy at Mkt / Sell at Mkt place the order on one tap. There is no ticket
+    and no confirmation** — Martin's answer, 16 Nov 2026, when asked whether
+    they should confirm first. A second tap within 1.2s, or while the first is
+    still being sent, is ignored.
+  - **− 65 / 1 lot +** sets the size (1 to 25 lots, kept as `scalpLots`).
+  - **Req** under each button is the margin that order needs; **Funds** is what
+    is available. An order that needs more than there is says "Not enough
+    funds" and is not sent.
+  - While a trade is open in that contract, the button that would go against it
+    becomes **Exit** (one tap, the whole position); the other still adds.
+- **It is the order ticket's own path** (`handleOrderSubmit`): the trade guard,
+  the journal entry and the automatic SL / TP all apply exactly as they do to an
+  order from the ticket. The guard's refusal is shown as it is elsewhere.
+- **SL and TP chips move without Quick Trade** on this screen (it has no Quick
+  Trade button); everywhere else they still need it.
+- A reload stays on ScalpPro (`scalpPro` in the session); the back arrow returns
+  to the index chart.
+- Not here yet: Limit / Trigger orders, the Positions · Orders · Option chain
+  row, and dragging SL / TP out of the entry line when the automatic ones are
+  switched off.
 
 ## Chart: the open trade's chips (Exit, P&L, SL, TP)
 

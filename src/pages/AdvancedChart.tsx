@@ -1,8 +1,9 @@
 import React, { useMemo, useRef, useState, useEffect, useLayoutEffect } from "react";
 import { useTodayBias, isRecord as isBiasRecord, istToday as biasIstToday, BIAS_LINES_KEY, useBiasCardHidden } from "../lib/bias";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, ChevronsUp, ChevronsDown, ChevronRight, Copy, Trash2, Search, PencilRuler, Minus, Slash, RectangleHorizontal, AlignJustify, TrendingDown, Type as TypeIcon, Move as MoveIcon, ArrowLeft, CalendarRange, ChartNoAxesCombined, TrendingUp, Star, Bell, ClipboardPen } from "lucide-react";
+import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, ChevronsUp, ChevronsDown, ChevronRight, Copy, Trash2, Search, PencilRuler, Minus, Slash, RectangleHorizontal, AlignJustify, TrendingDown, Type as TypeIcon, Move as MoveIcon, ArrowLeft, CalendarRange, ChartNoAxesCombined, TrendingUp, Star, Bell, ClipboardPen, ChevronsUpDown, ZoomIn, ZoomOut, Link2, CandlestickChart } from "lucide-react";
 import MyOrderModal from "../components/MyOrderModal";
+import { navigate } from "wouter/use-browser-location";
 import { TradeGuardButton } from "../components/TradeGuard";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
@@ -3979,8 +3980,14 @@ function isOptionInstr(i: any): boolean {
  *              so every code path below that is not explicitly gated on a role
  *              behaves exactly as it did before this feature existed.
  */
-export function AdvancedChart({ paneRole, split = false, spotHidden = false, onClosePane, onShowSpot }: {
+export function AdvancedChart({ paneRole, split = false, spotHidden = false, onClosePane, onShowSpot, scalp = false }: {
   paneRole?: 'spot' | 'option';
+  /** PHONE ONLY: this pane is one of the two charts of the ScalpPro screen (see
+   *  ScalpScreen in ChartWorkspace.tsx and THE SCALPPRO SCREEN below). The pane
+   *  then drops the chart page's own header, tool bar, RSI pane and floating
+   *  buttons, shows a two-line name and price instead, and — the option one —
+   *  ends in the Buy / Sell bar. */
+  scalp?: boolean;
   /** Both panes are on screen side by side. The toolbar is then shown ONCE (on the
    *  option pane, at the right end of the row) and drives both charts. */
   split?: boolean;
@@ -4892,6 +4899,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   };
 
   useEffect(() => {
+    // On the ScalpPro screen only the option pane shows the funds (in its Buy /
+    // Sell bar). The spot pane reading them as well made it two reads every 15
+    // seconds, and with the reads an order sets off the app raised its own
+    // "called 6 times in 15 seconds" warning for /api/margins on the first buy.
+    if (scalp && isSpotPane) return;
     fetchKiteBalance();
     const interval = setInterval(fetchKiteBalance, 15000); // Poll every 15s to keep funds live
     return () => clearInterval(interval);
@@ -6838,6 +6850,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       const docked = entryY !== null && Math.abs(y - entryY) < 32;
       let x = clearOfLabels(y);
       if (docked) x = Math.max(x, dockX);
+      // ON THE SCALPPRO SCREEN THE PLOT'S RIGHT-HAND CORNERS BELONG TO ZOOM (in
+      // at the top, out at the bottom, where Lemonn has them). A chip level
+      // with one of them stops short of it instead of lying under it: the
+      // button is the upper layer, so a touch on that end of the chip zoomed
+      // the chart. Seen with a short's TP, which sits low in the plot (16 Nov
+      // 2026). 32 = the button's 28 and a gap; 48 = its reach plus half a chip.
+      const rightEdge = plotW - 2 - (scalp && (y < 48 || y > plotH - 48) ? 32 : 0);
       // Two chips at nearly the same height: the second goes after the first.
       for (const o of placed) if (Math.abs(y - o.y) < 40 && x < o.x + o.w + 6) x = o.x + o.w + 6;
       show(el);
@@ -6848,7 +6867,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       // Fitting means measuring, so the answer is kept until the words, the
       // place or the width of the plot change.
       const rupees = (text.match(/[+-]₹[\d,]+/) || [''])[0];
-      const key = `${text}|${Math.round(x)}|${Math.round(plotW)}|${docked ? 1 : 0}`;
+      const key = `${text}|${Math.round(x)}|${Math.round(rightEdge)}|${docked ? 1 : 0}`;
       const kept = chipFitRef.current[which];
       let chosen = kept && kept.key === key ? kept.text : null;
       if (chosen === null) {
@@ -6856,7 +6875,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         chosen = '';
         for (const t of tries) {
           if (textEl) { setText(textEl, t); textEl.style.display = t ? '' : 'none'; }
-          if (!t || x + el.offsetWidth <= plotW - 2) { chosen = t; break; }
+          if (!t || x + el.offsetWidth <= rightEdge) { chosen = t; break; }
         }
         chipFitRef.current[which] = { key, text: chosen };
       }
@@ -6867,7 +6886,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       }
       const w = el.offsetWidth;
       // Never under the price axis: a chip that cannot be seen cannot be used.
-      x = Math.max(2, Math.min(x, plotW - w - 2));
+      x = Math.max(2, Math.min(x, rightEdge - w));
       put(el, x, y);
       placed.push({ x, w, y });
       if (docked) dockX = x + w + 6;
@@ -6898,7 +6917,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     const t = chipTargetsRef.current[which];
     const ser = mainSeriesRef.current, cont = chartContainerRef.current, chart = mainChartRef.current;
     if (!t || !ser || !cont || !chart || exitDragRef.current) return;
-    if (!quickTradeEnabledRef.current) {
+    // On the ScalpPro screen the chips always move, as they do in Lemonn: that
+    // screen has no Quick Trade button, and it is a trading screen, not one a
+    // thumb scrolls past on the way to something else.
+    if (!quickTradeEnabledRef.current && !scalp) {
       try { toast.info('Quick Trade is off', { id: 'chip-needs-qt', description: 'Switch it on (the ⚡ button) to move SL or TP. It turns itself off after a minute.' }); } catch (err) {}
       return;
     }
@@ -9258,11 +9280,23 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     product: 'MIS' | 'NRML';
     orderType: 'MARKET' | 'LIMIT';
     price?: number;
+  }, opts?: {
+    // THE SCALPPRO BAR (16 Nov 2026) places an order with no ticket on screen:
+    // the contract is handed in instead of being read from the open ticket.
+    // Everything else — the margin re-check, the guard, the journal entry, what
+    // is written down for the open position — is this one function for both.
+    ticket?: { exchange?: string; ltp?: number; optionType?: 'CE' | 'PE'; strike?: number; tradingsymbol?: string };
+    // The bar shows its own "working" state on the button that was pressed; the
+    // cover this puts over the chart ("Resolving option strike details...") is
+    // for the ticket.
+    quiet?: boolean;
   }) => {
-    setIsProcessingStrikeAction(true);
+    const ticket: any = opts?.ticket ?? ticketData;
+    const quiet = !!opts?.quiet;
+    if (!quiet) setIsProcessingStrikeAction(true);
     try {
       // 1. Refetch live margin to ensure values are current
-      const currentPrice = data.price !== undefined ? data.price : (ticketData?.ltp || 0);
+      const currentPrice = data.price !== undefined ? data.price : (ticket?.ltp || 0);
       let marginTotal = data.quantity * currentPrice;
       let marginCharges = -1; // -1 to differentiate from actual 0
       
@@ -9274,7 +9308,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-             exchange: ticketData?.exchange || 'NFO',
+             exchange: ticket?.exchange || 'NFO',
              tradingsymbol: data.tradingsymbol,
              quantity: data.quantity,
              transaction_type: data.action,
@@ -9305,8 +9339,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       }
       
       if (marginTotal + marginCharges > availBalance) {
-        toast.error("Insufficient Funds for this transaction. Refetched latest margin from Kite.");
-        setIsProcessingStrikeAction(false);
+        // The bar's own words are short (Martin, 16 Nov: "keep the texts ... to
+        // minimal"); the ticket keeps the sentence it has always shown.
+        toast.error(quiet ? 'Not enough funds' : "Insufficient Funds for this transaction. Refetched latest margin from Kite.");
+        if (!quiet) setIsProcessingStrikeAction(false);
         return;
       }
 
@@ -9333,8 +9369,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         const lastCandle = candlesNow.length ? candlesNow[candlesNow.length - 1] : null;
         const lastBB = (bbDataRef.current && bbDataRef.current.length) ? bbDataRef.current[bbDataRef.current.length - 1] : null;
         journalContext = {
-          optionType: ticketData?.optionType ?? null,
-          strike: ticketData?.strike ?? null,
+          optionType: ticket?.optionType ?? null,
+          strike: ticket?.strike ?? null,
           spot: (chartDataRef.current as any)?.spot ?? null,
           timeframe,
           entryPrice: currentPrice,
@@ -9354,7 +9390,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         // exchange comes from the contract the ticket was opened with (NFO for
         // NIFTY, BFO for SENSEX) — without it the server defaults to NFO and a
         // SENSEX order would be sent to the wrong exchange and rejected.
-        body: JSON.stringify({...data, exchange: ticketData?.exchange || 'NFO', test_mode: testOrderMode, journal: true, context: journalContext})
+        body: JSON.stringify({...data, exchange: ticket?.exchange || 'NFO', test_mode: testOrderMode, journal: true, context: journalContext})
       });
       const result = await res.json();
       
@@ -9389,7 +9425,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           status: 'Simulated Filled',
         });
       } else {
-        toast.success(`Order placed successfully on Kite! ID: ${result.orderId}`);
+        toast.success(quiet ? `${data.action === 'BUY' ? 'Bought' : 'Sold'} ${data.quantity}` : `Order placed successfully on Kite! ID: ${result.orderId}`);
         notificationService.add('order', `Kite Order Placed Successfully`, `Order ID ${result.orderId} filled on Kite for ${data.quantity} qty of ${data.tradingsymbol || 'Option Contract'}.`, {
           symbol: data.tradingsymbol || 'Option Contract',
           side: data.action,
@@ -9404,13 +9440,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         const activeTrade = {
           id: result.orderId || `ORD-${Date.now()}`,
           symbol: data.tradingsymbol || 'Option Contract',
-          exchange: ticketData?.exchange || 'NFO',
+          exchange: ticket?.exchange || 'NFO',
           side: data.action,
           qty: data.quantity,
           entryPrice: data.price || currentPrice,
           currentPrice: data.price || currentPrice,
-          optionType: ticketData?.optionType || (data.tradingsymbol.endsWith('CE') ? 'CE' : data.tradingsymbol.endsWith('PE') ? 'PE' : undefined),
-          strike: ticketData?.strike,
+          optionType: ticket?.optionType || (data.tradingsymbol.endsWith('CE') ? 'CE' : data.tradingsymbol.endsWith('PE') ? 'PE' : undefined),
+          strike: ticket?.strike,
           timestamp: new Date().toISOString(),
           testMode: !!result.test_mode
         };
@@ -9441,7 +9477,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       }
 
       // Draw horizontal line on price chart for ATM selection ONLY AFTER SUCCESSFUL PLACEMENT
-      if (ticketData) {
+      // (the ticket's own contract; an order from the ScalpPro bar has no ticket).
+      if (ticketData && !opts?.ticket) {
         setSelectedStrikeOnChart({
           strike: ticketData.strike,
           tradingsymbol: ticketData.tradingsymbol,
@@ -9454,7 +9491,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       console.error(e);
       toast.error(e.message || "Could not place option trade");
     } finally {
-      setIsProcessingStrikeAction(false);
+      if (!quiet) setIsProcessingStrikeAction(false);
     }
   };
 
@@ -10103,8 +10140,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     rsiOversoldColor: [rsiOversoldColor, setRsiOversoldColor],
   };
   const paneIndKey = `paneIndicators:${paneRole}`;
+  // Not on the phone's ScalpPro screen: its two charts are the phone's one chart
+  // shown twice, so they follow the indicators chosen on the chart page as they
+  // are now — a snapshot of their own would go stale the first time he changed
+  // one there, with no list on this screen to change it back.
   useLayoutEffect(() => {
-    if (!isPane) return;
+    if (!isPane || scalp) return;
     try {
       const raw = localStorage.getItem(paneIndKey);
       const saved = raw ? JSON.parse(raw) : null;
@@ -10121,7 +10162,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   }, []);
   const paneIndRunsRef = useRef(0);
   useEffect(() => {
-    if (!isPane) return;
+    if (!isPane || scalp) return;
     // Skip the very first run: it still sees the values from before the
     // snapshot above was applied, and would write them over it.
     if (paneIndRunsRef.current++ === 0) return;
@@ -11582,7 +11623,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     // load, refresh, and every timeframe switch. Raised from 55 to 85 so the
     // opening view is zoomed out a little and shows more context. The "sane
     // range" check below scales off this, so both move together.
-    const VISIBLE_BARS = 85;
+    // A ScalpPro pane is half the screen tall and is there to trade the last
+    // hour or two, as Lemonn's is: fewer candles, each one bigger.
+    const VISIBLE_BARS = scalp ? 50 : 85;
     const RIGHT_OFFSET = 8;
 
     function focusRecentCandles(chart: any, candles: any[]) {
@@ -12413,6 +12456,18 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       }
     });
 
+    // TORN DOWN. This effect removes both charts and builds new ones on every
+    // data refresh and every change of contract, and a resize queued for the
+    // next frame can land after that. applyOptions on a removed chart does not
+    // throw there and then: the library schedules a draw, and the draw throws
+    // "Object is disposed" a frame later from inside the library, where no
+    // try/catch of ours reaches it. That was the stray page error seen on a
+    // first load after v301 and never explained; it came back every time when
+    // a trade taken from the order ticket switched the chart to the option
+    // (16 Nov 2026), and the scheduling stack named syncChartSize, called from
+    // the observer's queued frame. So a resize that arrives late does nothing.
+    let tornDown = false;
+
     // Resize handlers (using ResizeObserver so it adapts to flex layout)
     const handleMainResize = (entries: ResizeObserverEntry[]) => {
       const entry = entries[0];
@@ -12420,6 +12475,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         const nw = Math.floor(entry.contentRect.width);
         const nh = Math.floor(entry.contentRect.height);
         window.requestAnimationFrame(() => {
+          if (tornDown) return;
           try {
             // Route through syncChartSize so the observer can never re-apply a
             // height that reaches past the visible area (see the note there).
@@ -12435,6 +12491,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         const nw = Math.floor(entry.contentRect.width);
         const nh = Math.floor(entry.contentRect.height);
         window.requestAnimationFrame(() => {
+          if (tornDown) return;
           try {
             rsiChart.applyOptions({
               width: nw,
@@ -12460,6 +12517,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     // Declared with `function` on purpose: the ResizeObserver handler above calls
     // it, and a const arrow would only work by luck of timing.
     function syncChartSize() {
+      if (tornDown) return;
       try {
         const el = chartContainerRef.current;
         if (!el) return;
@@ -12520,6 +12578,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     if (rsiContainerRef.current) rsiResizeObserver.observe(rsiContainerRef.current);
 
     return () => {
+      tornDown = true;
       sizeTimers.forEach(t => clearTimeout(t));
       syncChartSizeRef.current = () => {};
       window.removeEventListener('resize', syncChartSize);
@@ -14177,6 +14236,177 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     document.addEventListener('pointercancel', cancel);
   };
 
+  // ===== THE SCALPPRO SCREEN (16 Nov 2026) =====
+  // Martin, with two recordings of Lemonn's ScalpPro: the spot chart on top, the
+  // option chart under it, a handle between them to give either more room, and a
+  // bar at the bottom that buys or sells the option on one tap. Asked how the
+  // screen should open: "When I tap on scalping pro button as shown in the
+  // video". Asked whether Buy and Sell should confirm first: no — the order is
+  // placed on the tap; "if auto TP and SL are set, it will keep the same", and
+  // where they are not, the SL and TP buttons show on the entry price line "so
+  // that I can set it manually". Asked whether the trade guard should check
+  // the screen's orders: "Yes, all entries".
+  //
+  // The screen is ScalpScreen in ChartWorkspace.tsx: this component twice, as
+  // the 'spot' and the 'option' pane the desktop split view already has, with
+  // `scalp` set. What `scalp` changes is all in this file and all marked: no
+  // header row, tool bar, RSI pane, bias card or floating button; a two-line
+  // name and price instead; zoom buttons and an interval chooser on the chart;
+  // and, on the option pane, the bar. An order from the bar goes through
+  // handleOrderSubmit — the order ticket's own path, guard and journal included.
+
+  // The chart page's button for it (and its neighbour, Option Chain) sit in a
+  // second row of the phone's tool bar. Everything that opens above that bar,
+  // here and in the app's shell, reads the bar's height from this variable.
+  const openScalp = () => { try { window.dispatchEvent(new CustomEvent('terminal:scalp', { detail: true })); } catch (e) {} };
+  const barRowShown = !isPane && !isFocusedChart;
+  useEffect(() => {
+    if (!barRowShown) return;
+    const root = document.documentElement;
+    root.style.setProperty('--chart-bar-h', '6.25rem');       // 3.25rem of buttons + 3rem for the second row
+    return () => { root.style.removeProperty('--chart-bar-h'); };
+  }, [barRowShown]);
+
+  const tfLabelOf = (tf: any) => (({ '1': '1m', '3': '3m', '5': '5m', '15': '15m', '60': '1h', '240': '4h', '1440': '1D', '10080': '1W', '43200': '1M' } as Record<string, string>)[String(tf)] || `${tf}m`);
+  // Zoom from the newest candle: fewer (in) or more (out) candles on screen, the
+  // right edge staying where it is.
+  const zoomChart = (factor: number) => {
+    try {
+      const ts = mainChartRef.current?.timeScale();
+      const r = ts?.getVisibleLogicalRange();
+      if (!ts || !r) return;
+      const span = Math.max(8, Math.min(3000, (r.to - r.from) * factor));
+      ts.setVisibleLogicalRange({ from: r.to - span, to: r.to });
+      refitPriceScaleRef.current();
+    } catch (e) {}
+  };
+
+  // THE OPTION'S NAME, AND ITS OTHER SIDE. "NIFTY 17 NOV 25200" and the side as
+  // a button of its own: one tap on Call or Put opens the same strike and
+  // expiry on the other side. The other contract is looked up, never assumed —
+  // a strike can be listed on one side only.
+  const scalpOpt = (() => {
+    const ts = String(selectedInstrument?.tradingsymbol || '').toUpperCase();
+    const m = ts.match(/^(.*\d)(CE|PE)$/);
+    if (!m) return null;
+    const w = prettyOptionName(ts).split(' ');                 // "NIFTY 25200 CE 17 NOV"
+    const base = w.length >= 4 ? [w[0], ...w.slice(3), w[1]].join(' ') : ts;
+    return { base, side: m[2] as 'CE' | 'PE', sibling: m[1] + (m[2] === 'CE' ? 'PE' : 'CE') };
+  })();
+  const [flipBusy, setFlipBusy] = useState(false);
+  const flipOptionSide = async () => {
+    if (!scalpOpt || flipBusy) return;
+    setFlipBusy(true);
+    try {
+      const c = await fetchContractInfo(scalpOpt.sibling);
+      if (!c?.instrument_token) throw new Error('not listed');
+      setSelectedInstrument({
+        tradingsymbol: c.tradingsymbol, instrument_token: String(c.instrument_token), exchange: c.exchange,
+        lot_size: c.lot_size, instrument_type: c.instrument_type, strike: c.strike, expiry: c.expiry, name: c.name,
+      } as any);
+    } catch (e) { toast.error(`No ${scalpOpt.side === 'CE' ? 'Put' : 'Call'} at this strike`); }
+    finally { setFlipBusy(false); }
+  };
+
+  // ----- THE BUY / SELL BAR (the option pane of the ScalpPro screen) -----
+  const scalpBarOn = scalp && isOptionPane;
+  const scalpSym = scalpBarOn ? String(selectedInstrument?.tradingsymbol || '').toUpperCase() : '';
+  const [scalpLots, setScalpLots] = useState<number>(() => {
+    try { const v = parseInt(localStorage.getItem('scalpLots') || '1', 10); return v >= 1 && v <= 25 ? v : 1; } catch (e) { return 1; }
+  });
+  useEffect(() => { try { localStorage.setItem('scalpLots', String(scalpLots)); } catch (e) {} }, [scalpLots]);
+  // The contract as the broker lists it. The lot size comes from there and
+  // nowhere else: a wrong lot size is a wrong-sized real order.
+  const [scalpInfo, setScalpInfo] = useState<any>(null);
+  useEffect(() => {
+    setScalpInfo(null);
+    if (!scalpSym) return;
+    let dead = false;
+    fetchContractInfo(scalpSym).then((c) => { if (!dead && c?.lot_size) setScalpInfo(c); }).catch(() => {});
+    return () => { dead = true; };
+  }, [scalpSym]);
+  const scalpLot = Number(scalpInfo?.lot_size) || 0;
+  const scalpQty = scalpLots * scalpLot;
+  // WHAT EACH BUTTON NEEDS, from the broker and never worked out here — what a
+  // sell needs cannot be guessed. Asked for ONE lot, when the contract changes
+  // and every 30 seconds after; the figure shown is that times the lots. The
+  // first version asked again on every change of size, and stepping the lots a
+  // few times set off the app's own "called 6 times in 15 seconds" warning.
+  const [scalpReq, setScalpReq] = useState<{ sym: string; buy: number | null; sell: number | null }>({ sym: '', buy: null, sell: null });
+  useEffect(() => {
+    if (!scalpSym || !(scalpLot > 0)) return;
+    let dead = false;
+    const ask = () => {
+      const px = Number(lastCandleDataRef.current?.close) || 0;
+      const one = (side: 'BUY' | 'SELL') => fetch('/api/order-margin', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tradingsymbol: scalpSym, exchange: scalpInfo?.exchange || 'NFO', side, quantity: scalpLot, product: 'NRML', price: px }),
+      }).then(r => (r.ok ? r.json() : null)).then(m => (m && Number.isFinite(Number(m.total)) ? Number(m.total) : null)).catch(() => null);
+      Promise.all([one('BUY'), one('SELL')]).then(([buy, sell]) => {
+        if (dead) return;
+        setScalpReq(prev => ({ sym: scalpSym, buy: buy ?? (prev.sym === scalpSym ? prev.buy : null), sell: sell ?? (prev.sym === scalpSym ? prev.sell : null) }));
+      });
+    };
+    const first = setTimeout(ask, 400);
+    const iv = setInterval(() => { if (document.visibilityState === 'visible') ask(); }, 30000);
+    return () => { dead = true; clearTimeout(first); clearInterval(iv); };
+  }, [scalpSym, scalpLot]);
+  const scalpReqNow = scalpReq.sym === scalpSym
+    ? { buy: scalpReq.buy === null ? null : scalpReq.buy * scalpLots, sell: scalpReq.sell === null ? null : scalpReq.sell * scalpLots }
+    : { buy: null, sell: null };
+  // THE TRADE THAT IS OPEN IN THE CONTRACT ON SCREEN, if there is one: then the
+  // button that would go against it is Exit instead. Looked up by its symbol in
+  // the app's list of open positions — not "the first open position", which is
+  // what the chart's chips follow: with two trades on, a Sell pressed on the
+  // second one's chart must not go out as a new short.
+  const [scalpPos, setScalpPos] = useState<any>(null);
+  useEffect(() => {
+    if (!scalpBarOn || !scalpSym) { setScalpPos(null); return; }
+    const read = () => {
+      let next: any = null;
+      try {
+        const arr = JSON.parse(localStorage.getItem('active_positions') || '[]');
+        next = (Array.isArray(arr) ? arr : []).find((p: any) => String(p?.symbol || '').toUpperCase() === scalpSym && Number(p?.qty) > 0) || null;
+      } catch (e) { next = null; }
+      setScalpPos((prev: any) => ((prev?.symbol === next?.symbol && prev?.qty === next?.qty && prev?.side === next?.side) ? prev : next));
+    };
+    read();
+    window.addEventListener('active_positions_updated', read);
+    window.addEventListener('storage', read);
+    const iv = setInterval(read, 2000);
+    return () => { window.removeEventListener('active_positions_updated', read); window.removeEventListener('storage', read); clearInterval(iv); };
+  }, [scalpBarOn, scalpSym]);
+  // ONE TAP, ONE ORDER. No confirmation — his choice — so everything else that
+  // can stop a second order is here: nothing is sent while one is on its way,
+  // nor for 1.2 seconds after it has come back (a double tap), and both buttons
+  // show that they are busy.
+  const [scalpBusy, setScalpBusy] = useState<null | 'BUY' | 'SELL' | 'EXIT'>(null);
+  const scalpBusyRef = useRef<null | string>(null);
+  const scalpLastAtRef = useRef(0);
+  const scalpPlace = async (side: 'BUY' | 'SELL') => {
+    if (scalpBusyRef.current || Date.now() - scalpLastAtRef.current < 1200) return;
+    const c = scalpInfo;
+    if (!c?.tradingsymbol || !(scalpLot > 0)) { toast.error('Contract not ready'); return; }
+    const px = Number(lastCandleDataRef.current?.close) || 0;
+    if (!(px > 0)) { toast.error('No live price yet'); return; }
+    scalpBusyRef.current = side; setScalpBusy(side);
+    try {
+      await handleOrderSubmit(
+        { action: side, tradingsymbol: c.tradingsymbol, quantity: scalpLots * scalpLot, product: 'NRML', orderType: 'MARKET' },
+        { ticket: { exchange: c.exchange || 'NFO', ltp: px, optionType: c.instrument_type === 'PE' ? 'PE' : 'CE', strike: Number(c.strike) || 0, tradingsymbol: c.tradingsymbol }, quiet: true },
+      );
+    } finally { scalpLastAtRef.current = Date.now(); scalpBusyRef.current = null; setScalpBusy(null); }
+  };
+  // Exit is the positions bar's own exit, asked for the way the chart's Exit
+  // chip asks: one exit path in the app.
+  const scalpExit = () => {
+    if (scalpBusyRef.current || !scalpPos) return;
+    scalpBusyRef.current = 'EXIT'; setScalpBusy('EXIT');
+    try { window.dispatchEvent(new CustomEvent('exit_position_request', { detail: { symbol: scalpPos.symbol } })); } catch (e) {}
+    setTimeout(() => { scalpBusyRef.current = null; setScalpBusy(null); }, 2500);
+  };
+  const scalpRs = (v: number | null | undefined) => (v === null || v === undefined || !Number.isFinite(v) ? '—' : `₹${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`);
+
   // DESKTOP HEIGHT. The root used to be height:auto with a min-height of the
   // screen, so the chart's flex-grow had nothing to grow into and stopped at its
   // 450px floor — the rest of the screen was the page's own p-8 + pb-20, the
@@ -14185,7 +14415,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // overflow hidden so nothing can push the page into a scroll. The chart grows
   // to fill whatever the toolbar, tabs and strips leave. Mobile classes unchanged.
   return (
-    <div ref={pageRootRef} data-layout="page" className="px-1 pt-0 pb-0 md:px-0 md:py-0 animate-in fade-in duration-500 max-w-none w-full mx-auto flex flex-col h-[calc(100dvh-124px-env(safe-area-inset-bottom))] md:h-full md:min-h-0 max-md:overflow-hidden md:overflow-visible relative">
+    <div ref={pageRootRef} data-layout="page" className={`px-1 pt-0 pb-0 md:px-0 md:py-0 animate-in fade-in duration-500 max-w-none w-full mx-auto flex flex-col ${scalp ? 'h-full' : 'h-[calc(100dvh-124px-env(safe-area-inset-bottom))]'} md:h-full md:min-h-0 max-md:overflow-hidden md:overflow-visible relative`}>
       
       {/* Tap anywhere outside to dismiss. The panel is a floating readout, not a
           setting to leave switched on, so it should get out of the way the moment
@@ -14200,7 +14430,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       {showDiagnostic && (
         <div
           ref={diagPanelRef}
-          className="fixed inset-x-2 top-[60px] bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)] z-[60] md:inset-x-auto md:top-auto md:bottom-6 md:right-6 md:w-[340px] md:max-h-[80vh] bg-card/95 backdrop-blur-md border border-0 p-4 rounded-lg text-xs font-mono overflow-y-auto">
+          className="fixed inset-x-2 top-[60px] bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem))] z-[60] md:inset-x-auto md:top-auto md:bottom-6 md:right-6 md:w-[340px] md:max-h-[80vh] bg-card/95 backdrop-blur-md border border-0 p-4 rounded-lg text-xs font-mono overflow-y-auto">
           <div className="flex items-center justify-between border-b border-0 pb-2 mb-2">
             {/* Named for what it reports: the Zerodha connection (request rate,
                 cache, 429s) and the contract this chart is bound to. Distinct
@@ -14535,7 +14765,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
              </span>
           )}
           </div>
-          <MarketContext tabHidden={chartOverlayOpen} />
+          <MarketContext tabHidden={chartOverlayOpen || scalp} />
         </div>
 
       </div>
@@ -14552,7 +14782,46 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             tabs keep their own overflow-x so they still scroll; the controls sit
             OUTSIDE that scroller, because dropdowns opened from inside it would
             be clipped. */}
-        <div className={`items-center gap-2 px-0 pb-0 shrink-0 border-b border-white/10 bg-background md:px-2 ${isFocusedChart ? 'hidden' : 'flex'}`}>
+        {/* A SCALPPRO PANE'S TWO LINES: the chart's name, and its price with the
+            day's change (the same two spans the chart page's header fills). On
+            the spot pane the name opens the list of indices; on the option pane
+            the side is a button of its own — one tap flips Call and Put. */}
+        {scalp && (
+          <div data-scalp-head={paneRole} className="relative shrink-0 px-2.5 pt-1.5 pb-1 bg-background" onPointerDown={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
+              {isSpotPane ? (
+                <button type="button" data-scalp="index" onClick={() => setIndexMenuOpen(o => !o)}
+                  className="flex items-center gap-1 underline decoration-foreground/30 underline-offset-4">
+                  {indexLabel}<ChevronsUpDown size={12} className="text-muted-foreground" />
+                </button>
+              ) : scalpOpt ? (
+                <>
+                  <span data-scalp="option-name" className="truncate underline decoration-foreground/30 underline-offset-4">{scalpOpt.base}</span>
+                  <button type="button" data-scalp="side" onClick={flipOptionSide} disabled={flipBusy}
+                    className="shrink-0 flex items-center gap-1 disabled:opacity-50">
+                    {scalpOpt.side === 'PE' ? 'Put' : 'Call'}<ChevronsUpDown size={12} className="text-muted-foreground" />
+                  </button>
+                </>
+              ) : <span className="text-muted-foreground">—</span>}
+            </div>
+            <div className="flex items-baseline gap-1.5 whitespace-nowrap">
+              <span ref={headPriceRef} data-head="price" className="text-[13px] font-semibold tabular-nums text-foreground">—</span>
+              <span ref={headChangeRef} data-head="change" className="text-[11px] font-semibold tabular-nums" />
+            </div>
+            {isSpotPane && indexMenuOpen && (
+              <div data-scalp="index-menu" className="absolute left-2 top-full z-[60] min-w-[150px] bg-card border border-white/10 rounded-md shadow-2xl overflow-hidden">
+                {[{ k: 'NIFTY', label: 'NIFTY 50' }, { k: 'BANKNIFTY', label: 'BANK NIFTY' }, { k: 'SENSEX', label: 'SENSEX' }].map((o) => (
+                  <button key={o.k} type="button"
+                    onClick={() => { setUnderlying(o.k as any); setSelectedInstrument(null); setIndexMenuOpen(false); }}
+                    className={`w-full text-left px-3 py-2 text-xs transition-colors ${underlying === o.k ? 'bg-primary/15 text-primary font-bold' : 'text-foreground/80 active:bg-muted'}`}>
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        <div className={`items-center gap-2 px-0 pb-0 shrink-0 border-b border-white/10 bg-background md:px-2 ${isFocusedChart || scalp ? 'hidden' : 'flex'}`}>
           {/* The option pane hides the header, so without this the spot pane would
               be exactly one header taller and the two chart boxes would never line
               up. Same reservation trick as the option-reality strip: identical
@@ -14816,7 +15085,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               and the premium rule; only its tab is removed. */}
           <TradePnl sync={premSync} />
           </div>
-        <div ref={bottomBarRef} className={`fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-card md:bg-transparent border-t border-border md:border-0 px-3 py-1.5 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-nowrap md:flex-wrap justify-end md:shrink md:min-w-0 w-screen md:w-auto md:ml-auto md:mb-0 md:rounded-none md:border-0 md:bg-transparent max-w-[100vw] overflow-x-hidden md:overflow-visible`}>
+        <div ref={bottomBarRef} className={`fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-card md:bg-transparent border-t border-border md:border-0 px-3 py-1.5 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-wrap justify-end md:shrink md:min-w-0 w-screen md:w-auto md:ml-auto md:mb-0 md:rounded-none md:border-0 md:bg-transparent max-w-[100vw] overflow-x-hidden md:overflow-visible`}>
           {/* ON A PHONE THIS IS THE ROW OF FIVE (see THE LEMONN LAYOUT ON A PHONE):
               Range, Interval, Indicators, Drawings, Settings — an icon or a value
               with its name under it, in that order whatever the order below (the
@@ -14834,7 +15103,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               {rangeOpen && (
                 <>
                   <div className="fixed inset-0 z-[88]" aria-hidden="true" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setRangeOpen(false); }} />
-                  <div data-range-sheet="" className="fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)] z-[90] bg-card border border-white/10 rounded-xl shadow-2xl overflow-hidden">
+                  <div data-range-sheet="" className="fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem))] z-[90] bg-card border border-white/10 rounded-xl shadow-2xl overflow-hidden">
                     {([['1D', '1D'], ['2D', '2D'], ['5D', '5D'], ['1M', '1M'], ['ALL', 'All']] as const).map(([k, label]) => (
                       <button key={k} type="button" data-range-pick={k} onClick={() => applyRange(k)}
                         className={`w-full flex items-center justify-between px-3 py-2.5 text-left text-[13px] font-medium active:bg-muted ${rangeChoice === k ? 'text-primary' : 'text-foreground'}`}>
@@ -14909,7 +15178,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 // the button — the tool bar is at the top of the chart there, and the
                 // old two-item menu opened upwards, off the top of the page; seven
                 // rows would have left only the last of them on screen.
-                <div data-draw-sheet="" className="fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)] md:bottom-auto md:top-full md:mt-2 md:right-0 z-[90] md:w-60 bg-card border border-white/10 rounded-xl md:rounded-lg shadow-2xl md:shadow-xl overflow-hidden">
+                <div data-draw-sheet="" className="fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem))] md:bottom-auto md:top-full md:mt-2 md:right-0 z-[90] md:w-60 bg-card border border-white/10 rounded-xl md:rounded-lg shadow-2xl md:shadow-xl overflow-hidden">
                   <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Drawing Tools</div>
                   {(rrBox || (split && peerRrBox)) && (
                     // Split view: one sheet for both charts, so it clears a box on either of them.
@@ -14997,7 +15266,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   onClick={(e) => { e.preventDefault(); e.stopPropagation(); }} />
               )}
               {isIndicatorsOpen && (
-                <div className="fixed md:absolute inset-x-0 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto md:overflow-hidden bg-card border-y border-white/10 md:border-0 rounded-none md:rounded-md py-1.5 z-[45] shadow-2xl flex flex-col">
+                <div className="fixed md:absolute inset-x-0 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem))] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto md:overflow-hidden bg-card border-y border-white/10 md:border-0 rounded-none md:rounded-md py-1.5 z-[45] shadow-2xl flex flex-col">
                   <div className="order-0 px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase">Available Indicators</div>
                   
                   {/* Previous Day High/Low */}
@@ -15818,7 +16087,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           )}
           <div data-settings-sheet={phoneSettingsOpen ? 'open' : 'closed'}
             className={`${phoneSettingsOpen && !isPane
-              ? 'max-md:flex max-md:fixed max-md:inset-x-2 max-md:bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)] max-md:z-[90] max-md:flex-col max-md:items-stretch max-md:gap-0 max-md:max-w-none max-md:overflow-visible max-md:rounded-xl max-md:border max-md:border-white/10 max-md:bg-card max-md:p-1.5 max-md:shadow-2xl'
+              ? 'max-md:flex max-md:fixed max-md:inset-x-2 max-md:bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem))] max-md:z-[90] max-md:flex-col max-md:items-stretch max-md:gap-0 max-md:max-w-none max-md:overflow-visible max-md:rounded-xl max-md:border max-md:border-white/10 max-md:bg-card max-md:p-1.5 max-md:shadow-2xl'
               : isPane ? 'flex' : 'max-md:hidden flex'} items-center gap-2 flex-none max-w-[45%] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents md:min-w-0 md:basis-auto pr-1`}>
           {/* Trailing TP, beside Quick Trade. Distinct icon and colour so the two
               switches are not mistaken for each other at a glance.
@@ -15929,6 +16198,24 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           )}
 
           </div>
+          {/* OPTION CHAIN | SCALPPRO, as Lemonn's chart screen ends (phone). A
+              second row of this bar, so the chart above stops at it like at the
+              row of five (the chart is sized to the bar's top). 3rem tall with
+              the bar's own gap between its two rows: see --chart-bar-h. Option
+              Chain opens the Chain page; ScalpPro swaps this page for the
+              two-chart screen. */}
+          {barRowShown && (
+            <div data-bar-row="scalp" className="md:hidden basis-full w-full flex items-center gap-2">
+              <button type="button" data-bar="chain" onClick={() => navigate('/option-chain')}
+                className="flex-1 h-10 rounded-lg border border-border text-[13px] font-semibold text-foreground flex items-center justify-center gap-2 active:bg-foreground/10">
+                <Link2 size={15} /> Option Chain
+              </button>
+              <button type="button" data-bar="scalp" onClick={openScalp}
+                className="flex-1 h-10 rounded-lg bg-foreground text-background text-[13px] font-semibold flex items-center justify-center gap-2 active:opacity-80">
+                <CandlestickChart size={15} /> ScalpPro
+              </button>
+            </div>
+          )}
         </div>
         </div>
 
@@ -15971,8 +16258,15 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               taller than a short phone chart): its last row, "CE Chart | PE
               Chart", could not be pressed. Found by pressing every row of it on
               the phone before this shipped. The 1 is below the header's menus
-              (30), the tool bar (40) and everything that floats. */}
-          <div data-layout="chart" className="relative max-md:isolate max-md:z-[1] flex-grow flex w-full bg-card rounded-none min-h-0 md:min-h-[450px]" onMouseLeave={() => setCrosshairInfo(null)}>
+              (30), the tool bar (40) and everything that floats. (It beats the
+              RSI pane only because that pane closes off its own layers too —
+              see max-md:isolate there.) */}
+          {/* scalp → overflow-hidden: on the ScalpPro screen a chart can be dragged
+              down to nothing (the handle gives the other chart the screen), and
+              the buttons that sit over it — zoom, interval, the "i" — are placed
+              from its edges, so with no height they came out over the name above
+              and the Buy / Sell bar below. Cut off at the chart's own box. */}
+          <div data-layout="chart" className={`relative max-md:isolate max-md:z-[1] flex-grow flex w-full bg-card rounded-none min-h-0 md:min-h-[450px] ${scalp ? 'overflow-hidden' : ''}`} onMouseLeave={() => setCrosshairInfo(null)}>
             {/* Leverage meter — why the premium is moving more (or less) than the
                 index right now. Display only: pointer-events-none, so it can never
                 block a drag, a crosshair, or a level being placed. */}
@@ -16076,20 +16370,20 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 <div
                   data-chip={which}
                   onPointerDown={startChipDrag(which)}
-                  title={quickTradeEnabled ? `Drag to move the ${which === 'sl' ? 'stop' : 'target'}` : 'Switch Quick Trade on to move this'}
+                  title={quickTradeEnabled || scalp ? `Drag to move the ${which === 'sl' ? 'stop' : 'target'}` : 'Switch Quick Trade on to move this'}
                   // The padding is the touch target (the chip itself is 20px
                   // tall); the negative margin stops it pushing the row apart.
-                  className={`pointer-events-auto relative flex flex-col items-center px-2 -mx-2 py-1 -my-1 ${quickTradeEnabled ? 'cursor-ns-resize' : 'cursor-default'}`}
+                  className={`pointer-events-auto relative flex flex-col items-center px-2 -mx-2 py-1 -my-1 ${quickTradeEnabled || scalp ? 'cursor-ns-resize' : 'cursor-default'}`}
                   style={{ touchAction: 'none' }}
                 >
-                  <ChevronsUp size={11} strokeWidth={2.5} className={`${which === 'sl' ? 'text-rose-400' : 'text-emerald-400'} ${quickTradeEnabled ? 'opacity-90' : 'opacity-0'}`} />
+                  <ChevronsUp size={11} strokeWidth={2.5} className={`${which === 'sl' ? 'text-rose-400' : 'text-emerald-400'} ${quickTradeEnabled || scalp ? 'opacity-90' : 'opacity-0'}`} />
                   <span
                     ref={which === 'tp' ? chipTpLabelRef : undefined}
                     className={`h-5 min-w-[26px] px-1.5 rounded-[5px] text-[11px] font-bold leading-5 text-center text-white shadow ${which === 'sl' ? 'bg-rose-500' : 'bg-emerald-600'}`}
                   >
                     {which === 'sl' ? 'SL' : 'TP'}
                   </span>
-                  <ChevronsDown size={11} strokeWidth={2.5} className={`${which === 'sl' ? 'text-rose-400' : 'text-emerald-400'} ${quickTradeEnabled ? 'opacity-90' : 'opacity-0'}`} />
+                  <ChevronsDown size={11} strokeWidth={2.5} className={`${which === 'sl' ? 'text-rose-400' : 'text-emerald-400'} ${quickTradeEnabled || scalp ? 'opacity-90' : 'opacity-0'}`} />
                 </div>
               );
               const offChip = (which: 'sl' | 'tp') => (
@@ -16673,9 +16967,39 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 </div>
               </div>
             )}
+            {/* SCALPPRO: zoom in and out beside the price axis, and the interval
+                in the corner where the two axes meet — each chart has its own,
+                as in Lemonn. z-[44]: above the chips and the drawing tools. */}
+            {scalp && (
+              <>
+                <button type="button" data-scalp="zoom-in" aria-label="Zoom in" onClick={() => zoomChart(0.7)}
+                  className="absolute right-[58px] top-1.5 z-[44] h-7 w-7 rounded-full flex items-center justify-center text-muted-foreground active:bg-foreground/10">
+                  <ZoomIn size={16} />
+                </button>
+                <button type="button" data-scalp="zoom-out" aria-label="Zoom out" onClick={() => zoomChart(1 / 0.7)}
+                  className="absolute right-[58px] bottom-8 z-[44] h-7 w-7 rounded-full flex items-center justify-center text-muted-foreground active:bg-foreground/10">
+                  <ZoomOut size={16} />
+                </button>
+                <label data-scalp="interval" className="absolute right-0 bottom-0 z-[44] h-[26px] min-w-[52px] flex items-center justify-center gap-0.5 px-1 text-[11px] font-semibold text-foreground bg-card">
+                  {tfLabelOf(timeframe)}<ChevronDown size={11} className="text-muted-foreground" />
+                  <select value={timeframe} onChange={(e) => setTimeframe(e.target.value)} aria-label="Interval" className="absolute inset-0 h-full w-full opacity-0">
+                    <option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="15">15m</option>
+                    <option value="60">1h</option><option value="240">4h</option><option value="1440">1D</option>
+                  </select>
+                </label>
+              </>
+            )}
+            {/* The option pane before it has an option: without a contract this
+                component falls back to the index, and the index must not flash
+                up in the lower half while the first option is being found. */}
+            {scalp && isOptionPane && !selectedInstrument && (
+              <div className="absolute inset-0 z-[130] bg-background flex items-center justify-center">
+                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+              </div>
+            )}
           </div>
           {/* Divider between chart and RSI: visual border + drag to resize the RSI pane */}
-          {showRsi && (
+          {showRsi && !scalp && (
             <div
               onPointerDown={(e) => {
                 const h = rsiPaneRef.current?.getBoundingClientRect().height || 140;
@@ -16712,7 +17036,21 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               pushing the option-reality strip under the bottom bar. */}
 
           {/* RSI Chart */}
-          <div ref={rsiPaneRef} style={rsiPaneHeight ? { height: `${rsiPaneHeight}px` } : undefined} className={`relative w-full shrink-0 h-[140px] md:h-[200px] ${!showRsi ? 'hidden' : ''}`}>
+          {/* max-md:isolate — THE PANE'S OWN LAYERS STAY IN THE PANE (phone). The
+              charting library numbers its canvases 1 and 2, and with nothing
+              closing them off those numbers were weighed against the chart box
+              above (numbered 1, see max-md:z-[1] there): the canvases, equal or
+              higher and later in the page, won, and whatever hangs out of the
+              bottom of the chart went under them. The strike menu hangs out
+              whenever the chart is shorter than it (224px). v301's 1 put the
+              chart box above the divider and the pane's own background, and on
+              a 664px-tall phone that was as far down as the menu's last row
+              came. Then the tool bar took a second row (16 Nov 2026), the chart
+              on that phone went from about 199px to 151px, and the row —
+              "CE Chart | PE Chart" — landed on the canvases: it could not be
+              pressed again. Closed off, the pane is one layer with no number of
+              its own, and the chart box's 1 is above all of it. */}
+          <div ref={rsiPaneRef} style={rsiPaneHeight ? { height: `${rsiPaneHeight}px` } : undefined} className={`relative max-md:isolate w-full shrink-0 h-[140px] md:h-[200px] ${!showRsi || scalp ? 'hidden' : ''}`}>
             <div
               ref={rsiContainerRef}
               className="bg-card border border-0 rounded-none overflow-hidden w-full h-full absolute inset-0"
@@ -16723,6 +17061,55 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                </div>
             )}
           </div>
+          {/* THE SCALPPRO BAR (see THE BUY / SELL BAR). Buy on the left, the size
+              in the middle, Sell on the right; what each needs and the funds
+              under them. While a trade is open in this contract the button that
+              would go against it is Exit. */}
+          {scalpBarOn && (
+            <div data-scalp-bar="" className="shrink-0 border-t border-border bg-background px-2 pt-2 pb-1.5 select-none">
+              <div className="flex items-center gap-2">
+                {scalpPos && scalpPos.side === 'SELL' ? (
+                  <button type="button" data-scalp="exit" disabled={!!scalpBusy} onClick={scalpExit}
+                    className="flex-1 h-11 rounded-lg bg-rose-500 text-white text-[13px] font-bold flex items-center justify-center disabled:opacity-60 active:opacity-80">
+                    {scalpBusy === 'EXIT' ? <Loader2 size={16} className="animate-spin" /> : 'Exit'}
+                  </button>
+                ) : (
+                  <button type="button" data-scalp="buy" disabled={!!scalpBusy || !(scalpLot > 0)} onClick={() => scalpPlace('BUY')}
+                    className="flex-1 h-11 rounded-lg bg-emerald-500 text-white text-[13px] font-bold flex items-center justify-center disabled:opacity-60 active:opacity-80">
+                    {scalpBusy === 'BUY' ? <Loader2 size={16} className="animate-spin" /> : 'Buy at Mkt'}
+                  </button>
+                )}
+                <div className="shrink-0 flex items-center gap-1.5">
+                  <button type="button" data-scalp="lots-minus" aria-label="One lot less" disabled={scalpLots <= 1 || !!scalpBusy}
+                    onClick={() => setScalpLots(l => Math.max(1, l - 1))}
+                    className="h-8 w-8 rounded-full border border-border flex items-center justify-center text-foreground disabled:opacity-40 active:bg-foreground/10"><Minus size={14} /></button>
+                  <div className="min-w-[46px] text-center leading-tight">
+                    <div data-scalp="qty" className="text-[14px] font-bold tabular-nums text-foreground">{scalpQty > 0 ? scalpQty : '—'}</div>
+                    <div data-scalp="lots" className="text-[9px] text-muted-foreground">{scalpLots} lot{scalpLots > 1 ? 's' : ''}</div>
+                  </div>
+                  <button type="button" data-scalp="lots-plus" aria-label="One lot more" disabled={scalpLots >= 25 || !!scalpBusy}
+                    onClick={() => setScalpLots(l => Math.min(25, l + 1))}
+                    className="h-8 w-8 rounded-full border border-border flex items-center justify-center text-foreground disabled:opacity-40 active:bg-foreground/10"><Plus size={14} /></button>
+                </div>
+                {scalpPos && scalpPos.side !== 'SELL' ? (
+                  <button type="button" data-scalp="exit" disabled={!!scalpBusy} onClick={scalpExit}
+                    className="flex-1 h-11 rounded-lg bg-rose-500 text-white text-[13px] font-bold flex items-center justify-center disabled:opacity-60 active:opacity-80">
+                    {scalpBusy === 'EXIT' ? <Loader2 size={16} className="animate-spin" /> : 'Exit'}
+                  </button>
+                ) : (
+                  <button type="button" data-scalp="sell" disabled={!!scalpBusy || !(scalpLot > 0)} onClick={() => scalpPlace('SELL')}
+                    className="flex-1 h-11 rounded-lg border border-foreground/60 text-foreground text-[13px] font-bold flex items-center justify-center disabled:opacity-60 active:bg-foreground/10">
+                    {scalpBusy === 'SELL' ? <Loader2 size={16} className="animate-spin" /> : 'Sell at Mkt'}
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center mt-1 text-[9px] text-muted-foreground tabular-nums">
+                <span data-scalp="req-buy" className="flex-1 text-center">{scalpPos && scalpPos.side === 'SELL' ? '' : `Req: ${scalpRs(scalpReqNow.buy)}`}</span>
+                <span data-scalp="funds" className="shrink-0 px-1">Funds: {scalpRs(availBalance)}</span>
+                <span data-scalp="req-sell" className="flex-1 text-center">{scalpPos && scalpPos.side !== 'SELL' ? '' : `Req: ${scalpRs(scalpReqNow.sell)}`}</span>
+              </div>
+            </div>
+          )}
         </div>
       )}
       
@@ -17375,7 +17762,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           desktop split view the other half carried a blank row of the strip's
           height so the two charts matched; with no strip on either side that row
           is gone too, and both charts are that much taller.) */}
-      {isOptionView && <div ref={underBarRef} data-layout="under-bar" className="md:hidden shrink-0" aria-hidden="true" />}
+      {isOptionView && !scalp && <div ref={underBarRef} data-layout="under-bar" className="md:hidden shrink-0" aria-hidden="true" />}
 
       {/* "Check bias" card (public/bias-panel.js) under the chart, phone layout
           only — on desktop the workspace puts one card under BOTH panes, so the
@@ -17384,7 +17771,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           when expanded. The bottom margin clears the fixed toolbar, as the
           option-reality strip does. */}
       {!isPane && !isOptionView && !isFocusedChart && !biasCardHidden && (
-        <div className="shrink-0 px-1 pt-1 max-md:mb-[3.25rem] max-h-[42vh] overflow-y-auto">
+        <div className="shrink-0 px-1 pt-1 max-md:mb-[var(--chart-bar-h,3.25rem)] max-h-[42vh] overflow-y-auto">
           <bias-panel compact="" />
         </div>
       )}
