@@ -55,3 +55,25 @@ export function contractName(tradingsymbol: string): string {
   if (!p || p.strike == null) return String(tradingsymbol || '');
   return `${p.underlying} ${p.strike} ${p.optionType}${p.expiryLabel ? ` ${p.expiryLabel}` : ''}`;
 }
+
+const MONTH_TITLE = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+/**
+ * A contract as Lemonn's order list writes it: NIFTY26N1725250CE ->
+ * "NIFTY 17 Nov 26 - 25250 CE". A monthly symbol carries no day, so it reads
+ * "BANK NIFTY Mar 27 - 58500 CE". Falls back to the raw symbol.
+ */
+export function orderName(tradingsymbol: string): string {
+  const ts = String(tradingsymbol || '').trim().toUpperCase();
+  const m = ts.match(/^([A-Z]+?)(\d.*)(CE|PE)$/);
+  if (!m) return String(tradingsymbol || '');
+  const [, rawUnder, middle, type] = m;
+  const underlying = UNDERLYING_LABEL[rawUnder] || rawUnder;
+  const monthly = middle.match(/^(\d{2})([A-Z]{3})(\d+)$/);
+  if (monthly && MONTH_ABBR.includes(monthly[2])) {
+    return `${underlying} ${MONTH_TITLE[MONTH_ABBR.indexOf(monthly[2])]} ${monthly[1]} - ${Number(monthly[3])} ${type}`;
+  }
+  const weekly = middle.match(/^(\d{2})([1-9OND])(\d{2})(\d+)$/);
+  const mon = weekly ? WEEKLY_MONTH[weekly[2]] : 0;
+  if (weekly && mon) return `${underlying} ${weekly[3]} ${MONTH_TITLE[mon - 1]} ${weekly[1]} - ${Number(weekly[4])} ${type}`;
+  return String(tradingsymbol || '');
+}

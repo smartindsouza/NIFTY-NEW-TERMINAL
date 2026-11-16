@@ -180,6 +180,59 @@ Code: `server/trade_charges.ts`; wiring in `server.ts` (journal import, read,
 correction, export); page `src/pages/TradeJournal.tsx`.
 Test: `npx tsx server/trade_charges.test.ts`.
 
+## Trade Journal: the page is Lemonn's Positions screen (v315)
+
+`src/pages/TradeJournal.tsx`, arithmetic in `src/lib/journalStats.ts`. Martin
+sent four pictures of Lemonn — Positions, the wallet, Orders, Historical P&L —
+and asked for the journal to be laid out as they are, "100% exact". Every size
+on the page is measured off those pictures (1290px wide: a 430pt phone at 3
+pixels a point) and the page's own pictures were measured back against them;
+the ink is within a third of a point of Lemonn's. Surfaces and text are the
+app's theme (dark and light), the chips and the reds, greens and blues are
+Lemonn's. Nothing the old page knew was dropped. Three screens:
+
+- **`/journal`** — the title and one round button (the wallet); then:
+  - **The card.** Total Returns (the two arrowheads switch it to Net Returns,
+    after charges — remembered), D | W | M | Y, Unrealised and Realised
+    Returns, and a row Lemonn does not have: Total Trades, Win Rate, Charges.
+    Under a line, the week's five days as dots (red a loss, green a profit,
+    blue today; the eye hides the colours) and "P&L Analysis".
+  - **Open | History.** Until one is tapped it is Open when a trade is open and
+    History otherwise. Under it the trades, a day to a row, newest first, the
+    newest open; ten days at a time, then "Load more". A trade's card has when
+    it went in and out, a chip for how it ended (Open, Target, Stop, Manual,
+    Kite …) and one for Buy or Sell, the contract as Lemonn writes it
+    ("NIFTY 17 Nov 26 - 25250 CE"), Qty, Entry and Exit prices, and what it
+    made (an open trade: what it is making, live). A tap opens the rest:
+    charges and their breakdown, gross, net, the balance after, what the chart
+    showed at the entry, Correct price, and Delete (two taps). A day's
+    "Opened … Left …" line closes its cards.
+  - **Filter** — All, Today, 7 days, 30 days or a custom range; Calls or Puts;
+    Profit or Loss — and the three actions the old header had: Import from
+    Kite, Refresh, Excel (for the range chosen; "All" is from the first trade).
+- **`/journal/funds`** — the wallet button: Zerodha's Available Margin, Used
+  Margin, and under "View details" the rest of its margin statement, with the
+  account's id. Lemonn's has Deposit, Withdraw and All Transactions; Zerodha
+  gives an app none of those, so they are not there.
+- **`/journal/analysis`** — Historical P&L: Today's | Week | Month | Year, each
+  stepped back and forth, a total card (green, or red for a loss), and a
+  breakdown — the month as a calendar, a week's days, a month's weeks, a
+  year's months — whose cells are coloured by what they made. A tap on a cell
+  goes one step closer; a day lists its trades. The two round buttons jump to
+  a date and download the period as Excel.
+
+**The card's day turns over at 9:00 AM IST, not at midnight** (`sessionDay`).
+Midnight in India is 10:30 PM in Dubai, and the evening is when a day's trades
+are looked at; "D" stays on the session that has just ended through the night,
+as a broker's positions page does. What names a date — "Today", "Yesterday",
+the calendar's Today cell — still goes by the date in India.
+
+The whole journal is loaded once (`/api/journal?limit=20000`) and every period
+is cut from it in the browser. What is open comes from `/api/positions-live`,
+the banner's own question, every five seconds while the page is up; when a
+position opens or closes the journal is read again. Nothing on the server
+changed. Test: `npx tsx src/lib/journalStats.test.ts`.
+
 ## Trade guard: every order that opens a trade
 
 `server/trade_guard.ts`. Martin's own rules — no new trade before 10:00, 4 trades
