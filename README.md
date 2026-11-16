@@ -177,6 +177,26 @@ Code: `server/trade_charges.ts`; wiring in `server.ts` (journal import, read,
 correction, export); page `src/pages/TradeJournal.tsx`.
 Test: `npx tsx server/trade_charges.test.ts`.
 
+## Trade guard: every order that opens a trade
+
+`server/trade_guard.ts`. Martin's own rules — no new trade before 10:00, 4 trades
+a day, stop for the day at ₹3,000 loss. A rule can be tightened at once and
+relaxed only from the next trading day. It is checked for:
+
+- the order ticket and Quick Trade (`POST /api/orders` with `journal: true`);
+- My Order — the count and loss rules when it is created, every rule when it
+  fires;
+- armed orders (`server/triggers.ts`), since 16 Nov 2026 — the same two checks.
+  One refused at its level is marked FAILED with the rule as the reason
+  ("… No order sent.") and is announced as "Order NOT placed".
+
+An order that CLOSES a position is never checked: an armed sell against a long
+that is held, an armed buy against a short. If the positions cannot be read a
+buy is treated as an entry and a sell is let through. The Telegram auto-trade
+has its own limits and is not touched.
+
+`npx tsx server/trade_guard.test.ts`, `npx tsx server/triggers.test.ts`.
+
 ## Home: open-interest totals over every strike
 
 The Home screen's "Open Interest Distribution" card adds up **every strike** of the

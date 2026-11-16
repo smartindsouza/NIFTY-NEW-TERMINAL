@@ -20,6 +20,13 @@
 //   * FAILURES ARE RECORDED, never retried silently. A trigger that could not be
 //     placed is marked FAILED with the reason and stops; a silent retry loop
 //     against a broker is how one intended trade becomes five.
+//   * THE TRADE GUARD APPLIES (16 Nov 2026). An armed order that would OPEN a
+//     position is checked against Martin's own rules twice: the count and loss
+//     rules when it is armed, and every rule — the start time too — at the
+//     moment its level is reached. Refused at that moment, it is marked FAILED
+//     with the rule as the reason and no order is sent. An armed order that
+//     CLOSES a position he holds is never checked. Until this date armed orders
+//     were not checked at all (see ARMED ORDERS in server/trade_guard.ts).
 
 import express from 'express';
 import { getKiteClient } from './kite_service';
@@ -43,9 +50,28 @@ export function marketOpenFor(dateStr: string, weekday: number, minuteOfDay: num
   return minuteOfDay >= TRIGGER_WINDOW.openMin && minuteOfDay <= TRIGGER_WINDOW.closeMin;
 }
 function marketOpenNow(): boolean {
+  if (__test.marketOpen !== null) return __test.marketOpen;
   const x = istNow();
   return marketOpenFor(istDate(), x.getUTCDay(), istMinuteOfDay(), isNseHoliday(istDate()));
 }
+
+// The trade guard's check for an armed order (server/trade_guard.ts →
+// guardOrderBlock). Handed in by server.ts rather than imported, so this file
+// keeps working — unguarded, as before — if the guard failed to start.
+type GuardFn = (o: { tradingsymbol: string; side: string }, opts?: { ignoreTime?: boolean }) => Promise<string | null>;
+let guardFn: GuardFn | null = null;
+export function setTriggerGuard(fn: GuardFn | null) { guardFn = fn; }
+// A check that throws must never stop an order: that is the guard's own rule
+// (a broker hiccup skips the count and loss rules), kept here as well.
+async function guardSays(row: { tradingsymbol: string; side: string }, opts?: { ignoreTime?: boolean }): Promise<string | null> {
+  if (!guardFn) return null;
+  try { return await guardFn({ tradingsymbol: String(row.tradingsymbol), side: String(row.side) }, opts); }
+  catch (e) { console.error('[triggers] guard check failed — order allowed', e); return null; }
+}
+
+// Tests only: lets a test fire a level outside market hours, and send the order
+// to its own stand-in for /api/orders. Nothing in the app sets these.
+export const __test: { marketOpen: boolean | null; place: null | ((row: any) => Promise<{ ok: boolean; orderId?: string; error?: string }>) } = { marketOpen: null, place: null };
 
 /** Pure: which way must price move to reach the level, decided when arming. */
 export function directionFor(triggerPrice: number, currentPrice: number): 'UP' | 'DOWN' {
@@ -168,6 +194,7 @@ async function sizeAtFire(row: any, ltp: number): Promise<{ qty: number; note: s
 }
 
 async function placeThroughOwnApi(row: any): Promise<{ ok: boolean; orderId?: string; error?: string }> {
+  if (__test.place) return __test.place(row);
   const port = process.env.PORT || 3000;
   try {
     // 127.0.0.1 with proxy explicitly OFF: this must never be routed through the
@@ -215,7 +242,20 @@ export function onTickForTriggers(token: number, ltp: number) {
     if (!claimed) continue;
 
     console.log(`[triggers] ${row.side} ${row.quantity} ${row.tradingsymbol} — level ${row.trigger_price} reached at ${ltp}`);
-    sizeAtFire(row, ltp).then((sz) => {
+    // THE TRADE GUARD, at the moment that matters. Asked AFTER the claim, so a
+    // level reached while the guard is still thinking cannot be claimed twice;
+    // and before the sizing, so a refused order costs the broker nothing.
+    guardSays(row).then((g) => {
+      if (!g) return sizeAtFire(row, ltp);
+      const why = `${g} No order sent.`;
+      try {
+        db.prepare(`UPDATE pending_triggers SET status='FAILED', fired_at=?, error=? WHERE id=?`)
+          .run(Date.now(), why.slice(0, 300), row.id);
+      } catch (e) {}
+      console.warn(`[triggers] NOT PLACED ${row.tradingsymbol} — trade guard: ${g}`);
+      return null;
+    }).then((sz) => {
+      if (!sz) return null;
       if (sz.fail) {
         try {
           db.prepare(`UPDATE pending_triggers SET status='FAILED', fired_at=?, error=? WHERE id=?`)
@@ -263,6 +303,16 @@ export function registerTriggers(app: any, database: any) {
       if (!(currentPrice > 0)) return res.status(400).json({ ok: false, error: 'current price required to decide direction' });
       if (side !== 'BUY' && side !== 'SELL') return res.status(400).json({ ok: false, error: 'side must be BUY or SELL' });
       if (product !== 'MIS' && product !== 'NRML') return res.status(400).json({ ok: false, error: 'product must be MIS or NRML' });
+
+      // THE TRADE GUARD, when arming: the rules that cannot come right again
+      // today — the day's trade count and the loss limit. The start time is
+      // left for the moment the level is reached: an order armed at 9:40 may
+      // well be meant for 10:20. `force` (the margin warning's "arm anyway")
+      // does not get past this; it answers a different question.
+      {
+        const g = await guardSays({ tradingsymbol: String(b.tradingsymbol).toUpperCase(), side }, { ignoreTime: true });
+        if (g) return res.status(403).json({ ok: false, guard: true, error: g });
+      }
 
       // MARGIN PRE-CHECK. Two of Martin's armed entries were rejected by Zerodha
       // at the moment the level was reached — for insufficient funds — after he

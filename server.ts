@@ -30,7 +30,7 @@ import { buildMarketSnapshot } from './server/market_snapshot';
 // its README gives, which works under both tsx (dev) and the esbuild bundle.
 import biasCheck from './server/bias.cjs';
 const { createBiasRouter } = biasCheck as any;
-import { registerTriggers, armedTriggerTokens, onTickForTriggers } from './server/triggers';
+import { registerTriggers, armedTriggerTokens, onTickForTriggers, setTriggerGuard } from './server/triggers';
 // Telegram channel calls → automatic 1-lot entries with the message's SL (23 Oct 2026).
 import { registerReversalWatch } from './server/reversal_watch';
 import { registerDhan, dhanConfigured } from './server/dhan_service';
@@ -38,7 +38,7 @@ import { buildDhanOrder, instrumentByKey } from './server/dhan_kite_adapter';
 import { activeBroker, getDhanKite, startDhanTrial, endDhanTrial } from './server/kite_service';
 import { registerChartRef } from './server/chart_ref';
 import { lastUs30Source } from './server/us30';
-import { registerTradeGuard, guardEntryBlock } from './server/trade_guard';
+import { registerTradeGuard, guardEntryBlock, guardOrderBlock } from './server/trade_guard';
 import { registerSignalTrader, signalOnTick, signalTokens, signalNoteManualRearm, signalManages, signalManagedLevels, signalNotify } from './server/signal_trader';
 import { registerFamilyTrader, familyOnTick, familyTokens } from './server/family_trader';
 import { currentLeg, needsLegAverage } from './server/leg_average';
@@ -3698,7 +3698,9 @@ setInterval(() => {
       notify: (text: string) => signalNotify(text),
     });
   } catch (e) { console.error('[reversal-watch] failed to start — trading unaffected', e); }
-  try { registerTradeGuard(app, express, { db, getKiteClient }); } catch (e) { console.error('[guard] failed to start — orders are unaffected', e); }
+  // Armed orders are handed the guard's check only once the guard itself has
+  // started: if it did not, they go on unguarded, exactly as they were.
+  try { registerTradeGuard(app, express, { db, getKiteClient }); setTriggerGuard(guardOrderBlock); } catch (e) { console.error('[guard] failed to start — orders are unaffected', e); }
   // Today's Bias: the 09:33 IST note posted by the scheduled task (same key).
   registerBias(app, db);
 

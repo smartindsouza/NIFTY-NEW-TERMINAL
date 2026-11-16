@@ -9,11 +9,23 @@
 //   • once the day's P&L reaches −₹3,000, no more entries today.
 //
 // WHAT IT BLOCKS: only OPENING orders that Martin places himself — the order
-// ticket / Quick Trade (POST /api/orders with journal:true) and My Order
-// entries. It NEVER blocks an exit, an SL/TP, Exit All or a square-off: a guard
+// ticket / Quick Trade (POST /api/orders with journal:true), My Order entries
+// and, since 16 Nov 2026, ARMED ORDERS (server/triggers.ts; see ARMED ORDERS
+// below). It NEVER blocks an exit, an SL/TP, Exit All or a square-off: a guard
 // that could trap him in a losing position would be worse than no guard. The
 // Telegram auto-trader and his wife's account are separate systems with their
 // own limits and are not touched.
+//
+// ARMED ORDERS (16 Nov 2026). An order armed at a level went to the broker
+// through /api/orders WITHOUT journal:true, so nothing checked it: a fifth trade
+// of the day, or one after the loss limit, could still be armed and would fire.
+// Asked whether the guard should cover "Market, Limit/Trigger, and the armed
+// orders you have today, which it does not check now", Martin chose "Yes, all
+// entries". They are checked the way My Order is: the count and loss rules when
+// the order is armed (the start time is not, because it may be armed at 9:40 to
+// fire at 10:20), and every rule at the moment the level is reached. An armed
+// order can also be an EXIT — a sell armed above a long he is holding — so it is
+// checked only when it would OPEN a position: see isOpeningOrder.
 //
 // LOOSENING WAITS UNTIL TOMORROW: the moment a rule bites is exactly when it is
 // tempting to switch it off. So a change that makes a rule stricter applies at
@@ -95,7 +107,9 @@ function telegramOrderIds(day: string): Set<string> {
   } catch { return new Set(); }
 }
 
-type Measured = { entries: number | null; dayPnl: number | null; errors: string[] };
+// net: the account's net positions as the broker returned them (null when they
+// could not be read) — what tells an armed order that opens from one that exits.
+type Measured = { entries: number | null; dayPnl: number | null; errors: string[]; net: any[] | null };
 let cache: { at: number; v: Measured } | null = null;
 // ONE BROKER READ FOR POLLS THAT ARRIVE TOGETHER (16 Nov 2026). The 5 s cache
 // below is only filled AFTER both Kite calls return, so status polls that landed
@@ -115,7 +129,7 @@ async function measure(force = false): Promise<Measured> {
 }
 async function readBroker(): Promise<Measured> {
   const errors: string[] = [];
-  let entries: number | null = null, dayPnl: number | null = null;
+  let entries: number | null = null, dayPnl: number | null = null, netRows: any[] | null = null;
   const kc = D!.getKiteClient();
   if (!kc || !kc.access_token) errors.push('Zerodha not logged in');
   else {
@@ -129,6 +143,7 @@ async function readBroker(): Promise<Measured> {
     try {
       const pos = await kc.getPositions();
       const net: any[] = (pos && pos.net) || [];
+      netRows = net;
       dayPnl = Math.round(net.reduce((s, p) => {
         const bv = Number(p.buy_value), sv = Number(p.sell_value);
         const ltp = Number(p.last_price) || Number(p.average_price) || 0;
@@ -136,7 +151,7 @@ async function readBroker(): Promise<Measured> {
       }, 0));
     } catch (e: any) { errors.push(`positions: ${e?.message || e}`); }
   }
-  cache = { at: Date.now(), v: { entries, dayPnl, errors } };
+  cache = { at: Date.now(), v: { entries, dayPnl, errors, net: netRows } };
   return cache.v;
 }
 
@@ -160,6 +175,38 @@ export async function guardEntryBlock(opts: { ignoreTime?: boolean } = {}): Prom
     const m = await measure(true);
     return verdict(s.active, Date.now(), m.entries, m.dayPnl, !!opts.ignoreTime);
   } catch (e) { console.error('[guard] check failed — entry allowed', e); return null; }
+}
+
+// DOES THIS ORDER OPEN A POSITION, OR CLOSE ONE? Pure. `held` is the net
+// quantity of that contract in the account now (+ long, − short), or null when
+// the positions could not be read.
+//   BUY  — opens, unless a short in that contract is held (then it buys it back).
+//   SELL — closes a long that is held; with nothing held, or a short held, it
+//          opens (or adds to) a short.
+// When the positions are unknown a BUY is taken as opening and a SELL as
+// closing: the one mistake this must never make is to stop him getting out.
+export function isOpeningOrder(side: 'BUY' | 'SELL', held: number | null): boolean {
+  if (side === 'BUY') return !(held !== null && held < 0);
+  return held !== null && held <= 0;
+}
+export function heldQty(net: any[] | null, tradingsymbol: string): number | null {
+  if (!net) return null;
+  const sym = String(tradingsymbol || '').toUpperCase();
+  return net.reduce((q, p) => q + (String(p?.tradingsymbol || '').toUpperCase() === sym ? (Number(p?.quantity) || 0) : 0), 0);
+}
+
+// Called for an order whose side alone does not say whether it is an entry —
+// an armed order. Returns a reason to refuse, or null. An order that closes is
+// never refused; one that opens gets exactly the entry check above.
+export async function guardOrderBlock(o: { tradingsymbol: string; side: string }, opts: { ignoreTime?: boolean } = {}): Promise<string | null> {
+  try {
+    const s = load();
+    if (!s.active.enabled) return null;
+    const m = await measure(true);
+    const side = String(o.side || '').toUpperCase() === 'SELL' ? 'SELL' : 'BUY';
+    if (!isOpeningOrder(side, heldQty(m.net, o.tradingsymbol))) return null;
+    return verdict(s.active, Date.now(), m.entries, m.dayPnl, !!opts.ignoreTime);
+  } catch (e) { console.error('[guard] check failed — order allowed', e); return null; }
 }
 
 export function registerTradeGuard(app: any, express: any, deps: Deps) {
