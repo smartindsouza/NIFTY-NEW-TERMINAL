@@ -15531,10 +15531,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               and "Move the search button on the opposite side where the back
               button is present" — the app's bottom bar already goes everywhere
               the arrow went. The button is the arrow's own box (36px, the same
-              margins), so the tab beside it begins where it began: "Do not
-              increase the tab shaped top width ... Keep the width as it is".
-              The row's right end, where search was, is kept clear by a box of
-              the size search had there (data-head="tail"). Tapped, the button
+              margins), so the tab beside it begins where it began. The row's
+              right end, where search was, is kept clear by a box of the size
+              search had there (data-head="tail"), so the tabs are no wider for
+              it — and the index tab is the same width whether an option's chart
+              is open or not (see data-head="tab-room"). Tapped, the button
               gives way to the field, which opens in the header in place of the
               chart's name with its results below, as it did from the right. */}
           {!isPane && (phoneSearchOpen ? (
@@ -15686,6 +15687,15 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               </div>
               );
             })()}
+            {/* THE INDEX TAB IS THE SAME WIDTH WITH OR WITHOUT AN OPTION'S CHART
+                (17 Nov 2026). The two tabs split the row down the middle; with
+                no option chart open there was only one to share it, and the
+                index tab ran the whole row. Martin, after v312: "The nifty tab
+                still increases its width when the option chart tab is closed.
+                I want it to remain the same". So when there is no option tab,
+                an empty box takes the half it would have had. Phone only — the
+                desktop's tabs are as wide as their names. */}
+            {openCharts.length === 0 && !isOptionPane && <div data-head="tab-room" className="md:hidden min-w-0 flex-1 basis-0" aria-hidden="true" />}
 
             {/* Split view: close this half. On the option side that closes its
                 option charts (the split then goes back to one full chart); on

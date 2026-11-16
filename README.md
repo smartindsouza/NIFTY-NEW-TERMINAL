@@ -298,9 +298,12 @@ tool bar and the split view are untouched.
   title row is gone on a phone.
   - **No back arrow** (v312). It stood at the left until Martin had it removed
     and search moved into its place; the app's bottom bar goes everywhere it
-    went. The tab beside it is where it was and as wide as it was (he asked for
-    its width to be kept), so the row's right end, where search used to be, is
-    empty. ScalpPro keeps its own back arrow.
+    went. The row's right end, where search used to be, is empty, so the tabs
+    are no wider for it. ScalpPro keeps its own back arrow.
+  - **The index tab is one width** (v313): half the row, whether an option's
+    chart is open beside it or not. With no option chart open it used to run
+    the whole row and shrink when one was opened; Martin asked for it to stay
+    the same. The half an option's tab would take is simply left empty.
   - **The two choosers are folder tabs** (v309; Martin, of ScalpPro's top row:
     "Use the same design at the top for the main nifty screen"). The chart on
     screen is the tab, in the chart's own colour, so the tab, the price under
