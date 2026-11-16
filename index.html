@@ -14,11 +14,12 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="QuantTerminal" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <!-- Manrope: the face of the ScalpPro screen (it is Lemonn's; see SCALP_FONT in
-         src/pages/ChartWorkspace.tsx). Asked for here and not from the stylesheet:
-         the font @import in src/index.css is not in the stylesheet the build
-         produces (it follows other imports), so nothing asked for there reaches
-         the live app. Without it the screen falls back to the system face. -->
+    <!-- Manrope: the face of the whole app since v310 (it is Lemonn's; ScalpPro had
+         it from v308 — see --font-sans in src/index.css and SCALP_FONT in
+         src/pages/ChartWorkspace.tsx). Asked for here and not from the
+         stylesheet: a font @import in src/index.css is not in the stylesheet the
+         build produces (it follows other imports), so nothing asked for there
+         reaches the live app. Without it the app falls back to the system face. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400..800&display=swap" />

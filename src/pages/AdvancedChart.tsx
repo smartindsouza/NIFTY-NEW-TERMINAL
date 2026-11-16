@@ -1203,16 +1203,46 @@ const SCALP_NAME_LINE: React.CSSProperties = {
   backgroundSize: '100% 0.5px', backgroundPosition: '0 15.6px',
 };
 
+// THE OPTION CHART HAS ITS OWN INDICATOR SWITCHES, ALL OFF UNTIL HE TURNS ONE ON
+// (17 Nov 2026). Martin: "Remove all indicators in the option premium chart by
+// default." Every indicator's switch was one value in the browser, read by the
+// index chart and the option chart alike — so breaker blocks, liquidity grabs,
+// zones and volume switched on for NIFTY were drawn over a premium chart too,
+// where levels worked out for an index mean little. Each switch is now kept
+// twice: under its old name for an index chart (so nothing he has set there
+// changes), and under "opt:" + the name for an option chart, where one that has
+// never been set reads as off whatever its default is on the index. The list is
+// the same on both; a switch flipped on the option chart is the option chart's.
+// (indGet answers what localStorage.getItem did, so each switch's own reading of
+// its default is untouched: on an option chart it is simply never "not set".)
+const IND_OPT = (key: string) => `opt:${key}`;
+const indGet = (key: string, opt: boolean): string | null => {
+  try {
+    if (!opt) return localStorage.getItem(key);
+    const v = localStorage.getItem(IND_OPT(key));
+    // Session breaks are a small object, not a yes / no: not set means its own defaults, which are off.
+    return v !== null ? v : key === 'sessionBreaks' ? null : 'false';
+  } catch (e) { return opt && key !== 'sessionBreaks' ? 'false' : null; }
+};
+const indSet = (key: string, opt: boolean, value: string) => { try { localStorage.setItem(opt ? IND_OPT(key) : key, value); } catch (e) {} };
+
+// THE FACE A CHART DRAWS ITS FIGURES IN. Not the page's: a canvas is told its
+// font by name. `chartFontFamily` is the face the charts were in until 17 Nov
+// 2026 — the system's — and is what a chart falls back to.
 const chartFontFamily = (customFontUrl: string) =>
   (customFontUrl ? "'UserCustomFont', " : '') +
   "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
-// THE SCALPPRO CHARTS' FIGURES ARE IN MANROPE, as Lemonn's are (see SCALP_FONT in
-// ChartWorkspace for how the face was named; its chart scale is Manrope at 10px).
-// A chart is drawn on a canvas, which does not wait for a font: until Manrope
-// has arrived the chart is built in the usual face, and switched once it has
-// (see the font swap in the chart's build). The two strings must differ — the
-// library keeps the widths it measured per font string.
-const SCALP_CHART_FONT = (customFontUrl: string) => "'Manrope', " + chartFontFamily(customFontUrl);
+// EVERY CHART'S FIGURES ARE IN MANROPE (17 Nov 2026), as the rest of the app now
+// is: Martin, "use the Manrope fonts all over the app". (ScalpPro's two charts
+// had it a day earlier, when the face was named as Lemonn's — see SCALP_FONT in
+// ChartWorkspace; its chart scale is Manrope at 10px.) A chart is drawn on a
+// canvas, which does not wait for a font: until Manrope has arrived the chart
+// is built in the system face, and switched once it has (see the font swap in
+// the chart's build). The two strings must differ — the library keeps the
+// widths it measured per font string. A font of his own choosing still comes
+// first.
+const SCALP_CHART_FONT = (customFontUrl: string) =>
+  (customFontUrl ? "'UserCustomFont', " : '') + "'Manrope', -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
 const manropeReady = () => { try { return !!(document as any).fonts?.check?.("10px 'Manrope'"); } catch (e) { return false; } };
 
 // INDICATOR LINES ARE THIN AND SOLID (16 Nov 2026). Martin: "change the lines in
@@ -4068,6 +4098,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const isSpotPane = paneRole === 'spot';
   const isOptionPane = paneRole === 'option';
   const isPane = paneRole === 'spot' || paneRole === 'option';
+  // WHICH SET OF INDICATOR SWITCHES THIS CHART READS (see THE OPTION CHART HAS ITS
+  // OWN INDICATOR SWITCHES). An option pane is an option chart from the start.
+  // The single chart of the phone's chart page is whichever its tab says, which
+  // is not known this early: it starts as an index chart and is corrected, and
+  // corrected again on every change of tab, by the effect beside isOptionView.
+  const optKindRef = useRef<boolean>(paneRole === 'option');
 
   // LIVE SIGNAL on the chart. Same endpoint, same 30s poll and the SAME query
   // key as the Live Signal screen, so React Query shares one fetch between them
@@ -4273,13 +4309,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   }, [crosshairInfo]);
   const [showPdhPdl, setShowPdhPdl] = useState(() => {
     try {
-      return localStorage.getItem('showPdhPdl') === 'true';
+      return indGet('showPdhPdl', optKindRef.current) === 'true';
     } catch(e) {}
     return false;
   });
   const [showOpeningRange, setShowOpeningRange] = useState(() => {
     try {
-      const v = localStorage.getItem('showOpeningRange');
+      const v = indGet('showOpeningRange', optKindRef.current);
       return v === null ? true : v === 'true'; // default on (preserves current behaviour)
     } catch(e) {}
     return true;
@@ -4291,7 +4327,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // signals), so these arrows mark a rule that loses money. The logger keeps
   // running and grading itself, but nothing losing is shown by default.
   const [showConfSignals, setShowConfSignals] = useState(() => {
-    try { return localStorage.getItem('showConfSignals') === 'true'; } catch (e) { return false; }
+    try { return indGet('showConfSignals', optKindRef.current) === 'true'; } catch (e) { return false; }
   });
   // Market structure — index charts only, like the other index studies.
   // Days of structure to draw. 1 is today only, the previous behaviour.
@@ -4304,10 +4340,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // Reversal pin bars. Off by default: a new marker type should be switched on
   // deliberately, not appear on the chart unannounced.
   const [showPinBars, setShowPinBars] = useState<boolean>(() => {
-    try { return localStorage.getItem('showPinBars') === 'true'; } catch (e) { return false; }
+    try { return indGet('showPinBars', optKindRef.current) === 'true'; } catch (e) { return false; }
   });
   useEffect(() => {
-    try { localStorage.setItem('showPinBars', String(showPinBars)); } catch (e) {}
+    try { indSet('showPinBars', optKindRef.current, String(showPinBars)); } catch (e) {}
     if (!showPinBars) {
       try { mainSeriesRef.current?.setMarkers?.([]); } catch (e) {}
       pinSigRef.current = '';
@@ -4320,9 +4356,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // overlay canvas, NOT as series markers: the pin-bar indicator owns setMarkers,
   // which replaces every marker on the series, so the two would erase each other.
   const [showSwapSweep, setShowSwapSweep] = useState<boolean>(() => {
-    try { return localStorage.getItem('showSwapSweep') === 'true'; } catch (e) { return false; }
+    try { return indGet('showSwapSweep', optKindRef.current) === 'true'; } catch (e) { return false; }
   });
-  useEffect(() => { try { localStorage.setItem('showSwapSweep', String(showSwapSweep)); } catch (e) {} }, [showSwapSweep]);
+  useEffect(() => { try { indSet('showSwapSweep', optKindRef.current, String(showSwapSweep)); } catch (e) {} }, [showSwapSweep]);
   const showSwapSweepRef = useRef(showSwapSweep);
   showSwapSweepRef.current = showSwapSweep;
   // Swap-Sweep marks that passed the 5-min + 15-min agreement test. Written by the
@@ -4343,9 +4379,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // (lower low) that NIFTY 50 does not. NIFTY chart only, 5 and 15 minutes. On by
   // default — it takes the old divergence signal's place — and can be switched off.
   const [showGiftDiv, setShowGiftDiv] = useState<boolean>(() => {
-    try { return localStorage.getItem('showGiftDivergence') !== 'false'; } catch (e) { return true; }
+    try { return indGet('showGiftDivergence', optKindRef.current) !== 'false'; } catch (e) { return true; }
   });
-  useEffect(() => { try { localStorage.setItem('showGiftDivergence', String(showGiftDiv)); } catch (e) {} }, [showGiftDiv]);
+  useEffect(() => { try { indSet('showGiftDivergence', optKindRef.current, String(showGiftDiv)); } catch (e) {} }, [showGiftDiv]);
   const showGiftDivRef = useRef(showGiftDiv);
   showGiftDivRef.current = showGiftDiv;
   const giftDivRef = useRef<{ 5: GiftDiv[]; 15: GiftDiv[] }>({ 5: [], 15: [] });
@@ -4354,13 +4390,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // remembered. Read through a ref by the canvas loop, like the other overlays.
   const [sessionBreak, setSessionBreak] = useState<SbSettings>(() => {
     try {
-      const v = JSON.parse(localStorage.getItem('sessionBreaks') || 'null');
+      const v = JSON.parse(indGet('sessionBreaks', optKindRef.current) || 'null');
       if (v && typeof v.on === 'boolean' && typeof v.color === 'string' && Number.isFinite(v.opacity)
           && Number.isFinite(v.thickness) && Number.isFinite(v.lineStyle)) return { ...SB_DEFAULTS, ...v };
     } catch (e) {}
     return SB_DEFAULTS;
   });
-  useEffect(() => { try { localStorage.setItem('sessionBreaks', JSON.stringify(sessionBreak)); } catch (e) {} }, [sessionBreak]);
+  useEffect(() => { try { indSet('sessionBreaks', optKindRef.current, JSON.stringify(sessionBreak)); } catch (e) {} }, [sessionBreak]);
   const sessionBreakRef = useRef(sessionBreak);
   sessionBreakRef.current = sessionBreak;
   const sbSnapshotRef = useRef(sessionBreak);            // for Cancel in the settings box
@@ -4383,9 +4419,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   useEffect(() => { try { localStorage.setItem('structBullColor', structBullColor); } catch (e) {} }, [structBullColor]);
   useEffect(() => { try { localStorage.setItem('structBearColor', structBearColor); } catch (e) {} }, [structBearColor]);
   const [showBos, setShowBos] = useState(() => {
-    try { const v = localStorage.getItem('showBos'); return v === null ? true : v === 'true'; } catch (e) { return true; }
+    try { const v = indGet('showBos', optKindRef.current); return v === null ? true : v === 'true'; } catch (e) { return true; }
   });
-  useEffect(() => { try { localStorage.setItem('showBos', String(showBos)); } catch (e) {} }, [showBos]);
+  useEffect(() => { try { indSet('showBos', optKindRef.current, String(showBos)); } catch (e) {} }, [showBos]);
   const [isEditingDsZones, setIsEditingDsZones] = useState(false);
   const [isEditingVolume, setIsEditingVolume] = useState(false);
   const [isEditingFvg, setIsEditingFvg] = useState(false);
@@ -4409,17 +4445,17 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const rowOrder = (id: string, _active?: boolean) => isFav(id) ? 'order-0' : 'order-2';
 
   const [showStructure, setShowStructure] = useState(() => {
-    try { const v = localStorage.getItem('showStructure'); return v === null ? true : v === 'true'; } catch (e) { return true; }
+    try { const v = indGet('showStructure', optKindRef.current); return v === null ? true : v === 'true'; } catch (e) { return true; }
   });
   const [showOrderBlocks, setShowOrderBlocks] = useState(() => {
-    try { const v = localStorage.getItem('showOrderBlocks'); return v === null ? true : v === 'true'; } catch (e) { return true; }
+    try { const v = indGet('showOrderBlocks', optKindRef.current); return v === null ? true : v === 'true'; } catch (e) { return true; }
   });
   // Institutional Levels (port of Martin's TradingView indicator). Off until he
   // switches it on: it draws a lot, on top of BOS-CHoCH and the zones.
   const [showInstLevels, setShowInstLevels] = useState<boolean>(() => {
-    try { return localStorage.getItem('showInstLevels') === 'true'; } catch (e) { return false; }
+    try { return indGet('showInstLevels', optKindRef.current) === 'true'; } catch (e) { return false; }
   });
-  useEffect(() => { try { localStorage.setItem('showInstLevels', String(showInstLevels)); } catch (e) {} }, [showInstLevels]);
+  useEffect(() => { try { indSet('showInstLevels', optKindRef.current, String(showInstLevels)); } catch (e) {} }, [showInstLevels]);
   const showInstLevelsRef = useRef(showInstLevels);
   showInstLevelsRef.current = showInstLevels;
   // Its settings: every input of the TradingView panel, defaults = the script's.
@@ -4433,9 +4469,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const ilSnapshotRef = useRef<IlSettings>(ilSettings);
   // Breaker Blocks & Liquidity Grabs (src/indicators/breakerLiquidity.ts, 5 Nov 2026).
   const [showBreakers, setShowBreakers] = useState<boolean>(() => {
-    try { return localStorage.getItem('showBreakers') === 'true'; } catch (e) { return false; }
+    try { return indGet('showBreakers', optKindRef.current) === 'true'; } catch (e) { return false; }
   });
-  useEffect(() => { try { localStorage.setItem('showBreakers', String(showBreakers)); } catch (e) {} }, [showBreakers]);
+  useEffect(() => { try { indSet('showBreakers', optKindRef.current, String(showBreakers)); } catch (e) {} }, [showBreakers]);
   const showBreakersRef = useRef(showBreakers);
   showBreakersRef.current = showBreakers;
   const [blSettings, setBlSettings] = useState<BlSettings>(() => {
@@ -4448,11 +4484,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const blSnapshotRef = useRef<BlSettings>(blSettings);
   // Fair Value Gaps — drawn like Demand/Supply zones, index chart only.
   const [showFvg, setShowFvg] = useState(() => {
-    try { const v = localStorage.getItem('showFvg'); return v === null ? true : v === 'true'; } catch (e) { return true; }
+    try { const v = indGet('showFvg', optKindRef.current); return v === null ? true : v === 'true'; } catch (e) { return true; }
   });
   const [showDsZones, setShowDsZones] = useState(() => {
     try {
-      const v = localStorage.getItem('showDsZones');
+      const v = indGet('showDsZones', optKindRef.current);
       return v === null ? true : v === 'true'; // default on
     } catch(e) {}
     return true;
@@ -4646,7 +4682,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
   const [showSnR, setShowSnR] = useState(() => {
     try {
-      const saved = localStorage.getItem('showSnR');
+      const saved = indGet('showSnR', optKindRef.current);
       return saved === null ? true : saved === 'true'; // Default true
     } catch(e) {}
     return true;
@@ -4681,32 +4717,32 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
   useEffect(() => {
     try {
-      localStorage.setItem('showPdhPdl', String(showPdhPdl));
+      indSet('showPdhPdl', optKindRef.current, String(showPdhPdl));
     } catch(e) {}
   }, [showPdhPdl]);
 
   useEffect(() => {
     try {
-      localStorage.setItem('showOpeningRange', String(showOpeningRange));
+      indSet('showOpeningRange', optKindRef.current, String(showOpeningRange));
     } catch(e) {}
   }, [showOpeningRange]);
 
   useEffect(() => {
     try {
-      localStorage.setItem('showDsZones', String(showDsZones));
+      indSet('showDsZones', optKindRef.current, String(showDsZones));
     } catch(e) {}
   }, [showDsZones]);
   useEffect(() => {
-    try { localStorage.setItem('showFvg', String(showFvg)); } catch (e) {}
+    try { indSet('showFvg', optKindRef.current, String(showFvg)); } catch (e) {}
   }, [showFvg]);
   useEffect(() => {
-    try { localStorage.setItem('showOrderBlocks', String(showOrderBlocks)); } catch (e) {}
+    try { indSet('showOrderBlocks', optKindRef.current, String(showOrderBlocks)); } catch (e) {}
   }, [showOrderBlocks]);
   useEffect(() => {
-    try { localStorage.setItem('showStructure', String(showStructure)); } catch (e) {}
+    try { indSet('showStructure', optKindRef.current, String(showStructure)); } catch (e) {}
   }, [showStructure]);
   useEffect(() => {
-    try { localStorage.setItem('showConfSignals', String(showConfSignals)); } catch (e) {}
+    try { indSet('showConfSignals', optKindRef.current, String(showConfSignals)); } catch (e) {}
   }, [showConfSignals]);
 
   useEffect(() => {
@@ -4738,7 +4774,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
   useEffect(() => {
     try {
-      localStorage.setItem('showSnR', String(showSnR));
+      indSet('showSnR', optKindRef.current, String(showSnR));
     } catch(e) {}
   }, [showSnR]);
 
@@ -4801,13 +4837,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   }, [pdhPdlStyle]);
   const [showOiBars, setShowOiBars] = useState(() => {
     try {
-      return localStorage.getItem('showOiBars') === 'true';
+      return indGet('showOiBars', optKindRef.current) === 'true';
     } catch(e) {}
     return false;
   });
   const [showRsi, setShowRsi] = useState(() => {
     try {
-      const saved = localStorage.getItem('showRsi');
+      const saved = indGet('showRsi', optKindRef.current);
       return saved === null ? true : saved === 'true';
     } catch(e) {}
     return true;
@@ -4815,13 +4851,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
   useEffect(() => {
     try {
-      localStorage.setItem('showOiBars', String(showOiBars));
+      indSet('showOiBars', optKindRef.current, String(showOiBars));
     } catch(e) {}
   }, [showOiBars]);
 
   useEffect(() => {
     try {
-      localStorage.setItem('showRsi', String(showRsi));
+      indSet('showRsi', optKindRef.current, String(showRsi));
     } catch(e) {}
   }, [showRsi]);
 
@@ -4986,7 +5022,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
   const [showHLevels, setShowHLevels] = useState(() => {
     try {
-      return localStorage.getItem('showHLevels') === 'true';
+      return indGet('showHLevels', optKindRef.current) === 'true';
     } catch(e) {}
     return false;
   });
@@ -5065,7 +5101,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
   const [showFiftyPercentLevels, setShowFiftyPercentLevels] = useState(() => {
     try {
-      return localStorage.getItem('showFiftyPercentLevels') === 'true';
+      return indGet('showFiftyPercentLevels', optKindRef.current) === 'true';
     } catch(e) {}
     return false;
   });
@@ -5118,7 +5154,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
   useEffect(() => {
     try {
-      localStorage.setItem('showHLevels', String(showHLevels));
+      indSet('showHLevels', optKindRef.current, String(showHLevels));
     } catch(e) {}
   }, [showHLevels]);
 
@@ -5214,7 +5250,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
   useEffect(() => {
     try {
-      localStorage.setItem('showFiftyPercentLevels', String(showFiftyPercentLevels));
+      indSet('showFiftyPercentLevels', optKindRef.current, String(showFiftyPercentLevels));
     } catch(e) {}
   }, [showFiftyPercentLevels]);
 
@@ -5235,15 +5271,15 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const palette = chartPalette(resolvedTheme);
 
   const [showVolume, setShowVolume] = useState(() => {
-    try { return localStorage.getItem('showVolume') !== 'false'; } catch (e) { return true; }
+    try { return indGet('showVolume', optKindRef.current) !== 'false'; } catch (e) { return true; }
   });
   useEffect(() => {
-    try { localStorage.setItem('showVolume', String(showVolume)); } catch (e) {}
+    try { indSet('showVolume', optKindRef.current, String(showVolume)); } catch (e) {}
   }, [showVolume]);
 
   const [showBB, setShowBB] = useState(() => {
     try {
-      return localStorage.getItem('showBB') === 'true';
+      return indGet('showBB', optKindRef.current) === 'true';
     } catch(e) {}
     return false;
   });
@@ -5264,7 +5300,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
   useEffect(() => {
     try {
-      localStorage.setItem('showBB', String(showBB));
+      indSet('showBB', optKindRef.current, String(showBB));
     } catch(e) {}
   }, [showBB]);
 
@@ -6980,7 +7016,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     // screen has no Quick Trade button, and it is a trading screen, not one a
     // thumb scrolls past on the way to something else.
     if (!quickTradeEnabledRef.current && !scalp) {
-      try { toast.info('Quick Trade is off', { id: 'chip-needs-qt', description: 'Switch it on (the ⚡ button) to move SL or TP. It turns itself off after a minute.' }); } catch (err) {}
+      // A phone has no ⚡ button to point at (see THE PHONE HAS NO QUICK TRADE
+      // BUTTON), so there the press names the screen where the chips do move.
+      try {
+        if (isPhoneChart()) toast.info('Move SL / TP in ScalpPro', { id: 'chip-needs-qt' });
+        else toast.info('Quick Trade is off', { id: 'chip-needs-qt', description: 'Switch it on (the ⚡ button) to move SL or TP. It turns itself off after a minute.' });
+      } catch (err) {}
       return;
     }
     const lineY = ser.priceToCoordinate(t.price);
@@ -7471,6 +7512,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         setSelectedLineId(id);
         setLineToolPop(null);
         setCrosshairInfo(null);
+        isHoveringButtonRef.current = false;       // the + is gone from under whatever was on it
         // The library keeps its crosshair up after a long press until the next
         // tap; with the line placed it has done its job — and so has the candle's
         // O H L C line, which a crosshair cleared from here does not take down
@@ -7694,7 +7736,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // loop already runs every frame and reads only refs. Clipped to the plot, so a
   // drawing never runs over the prices. Where each one landed is kept for taps.
   const drawFontRef = useRef('monospace');
-  drawFontRef.current = scalp ? SCALP_CHART_FONT(settings.customFontUrl) : chartFontFamily(settings.customFontUrl);
+  drawFontRef.current = SCALP_CHART_FONT(settings.customFontUrl);
   const paintDrawingsRef = useRef<(ctx: CanvasRenderingContext2D, cw: number, ch: number) => void>(() => {});
   paintDrawingsRef.current = (ctx, cw, ch) => {
     const geoms = drawGeomRef.current;
@@ -9626,6 +9668,46 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // On the traded OPTION's chart only RSI stays on; index overlays (BB, S&R,
   // PDH/PDL, levels, OI bars, opening range, D/S zones, FVG) are hidden there.
   const isOptionView = !!selectedInstrument && (indexToken === null || instrumentToken !== indexToken);
+
+  // THE CHART'S KIND, AND ITS SWITCHES WHEN THE KIND CHANGES (see THE OPTION CHART
+  // HAS ITS OWN INDICATOR SWITCHES). On the phone's chart page one chart is the
+  // index or the option according to its tab, so when the tab changes every
+  // indicator switch is read again from the set that belongs to what is now on
+  // screen. Each is read exactly as it is when the chart first opens: the saved
+  // value, else its own default on an index chart, else off. The switches then
+  // save themselves, as they always have, under the kind the ref now holds —
+  // and until this has run they still hold, and save under, the old kind's.
+  const optKindNow = isOptionPane || (!isSpotPane && isOptionView);
+  useEffect(() => {
+    if (optKindRef.current === optKindNow) return;
+    optKindRef.current = optKindNow;
+    const on = (key: string, onByDefault: boolean) => { const v = indGet(key, optKindNow); return v === null ? onByDefault : v === 'true'; };
+    setShowPdhPdl(on('showPdhPdl', false));
+    setShowOpeningRange(on('showOpeningRange', true));
+    setShowConfSignals(on('showConfSignals', false));
+    setShowPinBars(on('showPinBars', false));
+    setShowSwapSweep(on('showSwapSweep', false));
+    setShowGiftDiv(on('showGiftDivergence', true));
+    setShowBos(on('showBos', true));
+    setShowStructure(on('showStructure', true));
+    setShowOrderBlocks(on('showOrderBlocks', true));
+    setShowInstLevels(on('showInstLevels', false));
+    setShowBreakers(on('showBreakers', false));
+    setShowFvg(on('showFvg', true));
+    setShowDsZones(on('showDsZones', true));
+    setShowSnR(on('showSnR', true));
+    setShowOiBars(on('showOiBars', false));
+    setShowRsi(on('showRsi', true));
+    setShowHLevels(on('showHLevels', false));
+    setShowFiftyPercentLevels(on('showFiftyPercentLevels', false));
+    setShowVolume(on('showVolume', true));
+    setShowBB(on('showBB', false));
+    try {
+      const v = JSON.parse(indGet('sessionBreaks', optKindNow) || 'null');
+      setSessionBreak(v && typeof v.on === 'boolean' && typeof v.color === 'string' && Number.isFinite(v.opacity)
+        && Number.isFinite(v.thickness) && Number.isFinite(v.lineStyle) ? { ...SB_DEFAULTS, ...v } : SB_DEFAULTS);
+    } catch (e) { setSessionBreak(SB_DEFAULTS); }
+  }, [optKindNow]);
 
   // SWAP-SWEEP, 5-MIN + 15-MIN AGREEMENT ONLY. A mark (and an alert) exists only when
   // the 15-minute chart AND the 5-minute chart both show the pattern, same direction,
@@ -11720,7 +11802,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         // ScalpPro's figures are as light as Lemonn's (#adadad on their surface);
         // the app's own slate read as a shade darker beside them.
         textColor: scalp && resolvedTheme !== 'light' ? 'rgba(255, 255, 255, 0.66)' : palette.text,
-        fontFamily: scalp && manropeReady() ? SCALP_CHART_FONT(settings.customFontUrl) : chartFontFamily(settings.customFontUrl),
+        fontFamily: manropeReady() ? SCALP_CHART_FONT(settings.customFontUrl) : chartFontFamily(settings.customFontUrl),
         fontSize: axisFontPx(),
       },
       // NO GRID ON THE SCALPPRO CHARTS (16 Nov 2026). Martin, of Lemonn's screen:
@@ -11891,15 +11973,16 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
     mainChartRef.current = mainChart;
 
-    // THE FONT SWAP (ScalpPro; see SCALP_CHART_FONT). Built before Manrope had
+    // THE FONT SWAP (see SCALP_CHART_FONT). Built before Manrope had
     // arrived, the chart is in the usual face; when the face is there it is told
     // so — if it is still the chart on screen: a removed chart must never be
     // touched again (it throws a frame later; see the bias lines).
-    if (scalp && !manropeReady()) {
+    if (!manropeReady()) {
       try {
         (document as any).fonts?.load?.("10px 'Manrope'").then(() => {
           if (mainChartRef.current !== mainChart || !manropeReady()) return;
           try { mainChart.applyOptions({ layout: { fontFamily: SCALP_CHART_FONT(settings.customFontUrl) } }); } catch (e) {}
+          try { rsiChart.applyOptions({ layout: { fontFamily: SCALP_CHART_FONT(settings.customFontUrl) } }); } catch (e) {}       // made further down; this runs later still
         }).catch(() => {});
       } catch (e) {}
     }
@@ -12550,7 +12633,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     const crossHost = chartContainerRef.current;
     let crossAwayTimer: any = null;
     const crossAway = () => {
-      if (mainChartRef.current !== mainChart || isHoveringButtonRef.current) return;
+      if (mainChartRef.current !== mainChart) return;
+      isHoveringButtonRef.current = false;        // a finger is in charge here; see "THE MOUSE IS ON THE +"
       try { mainChart.clearCrosshairPosition(); } catch (e) {}
       try { rsiChart.clearCrosshairPosition(); } catch (e) {}
       if (ohlcPanel) ohlcPanel.style.display = 'none';
@@ -12877,7 +12961,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           return `  ${amt < 0 ? '−' : ''}₹${Math.abs(Math.round(amt)).toLocaleString('en-IN')}`;
         };
         const tag = (yy: number, text: string, bg: string) => {
-          ctx.font = 'bold 10px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+          ctx.font = `bold 10px ${drawFontRef.current}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
           const w = ctx.measureText(text).width + 10;
           ctx.fillStyle = bg; ctx.fillRect(6, yy - 8, w, 16);
           ctx.fillStyle = '#0b0f14'; ctx.fillText(text, 11, yy);
@@ -12886,7 +12970,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         tag(yS, `SL ${rrB.stop.toFixed(2)}  −${risk.toFixed(2)}${pct(risk)}${inr(-risk)}`, 'rgba(244,63,94,0.95)');
         tag(yT, `TP ${rrB.target.toFixed(2)}  +${reward.toFixed(2)}${pct(reward)}${inr(reward)}`, 'rgba(16,185,129,0.95)');
         const rrText = `R:R  1 : ${ratio.toFixed(2)}`;
-        ctx.font = 'bold 11px monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+        ctx.font = `bold 11px ${drawFontRef.current}`; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
         const rw = ctx.measureText(rrText).width + 12;
         const ry = (Math.min(yS, yT) + Math.max(yS, yT)) / 2;
         ctx.fillStyle = ratio >= 2 ? 'rgba(16,185,129,0.95)' : ratio >= 1 ? 'rgba(234,179,8,0.95)' : 'rgba(244,63,94,0.95)';
@@ -13060,7 +13144,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           
           const maxOI = Math.max(...optionRows.map((o: any) => Math.max(o.call_oi, o.put_oi)));
           
-          ctx.font = '10px Inter, sans-serif';
+          ctx.font = `10px ${drawFontRef.current}`;
           ctx.textAlign = 'right';
           ctx.textBaseline = 'middle';
           
@@ -13143,7 +13227,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             ctx.fillStyle = spotColor;
             ctx.fillRect(x, spotY, badgeWidth, badgeHeight);
             ctx.fillStyle = '#ffffff';
-            ctx.font = `bold ${badgeFont}px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif`;
+            ctx.font = `bold ${badgeFont}px ${drawFontRef.current}`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(lastCandle.close.toFixed(2), x + badgeWidth / 2, spotY + badgeHeight / 2);
@@ -13168,7 +13252,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               // User said "keep the market closed background and the countdown to close background to match the spot price background"
               ctx.fillStyle = spotColor;
               ctx.fillRect(x, badgeY, badgeWidth, badgeHeight);
-              ctx.font = `${badgeFont === 12 ? 12 : 9}px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif`;
+              ctx.font = `${badgeFont === 12 ? 12 : 9}px ${drawFontRef.current}`;
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
 
@@ -13257,7 +13341,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   ctx.strokeStyle = hexToRgba(fvgHex, 0.5);
                   ctx.lineWidth = 1;
                   ctx.strokeRect(zx, Math.min(yTop, yBot), zw, Math.abs(yBot - yTop));
-                  ctx.font = 'bold 9px monospace';
+                  ctx.font = `bold 9px ${drawFontRef.current}`;
                   ctx.textAlign = 'left';
                   ctx.textBaseline = 'middle';
                   ctx.fillStyle = hexToRgba(fvgHex, 0.85);
@@ -13296,7 +13380,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     ctx.closePath();
                     ctx.fillStyle = long ? 'rgba(52,211,153,1)' : 'rgba(251,113,133,1)';
                     ctx.fill();
-                    ctx.font = 'bold 9px monospace';
+                    ctx.font = `bold 9px ${drawFontRef.current}`;
                     ctx.textAlign = 'center';
                     ctx.textBaseline = long ? 'top' : 'bottom';
                     ctx.fillText(long ? 'BUY' : 'SELL', x, long ? yy + 2 : yy - 2);
@@ -13385,7 +13469,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   const marks = pts;
                   const upC = settingsRef.current.candleUpColor, dnC = settingsRef.current.candleDownColor;
                   ctx.save();
-                  ctx.font = "bold 9px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif";
+                  ctx.font = `bold 9px ${drawFontRef.current}`;
                   ctx.textAlign = 'center';
                   for (const sg of marks) {
                     const x = mainChartRef.current?.timeScale()?.timeToCoordinate(sg.time as any);
@@ -13417,7 +13501,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   const list = tfG === 5 ? giftDivRef.current[5] : tfG === 15 ? giftDivRef.current[15] : [];
                   const upC = settingsRef.current.candleUpColor, dnC = settingsRef.current.candleDownColor;
                   ctx.save();
-                  ctx.font = "bold 9px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif";
+                  ctx.font = `bold 9px ${drawFontRef.current}`;
                   ctx.textAlign = 'center';
                   for (const d of list) {
                     const ts = mainChartRef.current?.timeScale();
@@ -13533,7 +13617,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   ctx.lineTo(x1, y);
                   ctx.stroke();
                   ctx.setLineDash([]);
-                  ctx.font = `bold ${isChoch ? 10 : 9}px monospace`;
+                  ctx.font = `bold ${isChoch ? 10 : 9}px ${drawFontRef.current}`;
                   ctx.textAlign = 'left';
                   ctx.textBaseline = 'bottom';
                   ctx.fillStyle = hexToRgba(structHex, isChoch ? 1 : 0.8);
@@ -13654,7 +13738,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     };
                     const yOf = (p: number) => mainSeriesRef.current.priceToCoordinate(p);
                     const dash = (st: number) => st === 1 ? [6, 4] : st === 2 ? [1.5, 3] : [];
-                    const FONT = "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif";
+                    const FONT = drawFontRef.current;
                     const label = (text: string, x: number, y: number, pos: 'above' | 'below' | 'right' | 'leftOfEdge', col: string, px: number) => {
                       ctx.font = `${px}px ${FONT}`; ctx.fillStyle = col;
                       if (pos === 'right') { ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(text, x + 4, y); return; }
@@ -13821,7 +13905,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       return lx === null || lx === undefined ? null : lx;
                     };
                     const yOf = (p: number) => mainSeriesRef.current.priceToCoordinate(p);
-                    const FONT = "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif";
+                    const FONT = drawFontRef.current;
                     const BULL = '#10b981', BEAR = '#f43f5e', GRAB_UP = '#f59e0b', GRAB_DN = '#38bdf8';
                     ctx.save();
                     // breaker zones: from the order-block candle to where they were invalidated, or the right edge
@@ -13926,7 +14010,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   const zx = 0, zw = textAlignX; // span the chart area
                   ctx.fillStyle = `rgba(${rgb},${pct})`;
                   ctx.fillRect(zx, Math.min(yTop, yBot), zw, Math.abs(yBot - yTop));
-                  ctx.font = 'bold 9px monospace';
+                  ctx.font = `bold 9px ${drawFontRef.current}`;
                   ctx.textAlign = 'left';
                   ctx.textBaseline = 'middle';
                   ctx.fillStyle = labelColor;
@@ -14020,7 +14104,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               // Draw OI bars on top of the horizontal lines so they stay clearly visible
               drawOiBars();
 
-              ctx.font = '12px sans-serif';
+              ctx.font = `12px ${drawFontRef.current}`;
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
               
@@ -14081,11 +14165,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                  // (smaller font for the text only — pill size above is still measured at 12px)
                  const isDark = document.documentElement.classList.contains('dark');
                  ctx.fillStyle = isDark ? '#0d1117' : '#ffffff';
-                 ctx.font = '10px sans-serif';
+                 ctx.font = `10px ${drawFontRef.current}`;
                  ctx.fillText(displayText, currentX, label.y);
                  
                  // Restore font for next inline label's measurements
-                 ctx.font = '12px sans-serif';
+                 ctx.font = `12px ${drawFontRef.current}`;
               });
 
               // The SL / TARGET / ENTRY pills that were drawn here are gone: each
@@ -14158,7 +14242,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               ctx.fillRect(x, labelY, priceScaleWidth, labelHeight);
 
               ctx.fillStyle = '#d1d4dc'; // crosshair text color
-              ctx.font = "12px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
+              ctx.font = `12px ${drawFontRef.current}`;
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
               ctx.fillText(crossPrice.toFixed(2), x + priceScaleWidth / 2, labelY + labelHeight / 2);
@@ -14177,7 +14261,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 const level = Math.max(0.05, Math.round(crossPrice / 0.05) * 0.05);
                 const text = `BUY / SELL @ ${level.toFixed(2)}`;
                 const light = document.documentElement.classList.contains('light');
-                ctx.font = "600 11px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
+                ctx.font = `600 11px ${drawFontRef.current}`;
                 const tw = ctx.measureText(text).width;
                 const ph = 20, pw = tw + 20, r = ph / 2;
                 // Clear of the "+" add-line button as well as the axis. That button
@@ -14355,76 +14439,25 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     } catch (e) {}
   };
 
-  // QUICK TRADE, ONE SWITCH. The tool bar's button (desktop) and the floating
-  // one (phone) both come here.
+  // QUICK TRADE'S SWITCH: the tool bar's button, on the desktop.
   const toggleQuickTrade = () => {
     const next = !quickTradeEnabled;
     setQuickTradeEnabled(next);
     try { toast(next ? 'Quick Trade on · 1 min' : 'Quick Trade off', { id: 'qt-toggle' }); } catch (e) {}
   };
-  // QUICK TRADE FLOATS (phone). A tap switches it; a drag moves it, and it stays
-  // where it is put (kept on this phone). x is measured from the RIGHT edge and y
-  // from the top, so "top right" stays top right when the phone is turned.
-  const qtFabRef = useRef<HTMLDivElement | null>(null);
-  const [qtFabPos, setQtFabPos] = useState<{ x: number; y: number } | null>(() => {
-    try { const v = JSON.parse(localStorage.getItem('quickTradeFab') || 'null'); return v && Number.isFinite(v.x) && Number.isFinite(v.y) ? { x: v.x, y: v.y } : null; }
-    catch (e) { return null; }
-  });
-  // Never saved yet: the top right of the chart, clear of the price axis.
-  useEffect(() => {
-    if (qtFabPos) return;
-    const place = () => {
-      const cont = chartContainerRef.current;
-      if (!cont) return false;
-      const r = cont.getBoundingClientRect();
-      if (!(r.width > 0)) return false;
-      let axisW = 56;
-      try { axisW = mainChartRef.current?.priceScale('right').width() || 56; } catch (e) {}
-      setQtFabPos({ x: Math.round(window.innerWidth - r.right + axisW + 8), y: Math.round(r.top + 8) });
-      return true;
-    };
-    if (place()) return;
-    const iv = setInterval(() => { if (place()) clearInterval(iv); }, 500);
-    return () => clearInterval(iv);
-  }, [qtFabPos]);
-  const startQtFabDrag = (e: React.PointerEvent) => {
-    const el = qtFabRef.current;
-    if (!el) return;
-    e.preventDefault();
-    e.stopPropagation();
-    try { el.setPointerCapture(e.pointerId); } catch (err) {}
-    const r0 = el.getBoundingClientRect();
-    const startX = e.clientX, startY = e.clientY;
-    let moved = false, x = window.innerWidth - r0.right, y = r0.top;
-    const move = (ev: PointerEvent) => {
-      const dx = ev.clientX - startX, dy = ev.clientY - startY;
-      if (!moved && Math.abs(dx) + Math.abs(dy) < 8) return;       // a tap wobbles; a drag travels
-      moved = true;
-      x = Math.max(4, Math.min(window.innerWidth - r0.width - 4, window.innerWidth - r0.right - dx));
-      y = Math.max(4, Math.min(window.innerHeight - r0.height - 4, r0.top + dy));
-      el.style.right = `${Math.round(x)}px`; el.style.top = `${Math.round(y)}px`;
-    };
-    const end = () => {
-      document.removeEventListener('pointermove', move);
-      document.removeEventListener('pointerup', end);
-      document.removeEventListener('pointercancel', cancel);
-      if (!moved) { toggleQuickTrade(); return; }
-      const pos = { x: Math.round(x), y: Math.round(y) };
-      setQtFabPos(pos);
-      try { localStorage.setItem('quickTradeFab', JSON.stringify(pos)); } catch (err) {}
-    };
-    // A cancelled touch (a call coming in, the app going to the background) is
-    // neither a tap nor a move worth keeping.
-    const cancel = () => {
-      document.removeEventListener('pointermove', move);
-      document.removeEventListener('pointerup', end);
-      document.removeEventListener('pointercancel', cancel);
-      if (moved) { const pos = { x: Math.round(x), y: Math.round(y) }; setQtFabPos(pos); }
-    };
-    document.addEventListener('pointermove', move);
-    document.addEventListener('pointerup', end);
-    document.addEventListener('pointercancel', cancel);
-  };
+  // THE PHONE HAS NO QUICK TRADE BUTTON (17 Nov 2026). It floated over the chart
+  // from v301. Martin, with ScalpPro's bar to trade from: remove the floating
+  // Quick Trade button, it is of no use any more. So on a phone's chart page
+  // Quick Trade is never on, and nothing it switches on is there: no strike
+  // menu, no BUY / SELL pill on a tap — and the SL and TP chips do not move.
+  // THE CHIPS WERE NOT QUIETLY LET LOOSE INSTEAD. That no chart gesture changes
+  // an order while Quick Trade is off is his own rule of 30 Oct (see TRADE
+  // CHIPS), and taking the switch away is not a reason to drop the rule: a
+  // thumb scrolling this page past the stop must not be able to move it. They
+  // move where they always have without the switch, on ScalpPro, and a press on
+  // one here says so. The desktop's tool bar keeps its button and nothing there
+  // changes.
+  const chipsMove = quickTradeEnabled || scalp;
 
   // ===== THE SCALPPRO SCREEN (16 Nov 2026) =====
   // Martin, with two recordings of Lemonn's ScalpPro: the spot chart on top, the
@@ -14450,11 +14483,25 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // here and in the app's shell, reads the bar's height from this variable.
   const openScalp = () => { try { window.dispatchEvent(new CustomEvent('terminal:scalp', { detail: true })); } catch (e) {} };
   const barRowShown = !isPane && !isFocusedChart;
+  // THE BAR'S REAL HEIGHT, NOT A FIGURE FOR IT (17 Nov 2026). The variable was
+  // "6.25rem" — 100px — and the bar on Martin's phone is 103: App Diagnostics,
+  // which ends where the variable says the bar begins, ran 3px under the bar,
+  // its rounded foot hidden, and looked as if it carried on beneath the
+  // buttons ("appears below the option chain/Scalp pro buttons"). The bar is
+  // measured, and measured again whenever it changes size.
   useEffect(() => {
     if (!barRowShown) return;
     const root = document.documentElement;
-    root.style.setProperty('--chart-bar-h', '6.25rem');       // 3.25rem of buttons + 3rem for the second row
-    return () => { root.style.removeProperty('--chart-bar-h'); };
+    const set = () => {
+      const el = bottomBarRef.current as HTMLElement | null;
+      const h = el && window.innerWidth < 768 ? Math.ceil(el.getBoundingClientRect().height) : 0;
+      root.style.setProperty('--chart-bar-h', h > 0 ? `${h}px` : '6.25rem');       // 6.25rem: 3.25rem of buttons + 3rem for the second row
+    };
+    set();
+    let ro: ResizeObserver | null = null;
+    try { const el = bottomBarRef.current as HTMLElement | null; if (el) { ro = new ResizeObserver(set); ro.observe(el); } } catch (e) {}
+    window.addEventListener('resize', set);
+    return () => { try { ro?.disconnect(); } catch (e) {} window.removeEventListener('resize', set); root.style.removeProperty('--chart-bar-h'); };
   }, [barRowShown]);
 
   const tfLabelOf = (tf: any) => (({ '1': '1m', '3': '3m', '5': '5m', '15': '15m', '60': '1h', '240': '4h', '1440': '1D', '10080': '1W', '43200': '1M' } as Record<string, string>)[String(tf)] || `${tf}m`);
@@ -14853,8 +14900,19 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // minus the shell's remaining 2rem top padding, no vertical padding of its own,
   // overflow hidden so nothing can push the page into a scroll. The chart grows
   // to fill whatever the toolbar, tabs and strips leave. Mobile classes unchanged.
+  // THE PAGE FADES IN WITHOUT MOVING ITS BAR (17 Nov 2026). Martin: "Sometimes when
+  // I switch between home and return to the charts screen the bottom buttons
+  // appear out of place and they jump for a second before returning to their
+  // position." The page came in with the animation library's fade, whose first
+  // frame carries a transform (an idle one — but any transform makes an element
+  // the thing its position:fixed children are placed against). So for the
+  // half-second of the fade the tool bar, and every sheet, was placed against
+  // this page's box instead of the screen: 112px too high on the test phone,
+  // then down in one step when the fade ended. Measured by recording the bar's
+  // place every frame from Home to Chart: 571 for 520ms, then 683. The fade is
+  // now opacity alone (page-fade-in, in index.css), which places nothing.
   return (
-    <div ref={pageRootRef} data-layout="page" className={`${scalp ? 'px-0' : 'px-1'} pt-0 pb-0 md:px-0 md:py-0 animate-in fade-in duration-500 max-w-none w-full mx-auto flex flex-col ${scalp ? 'h-full' : 'h-[calc(100dvh-124px-env(safe-area-inset-bottom))]'} md:h-full md:min-h-0 max-md:overflow-hidden md:overflow-visible relative`}>
+    <div ref={pageRootRef} data-layout="page" className={`${scalp ? 'px-0' : 'px-1'} pt-0 pb-0 md:px-0 md:py-0 page-fade-in max-w-none w-full mx-auto flex flex-col ${scalp ? 'h-full' : 'h-[calc(100dvh-124px-env(safe-area-inset-bottom))]'} md:h-full md:min-h-0 max-md:overflow-hidden md:overflow-visible relative`}>
       
       {/* Tap anywhere outside to dismiss. The panel is a floating readout, not a
           setting to leave switched on, so it should get out of the way the moment
@@ -16541,7 +16599,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               open. The names are two words at most and there is no heading and no
               description (Martin, 16 Nov: "as simple as the lemon app ... Keep
               the texts such as descriptions etc to minimal or avoid it wherever
-              possible"); what a row is set to stands at the end of it. Quick Trade is not among them on a phone: it floats (below).
+              possible"); what a row is set to stands at the end of it. Quick Trade is not among them: a phone has had none since v310.
               A see-through layer behind the sheet closes it on a tap elsewhere.
               On a desktop none of this applies: md:contents, as before. */}
           {phoneSettingsOpen && !isPane && (
@@ -16722,8 +16780,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 index right now. Display only: pointer-events-none, so it can never
                 block a drag, a crosshair, or a level being placed. */}
             {/* The "i" toggle. Top-RIGHT so it cannot sit under the OHLC row, and
-                the only part of this block that takes pointer events. */}
-            {isOptionView && lev && !lev.error && (
+                the only part of this block that takes pointer events.
+                NOT ON SCALPPRO (17 Nov 2026). Martin, of the "i" beside that
+                screen's price axis: "Remove it." Lemonn has nothing there. The
+                panel goes with its button — whether it is open is remembered,
+                so one left open on the chart page would otherwise sit on
+                ScalpPro's option chart with nothing to close it. The chart
+                page keeps both. */}
+            {isOptionView && !scalp && lev && !lev.error && (
               <button
                 onClick={() => setLevInfoOpen(o => !o)}
                 title={levInfoOpen ? 'Hide greeks & gearing' : 'Show greeks & gearing'}
@@ -16734,7 +16798,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 i
               </button>
             )}
-            {isOptionView && levInfoOpen && lev && !lev.error && (
+            {isOptionView && !scalp && levInfoOpen && lev && !lev.error && (
               <div className="absolute top-11 left-2 z-[5] pointer-events-none rounded-md bg-background/80 border border-border/60 px-2.5 py-1.5 text-[11px] leading-snug font-mono max-w-[85%]">
                 <div className="text-foreground font-semibold">
                   {lev.lambda != null ? `1% index ≈ ${lev.lambda}% premium` : 'gearing — solving…'}
@@ -16821,20 +16885,20 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 <div
                   data-chip={which}
                   onPointerDown={startChipDrag(which)}
-                  title={quickTradeEnabled || scalp ? `Drag to move the ${which === 'sl' ? 'stop' : 'target'}` : 'Switch Quick Trade on to move this'}
+                  title={chipsMove ? `Drag to move the ${which === 'sl' ? 'stop' : 'target'}` : 'Switch Quick Trade on to move this'}
                   // The padding is the touch target (the chip itself is 20px
                   // tall); the negative margin stops it pushing the row apart.
-                  className={`pointer-events-auto relative flex flex-col items-center px-2 -mx-2 py-1 -my-1 ${quickTradeEnabled || scalp ? 'cursor-ns-resize' : 'cursor-default'}`}
+                  className={`pointer-events-auto relative flex flex-col items-center px-2 -mx-2 py-1 -my-1 ${chipsMove ? 'cursor-ns-resize' : 'cursor-default'}`}
                   style={{ touchAction: 'none' }}
                 >
-                  <ChevronsUp size={11} strokeWidth={2.5} className={`${which === 'sl' ? 'text-rose-400' : 'text-emerald-400'} ${quickTradeEnabled || scalp ? 'opacity-90' : 'opacity-0'}`} />
+                  <ChevronsUp size={11} strokeWidth={2.5} className={`${which === 'sl' ? 'text-rose-400' : 'text-emerald-400'} ${chipsMove ? 'opacity-90' : 'opacity-0'}`} />
                   <span
                     ref={which === 'tp' ? chipTpLabelRef : undefined}
                     className={`h-5 min-w-[26px] px-1.5 rounded-[5px] text-[11px] font-bold leading-5 text-center text-white shadow ${which === 'sl' ? 'bg-rose-500' : 'bg-emerald-600'}`}
                   >
                     {which === 'sl' ? 'SL' : 'TP'}
                   </span>
-                  <ChevronsDown size={11} strokeWidth={2.5} className={`${which === 'sl' ? 'text-rose-400' : 'text-emerald-400'} ${quickTradeEnabled || scalp ? 'opacity-90' : 'opacity-0'}`} />
+                  <ChevronsDown size={11} strokeWidth={2.5} className={`${which === 'sl' ? 'text-rose-400' : 'text-emerald-400'} ${chipsMove ? 'opacity-90' : 'opacity-0'}`} />
                 </div>
               );
               const offChip = (which: 'sl' | 'tp') => (
@@ -16855,7 +16919,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   // The chart's own font, not the app's monospace: these sit among the
                   // chart's labels, and in monospace the entry row alone was 300px wide
                   // on a 338px plot.
-                  style={{ fontFamily: chartFontFamily(settings.customFontUrl) }}>
+                  style={{ fontFamily: SCALP_CHART_FONT(settings.customFontUrl) }}>
                   <div ref={chipEntryRowRef} data-chip-row="entry" className={`${chipRow} transition-opacity duration-150`} style={{ display: 'none', willChange: 'transform' }}>
                     {!tradeRowCollapsed && (
                       <button
@@ -16907,7 +16971,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               const bar = toolsBarPlace(lineToolsPos);
               return (
                 <div className="absolute inset-0 z-[42] pointer-events-none overflow-hidden select-none" data-line-tools=""
-                  style={{ fontFamily: chartFontFamily(settings.customFontUrl) }}>
+                  style={{ fontFamily: SCALP_CHART_FONT(settings.customFontUrl) }}>
                   <div
                     ref={lineHandleRef}
                     data-line-handle=""
@@ -16977,7 +17041,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               const bar = toolsBarPlace(drawToolsPos);
               return (
                 <div className="absolute inset-0 z-[42] pointer-events-none overflow-hidden select-none" data-draw-tools=""
-                  style={{ fontFamily: chartFontFamily(settings.customFontUrl) }}>
+                  style={{ fontFamily: SCALP_CHART_FONT(settings.customFontUrl) }}>
                   {!isText && (
                     <div
                       ref={drawMoveEl}
@@ -17113,8 +17177,21 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               <button
                 data-cross-plus=""
                 onClick={handleAddManualLine}
-                onMouseEnter={() => { isHoveringButtonRef.current = true; }}
-                onMouseLeave={() => { isHoveringButtonRef.current = false; }}
+                // "THE MOUSE IS ON THE +" IS ONLY EVER TRUE OF A MOUSE (17 Nov 2026).
+                // The flag keeps the crosshair up while a mouse moves from the
+                // chart onto the button, and has the app draw the crosshair's
+                // two lines itself for that moment (the library drops its own
+                // when the mouse leaves the chart). A finger's tap also arrives
+                // as "the mouse came in" — and never as "the mouse went out".
+                // So on a phone the first tap on a + left the flag set for good:
+                // from then on the app drew its dashed lines over the library's,
+                // out of step with them ("the dotted line appear a bit odd"),
+                // and nothing that takes the + down would, because each of them
+                // stands back while a mouse is on it ("the line along with plus
+                // button don't disappear when I tap somewhere else"). Both are
+                // Martin's, of v309. Only a real mouse sets it now.
+                onPointerEnter={(e) => { if (e.pointerType === 'mouse') isHoveringButtonRef.current = true; }}
+                onPointerLeave={() => { isHoveringButtonRef.current = false; }}
                 // Styled to MATCH the premium chart's "BUY / SELL @" pill beside it:
                 // same 20px height, same 1.25px outline, same fill and text colours
                 // in each theme. The pill is drawn on the canvas with these exact
@@ -17660,41 +17737,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         </div>
       )}
       
-      {/* QUICK TRADE FLOATS ON A PHONE (see QUICK TRADE FLOATS). Fixed to the
-          screen rather than to the chart, so it can be put anywhere — which is
-          why it is rendered here, at the page's own level, and not inside the
-          chart's box (see max-md:isolate there). Above the tool bar, below every
-          modal. It steps aside while a sheet or a menu is open over the chart.
-
-          AND WHILE THE CHART IS BEING DRAWN ON. Being above the chart, it is
-          above everything the chart puts up for a drawing — and its own default
-          place, the top right, is where those things are: the cross that puts
-          an armed tool down sat exactly under it, so a tap meant to cancel a
-          trend line switched Quick Trade ON instead (found by the drawing test,
-          before this ever shipped). The same goes for the handle of a selected
-          line near the top and for a tool bar that has taken that corner, and
-          it would go for wherever else he drags the button to. So while a tool
-          is armed, or a line or drawing is selected, it is simply not there.
-          Nothing is lost by that: in both states a tap on the chart belongs to
-          the drawing and ends there (see HIS OWN LINES AND DRAWINGS in the
-          chart's click handler), so Quick Trade could not act anyway.
-
-          AND WHILE THE STRIKE MENU IS UP. That menu opens docked against the
-          price axis — the very strip the button's default place is on — and its
-          own cross, top right, came out underneath the button. The menu has
-          that cross and closes on a tap on the chart; the button is back the
-          moment it does. */}
-      {!isPane && !isReferenceChart && qtFabPos && !chartOverlayOpen && !clickMenu
-        && !drawArm && !rrArm && selectedLineId === null && selectedDrawId === null && (
-        <div ref={qtFabRef} data-qt-fab={quickTradeEnabled ? 'on' : 'off'} role="button" aria-label="Quick Trade" aria-pressed={quickTradeEnabled}
-          title="Quick Trade — tap to switch it on for 1 minute; drag to move it"
-          onPointerDown={startQtFabDrag}
-          className={`md:hidden fixed z-[45] h-11 w-11 rounded-full flex items-center justify-center border shadow-lg select-none transition-colors ${
-            quickTradeEnabled ? 'bg-primary text-white border-primary' : 'bg-card/95 text-muted-foreground border-border'}`}
-          style={{ right: qtFabPos.x, top: qtFabPos.y, touchAction: 'none' }}>
-          <Zap size={20} />
-        </div>
-      )}
       {drawTextEdit && (
         // Near the top of the screen, not the middle: on a phone the keyboard
         // takes the lower half the moment the field has the cursor.

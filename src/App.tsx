@@ -258,12 +258,16 @@ export default function App() {
 
         {/* Floating live diagnostics view.
             Phone: fill the chart area, from under the app header down to just
-            above the chart toolbar and the bottom nav. The old 320px card at
+            above the chart toolbar and the bottom nav — 8px above, so its
+            rounded foot is seen to end there (17 Nov 2026: it ran 3px UNDER the
+            bar, and Martin read it, fairly, as carrying on beneath the buttons;
+            the bar's height is now measured, see --chart-bar-h). The bar and
+            the nav are not covered, so they take touches as ever. The old 320px card at
             the bottom-right corner clipped its own heading (build stamp + SYS
             badge) and left the readout in a narrow column. Desktop keeps the
             floating card. */}
         {showDiagnostics && (
-          <div className={`fixed inset-x-2 top-[60px] ${onChart ? 'bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem))]' : 'bottom-[calc(4rem+env(safe-area-inset-bottom)+0.5rem)]'} md:inset-x-auto md:top-auto md:bottom-20 md:right-6 z-50 md:w-96 max-h-none md:max-h-[70vh] overflow-y-auto overflow-x-hidden animate-in slide-in-from-bottom-5 duration-300 rounded-2xl`}>
+          <div className={`fixed inset-x-2 top-[60px] ${onChart ? 'bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+0.5rem)]' : 'bottom-[calc(4rem+env(safe-area-inset-bottom)+0.5rem)]'} md:inset-x-auto md:top-auto md:bottom-20 md:right-6 z-50 md:w-96 max-h-none md:max-h-[70vh] overflow-y-auto overflow-x-hidden animate-in slide-in-from-bottom-5 duration-300 rounded-2xl`}>
             <DiagnosticsPanel />
           </div>
         )}

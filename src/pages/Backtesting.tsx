@@ -246,7 +246,7 @@ export default function Backtesting() {
                          <YAxis tick={{ fontSize: 9 }} strokeOpacity={0.1} stroke="#94a3b8" tickFormatter={(val: number) => `₹${val.toLocaleString()}`} />
                          <Tooltip 
                             contentStyle={{ backgroundColor: "#0f172a", borderRadius: "8px", border: "1px solid #334155" }}
-                            labelStyle={{ color: "#94a3b8", fontSize: "10px", fontFamily: "monospace" }}
+                            labelStyle={{ color: "#94a3b8", fontSize: "10px" }}
                             itemStyle={{ fontSize: "11px" }}
                             formatter={(val: number) => [`₹${val.toLocaleString()}`, "Cumulative P&L"]}
                          />

@@ -282,7 +282,7 @@ futures contract).
 - **Any chart re-fits itself when it is moved**, not only when it is resized
   ("THE CHART MOVED WITHOUT CHANGING SIZE").
 
-## Chart on a phone: header, a row of five, Settings, floating Quick Trade
+## Chart on a phone: header, a row of five, Settings
 
 `src/pages/AdvancedChart.tsx` ("THE LEMONN LAYOUT ON A PHONE"). Below 768px wide
 the chart page is laid out the way the Lemonn chart screen is. Every control
@@ -318,13 +318,26 @@ tool bar and the split view are untouched.
   texts such as descriptions etc to minimal or avoid it wherever possible." The
   sheets here have no headings and no descriptions, and a row's name is two
   words at most. New screens follow the same rule.
-- **Quick Trade floats.** A round ⚡ button over the chart: a tap switches it (on
-  for 1 minute, as before), a drag moves it anywhere, and it stays where it is
-  put on that phone (`quickTradeFab` in the browser). It starts at the top right
-  of the chart. It steps aside while a sheet or menu is open, while a drawing
-  tool is armed, while a line or drawing is selected and while the strike menu
-  is up — in each of those a tap belongs to something else, and the button would
-  otherwise sit on top of that thing's own controls.
+- **No Quick Trade on a phone** (v310). From v301 it was a round ⚡ button
+  floating over the chart; Martin, 17 Nov 2026, with ScalpPro's bar to trade
+  from: remove it, it is of no use any more. So on a phone's chart page Quick
+  Trade is never on: no strike menu and no BUY / SELL pill on a tap, and **the
+  SL and TP chips of an open trade do not move here** — they are labels, and a
+  press on one says "Move SL / TP in ScalpPro". They were not let loose
+  instead: that no chart gesture changes an order while Quick Trade is off is
+  his own rule of 30 Oct, and a thumb scrolling this page must not be able to
+  move a stop. They move on ScalpPro, as they always have without the switch.
+  The desktop's tool bar keeps its ⚡ button and everything it switches on.
+- **App Diagnostics ends above the bar** (v310). The panel the Diag tab opens
+  used to run down behind the row of five and the Option Chain / ScalpPro
+  buttons. It now stops 8px above them (the bar's real height is measured, not
+  assumed), so its last row can be read and every button under it is pressed
+  as usual.
+- **The bar does not jump when you come back from Home** (v310). The page fades
+  in, and the fade the animation library gives starts from a transform — which
+  makes the page, for that half second, the box its fixed bar is placed
+  against. The bar sat 112px too high and then dropped. The page's fade is
+  opacity only now (`page-fade-in` in `src/index.css`).
 - **The chart keeps its layers to itself** (`max-md:isolate`): the trade chips,
   line tools and the like are no longer painted on top of an open sheet (the
   chips used to lie across the Trade guard sheet). The RSI pane does the same,
@@ -405,7 +418,12 @@ desktop split view uses, stacked.
   the journal entry and the automatic SL / TP all apply exactly as they do to an
   order from the ticket. The guard's refusal is shown as it is elsewhere.
 - **SL and TP chips move without Quick Trade** on this screen (it has no Quick
-  Trade button); everywhere else they still need it.
+  Trade button); everywhere else they still need it — which since v310 means
+  the desktop, because a phone's chart page has no Quick Trade either and its
+  chips stay put.
+- **No "i" on the option chart** (v310; Martin: "Remove it."). The round Greeks
+  and gearing button beside the price axis, and the panel it opens, are not on
+  this screen; Lemonn has nothing there. The chart page keeps both.
 - A reload stays on ScalpPro (`scalpPro` in the session); the back arrow returns
   to the index chart.
 - **On every chart (v308):** times on the axis are 12-hour with no am / pm
@@ -459,7 +477,9 @@ shows it the way the Lemonn app does:
   the entry line to fit under it, its chip parks straight after the entry row.
 - **Moving a level:** drag its chip. Only the chip is a handle — a press on the
   line itself is an ordinary press on the chart. Chips move **only while Quick
-  Trade is on** (they then show chevrons); with it off a press says so. Inside
+  Trade is on** (they then show chevrons); with it off a press says so. (On
+  ScalpPro they always move. On a phone's chart page they never do — it has no
+  Quick Trade since v310 — and a press says "Move SL / TP in ScalpPro".) Inside
   the pane the line follows the finger to the tick; push past the top or bottom
   edge and the chart slides that way until the finger comes back.
 - **A leg that is switched off** shows as a grey `SL off` / `TP off` beside the
@@ -470,6 +490,46 @@ shows it the way the Lemonn app does:
 
 Nothing here changes which levels are armed, the entry wall, or where a drop is
 sent; it replaces the on-line pills and the old "grab the line anywhere" drag.
+
+## Chart: an option chart has its own indicator switches, all off to begin with
+
+`src/pages/AdvancedChart.tsx` (`indGet` / `indSet`, "opt:" keys). Martin, 16 Nov
+2026: "Remove all indicators in the option premium chart by default." The
+twenty-one switches in the Indicators list (15 min High-Low, BOS-CHoCH, Fair
+Value Gaps, Volume, RSI and the rest) used to be one set for every chart, so
+whatever was on for NIFTY was drawn over an option's premium too.
+
+- An **option chart** — the chart page's option tab and ScalpPro's lower chart —
+  keeps its own set, saved under `opt:` + the switch's name, and every one
+  starts **off**: candles and nothing else, no RSI pane.
+- Switch one on there and it is on for option charts only, and stays on. The
+  index chart's switches are untouched by anything done on an option chart, and
+  the other way round.
+- The index chart's own switches and defaults are exactly what they were.
+- Session breaks — a style with its own editor, not a plain switch — are kept
+  the same way: an option chart's start from their defaults, which are off.
+
+## The app's font is Manrope
+
+`src/index.css` (`--font-sans`, `--font-mono`), `index.html` (the font's
+`<link>`). Martin, 17 Nov 2026: "use the Manrope fonts all over the app." It is
+Lemonn's font; ScalpPro had it from v308.
+
+- Every page, sheet and message is in Manrope, and so is everything drawn on a
+  chart: both scales, the crosshair's labels, and the labels painted over the
+  candles (CHoCH, FVG, the 15 min pills, the R:R tags). The bias card under the
+  chart (`public/bias-panel.js`) too.
+- **Figures still line up.** What used to be set in the fixed-width font
+  (`font-mono`) asked for columns of numbers that line up and prices that do not
+  shuffle sideways as they tick. Manrope's ordinary figures are each as wide as
+  they need to be, so `font-mono` now asks for its equal-width figures
+  (`tabular-nums`).
+- The font is fetched by the `<link>` in `index.html`. A font `@import` in the
+  stylesheet never reached the built app — which is why the JetBrains Mono the
+  app asked for until v309 never arrived on the live build, and each device
+  showed its own fixed-width font. If Manrope cannot be fetched the app falls
+  back to the system font.
+- A custom font chosen in the app's settings still wins, as before.
 
 ## Chart: indicator lines are thin and solid by default
 
@@ -500,6 +560,11 @@ own copy; anything restyled after that stays as set.
   to tap the + — and are then put away. A new touch on the chart puts them
   away at once. A tap or a pan never shows them. (Before, all three stayed on
   the chart until the next tap.)
+  - **Fixed in v310:** once the + had been tapped, the chart believed a pointer
+    was resting on it for good (a finger never "leaves" a button the way a
+    mouse does). From then on a long press drew the crosshair twice — the
+    chart's and a second dashed one on top — and a tap elsewhere no longer put
+    them away. Only a mouse can rest on the + now.
 - **A line that is selected** (just added, or tapped) shows a handle in the
   middle and a small bar of tools at the top left: colour, thickness (1-4px),
   copy, the full editor (price, style, label, alert) and delete. A tap anywhere

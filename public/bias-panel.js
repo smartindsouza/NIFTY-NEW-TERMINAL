@@ -16,7 +16,7 @@
   const css = `
   :host{--bg:#16181d;--card:#1c1f26;--line:#2a2e37;--text:#e7e9ee;--muted:#8b909c;
         --green:#3ddc84;--red:#ef5350;--amber:#f5b942;--purple:#8b5cf6;
-        display:block;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--text)}
+        display:block;font-family:'Manrope',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:var(--text)}
   *{box-sizing:border-box}
   :host{display:block}
   .wrap{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
