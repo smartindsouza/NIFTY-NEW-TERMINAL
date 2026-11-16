@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import express from 'express';
 import http from 'node:http';
-import { verdict, splitChange, normaliseRules, GUARD_DEFAULTS, registerTradeGuard, guardEntryBlock, istDate } from './trade_guard';
+import { verdict, splitChange, normaliseRules, GUARD_DEFAULTS, registerTradeGuard, guardEntryBlock, istDate, __test } from './trade_guard';
 
 const at = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); return Date.UTC(2026, 10, 11, h, m) - 5.5 * 3600e3; };
 const R = GUARD_DEFAULTS;
@@ -69,6 +69,22 @@ assert.equal(s.rules.maxLoss, 6000); assert.equal(s.pending, null);
 positions = [{ buy_value: 20000, sell_value: 13000, quantity: 0, last_price: 0 }];
 orders = [buy('A')];
 assert.match((await guardEntryBlock({ ignoreTime: true }))!, /loss limit ₹6,000/);
+// Polls that arrive together on a cold cache share ONE broker read (six polls used
+// to cost six orders reads and six positions reads); an entry check still makes
+// its own read, even while a poll is in flight.
+let nOrders = 0, nPos = 0;
+const slow = <T,>(v: () => T) => new Promise<T>(r => setTimeout(() => r(v()), 60));
+kc.getOrders = async () => { nOrders++; return slow(() => orders); };
+kc.getPositions = async () => { nPos++; return slow(() => ({ net: positions })); };
+__test.forgetCache();
+const six = await Promise.all(Array.from({ length: 6 }, () => call('GET', '/api/guard/status')));
+assert.equal(nOrders, 1, 'six polls together, one orders read'); assert.equal(nPos, 1, 'and one positions read');
+assert.ok(six.every((x: any) => x.success && x.entriesToday === 1 && x.dayPnl === -7000), 'every poll gets the same answer');
+await call('GET', '/api/guard/status');
+assert.equal(nOrders, 1, 'a poll inside 5 s is answered from the cache');
+__test.forgetCache(); nOrders = 0; nPos = 0;
+await Promise.all([call('GET', '/api/guard/status'), guardEntryBlock({ ignoreTime: true })]);
+assert.equal(nOrders, 2, 'an entry check never rides on a poll already in flight'); assert.equal(nPos, 2);
 // Kite logged out: count/loss rules skipped, never a block from a broker hiccup
 kc.access_token = null;
 assert.equal(await guardEntryBlock({ ignoreTime: true }), null);

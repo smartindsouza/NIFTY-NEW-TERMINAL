@@ -134,3 +134,38 @@ best bid/ask, OI) in its own database file `fut_ticks.db`, 09:15 AM – 3:40 PM,
 only. `GET /api/research/fut-ticks/days` lists what is stored;
 `GET /api/research/fut-ticks?day=YYYY-MM-DD` returns a day (prices ×100).
 Code: `server/fut_recorder.ts`. Test: `npx tsx server/fut_recorder.test.ts`.
+
+## Trade Journal: charges and capital (`/journal`, `/api/journal`)
+
+Every journal trade carries what it cost (brokerage, STT, exchange and SEBI fees,
+stamp duty, GST), what it made after that, and the account balance once it was
+closed; every day carries what the account opened with and what was left.
+
+- **Charges** are Zerodha's own calculation for each executed order (Kite Connect
+  "virtual contract note", `POST /charges/orders`), shared among the journal rows
+  that order opened or closed, by quantity. So an exit taken in two parts costs
+  two brokerages, as it does at the broker. Fetched once per order and kept.
+- **Rates stay current by themselves.** Once a trading day, on the first import
+  that has orders, a reference buy and sell go through the same calculator and
+  every rate is read back out of the answer. If a rate has moved, a new rate card
+  starts that day and the journal page says what changed; older trades keep the
+  rates of their own day. The written-down rates in `server/trade_charges.ts`
+  are only the fallback.
+- **"est."** on the page marks a figure worked out by the formula instead of
+  asked from Zerodha: trades from before 16 Nov 2026, a carried position's entry,
+  a row corrected by hand, or a moment the calculator could not be reached. The
+  formula matched Zerodha to the paisa on six orders on 16 Nov 2026 (including
+  Zerodha's whole-rupee rounding of stamp duty per order).
+- **Capital** is Zerodha's opening balance for the day (funds call), stored once
+  per day between 9:00 AM and 6:00 PM IST, plus funds added and less funds
+  withdrawn. "Capital after" a trade is that plus everything closed so far, after
+  charges. Zerodha does not give past days' balances, so days before 16 Nov 2026
+  show charges and net only.
+- Realized P&L on the page and in the Excel export is still gross, so it matches
+  the Kite app; Charges and Net P&L sit beside it. The export has the same
+  columns and a Days sheet.
+- Nothing here places, changes or cancels an order.
+
+Code: `server/trade_charges.ts`; wiring in `server.ts` (journal import, read,
+correction, export); page `src/pages/TradeJournal.tsx`.
+Test: `npx tsx server/trade_charges.test.ts`.

@@ -12,18 +12,70 @@ type Rules = { enabled: boolean; startTime: string; maxTrades: number; maxLoss: 
 type Status = { rules: Rules; pending: Partial<Rules> | null; pendingFrom: string | null; entriesToday: number | null; dayPnl: number | null; blocked: boolean; reason: string | null; errors: string[] };
 const inr = (v: number | null) => v === null ? '—' : `${v < 0 ? '−' : ''}₹${Math.abs(Math.round(v)).toLocaleString('en-IN')}`;
 
-export function useTradeGuard(pollMs = 15000) {
-  const [st, setSt] = useState<Status | null>(null);
+// ONE POLLER FOR THE WHOLE APP, NEVER MORE THAN ONE REQUEST IN 5 SECONDS (16 Nov
+// 2026). This hook used to own its request: every mount fetched at once (the
+// shield remounts whenever the chart comes back from a reference symbol, GIFT /
+// US30), and every window "focus" event fetched again with nothing in between.
+// On Martin's phone that added up to 6 requests in 15 seconds — which of the two
+// fired when was not captured — and the app raised its "high frequency API"
+// warning for /api/guard/status. It was a false alarm for Zerodha (the server
+// answers from a 5 s cache) but it was real noise, and requests landing together
+// on a cold cache did each cost their own broker read.
+//
+// The status now lives in one module-level store. A mount is served from it; a
+// focus or a tab coming back asks for a refresh, which is dropped if one was
+// sent in the last MIN_GAP_MS (the server would hand back the same cached answer
+// anyway) and joins the request already in flight otherwise. Worst case is 3
+// requests in any 15 s, under the warning's limit of 5 — so the endpoint does
+// NOT need adding to the exempt list in apiInterceptor.ts, and the warning stays
+// meaningful if something ever does start hammering it.
+const POLL_MS = 15000;
+const MIN_GAP_MS = 5000;
+let shared: Status | null = null;
+let sharedAt = 0;
+// A remount is served from the store only while the answer is recent. The chart
+// can sit unmounted for hours (another page, overnight); yesterday's "4/4 —
+// blocked" must not flash up before today's answer arrives.
+const recent = () => (shared && Date.now() - sharedAt < 60000 ? shared : null);
+const subscribers = new Set<(s: Status | null) => void>();
+let inFlight: Promise<void> | null = null;
+let lastSentAt = 0;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+const publish = (s: Status | null) => { shared = s; sharedAt = Date.now(); subscribers.forEach(fn => fn(s)); };
+function refreshGuard(): Promise<void> {
+  if (inFlight) return inFlight;
+  if (Date.now() - lastSentAt < MIN_GAP_MS) return Promise.resolve();
+  lastSentAt = Date.now();
+  inFlight = (async () => {
+    try { const r = await fetch('/api/guard/status'); const j = await r.json(); if (j?.success) publish(j); } catch { }
+  })().finally(() => { inFlight = null; });
+  return inFlight;
+}
+const onWake = () => { if (document.visibilityState !== 'hidden') void refreshGuard(); };
+function startPolling() {
+  if (pollTimer) return;
+  pollTimer = setInterval(() => { void refreshGuard(); }, POLL_MS);
+  window.addEventListener('focus', onWake);
+  document.addEventListener('visibilitychange', onWake);
+}
+function stopPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = null;
+  window.removeEventListener('focus', onWake);
+  document.removeEventListener('visibilitychange', onWake);
+}
+
+export function useTradeGuard() {
+  const [st, setLocal] = useState<Status | null>(recent);
   useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      try { const r = await fetch('/api/guard/status'); const j = await r.json(); if (alive && j?.success) setSt(j); } catch { }
-    };
-    load(); const id = setInterval(load, pollMs);
-    const onFocus = () => load(); window.addEventListener('focus', onFocus);
-    return () => { alive = false; clearInterval(id); window.removeEventListener('focus', onFocus); };
-  }, [pollMs]);
-  return [st, setSt] as const;
+    subscribers.add(setLocal);
+    setLocal(recent());          // whatever arrived between render and this effect
+    startPolling();
+    void refreshGuard();
+    return () => { subscribers.delete(setLocal); if (!subscribers.size) stopPolling(); };
+  }, []);
+  // Saving the rules returns the new status; it goes to every shield on screen.
+  return [st, publish as (s: Status) => void] as const;
 }
 
 export function TradeGuardButton({ className }: { className?: string }) {

@@ -95,9 +95,25 @@ function telegramOrderIds(day: string): Set<string> {
   } catch { return new Set(); }
 }
 
-let cache: { at: number; v: { entries: number | null; dayPnl: number | null; errors: string[] } } | null = null;
-async function measure(force = false) {
-  if (!force && cache && Date.now() - cache.at < 5000) return cache.v;
+type Measured = { entries: number | null; dayPnl: number | null; errors: string[] };
+let cache: { at: number; v: Measured } | null = null;
+// ONE BROKER READ FOR POLLS THAT ARRIVE TOGETHER (16 Nov 2026). The 5 s cache
+// below is only filled AFTER both Kite calls return, so status polls that landed
+// together on a cold cache each made their own orders + positions read — six
+// polls, twelve broker calls. Martin's phone did exactly that (the shield
+// refetched on every window focus) and the app raised its "high frequency"
+// warning for /api/guard/status. Polls now wait for the read already in flight.
+// An ENTRY CHECK (force) is deliberately left out of this: it must never be
+// answered from a read that started before the order it is judging, so it
+// always makes its own.
+let polling: Promise<Measured> | null = null;
+async function measure(force = false): Promise<Measured> {
+  if (force) return readBroker();
+  if (cache && Date.now() - cache.at < 5000) return cache.v;
+  if (!polling) polling = readBroker().finally(() => { polling = null; });
+  return polling;
+}
+async function readBroker(): Promise<Measured> {
   const errors: string[] = [];
   let entries: number | null = null, dayPnl: number | null = null;
   const kc = D!.getKiteClient();
@@ -123,6 +139,9 @@ async function measure(force = false) {
   cache = { at: Date.now(), v: { entries, dayPnl, errors } };
   return cache.v;
 }
+
+// Test hook: lets a test start from a cold cache without waiting out the 5 s.
+export const __test = { forgetCache() { cache = null; } };
 
 export async function guardStatus(force = false) {
   const s = load();

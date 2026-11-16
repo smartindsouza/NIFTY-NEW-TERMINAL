@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { contractName } from '../lib/optionName';
-import { BookOpen, RefreshCw, TrendingUp, TrendingDown, Trash2, Sparkles, Download, FileSpreadsheet, Pencil, Check, X } from 'lucide-react';
+import { BookOpen, RefreshCw, TrendingUp, TrendingDown, Trash2, Sparkles, Download, FileSpreadsheet, Pencil, Check, X, ChevronDown } from 'lucide-react';
 
 interface JournalTrade {
   id: number;
@@ -27,6 +27,24 @@ interface JournalTrade {
   pnl: number | null;
   kite_user_id?: string | null;
   locked?: number;
+  // Charges and capital (16 Nov 2026) — worked out by the server
+  // (server/trade_charges.ts) and sent with each row. charges_src says where the
+  // figure came from: 'zerodha' is Zerodha's own calculation for the trade's
+  // orders; anything else is the formula at that day's rates, shown as "est.".
+  charges?: number | null;
+  charges_src?: 'zerodha' | 'rates' | 'builtin' | null;
+  charges_breakdown?: { brokerage: number; stt: number; exchange: number; sebi: number; stamp: number; gst: number; total: number } | null;
+  charges_orders?: number | null;
+  net_pnl?: number | null;
+  capital_after?: number | null;
+}
+// One trading day's capital: what Zerodha reported as the opening balance, what
+// was added or withdrawn, and what was left once the day's closed trades and
+// their charges are counted. Only present for days the balance was recorded.
+interface DayCapital { opening: number; added: number; withdrawn: number; left: number; inOpen: number; openTrades: number; carriedIn: number; carriedTrades: number; complete: boolean }
+interface ChargeRates {
+  from: string; source: 'zerodha' | 'builtin'; checkedOn: string | null; changes: string[] | null;
+  brokerage: number; sttSellPct: number; exchangePct: number; sebiPerCrore: number; stampBuyPct: number; gstPct: number;
 }
 
 // IST calendar day for a timestamp — the journal is organised by trading day, and
@@ -56,6 +74,15 @@ type RangeKey = typeof RANGES[number]['key'] | 'CUSTOM';
 
 const inr = (v: number | null | undefined) =>
   v === null || v === undefined || isNaN(v) ? '—' : `₹${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+
+// Money to the paisa: charges are small, and "₹58.4" reads like a typo.
+const inr2 = (v: number | null | undefined) =>
+  v === null || v === undefined || isNaN(v) ? '—' : `₹${Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const shortDay = (day: string | null | undefined): string => {
+  if (!day) return '';
+  const [y, m, d] = day.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+};
 
 const fmtTime = (ms: number | null) => {
   if (!ms) return '—';
@@ -134,7 +161,7 @@ export default function TradeJournal() {
       const res = await fetch(`/api/journal${qs}`);
       if (!res.ok) throw new Error('Failed to load journal');
       const j = await res.json();
-      return j as { trades: JournalTrade[]; note?: string; accountId?: string };
+      return j as { trades: JournalTrade[]; note?: string; accountId?: string; days?: Record<string, DayCapital>; rates?: ChargeRates | null };
     },
     refetchOnWindowFocus: false,
   });
@@ -149,6 +176,23 @@ export default function TradeJournal() {
   const wins = closed.filter((t) => (t.pnl || 0) > 0).length;
   const winRate = closed.length ? Math.round((wins / closed.length) * 100) : 0;
   const totalPnl = closed.reduce((s, t) => s + (t.pnl || 0), 0);
+  // Charges are every charge run up in the range — a trade still open has
+  // already paid for its entry — and Net is the realised P&L less all of them.
+  // Counting the open trade's entry here is what makes each day add up: opened
+  // with + net = left.
+  const totalCharges = trades.reduce((s, t) => s + (t.charges || 0), 0);
+  const netPnl = totalPnl - totalCharges;
+  const anyEstimate = trades.some((t) => t.charges != null && t.charges_src !== 'zerodha');
+  const days = data?.days || {};
+  const rates = data?.rates || null;
+  // Each day's money, from ALL of that day's trades whatever the Open / Closed
+  // filter below is showing: it describes the day, not the list.
+  const dayMoney: Record<string, { gross: number; charges: number; closed: number; priced: number }> = {};
+  for (const t of trades) {
+    const m = (dayMoney[istDay(t.entry_time)] ||= { gross: 0, charges: 0, closed: 0, priced: 0 });
+    if (t.status === 'CLOSED') { m.gross += t.pnl || 0; m.closed++; }
+    if (t.charges != null) { m.charges += t.charges; m.priced++; }
+  }
 
   // Grouped by trading day, newest first, each with its own realised total.
   const byDay: { day: string; rows: JournalTrade[]; pnl: number }[] = [];
@@ -160,6 +204,10 @@ export default function TradeJournal() {
     if (t.status === 'CLOSED') g.pnl += t.pnl || 0;
   }
   byDay.sort((a, b) => (a.day < b.day ? 1 : -1));
+
+  // Which trade's charges are opened out into brokerage / STT / the rest. Tapped
+  // open, because a phone has no hover and seven figures on every row is noise.
+  const [costOpen, setCostOpen] = useState<number | null>(null);
 
   // Correcting a price by hand. Zerodha's trade list only covers today, so a
   // position carried in from a previous day has no entry price the import can
@@ -243,11 +291,15 @@ export default function TradeJournal() {
           : 'Report: all trades'}
         <span className="opacity-60"> · by entry date, IST</span>
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-2.5 md:gap-3 mb-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2.5 md:gap-3 mb-4">
         <StatCard label="Total Trades" value={String(trades.length)} />
         <StatCard label="Closed" value={String(closed.length)} />
         <StatCard label="Win Rate" value={closed.length ? `${winRate}%` : '—'} tone={winRate >= 50 ? 'pos' : closed.length ? 'neg' : 'neutral'} />
         <StatCard label="Realized P&L" value={inr(totalPnl)} tone={totalPnl > 0 ? 'pos' : totalPnl < 0 ? 'neg' : 'neutral'} />
+        {/* What the trades cost, and what is left of the P&L once it is paid.
+            Realized P&L above stays gross so it still matches the Kite app. */}
+        <StatCard label={anyEstimate ? 'Charges (part est.)' : 'Charges'} value={trades.some((t) => t.charges != null) ? inr2(totalCharges) : '—'} />
+        <StatCard label="Net P&L" value={closed.length ? inr2(netPnl) : '—'} tone={!closed.length ? 'neutral' : netPnl > 0 ? 'pos' : netPnl < 0 ? 'neg' : 'neutral'} />
       </div>
 
       {/* Range — the record is permanent now, so the window is explicit. */}
@@ -332,6 +384,30 @@ export default function TradeJournal() {
                 {g.rows.some((r) => r.status === 'CLOSED') ? inr(g.pnl) : '—'}
               </span>
             </div>
+            {/* The day's money: what the account opened with, what the day's
+                trades cost, what they made after that, and what was left. The
+                opening balance is Zerodha's own figure for the day; days from
+                before it was being recorded show the charges and net only. */}
+            {(dayMoney[g.day]?.priced > 0 || days[g.day]) && (() => {
+              const cap = days[g.day];
+              const m = dayMoney[g.day] || { gross: 0, charges: 0, closed: 0, priced: 0 };
+              const net = m.gross - m.charges;
+              return (
+                <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap px-1 -mt-1 text-[11px] font-mono text-muted-foreground">
+                  {cap && <span>Opened with <span className="text-foreground">{inr2(cap.opening)}</span></span>}
+                  {cap && cap.added > 0 && <span>Added <span className="text-foreground">{inr2(cap.added)}</span></span>}
+                  {cap && cap.withdrawn > 0 && <span>Withdrawn <span className="text-foreground">{inr2(cap.withdrawn)}</span></span>}
+                  {m.priced > 0 && <span>Charges <span className="text-foreground">{inr2(m.charges)}</span></span>}
+                  {m.closed > 0 && <span>Net <span className={cn(net > 0 ? 'text-emerald-400' : net < 0 ? 'text-rose-400' : 'text-foreground')}>{inr2(net)}</span></span>}
+                  {cap && <span>Left <span className="text-foreground font-bold">{cap.complete ? '' : '≈ '}{inr2(cap.left)}</span></span>}
+                  {cap && cap.openTrades > 0 && <span className="opacity-70">({inr2(cap.inOpen)} of it in {cap.openTrades} open trade{cap.openTrades === 1 ? '' : 's'})</span>}
+                  {/* A position bought on an earlier day and sold today is listed
+                      under the day it was bought, but its money came back today.
+                      Named here, or opened with + net would not reach "left". */}
+                  {cap && cap.carriedTrades > 0 && <span className="opacity-70">(includes {inr2(cap.carriedIn)} back from {cap.carriedTrades} position{cap.carriedTrades === 1 ? '' : 's'} carried in)</span>}
+                </div>
+              );
+            })()}
           {g.rows.map((t) => {
             const isBuy = t.side === 'BUY';
             const pnlPos = (t.pnl || 0) >= 0;
@@ -409,6 +485,39 @@ export default function TradeJournal() {
                   {t.exit_reason && <span className="opacity-70">· {t.exit_reason}</span>}
                 </div>
 
+                {/* Charges, what the trade made after them, and the account
+                    balance once it was closed. "est." means the figure is the
+                    formula at that day's rates rather than Zerodha's own
+                    calculation for the trade's orders. */}
+                {t.charges != null && (
+                  <div className="flex items-center gap-x-4 gap-y-1 flex-wrap mt-1.5 text-[11px] font-mono text-muted-foreground">
+                    <button
+                      onClick={() => setCostOpen(costOpen === t.id ? null : t.id)}
+                      className="flex items-center gap-1 hover:text-foreground transition-colors"
+                      title="Show brokerage, STT and the other charges"
+                    >
+                      {t.status === 'CLOSED' ? 'Charges' : 'Charges so far'} <span className="text-foreground">{inr2(t.charges)}</span>
+                      {t.charges_src !== 'zerodha' && <span className="text-[9px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-300">est.</span>}
+                      <ChevronDown className={cn('w-3 h-3 transition-transform', costOpen === t.id && 'rotate-180')} />
+                    </button>
+                    {t.net_pnl != null && (
+                      <span>Net <span className={cn('font-bold', t.net_pnl > 0 ? 'text-emerald-400' : t.net_pnl < 0 ? 'text-rose-400' : 'text-foreground')}>{inr2(t.net_pnl)}</span></span>
+                    )}
+                    {t.capital_after != null && <span>Capital after <span className="text-foreground">{inr2(t.capital_after)}</span></span>}
+                  </div>
+                )}
+                {costOpen === t.id && t.charges_breakdown && (
+                  <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+                    <Chip label="brokerage" value={t.charges_breakdown.brokerage} />
+                    <Chip label="STT" value={t.charges_breakdown.stt} />
+                    <Chip label="exchange" value={t.charges_breakdown.exchange} />
+                    <Chip label="SEBI" value={t.charges_breakdown.sebi} />
+                    <Chip label="stamp" value={t.charges_breakdown.stamp} />
+                    <Chip label="GST" value={t.charges_breakdown.gst} />
+                    {t.charges_orders != null && <Chip label="orders" value={String(t.charges_orders)} />}
+                  </div>
+                )}
+
                 {/* Context chips */}
                 <div className="flex items-center gap-1.5 flex-wrap mt-2.5">
                   <Chip label="spot" value={ctx.spot} />
@@ -425,6 +534,21 @@ export default function TradeJournal() {
           })}
           </div>
           ))}
+        </div>
+      )}
+
+      {/* Where the charges come from and which rates are in force. The rates are
+          read back from Zerodha's calculator once each trading day, so this line
+          changes by itself when a rate does — and says so for the first days. */}
+      {rates && (
+        <div className="mt-5 text-[11px] leading-relaxed text-muted-foreground bg-card/60 rounded-xl px-3 py-2.5">
+          <span className="text-foreground font-semibold">Charges</span> are Zerodha's own calculation for each order. <span className="px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 text-[9px]">est.</span> marks
+          a figure worked out from the rates instead (older trades, and rows corrected by hand).{' '}
+          {rates.checkedOn ? `Rates checked with Zerodha on ${shortDay(rates.checkedOn)}: ` : 'Rates (not yet checked with Zerodha): '}
+          brokerage ₹{rates.brokerage} an order · STT {rates.sttSellPct}% of sell value · exchange {rates.exchangePct}% · SEBI ₹{rates.sebiPerCrore} a crore · stamp duty {rates.stampBuyPct}% of buy value · GST {rates.gstPct}%.
+          {rates.changes && rates.changes.length > 0 && (
+            <div className="mt-1 text-amber-300">Changed from {shortDay(rates.from)}: {rates.changes.join(' · ')}.</div>
+          )}
         </div>
       )}
     </div>

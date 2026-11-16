@@ -46,6 +46,7 @@ import { registerResearchExport } from './server/research_export';
 import { registerGoldenSweep } from './server/golden_sweep';
 import { registerExpirySkew } from './server/expiry_skew';
 import { registerFutRecorder } from './server/fut_recorder';
+import { initTradeCharges, chargesForOrders, allocateRow, captureCapital, journalAccounts, ratesInfo, parseDetail, istDay as journalDay, type ExecOrder } from './server/trade_charges';
 import { registerLatencyDiag, noteServerTick } from './server/latency_diag';
 import { registerLeverage } from './server/leverage';
 import { GAP_CONFIG } from './server/config/gapScorecard';
@@ -304,6 +305,11 @@ try { db.exec(`CREATE INDEX IF NOT EXISTS idx_trade_journal_owner_time ON trade_
 catch (e) { console.error('[journal] owner index failed', e); }
 try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_trade_journal_kite_key ON trade_journal(kite_key) WHERE kite_key IS NOT NULL`); }
 catch (e) { console.error('[journal] kite_key index failed', e); }
+// Charges and capital (16 Nov 2026): two more journal columns (charges,
+// charges_detail) and the module's own tables — see server/trade_charges.ts.
+// Here, not earlier, because it ALTERs trade_journal and that table must exist.
+try { initTradeCharges({ db }); }
+catch (e) { console.error('[journal] charges tables failed — the journal will show no charges', e); }
 
 
 // Migration: add trailing-stop columns if they don't exist yet
@@ -1956,6 +1962,10 @@ setInterval(() => {
               product: r.product || p.product || 'NRML',
               orderId: `PRIOR:${r.id}`, tradeId: null, carried: true,
               priorCtx: ctx, priorEntrySpot: r.entry_spot ?? null,
+              // What the entry was charged on the day it was bought, if the
+              // journal priced it then — a carried lot must not have its entry
+              // re-priced at today's rates.
+              priorCharges: { detail: parseDetail(r.charges_detail), qty: Number(r.qty) || 0 },
             });
             priorRowIds.push(r.id);
             remaining -= take;
@@ -1988,18 +1998,23 @@ setInterval(() => {
           const pnl = lot.side === 'BUY' ? (price - lot.price) * take : (lot.price - price) * take;
           rows.push({ sym, side: lot.side, qty: take, entry: lot.price, entryTime: lot.when, exit: price, exitTime: when,
                       product: lot.product, status: 'CLOSED', pnl, orderId: lot.orderId, carried: !!lot.carried,
-                      priorCtx: lot.priorCtx || null, priorEntrySpot: lot.priorEntrySpot ?? null, basisIsClose: !!lot.basisIsClose });
+                      priorCtx: lot.priorCtx || null, priorEntrySpot: lot.priorEntrySpot ?? null, basisIsClose: !!lot.basisIsClose,
+                      // Which order closed this piece: an exit taken in two parts
+                      // is two orders and two brokerages, and one sell order can
+                      // close two entries — the charges follow the orders.
+                      exitOrderId: String(t.order_id || ''), exchange: t.exchange || null, priorCharges: lot.priorCharges || null });
           lot.qty -= take; qty -= take;
           if (lot.qty <= 0) book.shift();
         }
-        if (qty > 0) book.push({ side, qty, price, when, product: t.product || 'MIS', orderId: t.order_id, tradeId: t.trade_id });
+        if (qty > 0) book.push({ side, qty, price, when, product: t.product || 'MIS', orderId: t.order_id, tradeId: t.trade_id, exchange: t.exchange || null });
       }
       // Anything left unmatched is still open.
       for (const key of Object.keys(openLots)) {
         for (const lot of openLots[key]) {
           rows.push({ sym: key, side: lot.side, qty: lot.qty, entry: lot.price, entryTime: lot.when,
                       exit: null, exitTime: null, product: lot.product, status: 'OPEN', pnl: null, orderId: lot.orderId, carried: !!lot.carried,
-                      priorCtx: lot.priorCtx || null, priorEntrySpot: lot.priorEntrySpot ?? null, basisIsClose: !!lot.basisIsClose });
+                      priorCtx: lot.priorCtx || null, priorEntrySpot: lot.priorEntrySpot ?? null, basisIsClose: !!lot.basisIsClose,
+                      exitOrderId: null, exchange: lot.exchange || null, priorCharges: lot.priorCharges || null });
         }
       }
 
@@ -2009,7 +2024,8 @@ setInterval(() => {
       // single "BUY 1755" that was never placed, with blended prices nobody paid.
       type Agg = { sym: string; side: string; qty: number; entryQP: number; exitQP: number;
                    entryTime: number; exitTime: number | null; product: string; status: string; pnl: number;
-                   orderId: string; carried: boolean; priorCtx: any; priorEntrySpot: number | null; basisIsClose: boolean };
+                   orderId: string; carried: boolean; priorCtx: any; priorEntrySpot: number | null; basisIsClose: boolean;
+                   exits: Map<string, number>; exchange: string | null; priorCharges: any };
       const aggs = new Map<string, Agg>();
       for (const r of rows) {
         const oid = String(r.orderId || 'NA');
@@ -2017,15 +2033,42 @@ setInterval(() => {
         const a = aggs.get(k) || { sym: r.sym, side: r.side, qty: 0, entryQP: 0, exitQP: 0,
                                    entryTime: r.entryTime, exitTime: null, product: r.product, status: r.status, pnl: 0,
                                    orderId: oid, carried: !!r.carried, priorCtx: r.priorCtx || null,
-                                   priorEntrySpot: r.priorEntrySpot ?? null, basisIsClose: !!r.basisIsClose };
+                                   priorEntrySpot: r.priorEntrySpot ?? null, basisIsClose: !!r.basisIsClose,
+                                   exits: new Map<string, number>(), exchange: r.exchange || null, priorCharges: r.priorCharges || null };
         a.qty += r.qty;
         a.entryQP += r.entry * r.qty;                       // quantity-weighted, so the
         if (r.exit != null) a.exitQP += r.exit * r.qty;     // average price is the real one
         a.entryTime = Math.min(a.entryTime, r.entryTime);   // first fill in
         if (r.exitTime != null) a.exitTime = Math.max(a.exitTime ?? 0, r.exitTime);  // last fill out
         a.pnl += r.pnl || 0;
+        if (r.exitOrderId) a.exits.set(r.exitOrderId, (a.exits.get(r.exitOrderId) || 0) + r.qty);
         aggs.set(k, a);
       }
+
+      // CHARGES (16 Nov 2026). Each executed order is priced by Zerodha's own
+      // calculator (server/trade_charges.ts) and its charges are shared among the
+      // journal rows it opened or closed, by quantity. Done HERE — before the
+      // day's rows are wiped below — because it waits on the broker, and the
+      // window in which today's rows are missing from the table must not grow.
+      // It cannot fail the import: with no answer the journal falls back to the
+      // formula and says the figure is an estimate.
+      let priced = new Map<string, any>();
+      try {
+        const byOrder = new Map<string, ExecOrder & { value: number }>();
+        for (const t of sorted) {
+          const oid = String(t.order_id || ''); const q = Number(t.quantity) || 0; const px = Number(t.average_price ?? t.price) || 0;
+          const side = String(t.transaction_type || '').toUpperCase();
+          if (!oid || q <= 0 || px <= 0 || (side !== 'BUY' && side !== 'SELL') || !t.tradingsymbol) continue;
+          const o = byOrder.get(oid) || { order_id: oid, exchange: String(t.exchange || 'NFO'), tradingsymbol: String(t.tradingsymbol), transaction_type: side as 'BUY' | 'SELL',
+                                          product: String(t.product || 'MIS'), quantity: 0, average_price: 0, value: 0 };
+          o.quantity += q; o.value += q * px; o.average_price = o.value / o.quantity;
+          byOrder.set(oid, o);
+        }
+        priced = await chargesForOrders(kc, owner, Array.from(byOrder.values()).map(({ value, ...o }) => o), journalDay(now));
+      } catch (e) { console.error('[journal import-kite] charges unavailable (rows will be estimated)', e); }
+      // The day's opening balance, once the session is under way (and the day's
+      // pay-ins kept current). Its own try/catch inside; never throws.
+      await captureCapital(kc, owner);
 
       // /(\d+)(CE|PE)$/ is GREEDY: on NIFTY2692223300CE it swallowed the expiry
       // too and stored 2692223300 as the strike. parseContractSymbol splits the
@@ -2123,8 +2166,9 @@ setInterval(() => {
       let imported = 0;
       const ins = db.prepare(`INSERT OR REPLACE INTO trade_journal
         (tradingsymbol, exchange, option_type, strike, side, qty, product, entry_price, entry_time, context,
-         test_mode, simulated, status, exit_price, exit_time, exit_reason, pnl, created_at, updated_at, kite_key, kite_user_id, entry_spot)
-        VALUES (?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?)`);
+         test_mode, simulated, status, exit_price, exit_time, exit_reason, pnl, created_at, updated_at, kite_key, kite_user_id, entry_spot,
+         charges, charges_detail)
+        VALUES (?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?,?,?)`);
       for (const a of aggs.values()) {
         if (a.qty <= 0) continue;
         const key = `${owner}|${a.carried ? a.entryTime : dayStart}|${a.sym}|${a.status}|${a.side}|${a.orderId}`;
@@ -2138,6 +2182,17 @@ setInterval(() => {
         const appCtx = a.priorCtx || contextBySym.get(a.sym);
         const ctx = { ...(appCtx || {}), source: a.priorCtx?.source || 'KITE_IMPORT',
                       ...(a.carried ? { carried: true } : {}), ...(a.basisIsClose ? { basisIsClose: true } : {}) };
+        // This row's share of its orders' charges. null (nothing stored) leaves
+        // the journal to estimate it when read.
+        let cost: { total: number; detail: any } | null = null;
+        try {
+          cost = allocateRow({
+            sym: a.sym, exchange: a.exchange, side: a.side, qty: a.qty, entryAvg, exitAvg, status: a.status,
+            entryOrderId: /^(PRIOR:|OVERNIGHT$|NA$)/.test(a.orderId) ? null : a.orderId,
+            entryDay: journalDay(a.entryTime), exitDay: a.exitTime ? journalDay(a.exitTime) : null,
+            exits: a.exits, prior: a.priorCharges,
+          }, priced);
+        } catch (e) { console.error('[journal import-kite] charge allocation failed for', a.sym, e); }
         ins.run(
           a.sym, 'NFO', optionType, strike, a.side, a.qty, a.product, entryAvg, a.entryTime,
           JSON.stringify(ctx), a.status, exitAvg, a.exitTime,
@@ -2149,7 +2204,8 @@ setInterval(() => {
           // entry order id keeps two round trips in one strike as two rows.
           key,
           owner,
-          a.priorEntrySpot ?? entrySpotBySym.get(a.sym) ?? spotAt(a.entryTime) ?? null
+          a.priorEntrySpot ?? entrySpotBySym.get(a.sym) ?? spotAt(a.entryTime) ?? null,
+          cost ? cost.total : null, cost ? JSON.stringify(cost.detail) : null
         );
         imported++;
       }
@@ -2193,8 +2249,10 @@ setInterval(() => {
       delete ctx.basisIsClose;                    // no longer an estimate
 
       db.prepare(
+        // The stored charges were worked out on the old prices. Cleared, so the
+        // journal re-prices the row by the formula on the corrected ones.
         `UPDATE trade_journal SET entry_price = ?, exit_price = ?, entry_time = ?, exit_time = ?,
-           pnl = ?, context = ?, locked = 1, updated_at = ? WHERE id = ? AND kite_user_id = ?`
+           pnl = ?, context = ?, locked = 1, updated_at = ?, charges = NULL, charges_detail = NULL WHERE id = ? AND kite_user_id = ?`
       ).run(entryPrice, exitPrice, entryTime, exitTime, pnl, JSON.stringify(ctx), Date.now(), id, uid);
 
       const updated = db.prepare('SELECT * FROM trade_journal WHERE id = ?').get(id) as any;
@@ -2249,6 +2307,13 @@ setInterval(() => {
         { header: 'Held (min)',      key: 'held',     width: 11 },
         { header: 'Points',          key: 'points',   width: 10 },
         { header: 'P&L',             key: 'pnl',      width: 12 },
+        // Charges, what is left of the P&L after them, and the account balance
+        // once the trade was closed (server/trade_charges.ts). "Charges from"
+        // says whether the figure is Zerodha's own calculation or an estimate.
+        { header: 'Charges',         key: 'charges',  width: 10 },
+        { header: 'Net P&L',         key: 'net',      width: 12 },
+        { header: 'Capital after',   key: 'capital',  width: 14 },
+        { header: 'Charges from',    key: 'csrc',     width: 13 },
         { header: 'Status',          key: 'status',   width: 9 },
         { header: 'Exit reason',     key: 'reason',   width: 22 },
         { header: 'Entry spot',      key: 'espot',    width: 11 },
@@ -2259,17 +2324,29 @@ setInterval(() => {
       ];
       ws.getRow(1).font = { bold: true };
 
-      let realised = 0, wins = 0, losses = 0;
+      let acct: ReturnType<typeof journalAccounts> | null = null;
+      try { acct = journalAccounts(uid, from, to); } catch (e) { console.error('[journal export] charges/capital unavailable', e); }
+      const perDay = new Map<string, { closed: number; gross: number; charges: number }>();
+      let realised = 0, wins = 0, losses = 0, chargesTotal = 0;
       for (const r of rows) {
+        const cost = acct?.byId.get(r.id);
         const ctx = (() => { try { return r.context ? JSON.parse(r.context) : null; } catch { return null; } })();
         const points = (r.exit_price != null && r.entry_price != null)
           ? (String(r.side).toUpperCase() === 'BUY' ? r.exit_price - r.entry_price : r.entry_price - r.exit_price)
           : null;
         const held = (r.exit_time && r.entry_time) ? Math.round((r.exit_time - r.entry_time) / 60000) : null;
+        // Every charge run up counts, including the entry of a trade still open
+        // — the same rule as the journal page, so each day adds up: opened with
+        // + net = left.
+        const dk = ist(r.entry_time).slice(0, 10);
+        const dd = perDay.get(dk) || { closed: 0, gross: 0, charges: 0 };
+        chargesTotal += cost?.charges ?? 0; dd.charges += cost?.charges ?? 0;
         if (r.status === 'CLOSED' && typeof r.pnl === 'number') {
           realised += r.pnl;
           if (r.pnl > 0) wins++; else if (r.pnl < 0) losses++;
+          dd.closed++; dd.gross += r.pnl;
         }
+        perDay.set(dk, dd);
         const parsed = parseContractSymbol(r.tradingsymbol);
         ws.addRow({
           date: ist(r.entry_time).slice(0, 10),
@@ -2286,6 +2363,8 @@ setInterval(() => {
           exit: r.exit_price, xtime: ist(r.exit_time),
           held, points: points == null ? null : Math.round(points * 100) / 100,
           pnl: r.pnl, status: r.status, reason: r.exit_reason,
+          charges: cost?.charges ?? null, net: cost?.net ?? null, capital: cost?.capitalAfter ?? null,
+          csrc: cost?.chargesSrc === 'zerodha' ? 'Zerodha' : cost?.chargesSrc ? 'Estimate' : '',
           // entry_spot is the column; ctx.spot is where the app's own capture
           // landed on older rows. Either is the same observation.
           espot: r.entry_spot ?? (typeof ctx?.spot === 'number' ? ctx.spot : null),
@@ -2295,7 +2374,8 @@ setInterval(() => {
       }
 
       for (const key of ['entry', 'exit', 'points', 'espot']) ws.getColumn(key).numFmt = '0.00';
-      ws.getColumn('pnl').numFmt = '#,##0.00;[Red]-#,##0.00';
+      for (const key of ['pnl', 'net']) ws.getColumn(key).numFmt = '#,##0.00;[Red]-#,##0.00';
+      for (const key of ['charges', 'capital']) ws.getColumn(key).numFmt = '#,##0.00';
 
       // A summary sheet, so the totals do not have to be re-derived by hand.
       const sum = wb.addWorksheet('Summary');
@@ -2313,9 +2393,50 @@ setInterval(() => {
         { k: 'Losses', v: losses },
         { k: 'Win rate', v: closed ? `${Math.round((wins / closed) * 100)}%` : '—' },
         { k: 'Realised P&L', v: Math.round(realised * 100) / 100 },
-        { k: 'Note', v: 'P&L is gross of brokerage, STT and other charges.' },
+        { k: 'Charges', v: Math.round(chargesTotal * 100) / 100 },
+        { k: 'Net P&L after charges', v: Math.round((realised - chargesTotal) * 100) / 100 },
+        { k: 'Note', v: 'Charges are brokerage, STT, exchange and SEBI fees, stamp duty and GST. Where the Trades sheet says Zerodha they are Zerodha\'s own calculation for each order; otherwise an estimate at the rates in force that day.' },
       ]);
-      sum.getCell('B10').numFmt = '#,##0.00;[Red]-#,##0.00';
+      // Formatted by NAME. This used to be sum.getCell('B10'), which is the Win
+      // rate row — Realised P&L sits on row 11 — so the money format had been
+      // landing on a percentage and the P&L had none.
+      sum.eachRow((row) => {
+        const k = String(row.getCell(1).value || '');
+        if (k === 'Realised P&L' || k === 'Net P&L after charges') row.getCell(2).numFmt = '#,##0.00;[Red]-#,##0.00';
+        if (k === 'Charges') row.getCell(2).numFmt = '#,##0.00';
+      });
+
+      // One line per trading day: what the day made after charges, and — for days
+      // Zerodha's opening balance was recorded — what the account opened with and
+      // what was left.
+      const dayWs = wb.addWorksheet('Days', { views: [{ state: 'frozen', ySplit: 1 }] });
+      dayWs.columns = [
+        { header: 'Date (IST)',     key: 'date',    width: 12 },
+        { header: 'Closed trades',  key: 'closed',  width: 13 },
+        { header: 'P&L',            key: 'gross',   width: 12 },
+        { header: 'Charges',        key: 'charges', width: 10 },
+        { header: 'Net P&L',        key: 'net',     width: 12 },
+        { header: 'Opened with',    key: 'opening', width: 14 },
+        { header: 'Funds added',    key: 'added',   width: 12 },
+        { header: 'Withdrawn',      key: 'out',     width: 11 },
+        { header: 'Left',           key: 'left',    width: 14 },
+        { header: 'In open trades', key: 'inopen',  width: 14 },
+        { header: 'Back from carried positions', key: 'carried', width: 26 },
+      ];
+      dayWs.getRow(1).font = { bold: true };
+      const dayKeys = Array.from(new Set([...perDay.keys(), ...Object.keys(acct?.days || {})])).sort();
+      for (const dk of dayKeys) {
+        const dd = perDay.get(dk); const cap = acct?.days?.[dk];
+        dayWs.addRow({
+          date: dk, closed: dd?.closed ?? 0,
+          gross: dd ? Math.round(dd.gross * 100) / 100 : null, charges: dd ? Math.round(dd.charges * 100) / 100 : null,
+          net: dd ? Math.round((dd.gross - dd.charges) * 100) / 100 : null,
+          opening: cap?.opening ?? null, added: cap?.added || null, out: cap?.withdrawn || null, left: cap?.left ?? null, inopen: cap?.inOpen || null,
+          carried: cap?.carriedIn || null,
+        });
+      }
+      for (const key of ['gross', 'net']) dayWs.getColumn(key).numFmt = '#,##0.00;[Red]-#,##0.00';
+      for (const key of ['charges', 'opening', 'added', 'out', 'left', 'inopen', 'carried']) dayWs.getColumn(key).numFmt = '#,##0.00';
 
       const fname = `trades_${uid}_${ist(from).slice(0, 10)}_to_${ist(to).slice(0, 10)}.xlsx`;
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -2354,8 +2475,21 @@ setInterval(() => {
       const rows = db.prepare(
         `SELECT * FROM trade_journal WHERE ${where.join(' AND ')} ORDER BY entry_time DESC LIMIT ?`
       ).all(...args, limit);
-      const trades = (rows as any[]).map((r) => ({ ...r, context: r.context ? JSON.parse(r.context) : null }));
-      return res.json({ success: true, trades, accountId: uid, from, to });
+      // Charges, net P&L and the balance after each trade (server/trade_charges.ts).
+      // Worked out over every row entered OR closed in the range, not only the
+      // rows being returned, so a status filter cannot drop a trade from the
+      // running balance. If it fails the journal still loads, without them.
+      let acct: ReturnType<typeof journalAccounts> | null = null;
+      try { acct = journalAccounts(uid, from, to); } catch (e) { console.error('[journal GET] charges/capital unavailable', e); }
+      const trades = (rows as any[]).map((r) => {
+        const { charges_detail, ...rest } = r;
+        const a = acct?.byId.get(r.id);
+        return { ...rest, context: r.context ? JSON.parse(r.context) : null,
+                 charges: a?.charges ?? null, charges_src: a?.chargesSrc ?? null, charges_breakdown: a?.breakdown ?? null,
+                 charges_orders: a?.orders ?? null, net_pnl: a?.net ?? null, capital_after: a?.capitalAfter ?? null };
+      });
+      let rates: any = null; try { rates = ratesInfo(); } catch { }
+      return res.json({ success: true, trades, accountId: uid, from, to, days: acct?.days || {}, rates });
     } catch (e: any) {
       console.error('[journal GET]', e);
       return res.status(500).json({ success: false, error: e?.message || String(e) });
