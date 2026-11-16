@@ -78,16 +78,23 @@ function initialHasOption(): boolean {
  */
 const isOptionLike = (i: any) => !!i && /\d(CE|PE)$/.test(String(i.tradingsymbol || '').toUpperCase());
 
-// THE SCALPPRO SCREEN'S TYPE IS THE PHONE'S OWN (16 Nov 2026). The app is set in
-// a fixed-width code face; Lemonn's ScalpPro, which Martin asked this screen to
-// match "100%" down to "the text size and the button sizes", is in a
-// proportional one, and a size measured off his screenshot only lands where
-// theirs does in a face of the same build — a fixed-width "NIFTY 17NOV 25350"
-// is a tenth wider and a different shape at any size. So this screen, and only
-// this screen, uses the system face: San Francisco on his iPhone, which is also
-// what the chart's own price scale is drawn in (chartFontFamily). Nothing is
-// downloaded for it. Everything inside the screen inherits it.
-const SCALP_FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
+// THE SCALPPRO SCREEN IS SET IN MANROPE, LEMONN'S OWN FACE (16 Nov 2026). The app
+// is set in a fixed-width code face; Lemonn's ScalpPro, which Martin asked this
+// screen to match "100%" down to "the text size and the button sizes", is not,
+// and a fixed-width "NIFTY 17NOV 25350" is a tenth wider and a different shape
+// at any size. v307 used the phone's system face, with sizes worked out for it.
+// He then asked to "copy the same fonts as in the screenshot", and the face
+// could be named: the widths of Lemonn's texts, measured off his screenshot,
+// are Manrope's at whole-pixel sizes to within a point (names, prices and
+// buttons 12px, "Req" 10px, "Funds" 8px, the chart's own scale 10px) — "Funds:
+// ₹8,645.89" is 65.33pt wide in both — where its two nearest look-alikes, DM
+// Sans and Plus Jakarta Sans, are 8 to 11% wide on the chart's figures.
+// Manrope is free (Open Font Licence) and is asked for in index.html (the
+// <link> there says why not in the stylesheet). The system face is what shows
+// until it arrives, or if it never does.
+// Everything inside the screen inherits it; the two charts are told it
+// separately (see SCALP_CHART_FONT in AdvancedChart).
+const SCALP_FONT = "'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
 
 function ScalpScreen({ onClose }: { onClose: () => void }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -186,12 +193,25 @@ function ScalpScreen({ onClose }: { onClose: () => void }) {
     // itself.
     <div ref={rootRef} data-scalp-screen="" className="flex flex-col w-full min-h-0 bg-background"
       style={{ height: top === null ? '80dvh' : `calc(100dvh - ${top}px)`, fontFamily: SCALP_FONT }}>
-      <div className="shrink-0 flex items-center gap-1 h-10 px-1 border-b border-white/10">
+      {/* THE TOP ROW IS LEMONN'S (16 Nov 2026). Martin, with a picture of theirs:
+          "add this design on the top and instead of All -211 text show the scalp
+          pro text" — and of the button beside their tab, "No need of add more
+          strategies button". Measured off the picture: a back arrow 16pt wide,
+          10pt in from the edge; then a tab cut like a folder's — 37pt tall, its
+          top corners rounded at 13pt, its feet flaring out at 10pt into the
+          surface below — in the charts' own colour, so the tab and the chart
+          under it are one piece, with a hairline under the rest of the row. */}
+      <div data-scalp-top="" className="relative shrink-0 h-11 flex items-end bg-background">
+        <div className="absolute inset-x-0 bottom-0 h-px bg-foreground/10" aria-hidden="true" />
         <button type="button" data-scalp="back" aria-label="Back" onClick={onClose}
-          className="h-9 w-9 flex items-center justify-center rounded-full text-foreground/90 active:bg-foreground/10">
-          <ArrowLeft size={20} />
+          className="relative h-11 w-9 flex items-center justify-center text-foreground active:opacity-60">
+          <ArrowLeft size={27} strokeWidth={1.8} />
         </button>
-        <span className="text-[13px] font-semibold text-foreground">ScalpPro</span>
+        <div data-scalp="tab" className="relative ml-[11px] h-[37px] px-[17px] flex items-center rounded-t-[13px] border border-b-0 border-foreground/15 bg-card text-[12px] font-[650] text-foreground">
+          <span className="absolute -left-[10px] bottom-0 h-[10px] w-[10px]" aria-hidden="true" style={{ background: 'radial-gradient(circle at 0 0, transparent 9.5px, var(--card) 10px)' }} />
+          <span className="absolute -right-[10px] bottom-0 h-[10px] w-[10px]" aria-hidden="true" style={{ background: 'radial-gradient(circle at 100% 0, transparent 9.5px, var(--card) 10px)' }} />
+          ScalpPro
+        </div>
       </div>
       <div ref={bodyRef} className="flex flex-col flex-1 min-h-0">
         {/* Neither pane is ever squeezed below what it must keep: its two lines

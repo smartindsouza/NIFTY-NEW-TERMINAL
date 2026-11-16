@@ -357,13 +357,25 @@ desktop split view uses, stacked.
   - **no grid lines** on these two charts (every other chart keeps its grid);
   - the name and price lines are **on the chart's own surface**, and the strip
     between the charts and the bar are the page's darker one;
-  - **the screen is set in the phone's own font**, not the app's fixed-width
-    one — a size only lands where Lemonn's does in a face of the same build.
-    Nothing is downloaded for it; the chart's price scale was already in it;
-  - capitals are 8.67pt tall in the names, prices, buttons and switch (12.3px);
+  - **the screen is set in Manrope, Lemonn's own font** (v308; v307 used the
+    phone's system font), not the app's fixed-width one. Martin asked to "copy
+    the same fonts as in the screenshot", and the font could be named: the
+    widths of Lemonn's texts are Manrope's at whole-pixel sizes to within a
+    point. It is free (Open Font Licence) and loaded by a `<link>` in
+    `index.html` — not by the `@import` in `src/index.css`, which is not in the
+    stylesheet the build produces; the two ScalpPro charts draw their figures
+    in it too (`SCALP_CHART_FONT`). If it cannot be fetched the screen shows
+    the system font;
+  - names, prices, buttons and the switch are 12px (capitals 8.67pt tall), the
+    quantity 13px, "Req" 10px extra-bold and "Funds" 8px — small, and theirs;
     Buy is 36pt tall, Sell 34pt with a 1pt outline, both ending 4pt from the
-    screen's edge; the stepper's circles are 32pt; "Req" is 10px bold and
-    "Funds" 8px — small, and theirs; amounts always show two decimals.
+    screen's edge; the stepper's circles are 32pt; amounts always show two
+    decimals;
+  - **the top row** is Lemonn's (v308): a back arrow and a tab cut like a
+    folder's, reading ScalpPro, in the charts' colour so it runs into the chart
+    below. Their "Add more strategies" button is left out at his word;
+  - **the time axis** (v308): its line runs on over the interval label in the
+    corner, there is a small mark above each time, and it is 30pt tall.
 - **The app's bottom bar is not shown on this screen**, as Lemonn's is not on
   its ScalpPro. The back arrow at the top returns to the chart page and the bar.
   - Tap the index name for NIFTY 50 / BANK NIFTY / SENSEX.
@@ -390,6 +402,11 @@ desktop split view uses, stacked.
   Trade button); everywhere else they still need it.
 - A reload stays on ScalpPro (`scalpPro` in the session); the back arrow returns
   to the index chart.
+- **On every chart (v308):** times on the axis are 12-hour with no am / pm
+  ("9:30", "2:15" — a session never has the same hour twice), each with a small
+  mark above it; and the button that brings the chart back to the latest candle
+  is Lemonn's — a white square with a blue turning arrow, in the middle of the
+  chart just above the time axis on a phone.
 - **Market | Limit/Trigger** above the buttons (v307). On Limit/Trigger each
   chart gets an **At Price** line at the live price, with a chip (✕ · At Price ·
   six dots) and the price in a box on the axis:

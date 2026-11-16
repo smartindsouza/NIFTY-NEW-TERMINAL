@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect, useLayoutEffect } from "react";
 import { useTodayBias, isRecord as isBiasRecord, istToday as biasIstToday, BIAS_LINES_KEY, useBiasCardHidden } from "../lib/bias";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, ChevronsUp, ChevronsDown, ChevronRight, Copy, Trash2, Search, PencilRuler, Minus, Slash, RectangleHorizontal, AlignJustify, TrendingDown, Type as TypeIcon, Move as MoveIcon, ArrowLeft, CalendarRange, ChartNoAxesCombined, TrendingUp, Star, Bell, Link2, CandlestickChart, GripVertical } from "lucide-react";
+import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsUp, ChevronsDown, ChevronRight, Copy, Trash2, Search, PencilRuler, Minus, Slash, RectangleHorizontal, AlignJustify, TrendingDown, Type as TypeIcon, Move as MoveIcon, ArrowLeft, CalendarRange, ChartNoAxesCombined, TrendingUp, Star, Bell, Link2, CandlestickChart, GripVertical, RotateCw } from "lucide-react";
 import { navigate } from "wouter/use-browser-location";
 import { TradeGuardButton } from "../components/TradeGuard";
 import { toast } from "sonner";
@@ -1173,7 +1173,7 @@ const UpDownMark = () => (
 // than Buy.) The stepper's − and + are 11.7pt across and 1.5pt thick, and a
 // button that cannot be pressed only dims its mark — at one lot Lemonn's − is a
 // shade greyer, not a ghost.
-const SCALP_BTN = 'flex-1 min-w-0 border text-[12.3px] leading-none font-semibold flex items-center justify-center disabled:opacity-60';
+const SCALP_BTN = 'flex-1 min-w-0 border text-[12px] leading-none font-bold flex items-center justify-center disabled:opacity-60';
 const SCALP_BTN_FILL = `${SCALP_BTN} h-9 rounded-[13px] border-transparent active:opacity-80`;
 const SCALP_BTN_LINE = `${SCALP_BTN} h-[34px] rounded-[12px] border-foreground text-foreground active:bg-foreground/10`;
 const SCALP_STEP = 'shrink-0 h-8 w-8 rounded-full border-2 border-foreground/15 bg-card flex items-center justify-center text-foreground/80 disabled:text-foreground/65 active:bg-foreground/10';
@@ -1183,15 +1183,23 @@ const SCALP_DASH: React.CSSProperties = { backgroundImage: 'repeating-linear-gra
 // THE HAIRLINE UNDER A SCALPPRO NAME. Lemonn's is half a point thick and 2.2pt
 // under the letters. A text underline cannot be that thin (browsers draw it at
 // least a pixel thick), so it is a half-pixel band of the text's own colour
-// painted across the name's 18px line, 15.4px down.
+// painted across the name's 18px line, 15.6px down.
 const SCALP_NAME_LINE: React.CSSProperties = {
   backgroundImage: 'linear-gradient(currentColor, currentColor)', backgroundRepeat: 'no-repeat',
-  backgroundSize: '100% 0.5px', backgroundPosition: '0 15.4px',
+  backgroundSize: '100% 0.5px', backgroundPosition: '0 15.6px',
 };
 
 const chartFontFamily = (customFontUrl: string) =>
   (customFontUrl ? "'UserCustomFont', " : '') +
   "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
+// THE SCALPPRO CHARTS' FIGURES ARE IN MANROPE, as Lemonn's are (see SCALP_FONT in
+// ChartWorkspace for how the face was named; its chart scale is Manrope at 10px).
+// A chart is drawn on a canvas, which does not wait for a font: until Manrope
+// has arrived the chart is built in the usual face, and switched once it has
+// (see the font swap in the chart's build). The two strings must differ — the
+// library keeps the widths it measured per font string.
+const SCALP_CHART_FONT = (customFontUrl: string) => "'Manrope', " + chartFontFamily(customFontUrl);
+const manropeReady = () => { try { return !!(document as any).fonts?.check?.("10px 'Manrope'"); } catch (e) { return false; } };
 
 // INDICATOR LINES ARE THIN AND SOLID (16 Nov 2026). Martin: "change the lines in
 // every indicator that I have in my app to thin lines instead of dotted lines or
@@ -5566,7 +5574,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       invalidateArmedRule();   // neither pane may keep showing the cancelled rule
       const ser = slSeriesRef.current;
       if (ser) {
-        slLinesRef.current.forEach((l: any) => { try { ser.removePriceLine(l.instance); } catch (e) {} });
+        // Only off a series that is still the chart's (see A SERIES THAT IS NO
+        // LONGER THE CHART'S IS A DEAD ONE): a rebuilt chart took its lines with it.
+        slLinesRef.current.forEach((l: any) => { try { if (ser === mainSeriesRef.current) ser.removePriceLine(l.instance); } catch (e) {} });
         slLinesRef.current = [];
         // The ENTRY line stays: it carries the chip row, which now reads
         // "SL off · TP off" (see RUNNING FREE in the line drawing).
@@ -7667,7 +7677,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // loop already runs every frame and reads only refs. Clipped to the plot, so a
   // drawing never runs over the prices. Where each one landed is kept for taps.
   const drawFontRef = useRef('monospace');
-  drawFontRef.current = chartFontFamily(settings.customFontUrl);
+  drawFontRef.current = scalp ? SCALP_CHART_FONT(settings.customFontUrl) : chartFontFamily(settings.customFontUrl);
   const paintDrawingsRef = useRef<(ctx: CanvasRenderingContext2D, cw: number, ch: number) => void>(() => {});
   paintDrawingsRef.current = (ctx, cw, ch) => {
     const geoms = drawGeomRef.current;
@@ -8560,7 +8570,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       const same = drawn.size === want.size && [...want].every((x) => drawn.has(x));
       if (same) return;
       const ser = slSeriesRef.current;
-      slLinesRef.current.forEach((l: any) => { try { ser?.removePriceLine(l.instance); } catch (e) {} });
+      slLinesRef.current.forEach((l: any) => { try { if (ser && ser === mainSeriesRef.current) ser.removePriceLine(l.instance); } catch (e) {} });   // never off a dead series
       slLinesRef.current = [];
     }
     // Adopt a rule change the instant another chart arms one, rather than waiting
@@ -10295,7 +10305,17 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       const sig = JSON.stringify(want);
       const cur = biasLinesRef.current;
       if (cur.series === s && cur.sig === sig) return;
-      if (cur.series) cur.lines.forEach((l) => { try { cur.series.removePriceLine(l); } catch (e) {} });
+      // A SERIES THAT IS NO LONGER THE CHART'S IS A DEAD ONE (16 Nov 2026). The
+      // chart is removed and built again on every data refresh, and its series
+      // with it; lines drawn on the old series went with the old chart. They
+      // were taken off it anyway, which asks the REMOVED chart to redraw — and a
+      // removed chart throws "Object is disposed" a frame later. Once per
+      // rebuild, on any day that has a bias; nothing on screen changed, which
+      // is how it went unseen. Found on the live app after v307 (the test
+      // copies have no bias, so no lines) and reproduced on one by giving it a
+      // bias and slow chart data. Lines are only taken off the series that is
+      // still the chart's.
+      if (cur.series && cur.series === s) cur.lines.forEach((l) => { try { cur.series.removePriceLine(l); } catch (e) {} });
       const lines = s ? want.map((p) => { try { return s.createPriceLine({ ...p, axisLabelVisible: true } as any); } catch (e) { return null; } }).filter(Boolean) : [];
       biasLinesRef.current = { series: s, lines, sig };
     };
@@ -10303,11 +10323,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     const id = setInterval(sync, 1500);
     return () => clearInterval(id);
   }, [biasToday, showBiasLevels, instrumentToken]);
-  useEffect(() => () => {
-    const cur = biasLinesRef.current;
-    if (cur.series) cur.lines.forEach((l) => { try { cur.series.removePriceLine(l); } catch (e) {} });
-    biasLinesRef.current = { series: null, lines: [], sig: '' };
-  }, []);
+  // On the way out there is nothing to take off: the chart is removed with its
+  // lines, and the series held here may already be a dead one (see above).
+  useEffect(() => () => { biasLinesRef.current = { series: null, lines: [], sig: '' }; }, []);
 
   // The signal list comes from the SERVER's log — the same rows the scorecard
   // grades — so an arrow always has a paper trail and can never repaint.
@@ -11682,8 +11700,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     const commonOptions = {
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: palette.text,
-        fontFamily: chartFontFamily(settings.customFontUrl),
+        // ScalpPro's figures are as light as Lemonn's (#adadad on their surface);
+        // the app's own slate read as a shade darker beside them.
+        textColor: scalp && resolvedTheme !== 'light' ? 'rgba(255, 255, 255, 0.66)' : palette.text,
+        fontFamily: scalp && manropeReady() ? SCALP_CHART_FONT(settings.customFontUrl) : chartFontFamily(settings.customFontUrl),
         fontSize: axisFontPx(),
       },
       // NO GRID ON THE SCALPPRO CHARTS (16 Nov 2026). Martin, of Lemonn's screen:
@@ -11699,7 +11719,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         mode: CrosshairMode.Normal,
       },
       timeScale: {
-        borderColor: palette.border,
+        // On ScalpPro the two axis lines are as strong as Lemonn's (theirs is
+        // #414141 on #161616, which is white at 18%); the app's own, at 10%,
+        // all but vanished beside it once the grid was gone.
+        borderColor: scalp && resolvedTheme !== 'light' ? 'rgba(255, 255, 255, 0.18)' : palette.border,
         timeVisible: true,
         secondsVisible: false,
         // barSpacing is the DEFAULT zoom and is deliberately unchanged — every
@@ -11710,6 +11733,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         // times as many candles on screen at full zoom-out.
         barSpacing: 12,
         minBarSpacing: 0.5,
+        // A small mark above each time, as on Lemonn's axis (Martin, 16 Nov
+        // 2026: "there's a small vertical mark above each time, add that as
+        // well").
+        ticksVisible: true,
         tickMarkFormatter: (time: any, tickMarkType: any, locale: string) => {
           const date = new Date(time * 1000);
           
@@ -11746,8 +11773,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           const hrNum = parseInt(hour, 10);
           const minNum = parseInt(minute, 10);
           const h12 = hrNum % 12 === 0 ? 12 : hrNum % 12;
-          const suffix = hrNum >= 12 ? 'pm' : 'am';
-          const label12 = `${h12}:${minute}${suffix}`;
+          // No am / pm (16 Nov 2026). Martin: "remove am/pm Indicator on time.
+          // Keep the time in 12 hr format". A session runs 9:15 to 3:30, so no
+          // hour on this axis is ever both. (The time under the crosshair still
+          // says which half of the day it is.)
+          const label12 = `${h12}:${minute}`;
 
           if (hrNum === 9 && minNum === 30) {
             return label12;
@@ -11818,7 +11848,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         ...(scalp ? { minimumHeight: 30 } : {}),
       },
       rightPriceScale: {
-        borderColor: palette.border,
+        borderColor: scalp && resolvedTheme !== 'light' ? 'rgba(255, 255, 255, 0.18)' : palette.border,
         // AUTO-FIT (16 Nov 2026). This was false "so the vertical range stays put
         // while you pan" — which also meant that scrolling back in time slid the
         // candles off the top or bottom of the pane, and only the reload button
@@ -11835,6 +11865,19 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     });
 
     mainChartRef.current = mainChart;
+
+    // THE FONT SWAP (ScalpPro; see SCALP_CHART_FONT). Built before Manrope had
+    // arrived, the chart is in the usual face; when the face is there it is told
+    // so — if it is still the chart on screen: a removed chart must never be
+    // touched again (it throws a frame later; see the bias lines).
+    if (scalp && !manropeReady()) {
+      try {
+        (document as any).fonts?.load?.("10px 'Manrope'").then(() => {
+          if (mainChartRef.current !== mainChart || !manropeReady()) return;
+          try { mainChart.applyOptions({ layout: { fontFamily: SCALP_CHART_FONT(settings.customFontUrl) } }); } catch (e) {}
+        }).catch(() => {});
+      } catch (e) {}
+    }
 
     // Candlestick Series
     const mainSeries = mainChart.addSeries(CandlestickSeries, {
@@ -14641,6 +14684,35 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     raf = requestAnimationFrame(frame);
     return () => { stopped = true; cancelAnimationFrame(raf); };
   }, [scalpRowsOn]);
+  // THE INTERVAL LABEL IS THE CORNER WHERE THE TWO AXES MEET, to the pixel: the
+  // price axis is as wide as its longest figure and the time axis as tall as
+  // the library makes it, and neither is known until the chart has drawn. Read
+  // off the chart a few times a second (a read, never a change: it is safe on a
+  // chart that has since been removed).
+  const scalpCornerRef = useRef<HTMLLabelElement | null>(null);
+  useEffect(() => {
+    if (!scalp) return;
+    const fit = () => {
+      const el = scalpCornerRef.current, chart = mainChartRef.current;
+      if (!el || !chart) return;
+      try {
+        const w = Math.round(chart.priceScale('right').width()), h = Math.round(chart.timeScale().height());
+        if (w > 0 && el.style.width !== `${w}px`) el.style.width = `${w}px`;
+        if (h > 0 && el.style.height !== `${h}px`) el.style.height = `${h}px`;
+        // Its top is the chart's own axis line, not "30px up from the box": the
+        // chart is drawn to a whole number of pixels and the box it sits in is
+        // not always one, and the difference showed as a notch in the line.
+        const box = el.offsetParent as HTMLElement | null, root = chart.chartElement?.();
+        if (h > 0 && box && root) {
+          const top = `${(root.getBoundingClientRect().bottom - h - box.getBoundingClientRect().top).toFixed(2)}px`;
+          if (el.style.top !== top) { el.style.top = top; el.style.bottom = 'auto'; }
+        }
+      } catch (e) {}
+    };
+    fit();
+    const iv = setInterval(fit, 400);
+    return () => clearInterval(iv);
+  }, [scalp]);
   // WHICH SIDE OF THE LIVE PRICE THE LINE IS ON — that is what names the two
   // buttons. The live price is not in React state (it would re-render this page
   // on every tick), so it is looked at a few times a second while the mode is on.
@@ -15088,13 +15160,15 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             on the chart's own surface (bg-card, not the page's darker
             background), and every size here is measured off his screenshot of
             Lemonn, which is 430pt wide at 3 pixels a point: capitals 8.67pt
-            tall in both lines (12.3px in the phone's own font), the name's
-            capitals starting 18.3pt down, the price's baseline 18pt under the
-            name's, 57.5pt in all; the name underlined with a hairline, a pair
-            of solid triangles after what can be changed. */}
+            tall in both lines — Manrope at 12px, the face and the size Lemonn's
+            are (see SCALP_FONT) — the name's capitals starting 18.3pt down, the
+            price's baseline 18pt under the name's, 57.5pt in all; the name a
+            shade under bold with a hairline under it, "Call" and the change
+            regular, the price medium; a pair of solid triangles after what can
+            be changed. */}
         {scalp && (
           <div data-scalp-head={paneRole} className="relative shrink-0 px-[15px] pt-[13.5px] pb-2 bg-card" onPointerDown={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-1 h-[18px] text-[12.3px] leading-[18px] font-medium text-foreground">
+            <div className="flex items-center gap-1 h-[18px] text-[12px] leading-[18px] font-[650] text-foreground">
               {isSpotPane ? (
                 <button type="button" data-scalp="index" onClick={() => setIndexMenuOpen(o => !o)} className="flex items-center gap-[3px]">
                   <span className="block h-[18px]" style={SCALP_NAME_LINE}>{indexLabel}</span><UpDownMark />
@@ -15114,7 +15188,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 no letter of a font is; the paint loop fills the two texts and
                 turns the triangle over (see data-chg there). The figures are
                 not fixed-width here, as theirs are not. */}
-            <div className="flex items-baseline gap-[5px] h-[18px] whitespace-nowrap text-[12.3px] leading-[18px]">
+            <div className="flex items-baseline gap-[5px] h-[18px] whitespace-nowrap text-[12px] leading-[18px]">
               <span ref={headPriceRef} data-head="price" className="font-medium text-foreground">—</span>
               <span ref={headChangeRef} data-head="change" className="inline-flex items-baseline gap-1 font-normal">
                 <span data-chg="amt" />
@@ -16945,9 +17019,20 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   setShowJumpToLatest(false);
                 }}
                 title="Scroll to the latest candle"
-                className="absolute bottom-14 md:bottom-3 right-3 md:right-[60px] z-[55] h-9 w-9 rounded-full bg-primary/90 text-white shadow-lg flex items-center justify-center hover:bg-primary transition-colors animate-in fade-in duration-200"
+                data-jump-latest=""
+                // LEMONN'S BUTTON (16 Nov 2026). Martin, with a picture of theirs:
+                // "Change the chart refresh button (the one that brings the chart
+                // to the latest candlesticks) into the one that's shown in the
+                // screenshot". Measured off it: a white square of 24pt with a 1pt
+                // pale edge and 6pt corners, a blue (#4f6bd5) turning arrow of
+                // 13pt in it, in the middle of the chart's width and 8pt above
+                // the time axis's line. White in every theme, as a thing floating
+                // over the chart. It was a purple disc with a double chevron at
+                // the right edge. (On the desktop it keeps its place by the
+                // price axis.) The phone's axis is 26px tall, ScalpPro's 30.
+                className={`absolute z-[55] h-[26px] w-[26px] rounded-[7px] border border-[#dcdcdc] bg-white text-[#4f6bd5] shadow-md flex items-center justify-center active:bg-[#f0f0f0] animate-in fade-in duration-200 left-1/2 -translate-x-1/2 md:left-auto md:translate-x-0 md:right-[60px] md:bottom-3 ${scalp ? 'bottom-[38px]' : 'bottom-[34px]'}`}
               >
-                <ChevronsRight size={18} />
+                <RotateCw size={14} strokeWidth={2.4} />
               </button>
             )}
             {crosshairInfo && (
@@ -17313,9 +17398,17 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 drawing tools. (Lemonn also has zoom in / out buttons beside the
                 price axis, and v303 had them here. Martin, the same evening:
                 "Remove the zoom out and zoom in buttons from the scalp pro
-                charts". A pinch zooms, as on every chart in the app.) */}
+                charts". A pinch zooms, as on every chart in the app.)
+                The label covers the corner under the time axis's line, and
+                draws that line on across its own top: Martin, 16 Nov, "the line
+                above the time axis extends above the time frame button" on
+                Lemonn's. The price axis's line ends there, as theirs does. It
+                is kept exactly the size of the corner it covers — as wide as
+                the price axis, as tall as the time axis (see scalpCornerRef) —
+                or its line is a step off the chart's and stops short of it. */}
             {scalp && (
-              <label data-scalp="interval" className="absolute right-0 bottom-0 z-[44] h-[30px] min-w-[52px] flex items-center justify-end gap-[3px] pl-2 pr-[13px] text-[12.3px] font-medium text-foreground bg-card">
+              <label ref={scalpCornerRef} data-scalp="interval" className="absolute right-0 bottom-0 z-[44] flex items-center justify-end gap-[3px] pr-[13px] text-[12px] font-normal text-foreground bg-card border-t"
+                style={{ width: 56, height: 30, borderTopColor: resolvedTheme !== 'light' ? 'rgba(255, 255, 255, 0.18)' : palette.border }}>
                 {tfLabelOf(timeframe)}<svg width="8" height="4" viewBox="0 0 8 4" aria-hidden="true"><path d="M0 0 H8 L4 4 Z" fill="currentColor" /></svg>
                 <select value={timeframe} onChange={(e) => setTimeframe(e.target.value)} aria-label="Interval" className="absolute inset-0 h-full w-full opacity-0">
                   <option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="15">15m</option>
@@ -17413,9 +17506,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   Sell is 34pt with a 1pt outline; both run to 4pt from the
                   screen's edge and stop 8pt short of the stepper;
                 the stepper's circles are 32pt with a 2pt ring, 44pt apart;
-                capitals are 8.67pt tall on the buttons and the switch (12.3px),
-                  10pt in the quantity, 7pt in "Req" (10px, bold) and 5.7pt in
-                  "Funds" (8px) — small, and theirs;
+                the words are Manrope, at the sizes and weights whose widths are
+                  Lemonn's: the buttons and the switch 12px bold, the quantity
+                  13px medium over "1 lot" at 10px, "Req" 10px extra-bold and
+                  "Funds" 8px — small, and theirs;
                 "Req" starts 8pt under the buttons, and the bar ends 22pt under
                   them, above the home indicator's strip.
               The lime is theirs and deliberately not one of the app's theme
@@ -17428,7 +17522,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   half is pressed over the switch's whole height, not only its
                   24pt pill (the ::after). */}
               <div className="flex justify-center mb-0.5">
-                <div data-scalp="mode" className="inline-flex items-center h-[34px] rounded-[12px] border border-foreground/15 bg-card p-1 text-[12.3px] leading-none font-semibold">
+                <div data-scalp="mode" className="inline-flex items-center h-[34px] rounded-[12px] border border-foreground/15 bg-card p-1 text-[12px] leading-none font-bold">
                   <button type="button" data-mode="market" aria-pressed={!atOn} onClick={() => { if (atOn) atOff(); }}
                     className={`relative h-6 px-[9px] rounded-[9px] after:absolute after:inset-x-0 after:-inset-y-[5px] after:content-[''] ${!atOn ? 'bg-foreground text-background' : 'text-foreground'}`}>Market</button>
                   <button type="button" data-mode="at" aria-pressed={atOn} onClick={() => { if (!atOn) onScalpAt?.(() => ({ on: true, src: 'option', optPx: null, spotPx: null })); }}
@@ -17455,9 +17549,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 <div className="shrink-0 self-stretch mx-2 flex items-center">
                   <button type="button" data-scalp="lots-minus" aria-label="One lot less" disabled={scalpLots <= 1 || !!scalpBusy}
                     onClick={() => setScalpLots(l => Math.max(1, l - 1))} className={SCALP_STEP}><Minus size={17.5} strokeWidth={2.05} /></button>
-                  <div className="self-start mt-[5px] w-[44px] text-center">
-                    <div data-scalp="qty" className="text-[14.2px] leading-[18.5px] font-medium tabular-nums text-foreground">{scalpQty > 0 ? scalpQty : '—'}</div>
-                    <div data-scalp="lots" className="text-[9.7px] leading-[14px] font-medium text-muted-foreground">{scalpLots} lot{scalpLots > 1 ? 's' : ''}</div>
+                  <div className="self-start mt-[3.4px] w-[44px] text-center">
+                    <div data-scalp="qty" className="text-[13px] leading-[18px] font-medium tabular-nums text-foreground">{scalpQty > 0 ? scalpQty : '—'}</div>
+                    <div data-scalp="lots" className="mt-[0.8px] text-[10px] leading-[14px] font-semibold text-muted-foreground">{scalpLots} lot{scalpLots > 1 ? 's' : ''}</div>
                   </div>
                   <button type="button" data-scalp="lots-plus" aria-label="One lot more" disabled={scalpLots >= 25 || !!scalpBusy}
                     onClick={() => setScalpLots(l => Math.min(25, l + 1))} className={SCALP_STEP}><Plus size={17.5} strokeWidth={2.05} /></button>
@@ -17481,9 +17575,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               </div>
               {/* The middle column is as wide as the stepper above it (8 + 32 +
                   44 + 32 + 8), so each "Req" is centred under its own button. */}
-              <div className="flex items-start mt-[5.5px] text-[10px] leading-[12px] font-bold text-muted-foreground tabular-nums">
+              <div className="flex items-start mt-[5.5px] text-[10px] leading-[12px] font-extrabold text-muted-foreground">
                 <span data-scalp="req-buy" className="flex-1 min-w-0 text-center whitespace-nowrap">{!atOn && scalpPos && scalpPos.side === 'SELL' ? '' : `Req: ${scalpRs(atOn ? atReqBuy : scalpReqNow.buy)}`}</span>
-                <span data-scalp="funds" className="shrink-0 w-[124px] -mt-[0.8px] text-center whitespace-nowrap text-[8px] leading-[10px] font-normal text-foreground/80">Funds: {scalpRs(availBalance)}</span>
+                <span data-scalp="funds" className="shrink-0 w-[124px] -mt-[0.5px] text-center whitespace-nowrap text-[8px] leading-[10px] font-semibold text-foreground/80">Funds: {scalpRs(availBalance)}</span>
                 <span data-scalp="req-sell" className="flex-1 min-w-0 text-center whitespace-nowrap">{!atOn && scalpPos && scalpPos.side !== 'SELL' ? '' : `Req: ${scalpRs(scalpReqNow.sell)}`}</span>
               </div>
             </div>
