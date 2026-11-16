@@ -169,3 +169,16 @@ closed; every day carries what the account opened with and what was left.
 Code: `server/trade_charges.ts`; wiring in `server.ts` (journal import, read,
 correction, export); page `src/pages/TradeJournal.tsx`.
 Test: `npx tsx server/trade_charges.test.ts`.
+
+## Home: open-interest totals over every strike
+
+The Home screen's "Open Interest Distribution" card adds up **every strike** of the
+nearest expiry, so it matches other apps and NSE. The option chain itself only
+carries strikes near spot (NIFTY: within 1,500 points), so the far strikes' OI is
+read once a minute in the background (`getLiveOptionChain` in
+`server/kite_service.ts`, field `oiAll`) and added per contract. The card says
+what it is showing ("all 201 strikes · put : call 0.88"); for the first seconds
+after a restart, or if that read fails for five minutes, it shows the near-strike
+totals and says "strikes near spot". Everything that decides — the Home decision,
+PCR Context, max pain, the zones — still uses the strikes near spot.
+Test: `npx tsx server/analytics_engine.test.ts`.

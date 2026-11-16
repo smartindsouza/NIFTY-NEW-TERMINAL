@@ -566,6 +566,48 @@ function resolveIndexToken(spotSymbol: string): number | null {
   } catch (e) { return null; }
 }
 
+// ALL-STRIKE OI TOTALS (16 Nov 2026). The chain below only carries strikes near
+// spot (NIFTY: within 1,500 points — about 60 strikes), and the Home screen's
+// "Total CE / PE OI" was the sum of just those. Martin compared it with another
+// app at 11:14 AM: his app said 2,459 lakh calls and 2,000 lakh puts, the other
+// 2,724 and 2,405. Same expiry, same units — the other app adds up EVERY strike.
+// The 265 lakh calls and 405 lakh puts between them sit in far strikes (puts
+// below 23,750, calls above 26,700). It was checked that the gap is not other
+// expiries: the next two hold 671 and 573 lakh in the same strike range.
+//
+// So the OI of every contract of the expiry is read once a minute, in the
+// background, and kept per contract. The total is then: the quote just fetched
+// for a strike inside the chain's window, the kept figure for one outside it —
+// per contract, so a strike crossing the edge of the window as spot moves is
+// never counted twice or dropped. The chain itself, its strikes, max pain, the
+// zones and the PCR the decision uses are untouched: this is one extra field.
+//
+// In the background and never awaited by the chain: the chain is rebuilt every
+// 10 s and must not wait on, or fail with, a second quote request. The request
+// is held back 1.2 s so it does not land in the same second as the chain's own
+// (Kite allows about one quote request a second).
+type AllStrikeOi = { at: number; oi: Map<string, number> };
+const allStrikeOi = new Map<string, AllStrikeOi>();
+const allStrikeTriedAt = new Map<string, number>();
+const ALL_STRIKE_REFRESH_MS = 60 * 1000;
+const ALL_STRIKE_MAX_AGE_MS = 5 * 60 * 1000;
+async function refreshAllStrikeOi(kc: any, key: string, symbols: string[]) {
+  try {
+    const oi = new Map<string, number>();
+    for (let i = 0; i < symbols.length; i += 500) {
+      await new Promise((r) => setTimeout(r, 1200));
+      const chunk = symbols.slice(i, i + 500);
+      const q: any = await kc.getQuote(chunk);
+      for (const s of chunk) { const v = Number(q?.[s]?.oi); if (Number.isFinite(v)) oi.set(s, v); }
+    }
+    if (oi.size) allStrikeOi.set(key, { at: Date.now(), oi });
+  } catch (e: any) {
+    // Not fatal and not urgent: the last figures are used for up to five minutes,
+    // after which the Home screen goes back to the near-strike totals and says so.
+    console.error('[chain] all-strike OI read failed:', e?.message || e);
+  }
+}
+
 export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot?: number, expiry?: string) {
   const kc = getKiteClient();
   
@@ -715,6 +757,32 @@ export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot
         }
     } catch(e) { console.error("OI tracking error", e); }
 
+    // Totals over EVERY strike of this expiry — see ALL-STRIKE OI TOTALS above.
+    // null until the first background read lands (a few seconds after start) or
+    // if it has gone stale; callers fall back to the near-strike totals.
+    let oiAll: { ce: number; pe: number; strikes: number; asOf: number } | null = null;
+    try {
+      const expiryOptions = niftyInstruments.filter((i: any) =>
+        toDateStr(i.expiry) === targetExpiry && (i.instrument_type === 'CE' || i.instrument_type === 'PE'));
+      const allKey = `${optExchange}|${nameFilter}|${targetExpiry}`;
+      const kept = allStrikeOi.get(allKey);
+      const nowMs = Date.now();
+      if ((!kept || nowMs - kept.at > ALL_STRIKE_REFRESH_MS) && nowMs - (allStrikeTriedAt.get(allKey) || 0) > ALL_STRIKE_REFRESH_MS) {
+        allStrikeTriedAt.set(allKey, nowMs);
+        void refreshAllStrikeOi(kc, allKey, expiryOptions.map((i: any) => `${optExchange}:${i.tradingsymbol}`));
+      }
+      if (kept && nowMs - kept.at < ALL_STRIKE_MAX_AGE_MS) {
+        let ce = 0, pe = 0;
+        for (const i of expiryOptions) {
+          const sym = `${optExchange}:${i.tradingsymbol}`;
+          const fresh = optionQuotes[sym];
+          const oi = fresh ? (Number(fresh.oi) || 0) : (kept.oi.get(sym) ?? 0);
+          if (i.instrument_type === 'CE') ce += oi; else pe += oi;
+        }
+        oiAll = { ce: ce / 100000, pe: pe / 100000, strikes: new Set(expiryOptions.map((i: any) => Number(i.strike))).size, asOf: kept.at };
+      }
+    } catch (e) { console.error('[chain] all-strike OI totals unavailable', e); }
+
     // Process and format data
     const strikes = Array.from(new Set(relevantOptions.map((i: any) => Math.round(Number(i.strike))))).sort((a: any, b: any) => a - b);
     
@@ -787,7 +855,8 @@ export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot
         spotToken: isBse ? await getBseIndexToken(cleanSymbol) : resolveIndexToken(spotSymbol),
         expiryDate: targetExpiry,
         expiryDays: Math.max(1, Math.ceil((new Date(targetExpiry).getTime() - Date.now()) / (1000 * 60 * 60 * 24))),
-        expiries
+        expiries,
+        oiAll
     };
   } catch (e) {
     console.error("Error fetching live option chain:", e);

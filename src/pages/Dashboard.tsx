@@ -228,9 +228,20 @@ export function Dashboard() {
   const { spot } = chain;
   const { totalCeOi, totalPeOi, pcr, maxPain, supportZone, resistanceZone } = analytics;
   
-  const totalOi = totalCeOi + totalPeOi;
-  const cePercent = totalOi > 0 ? (totalCeOi / totalOi) * 100 : 50;
-  const pePercent = totalOi > 0 ? (totalPeOi / totalOi) * 100 : 50;
+  // TOTALS OVER EVERY STRIKE (16 Nov 2026). The card below used to add up only the
+  // ~60 strikes the chain carries around spot, so it read well under other apps
+  // (2,459 lakh calls against 2,724 in the one Martin compared it with — the
+  // rest was in far strikes). The server now sends the all-strike totals too.
+  // They are for THIS card only: the decision, PCR Context, max pain and the
+  // zones below still use the strikes near spot, as before. Until the first
+  // all-strike read lands the server sends the near-strike totals and says so.
+  const oiAllStrikes = analytics.oiScope === 'all';
+  const ceOiShown: number = analytics.totalCeOiAll ?? totalCeOi;
+  const peOiShown: number = analytics.totalPeOiAll ?? totalPeOi;
+  const pcrAllStrikes: number = analytics.pcrAll ?? pcr;
+  const totalOi = ceOiShown + peOiShown;
+  const cePercent = totalOi > 0 ? (ceOiShown / totalOi) * 100 : 50;
+  const pePercent = totalOi > 0 ? (peOiShown / totalOi) * 100 : 50;
 
   const computed = computeMasterSignal({ ...analytics, spot }, taData, fiiDiiData);
 
@@ -341,11 +352,18 @@ export function Dashboard() {
 
       {/* OI Bars — carded with section label */}
       <div className="bg-card border border-border rounded-xl p-4 md:p-5">
-        <p className="text-[10px] font-bold text-muted-foreground tracking-widest uppercase mb-3">Open Interest Distribution</p>
+        <div className="flex items-baseline justify-between gap-2 mb-3 flex-wrap">
+          <p className="text-[10px] font-bold text-muted-foreground tracking-widest uppercase">Open Interest Distribution</p>
+          {/* Says what is being added up, so the figure can be checked against
+              another app or NSE without guessing. */}
+          <p className="text-[10px] font-mono text-muted-foreground">
+            {oiAllStrikes ? `all ${analytics.oiStrikes} strikes` : 'strikes near spot'} · put : call {pcrAllStrikes.toFixed(2)}
+          </p>
+        </div>
         <div className="grid grid-cols-[1fr_2fr_1fr] items-center gap-3 md:gap-8">
           <div className="text-center">
             <p className="text-[10px] uppercase text-muted-foreground tracking-widest">Total CE OI</p>
-            <p className="text-lg font-mono font-bold text-red-500 mt-1">{totalCeOi.toFixed(1)}L</p>
+            <p className="text-lg font-mono font-bold text-red-500 mt-1">{ceOiShown.toFixed(1)}L</p>
           </div>
           <div className="text-center w-full px-2 md:px-4">
             <p className="text-[10px] uppercase text-muted-foreground tracking-widest mb-2">CE / PE Split</p>
@@ -360,7 +378,7 @@ export function Dashboard() {
           </div>
           <div className="text-center">
             <p className="text-[10px] uppercase text-muted-foreground tracking-widest">Total PE OI</p>
-            <p className="text-lg font-mono font-bold text-green-500 mt-1">{totalPeOi.toFixed(1)}L</p>
+            <p className="text-lg font-mono font-bold text-green-500 mt-1">{peOiShown.toFixed(1)}L</p>
           </div>
         </div>
       </div>
@@ -530,8 +548,11 @@ export function Dashboard() {
          {/* PCR */}
          <Card className="bg-card border border-border p-6 rounded-xl flex flex-col items-center justify-center text-center">
             <p className="text-[10px] tracking-widest uppercase text-muted-foreground font-bold mb-4">PCR Context</p>
+            {/* This is the PCR the decision uses: strikes near spot. The all-strike
+                ratio is on the Open Interest card above and usually reads higher. */}
             <p className={cn("text-4xl font-mono font-bold", pcr < 0.7 ? "text-red-500" : pcr > 1.2 ? "text-green-500" : "text-primary")}>{pcr.toFixed(2)}</p>
             <p className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground mt-2">{pcr < 0.7 ? "Oversold" : pcr > 1.2 ? "Overbought" : "Neutral"}</p>
+            {oiAllStrikes && <p className="text-[9px] font-mono text-muted-foreground/70 mt-1">strikes near spot</p>}
          </Card>
 
          {/* Max Pain */}

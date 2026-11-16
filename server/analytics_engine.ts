@@ -5,6 +5,16 @@ export interface AnalyticsResult {
   maxPain: number;
   totalCeOi: number;
   totalPeOi: number;
+  // The same totals over EVERY strike of the expiry (what other apps and NSE
+  // show), where the chain carries them; otherwise equal to the near-strike
+  // totals above, and oiScope says which it is. Display only: the bias, the
+  // signal and everything else in this file still work from the strikes near
+  // spot, exactly as before.
+  totalCeOiAll: number;
+  totalPeOiAll: number;
+  pcrAll: number;
+  oiScope: 'all' | 'near';
+  oiStrikes: number;
   marketBias: string;
   confidence: number;
   topCeStrikes: any[];
@@ -15,7 +25,8 @@ export interface AnalyticsResult {
 }
 
 export function computeAnalytics(
-  chain: { spot: number, strikes: number[], ceData: Record<number, OptionContract>, peData: Record<number, OptionContract> }
+  chain: { spot: number, strikes: number[], ceData: Record<number, OptionContract>, peData: Record<number, OptionContract>,
+           oiAll?: { ce: number; pe: number; strikes: number; asOf: number } | null }
 ): AnalyticsResult {
   let totalCeOi = 0;
   let totalPeOi = 0;
@@ -26,6 +37,11 @@ export function computeAnalytics(
   });
 
   const pcr = totalPeOi / (totalCeOi || 1);
+  // All-strike totals, if the chain has them (server/kite_service.ts). They can
+  // never be smaller than the near-strike totals they contain; a figure that is
+  // would be a bad read, and is not shown.
+  const all = chain.oiAll;
+  const hasAll = !!all && Number.isFinite(all.ce) && Number.isFinite(all.pe) && all.ce >= totalCeOi - 0.01 && all.pe >= totalPeOi - 0.01 && all.ce + all.pe > 0;
 
   // Max Pain
   let maxPain = chain.spot;
@@ -72,6 +88,11 @@ export function computeAnalytics(
     maxPain,
     totalCeOi: parseFloat(totalCeOi.toFixed(2)),
     totalPeOi: parseFloat(totalPeOi.toFixed(2)),
+    totalCeOiAll: parseFloat((hasAll ? all!.ce : totalCeOi).toFixed(2)),
+    totalPeOiAll: parseFloat((hasAll ? all!.pe : totalPeOi).toFixed(2)),
+    pcrAll: parseFloat((hasAll ? all!.pe / (all!.ce || 1) : pcr).toFixed(2)),
+    oiScope: hasAll ? 'all' : 'near',
+    oiStrikes: hasAll ? all!.strikes : chain.strikes.length,
     marketBias,
     confidence: Math.min(Math.abs(biasScore) * 30 + 10, 95),
     topCeStrikes,
