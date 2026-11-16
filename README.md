@@ -191,6 +191,11 @@ the pane. The rules are the charting library's (and TradingView's): while auto-f
 is on, a vertical drag in the chart body does nothing; **dragging the price axis**
 takes over by hand (the body can then be dragged up and down too); a double-tap on
 the axis, the jump-to-latest button or a reload hands it back.
+While a trade is open and the latest candle is on screen, the fit also keeps the
+trade in view: the entry, the armed SL and TP on the traded option's chart, and
+their mirrors on the spot chart. A level that would stretch the range past five
+times the candles' own is left out (it would flatten the candles), and the range
+holds still while a line is being dragged.
 On phones (under 768px wide) both axes are drawn at 10px, the price axis is 52px
 wide, and tick labels drop ".00" — sizes measured off the Lemonn app. Desktop text
 is unchanged. The indicators list closes on a tap anywhere on the chart.

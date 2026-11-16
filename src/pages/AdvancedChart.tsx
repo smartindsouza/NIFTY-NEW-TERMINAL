@@ -6009,6 +6009,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     return (long ? cap > entry : cap < entry) ? cap : entry;
   };
   const startExitLineDrag = () => {
+    // Hold the auto-fit where it is for the length of the drag (see THE OPEN
+    // TRADE STAYS ON SCREEN): the range must not move under the finger.
+    tradeFitFrozenRef.current = tradeFitLevels();
     const move = (ev: PointerEvent) => {
       const cont = chartContainerRef.current;
       const series = mainSeriesRef.current;
@@ -6068,6 +6071,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       document.removeEventListener('pointercancel', end);
       const d = exitDragRef.current;
       exitDragRef.current = null;
+      // The finger is up: let the fit follow the line to where it was dropped.
+      tradeFitFrozenRef.current = null;
+      tradeFitSigRef.current = tradeFitLevels().map((p) => p.toFixed(2)).join('|');
+      refitForTrade();
       try {
         mainChartRef.current?.applyOptions({
           handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
@@ -6216,6 +6223,79 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const spotMapSeriesRef = useRef<any>(null);
   const spotMapRef = useRef<{ spot: number; delta: number; iv: number; slSpot: number | null; tpSpot: number | null; sl: number; tp: number; symbol: string; slOn?: boolean; tpOn?: boolean } | null>(null);
   const spotMapBusyRef = useRef(false);
+
+  // ===== THE OPEN TRADE STAYS ON SCREEN (16 Nov 2026) =====
+  // The price scale auto-fits to the candles now (v292), and the library's
+  // auto-fit looks at candles only — a price LINE never widens it. So the first
+  // trade after that change would have had its stop and target off the top and
+  // bottom of the pane whenever they sat outside the recent candles' range
+  // (a -10% stop and +20% target on a quiet tape always do), with nothing on
+  // screen to say where they were. Before v292 the scale was manual and a drag
+  // in the chart body reached them; with auto-fit on that drag does nothing.
+  //
+  // So the auto-fit is told about the trade: the entry, the armed SL and TP on
+  // the traded option's chart, and their mirrors on the spot chart, are kept
+  // inside the fitted range. Two limits:
+  //  * A level that would stretch the range past TRADE_FIT_MAX_STRETCH times the
+  //    candles' own range is left out, nearest levels first — a target parked
+  //    far away must not flatten the candles into a line. It is then off screen
+  //    exactly as a far drawing is; dragging the price axis reaches it.
+  //  * While a line is being DRAGGED the levels are frozen at where they were
+  //    when the finger went down. Otherwise the range would grow as the line
+  //    neared the edge, the price under a still finger would change, and the
+  //    line would run away from the thumb.
+  // Only lines that live on the CURRENT series count, so a level left over from
+  // the previous instrument can never set this chart's scale. And only while the
+  // latest candle is on screen: scrolled back into history (the same point at
+  // which the jump-to-latest button appears) the chart fits the candles being
+  // looked at, as Martin asked, not a trade that is days to the right of them.
+  const TRADE_FIT_MAX_STRETCH = 5;
+  const tradeFitFrozenRef = useRef<number[] | null>(null);
+  const tradeFitSigRef = useRef('');
+  const tradeFitLevels = (): number[] => {
+    if (tradeFitFrozenRef.current) return tradeFitFrozenRef.current;
+    const ser = mainSeriesRef.current;
+    const out: number[] = [];
+    if (!ser) return out;
+    try {
+      const total = chartDataRef.current?.candles?.length || 0;
+      const lr = mainChartRef.current?.timeScale?.().getVisibleLogicalRange?.();
+      if (lr && total && (total - 1) - Number(lr.to) > 3) return out;
+    } catch (e) { /* cannot tell: treat the latest candle as on screen */ }
+    if (slSeriesRef.current === ser) {
+      for (const l of slLinesRef.current) if (Number.isFinite(l.price) && l.price > 0) out.push(l.price);
+      const entry = slEntryRef.current;
+      if (slEntryLineRef.current && entry && Number.isFinite(entry) && entry > 0) out.push(entry);
+    }
+    if (spotMapSeriesRef.current === ser) {
+      for (const l of spotMapLinesRef.current) if (Number.isFinite(l.price) && l.price > 0) out.push(l.price);
+    }
+    return out;
+  };
+  const tradeFitLevelsRef = useRef(tradeFitLevels);
+  tradeFitLevelsRef.current = tradeFitLevels;
+  // The library recomputes the fitted range on data and on scrolling, not when a
+  // price line appears or moves, and it has no public "refit" call. Re-applying
+  // the current scroll position is a no-op for the time axis that runs the same
+  // recalculation.
+  const refitForTrade = () => {
+    try {
+      const ts = mainChartRef.current?.timeScale?.();
+      if (ts) ts.scrollToPosition(ts.scrollPosition(), false);
+    } catch (e) {}
+  };
+  useEffect(() => {
+    const iv = setInterval(() => {
+      if (exitDragRef.current) return;
+      const sig = tradeFitLevels().map((p) => p.toFixed(2)).join('|');
+      if (sig === tradeFitSigRef.current) return;
+      tradeFitSigRef.current = sig;
+      refitForTrade();
+    }, 400);
+    return () => clearInterval(iv);
+    // Reads refs only; the interval must not be torn down and rebuilt on renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Is the CURRENT chart the spot index that the open position is written on?
   const onUnderlyingSpotChart = () => {
@@ -10293,6 +10373,30 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       priceLineVisible: false,
       // Candle price scale ALWAYS auto-fits to the data. (A previous "Y-lock"
       // could pin it to a stale near-zero range and hide the candles — removed.)
+      // ...and to the open trade's entry, SL and TP, so they are never left off
+      // screen by the fit (see THE OPEN TRADE STAYS ON SCREEN). Any fault in
+      // here falls back to the library's own range: a wrong scale is worse than
+      // a line that needs the axis dragged to find it.
+      autoscaleInfoProvider: (original: () => any) => {
+        const base = original();
+        try {
+          const levels = tradeFitLevelsRef.current();
+          if (!base || !base.priceRange || !levels.length) return base;
+          const lo0 = Number(base.priceRange.minValue), hi0 = Number(base.priceRange.maxValue);
+          if (!Number.isFinite(lo0) || !Number.isFinite(hi0)) return base;
+          const span = hi0 - lo0;
+          const maxSpan = span > 0 ? span * TRADE_FIT_MAX_STRETCH : Infinity;
+          const away = (p: number) => (p < lo0 ? lo0 - p : p > hi0 ? p - hi0 : 0);
+          let lo = lo0, hi = hi0;
+          for (const p of [...levels].sort((a, b) => away(a) - away(b))) {
+            const nlo = Math.min(lo, p), nhi = Math.max(hi, p);
+            if (nhi - nlo > maxSpan) continue;
+            lo = nlo; hi = nhi;
+          }
+          if (lo === lo0 && hi === hi0) return base;
+          return { ...base, priceRange: { minValue: lo, maxValue: hi } };
+        } catch (e) { return base; }
+      },
     });
 
     mainSeriesRef.current = mainSeries;
