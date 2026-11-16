@@ -99,7 +99,10 @@ Telegram, alerts), page `src/pages/TelegramSignals.tsx`.
   sells nothing at TP1) · TP2 → the SL stays · TP3 → SL to TP1 · at 2 × the fill
   price everything left is sold. Square-off at `squareOff` (15:15). Moving the SL
   on the chart hands the trade to you. (My Order trades keep the older ladder:
-  TP2 → SL to TP1, TP3 → SL to TP2 and trailing, no half and no 2 × target.)
+  TP2 → SL to TP1, TP3 → SL to TP2 and trailing, no half and no 2 × target.
+  The My Order screen was removed on 16 Nov 2026 — see ScalpPro's Limit /
+  Trigger; the server's `/api/signals/manual*` path is still there, unused by
+  the app.)
 - **Ignored:** every other message, messages older than 3 minutes, anything that
   fails the checks (each skip is reported with its reason).
 - Tests: `npx tsx server/signal_parser.test.ts` and
@@ -185,7 +188,7 @@ relaxed only from the next trading day. It is checked for:
 
 - the order ticket and Quick Trade (`POST /api/orders` with `journal: true`);
 - My Order — the count and loss rules when it is created, every rule when it
-  fires;
+  fires (server path only; its screen was removed on 16 Nov 2026);
 - armed orders (`server/triggers.ts`), since 16 Nov 2026 — the same two checks.
   One refused at its level is marked FAILED with the rule as the reason
   ("… No order sent.") and is announced as "Order NOT placed".
@@ -298,10 +301,13 @@ tool bar and the split view are untouched.
     the chart changes.
   - **Interval** — the same chooser as before, drawn as the value with its name.
 - **Settings** holds what used to fill the right of the bar: Trailing SL (on the
-  option chart of an open trade; On/Off at the end of the row) or My order (on
-  an index chart), Trade guard (today's count at the end of the row, red while
-  entries are blocked), SL & TP (the levels new trades get), Reload, and Sync
-  positions (from Zerodha).
+  option chart of an open trade; On/Off at the end of the row), Trade guard
+  (today's count at the end of the row, red while entries are blocked), SL & TP
+  (the levels new trades get), Reload, and Sync positions (from Zerodha).
+  My order was a row here on an index chart until 16 Nov 2026, when Martin asked
+  to "remove My order screen so that I can place limit/trigger orders directly
+  from the charts" — that is ScalpPro's Limit / Trigger now. No My Order was
+  waiting on the live app when the screen went.
 - **Few words.** Martin, 16 Nov 2026: "as simple as the lemon app ... Keep the
   texts such as descriptions etc to minimal or avoid it wherever possible." The
   sheets here have no headings and no descriptions, and a row's name is two
@@ -343,6 +349,21 @@ desktop split view uses, stacked.
   ("25,291.10 146.80 ▲ (0.58%)"), and its own interval in the corner. There are
   no zoom buttons (v303 had Lemonn's; Martin asked for them to go): a pinch
   zooms, as on every chart.
+- **The look is Lemonn's, measured** (v307; Martin: "100% match the UI ... make
+  sure the text size and the button sizes match them as it is 100%"). His
+  screenshot of Lemonn is 430pt wide at 3 pixels a point, so every size on this
+  screen is a pixel count off it divided by three; they are written where they
+  are used (`data-scalp-head`, "THE SCALPPRO BAR", `ScalpScreen`). In short:
+  - **no grid lines** on these two charts (every other chart keeps its grid);
+  - the name and price lines are **on the chart's own surface**, and the strip
+    between the charts and the bar are the page's darker one;
+  - **the screen is set in the phone's own font**, not the app's fixed-width
+    one — a size only lands where Lemonn's does in a face of the same build.
+    Nothing is downloaded for it; the chart's price scale was already in it;
+  - capitals are 8.67pt tall in the names, prices, buttons and switch (12.3px);
+    Buy is 36pt tall, Sell 34pt with a 1pt outline, both ending 4pt from the
+    screen's edge; the stepper's circles are 32pt; "Req" is 10px bold and
+    "Funds" 8px — small, and theirs; amounts always show two decimals.
 - **The app's bottom bar is not shown on this screen**, as Lemonn's is not on
   its ScalpPro. The back arrow at the top returns to the chart page and the bar.
   - Tap the index name for NIFTY 50 / BANK NIFTY / SENSEX.
@@ -369,9 +390,36 @@ desktop split view uses, stacked.
   Trade button); everywhere else they still need it.
 - A reload stays on ScalpPro (`scalpPro` in the session); the back arrow returns
   to the index chart.
-- Not here yet: Limit / Trigger orders, the Positions · Orders · Option chain
-  row, and dragging SL / TP out of the entry line when the automatic ones are
-  switched off.
+- **Market | Limit/Trigger** above the buttons (v307). On Limit/Trigger each
+  chart gets an **At Price** line at the live price, with a chip (✕ · At Price ·
+  six dots) and the price in a box on the axis:
+  - drag a chip to set the price. The option chart's line is a price of the
+    option; the index chart's line ("At Price · 25300 CE") is a level of the
+    index. The one dragged last is the one in use (blue outline);
+  - the buttons name what the order is: with the line above the live price
+    **Buy Trg | Sell Lmt**, below it **Buy Lmt | Sell Trg**; on the index line
+    both are **Trg**. "Req" follows the option line's price;
+  - a tap on one **arms an order that waits** — nothing goes to the broker
+    until the price gets there, then a MARKET order is sent
+    (`server/triggers.ts`, the armed-order engine the chart page already used).
+    The waiting order is a chip on its line ("B 0/65 LMT") with a ✕ that
+    cancels it; the switch goes back to Market;
+  - ✕ on an At Price chip, the Market half of the switch, or changing the
+    option puts the mode away without placing anything.
+- **What a waiting order is, and is not.** It is held by this app's server, not
+  by the exchange: it fires only while the server is running and logged in to
+  the broker, in market hours, and it lapses at the close. One armed after the
+  close is refused ("Market closed") rather than accepted and dropped. The
+  trade guard checks it when it is armed and again when it fires, and the size
+  is checked against the funds at that moment.
+  - **A level on the index** is stored with `watch_token` (the index's token)
+    beside the option's own: the server compares the index's ticks to the level
+    and, when it is touched, buys or sells the option at market. `GET
+    /api/triggers` shows it as `@ NIFTY 50 25305.65`.
+  - Test: `npx tsx server/triggers.test.ts` (sections 8 and 9 are these two).
+- Not here yet: the ≡+ button (Range, Indicators, Drawings, Settings), the
+  Positions · Orders · Option chain row, and dragging SL / TP out of the entry
+  line when the automatic ones are switched off.
 
 ## Chart: the open trade's chips (Exit, P&L, SL, TP)
 

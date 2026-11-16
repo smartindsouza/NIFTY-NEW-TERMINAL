@@ -27,6 +27,20 @@
 //     with the rule as the reason and no order is sent. An armed order that
 //     CLOSES a position he holds is never checked. Until this date armed orders
 //     were not checked at all (see ARMED ORDERS in server/trade_guard.ts).
+//   * A LEVEL ON THE INDEX (16 Nov 2026). Martin, with a recording of Lemonn's
+//     ScalpPro: "Here's how limit/trigger order is placed from the option chart
+//     or spot chart. Use the same UI concept". A line on the option chart is a
+//     level in the option's own premium — what this file has always done. A line
+//     on the SPOT chart is a level in the index: "buy this option when NIFTY
+//     reaches 25,300". Such a row carries the token it WATCHES (watch_token, the
+//     index) beside the contract it TRADES; its level, its direction and the
+//     price it was armed at are all in the watched instrument's terms. Every
+//     other rule here applies to it unchanged.
+//   * NOTHING IS ARMED AFTER THE CLOSE. It used to be accepted, with a note,
+//     and then retired within the minute by the timer below — an order that
+//     looked placed and was gone when he looked again. It is refused now, with
+//     "Market closed". Before the open is different: an order armed at 9:05 is
+//     still there at 9:15.
 
 import express from 'express';
 import { getKiteClient } from './kite_service';
@@ -73,9 +87,13 @@ async function guardSays(row: { tradingsymbol: string; side: string }, opts?: { 
 // to its own stand-in for /api/orders. Nothing in the app sets these.
 export const __test: { marketOpen: boolean | null; place: null | ((row: any) => Promise<{ ok: boolean; orderId?: string; error?: string }>) } = { marketOpen: null, place: null };
 
-/** Pure: which way must price move to reach the level, decided when arming. */
+/** Pure: which way must price move to reach the level, decided when arming.
+ *  A level AT the price counts as up: it is reached on the next tick either
+ *  way, and the ScalpPro bar calls a buy at the price a trigger, as Lemonn does
+ *  — the order's chip should not say "limit" a moment later. (It was DOWN until
+ *  16 Nov 2026; nothing but that name depended on it.) */
 export function directionFor(triggerPrice: number, currentPrice: number): 'UP' | 'DOWN' {
-  return triggerPrice > currentPrice ? 'UP' : 'DOWN';
+  return triggerPrice >= currentPrice ? 'UP' : 'DOWN';
 }
 
 /** Pure: has the level been reached? */
@@ -101,6 +119,11 @@ export function initTriggers(database: any) {
   try { db.exec(`ALTER TABLE pending_triggers ADD COLUMN lot_size INTEGER`); } catch (e) { /* exists */ }
   try { db.exec(`ALTER TABLE pending_triggers ADD COLUMN placed_qty INTEGER`); } catch (e) { /* exists */ }
   try { db.exec(`ALTER TABLE pending_triggers ADD COLUMN note TEXT`); } catch (e) { /* exists */ }
+  // A level on the index (see the header): the instrument whose price is
+  // watched, when it is not the contract being traded. NULL on every older row
+  // and on every level set in the option's own premium.
+  try { db.exec(`ALTER TABLE pending_triggers ADD COLUMN watch_token INTEGER`); } catch (e) { /* exists */ }
+  try { db.exec(`ALTER TABLE pending_triggers ADD COLUMN watch_name TEXT`); } catch (e) { /* exists */ }
   // Anything left ARMED from an earlier day cannot be honoured today — the level
   // meant something in yesterday's market. Retire them at boot.
   try {
@@ -115,13 +138,24 @@ export function initTriggers(database: any) {
   } catch (e) { console.error('[triggers] boot cleanup failed', e); }
 }
 
-/** Tokens that must be on the live feed for triggers to be able to fire. */
+/** Tokens that must be on the live feed for triggers to be able to fire: the
+ *  contract of every armed row, and the instrument it watches where that is
+ *  another one (the contract's own price is still wanted, for its chart). */
 export function armedTriggerTokens(): number[] {
   if (!db) return [];
   try {
-    return (db.prepare(`SELECT DISTINCT instrument_token FROM pending_triggers WHERE status='ARMED'`).all() as any[])
-      .map(r => Number(r.instrument_token)).filter(t => t > 0);
+    const out = new Set<number>();
+    for (const r of db.prepare(`SELECT DISTINCT instrument_token, watch_token FROM pending_triggers WHERE status='ARMED'`).all() as any[]) {
+      if (Number(r.instrument_token) > 0) out.add(Number(r.instrument_token));
+      if (Number(r.watch_token) > 0) out.add(Number(r.watch_token));
+    }
+    return [...out];
   } catch (e) { return []; }
+}
+
+/** Pure: after the close (or on a day with no session at all) nothing can be armed. */
+export function closedForArming(weekday: number, minuteOfDay: number, holiday: boolean): boolean {
+  return weekday === 0 || weekday === 6 || holiday || minuteOfDay > TRIGGER_WINDOW.closeMin;
 }
 
 export function expireAtClose() {
@@ -158,13 +192,24 @@ export function fitLots(armedLots: number, perLot: number, available: number): n
   if (!(armedLots > 0) || !(perLot > 0) || !(available >= 0)) return armedLots;
   return Math.max(0, Math.min(armedLots, Math.floor((available * FUNDS_HEADROOM) / perLot)));
 }
-async function sizeAtFire(row: any, ltp: number): Promise<{ qty: number; note: string | null; fail?: string }> {
+async function sizeAtFire(row: any, hitPrice: number): Promise<{ qty: number; note: string | null; fail?: string }> {
   const armedQty = Number(row.quantity) || 0;
   const lot = Number(row.lot_size) || 0;
   if (!(lot > 0) || !(armedQty >= lot) || String(row.side) !== 'BUY') return { qty: armedQty, note: null };
   try {
     const kc: any = getKiteClient();
     if (!kc || !kc.access_token) return { qty: armedQty, note: null };
+    // The price that reached the level is the option's own — unless the level
+    // was on the index, when it is the index's and says nothing about what a
+    // lot costs. Then the option's price is read from the broker. If that
+    // cannot be read, the armed size stands, as for every other failure here.
+    let ltp = hitPrice;
+    if (Number(row.watch_token) > 0) {
+      const key = `${String(row.exchange || 'NFO')}:${String(row.tradingsymbol)}`;
+      const q = await kc.getLTP([key]);
+      ltp = Number(q?.[key]?.last_price);
+      if (!(ltp > 0)) return { qty: armedQty, note: null };
+    }
     const limit = Math.round((ltp * 1.005) / 0.05) * 0.05;       // exactly as /api/orders prices it
     const [mg, funds] = await Promise.all([
       kc.orderMargins([{
@@ -220,7 +265,9 @@ export function onTickForTriggers(token: number, ltp: number) {
   if (!db || !(ltp > 0)) return;
   let rows: any[];
   try {
-    rows = db.prepare(`SELECT * FROM pending_triggers WHERE status='ARMED' AND instrument_token = ?`).all(Number(token)) as any[];
+    // A row is judged by the price of what it WATCHES: its own contract, or —
+    // a level set on the spot chart — the index.
+    rows = db.prepare(`SELECT * FROM pending_triggers WHERE status='ARMED' AND COALESCE(watch_token, instrument_token) = ?`).all(Number(token)) as any[];
   } catch (e) { return; }
   if (!rows.length) return;
 
@@ -241,7 +288,7 @@ export function onTickForTriggers(token: number, ltp: number) {
     } catch (e) { claimed = false; }
     if (!claimed) continue;
 
-    console.log(`[triggers] ${row.side} ${row.quantity} ${row.tradingsymbol} — level ${row.trigger_price} reached at ${ltp}`);
+    console.log(`[triggers] ${row.side} ${row.quantity} ${row.tradingsymbol} — ${row.watch_token ? `${row.watch_name || 'index'} ` : ''}level ${row.trigger_price} reached at ${ltp}`);
     // THE TRADE GUARD, at the moment that matters. Asked AFTER the claim, so a
     // level reached while the guard is still thinking cannot be claimed twice;
     // and before the sizing, so a refused order costs the broker nothing.
@@ -303,6 +350,19 @@ export function registerTriggers(app: any, database: any) {
       if (!(currentPrice > 0)) return res.status(400).json({ ok: false, error: 'current price required to decide direction' });
       if (side !== 'BUY' && side !== 'SELL') return res.status(400).json({ ok: false, error: 'side must be BUY or SELL' });
       if (product !== 'MIS' && product !== 'NRML') return res.status(400).json({ ok: false, error: 'product must be MIS or NRML' });
+      // A level on the index: the token to watch instead of the contract's own.
+      // trigger_price and current_price are then the index's.
+      const watchToken = b.watch_token === undefined || b.watch_token === null || b.watch_token === '' ? null : parseInt(String(b.watch_token), 10);
+      if (watchToken !== null && !(watchToken > 0)) return res.status(400).json({ ok: false, error: 'watch_token must be an instrument token' });
+      if (watchToken !== null && watchToken === token) return res.status(400).json({ ok: false, error: 'watch_token is the contract itself — leave it out' });
+      const watchName = watchToken === null ? null : String(b.watch_name || '').slice(0, 40) || null;
+
+      // After the close an armed order has no session left to fire in and is
+      // retired within the minute; say so now instead (see the header).
+      if (__test.marketOpen === null) {
+        const x = istNow();
+        if (closedForArming(x.getUTCDay(), istMinuteOfDay(), isNseHoliday(istDate()))) return res.status(400).json({ ok: false, closed: true, error: 'Market closed' });
+      }
 
       // THE TRADE GUARD, when arming: the rules that cannot come right again
       // today — the day's trade count and the loss limit. The start time is
@@ -367,12 +427,13 @@ export function registerTriggers(app: any, database: any) {
       const id = `trg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       db.prepare(`INSERT INTO pending_triggers
         (id, created_at, trade_date, tradingsymbol, instrument_token, exchange, side, product, quantity,
-         trigger_price, direction, armed_at_price, status, lot_size)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ARMED', ?)`)
+         trigger_price, direction, armed_at_price, status, lot_size, watch_token, watch_name)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ARMED', ?, ?, ?)`)
         .run(id, Date.now(), istDate(), String(b.tradingsymbol).toUpperCase(), token,
              String(b.exchange || 'NFO'), side, product, quantity,
              triggerPrice, directionFor(triggerPrice, currentPrice), currentPrice,
-             (parseInt(String(b.lot_size), 10) > 0 ? parseInt(String(b.lot_size), 10) : null));
+             (parseInt(String(b.lot_size), 10) > 0 ? parseInt(String(b.lot_size), 10) : null),
+             watchToken, watchName);
 
       res.json({
         ok: true, id, direction: directionFor(triggerPrice, currentPrice),

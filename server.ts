@@ -1085,6 +1085,10 @@ function connectTicker() {
       const ts = Math.floor(Date.now() / 1000);
       broadcast({ type: 'tick', symbol: 'NSE:NIFTY 50', price: tick.ltp, timestamp: ts,
         candle: { time: ts, open: tick.ltp, high: tick.ltp, low: tick.ltp, close: tick.ltp } });
+      // An order armed at a level ON THE INDEX (a line on the spot chart) is
+      // judged on the index's own ticks. Orders armed in an option's premium
+      // carry the option's token and never match here.
+      try { onTickForTriggers(tick.token, tick.ltp); } catch (e) {}
     } else if (tick.token === BANKNIFTY_TOKEN) {
       // Bank Nifty index tick → same live-candle shape the chart consumes. Like
       // SENSEX, deliberately does NOT touch latestSpot: every scorecard, watcher
@@ -1092,6 +1096,7 @@ function connectTicker() {
       const ts = Math.floor(Date.now() / 1000);
       broadcast({ type: 'tick', symbol: 'NSE:NIFTY BANK', price: tick.ltp, timestamp: ts,
         candle: { time: ts, open: tick.ltp, high: tick.ltp, low: tick.ltp, close: tick.ltp } });
+      try { onTickForTriggers(tick.token, tick.ltp); } catch (e) {}       // levels armed on this index
     } else if (giftNiftyToken && tick.token === giftNiftyToken) {
       // GIFT NIFTY tick → the same live-candle shape the chart consumes. Like
       // SENSEX it deliberately does NOT touch latestSpot: every watcher, exit
@@ -1108,6 +1113,7 @@ function connectTicker() {
       const ts = Math.floor(Date.now() / 1000);
       broadcast({ type: 'tick', symbol: 'BSE:SENSEX', price: tick.ltp, timestamp: ts,
         candle: { time: ts, open: tick.ltp, high: tick.ltp, low: tick.ltp, close: tick.ltp } });
+      try { onTickForTriggers(tick.token, tick.ltp); } catch (e) {}       // levels armed on this index
     } else if (tick.token === getDeltaFuturesToken()) {
       // Front-month future: update the delta (pressure) proxy. Also broadcast the
       // option tick shape is irrelevant here; the future isn't shown as an option.

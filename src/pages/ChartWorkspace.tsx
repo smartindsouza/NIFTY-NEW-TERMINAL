@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
-import { AdvancedChart } from './AdvancedChart';
+import { AdvancedChart, type ScalpAt, type ScalpShared } from './AdvancedChart';
 import { useBiasCardHidden } from '../lib/bias';
 
 /**
@@ -78,6 +78,17 @@ function initialHasOption(): boolean {
  */
 const isOptionLike = (i: any) => !!i && /\d(CE|PE)$/.test(String(i.tradingsymbol || '').toUpperCase());
 
+// THE SCALPPRO SCREEN'S TYPE IS THE PHONE'S OWN (16 Nov 2026). The app is set in
+// a fixed-width code face; Lemonn's ScalpPro, which Martin asked this screen to
+// match "100%" down to "the text size and the button sizes", is in a
+// proportional one, and a size measured off his screenshot only lands where
+// theirs does in a face of the same build — a fixed-width "NIFTY 17NOV 25350"
+// is a tenth wider and a different shape at any size. So this screen, and only
+// this screen, uses the system face: San Francisco on his iPhone, which is also
+// what the chart's own price scale is drawn in (chartFontFamily). Nothing is
+// downloaded for it. Everything inside the screen inherits it.
+const SCALP_FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
+
 function ScalpScreen({ onClose }: { onClose: () => void }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
@@ -87,6 +98,14 @@ function ScalpScreen({ onClose }: { onClose: () => void }) {
   });
   const fracRef = useRef(frac);
   fracRef.current = frac;
+  // LIMIT / TRIGGER belongs to the screen, not to one chart: its line is on
+  // both, and the bar that places the order is under the lower one. So the
+  // mode, each chart's line and which line is the lit one are kept here and
+  // handed to both; what the charts tell each other without a render (the
+  // index's live price for the bar, the option's name for the index's chip)
+  // goes through the ref. Not remembered: a reload comes back on Market.
+  const [at, setAt] = useState<ScalpAt>({ on: false, src: 'option', optPx: null, spotPx: null });
+  const shared = useRef<ScalpShared>({ spotNow: 0, spotToken: null, spotName: '', optShort: '' });
 
   // THE SCREEN ENDS WHERE THE BOTTOM BAR BEGINS, wherever it starts. Its top is
   // not a constant: the positions banner sits above it whenever a trade is on,
@@ -166,7 +185,7 @@ function ScalpScreen({ onClose }: { onClose: () => void }) {
     // on its ScalpPro. The Buy / Sell bar keeps clear of the home indicator
     // itself.
     <div ref={rootRef} data-scalp-screen="" className="flex flex-col w-full min-h-0 bg-background"
-      style={{ height: top === null ? '80dvh' : `calc(100dvh - ${top}px)` }}>
+      style={{ height: top === null ? '80dvh' : `calc(100dvh - ${top}px)`, fontFamily: SCALP_FONT }}>
       <div className="shrink-0 flex items-center gap-1 h-10 px-1 border-b border-white/10">
         <button type="button" data-scalp="back" aria-label="Back" onClick={onClose}
           className="h-9 w-9 flex items-center justify-center rounded-full text-foreground/90 active:bg-foreground/10">
@@ -176,20 +195,26 @@ function ScalpScreen({ onClose }: { onClose: () => void }) {
       </div>
       <div ref={bodyRef} className="flex flex-col flex-1 min-h-0">
         {/* Neither pane is ever squeezed below what it must keep: its two lines
-            of name and price (46px), and for the option pane the Buy / Sell bar
-            under them as well (82px, and the home indicator's strip below it now
-            that the app's bottom bar is not under this screen) — dragged all the
-            way down, the handle stops there. */}
-        <div data-scalp-pane="spot" className="overflow-hidden" style={{ flex: `${frac} 1 0%`, minHeight: 46 }}>
-          <AdvancedChart key="scalp-spot" paneRole="spot" split scalp />
+            of name and price (58px), and for the option pane the Buy / Sell bar
+            under them as well (98px with its Market | Limit/Trigger switch, and
+            the home indicator's strip below it now that the app's bottom bar is
+            not under this screen) — dragged all the way down, the handle stops
+            there. */}
+        <div data-scalp-pane="spot" className="overflow-hidden" style={{ flex: `${frac} 1 0%`, minHeight: 58 }}>
+          <AdvancedChart key="scalp-spot" paneRole="spot" split scalp scalpAt={at} onScalpAt={setAt} scalpShared={shared} />
         </div>
+        {/* The strip between the charts is Lemonn's, off Martin's screenshot: 16pt
+            of the page's own background with a 42 x 4pt bar in it, and no lines
+            of its own — the two panes are a lighter surface and end where it
+            begins. (The light theme's page and panes are the same white, so
+            there, and only there, it keeps a hairline above and below.) */}
         <div data-scalp="handle" onPointerDown={startDrag} title="Drag to resize the charts"
-          className="shrink-0 h-4 flex items-center justify-center cursor-row-resize select-none bg-background border-y border-white/10 active:bg-white/10"
+          className="shrink-0 h-4 flex items-center justify-center cursor-row-resize select-none bg-background border-y border-border dark:border-y-0 active:bg-foreground/10"
           style={{ touchAction: 'none' }}>
-          <div className="w-10 h-1 rounded-full bg-foreground/30" />
+          <div className="w-[42px] h-1 rounded-full bg-foreground/65" />
         </div>
-        <div data-scalp-pane="option" className="overflow-hidden" style={{ flex: `${1 - frac} 1 0%`, minHeight: 'calc(134px + env(safe-area-inset-bottom))' }}>
-          <AdvancedChart key="scalp-option" paneRole="option" split scalp />
+        <div data-scalp-pane="option" className="overflow-hidden" style={{ flex: `${1 - frac} 1 0%`, minHeight: 'calc(156px + env(safe-area-inset-bottom))' }}>
+          <AdvancedChart key="scalp-option" paneRole="option" split scalp scalpAt={at} onScalpAt={setAt} scalpShared={shared} />
         </div>
       </div>
     </div>

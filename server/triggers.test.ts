@@ -34,6 +34,11 @@ assert.equal(G.heldQty(null, SYM), null);
 assert.equal(G.heldQty([], SYM), 0);
 assert.equal(G.heldQty([{ tradingsymbol: SYM, quantity: 65 }, { tradingsymbol: SYM.toLowerCase(), quantity: 65 }, { tradingsymbol: 'OTHER', quantity: -130 }], SYM), 130, 'both products of one contract are added');
 
+// ── which way the price must go ──
+assert.equal(T.directionFor(150, 140), 'UP'); assert.equal(T.directionFor(130, 140), 'DOWN');
+assert.equal(T.directionFor(140, 140), 'UP', 'a level at the price is reached at once, and is called a rise');
+assert.equal(T.isHit('UP', 140, 140), true); assert.equal(T.isHit('UP', 140, 139.95), false); assert.equal(T.isHit('DOWN', 140, 140), true); assert.equal(T.isHit('DOWN', 140, 140.05), false);
+
 // ── the app: armed orders + the guard, against a stand-in broker ──
 const db = new Database(':memory:');
 let orders: any[] = [], positions: any[] = [], positionsDown = false;
@@ -185,6 +190,74 @@ a = await arm();
 assert.equal(a.body.ok, true);
 T.onTickForTriggers(TOK, 150); await sleep(80);
 assert.equal(row(a.body.id).status, 'FIRED'); assert.equal(placed.length, 7);
+
+// ── 8. a level on the INDEX: the option is traded, the index is watched ──
+{
+  const IDX = 256265;
+  T.setTriggerGuard(null); positions = []; orders = [];
+  const n0 = placed.length;
+  const armAtSpot = (o: any = {}) => arm({ trigger_price: 25300, current_price: 25250, watch_token: IDX, watch_name: 'NIFTY 50', ...o });
+  a = await armAtSpot();
+  assert.equal(a.status, 200); assert.equal(a.body.ok, true); assert.equal(a.body.direction, 'UP', 'the direction is the index\'s: 25,300 from 25,250 is up');
+  let w = row(a.body.id);
+  assert.equal(w.watch_token, IDX); assert.equal(w.watch_name, 'NIFTY 50'); assert.equal(w.instrument_token, TOK); assert.equal(w.trigger_price, 25300); assert.equal(w.armed_at_price, 25250);
+  assert.deepEqual(T.armedTriggerTokens().sort(), [IDX, TOK].sort(), 'both the contract and the index must be on the feed');
+  // the option's own ticks say nothing about it, whatever the number
+  T.onTickForTriggers(TOK, 150); T.onTickForTriggers(TOK, 30000); await sleep(40);
+  assert.equal(row(a.body.id).status, 'ARMED', 'a tick of the option never fires a level set on the index');
+  T.onTickForTriggers(IDX, 25299.95); await sleep(40);
+  assert.equal(row(a.body.id).status, 'ARMED', 'the index below the level: nothing');
+  T.onTickForTriggers(IDX, 25300); T.onTickForTriggers(IDX, 25304); await sleep(60);
+  w = row(a.body.id);
+  assert.equal(w.status, 'FIRED'); assert.equal(w.fired_price, 25300, 'what reached the level was the index');
+  assert.equal(placed.length, n0 + 1, 'one order, on two index ticks past the level');
+  assert.deepEqual(placed[n0], { side: 'BUY', qty: 65, sym: SYM }, 'and it is the OPTION that is bought');
+
+  // from above: a level under the index fires on the way down
+  a = await armAtSpot({ trigger_price: 25200, side: 'SELL' });
+  assert.equal(a.body.direction, 'DOWN');
+  T.onTickForTriggers(IDX, 25201); await sleep(40); assert.equal(row(a.body.id).status, 'ARMED');
+  T.onTickForTriggers(IDX, 25199.5); await sleep(60); assert.equal(row(a.body.id).status, 'FIRED');
+  assert.deepEqual(placed[n0 + 1], { side: 'SELL', qty: 65, sym: SYM });
+
+  // and the other way about: an index tick never fires a level set in the option's premium
+  a = await arm({ trigger_price: 150, current_price: 140 });
+  T.onTickForTriggers(IDX, 25300); await sleep(40);
+  assert.equal(row(a.body.id).status, 'ARMED', 'the index is far above 150; that is not the option reaching it');
+  await call('DELETE', `/api/triggers/${a.body.id}`);
+  assert.equal(row(a.body.id).status, 'CANCELLED');
+
+  // a level on the index is cancelled, guarded and refused like any other
+  a = await armAtSpot(); await call('DELETE', `/api/triggers/${a.body.id}`);
+  T.onTickForTriggers(IDX, 25400); await sleep(40);
+  assert.equal(row(a.body.id).status, 'CANCELLED'); assert.equal(placed.length, n0 + 2, 'cancelled: the level comes and nothing is sent');
+  T.setTriggerGuard(async () => 'Your rule: 4 trades a day — already 4 today. Exits are not affected.');
+  a = await armAtSpot(); assert.equal(a.status, 403, 'the trade guard applies to it'); assert.equal(a.body.guard, true);
+  T.setTriggerGuard(null);
+  a = await armAtSpot({ watch_token: TOK }); assert.equal(a.status, 400, 'watching the contract itself is not a level on the index');
+  a = await armAtSpot({ watch_token: 'abc' }); assert.equal(a.status, 400);
+  assert.deepEqual(T.armedTriggerTokens(), [], 'nothing left armed');
+}
+
+// ── 9. nothing is armed after the close ──
+assert.equal(T.closedForArming(1, 9 * 60, false), false, 'five past nine on a Monday: before the open is allowed');
+assert.equal(T.closedForArming(1, 15 * 60 + 40, false), false, 'the last minute of the session');
+assert.equal(T.closedForArming(1, 15 * 60 + 41, false), true, 'a minute after it');
+assert.equal(T.closedForArming(6, 11 * 60, false), true, 'Saturday'); assert.equal(T.closedForArming(0, 11 * 60, false), true, 'Sunday');
+assert.equal(T.closedForArming(3, 11 * 60, true), true, 'a holiday');
+{
+  // the route itself, at whatever hour this test runs: refused exactly when the pure rule says so
+  const { isNseHoliday } = await import('./calendar_service');
+  const x = new Date(Date.now() + 5.5 * 3600e3);
+  const day = x.toISOString().slice(0, 10);
+  const closed = T.closedForArming(x.getUTCDay(), x.getUTCHours() * 60 + x.getUTCMinutes(), isNseHoliday(day));
+  T.__test.marketOpen = null;
+  a = await arm();
+  if (closed) { assert.equal(a.status, 400); assert.equal(a.body.closed, true); assert.equal(a.body.error, 'Market closed'); }
+  else { assert.equal(a.status, 200); await call('DELETE', `/api/triggers/${a.body.id}`); }
+  T.__test.marketOpen = true;
+  console.log(`  (arming with the real clock: ${closed ? 'refused, market closed' : 'accepted'})`);
+}
 
 srv.close();
 console.log('triggers: all checks passed');

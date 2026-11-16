@@ -1,8 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect, useLayoutEffect } from "react";
 import { useTodayBias, isRecord as isBiasRecord, istToday as biasIstToday, BIAS_LINES_KEY, useBiasCardHidden } from "../lib/bias";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, ChevronsUp, ChevronsDown, ChevronRight, Copy, Trash2, Search, PencilRuler, Minus, Slash, RectangleHorizontal, AlignJustify, TrendingDown, Type as TypeIcon, Move as MoveIcon, ArrowLeft, CalendarRange, ChartNoAxesCombined, TrendingUp, Star, Bell, ClipboardPen, ChevronsUpDown, Link2, CandlestickChart } from "lucide-react";
-import MyOrderModal from "../components/MyOrderModal";
+import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, ChevronsUp, ChevronsDown, ChevronRight, Copy, Trash2, Search, PencilRuler, Minus, Slash, RectangleHorizontal, AlignJustify, TrendingDown, Type as TypeIcon, Move as MoveIcon, ArrowLeft, CalendarRange, ChartNoAxesCombined, TrendingUp, Star, Bell, Link2, CandlestickChart, GripVertical } from "lucide-react";
 import { navigate } from "wouter/use-browser-location";
 import { TradeGuardButton } from "../components/TradeGuard";
 import { toast } from "sonner";
@@ -1154,6 +1153,41 @@ async function fetchContractInfo(tradingsymbol: string): Promise<any> {
 const chartPalette = (theme: 'dark' | 'light') => theme === 'light'
   ? { text: '#475569', grid: 'rgba(15, 23, 42, 0.06)', border: 'rgba(15, 23, 42, 0.12)', crosshair: '#94a3b8' }
   : { text: '#64748b', grid: 'rgba(255, 255, 255, 0.05)', border: 'rgba(255, 255, 255, 0.10)', crosshair: '#758696' };
+
+// THE PAIR OF SOLID TRIANGLES AFTER A NAME THAT CAN BE CHANGED (ScalpPro). Lemonn
+// puts them after "NIFTY 50" and after "Call"; measured off Martin's screenshot
+// of it they are 7.7pt wide, two triangles of 4pt with a point between them.
+// Drawn here because the icon set's up-and-down mark is two open chevrons, and
+// his ask was that the screen match Lemonn's "100%".
+const UpDownMark = () => (
+  <svg width="7.7" height="9" viewBox="0 0 7.7 9" aria-hidden="true" className="shrink-0 text-foreground/80">
+    <path d="M3.85 0 L7.7 4 H0 Z M3.85 9 L0 5 H7.7 Z" fill="currentColor" />
+  </svg>
+);
+
+// THE SCALPPRO BAR'S BUTTONS (sizes: see THE SCALPPRO BAR, where they are drawn).
+// A filled button (Buy, Exit) is 36pt tall; the outlined one (Sell) is 34pt with
+// a 1pt line — Lemonn's are that 2pt apart, and so are these.
+// (The filled one carries a 1pt line too, a clear one: a flex item's line is
+// outside the space the row shares out, so without it Sell came out 2pt wider
+// than Buy.) The stepper's − and + are 11.7pt across and 1.5pt thick, and a
+// button that cannot be pressed only dims its mark — at one lot Lemonn's − is a
+// shade greyer, not a ghost.
+const SCALP_BTN = 'flex-1 min-w-0 border text-[12.3px] leading-none font-semibold flex items-center justify-center disabled:opacity-60';
+const SCALP_BTN_FILL = `${SCALP_BTN} h-9 rounded-[13px] border-transparent active:opacity-80`;
+const SCALP_BTN_LINE = `${SCALP_BTN} h-[34px] rounded-[12px] border-foreground text-foreground active:bg-foreground/10`;
+const SCALP_STEP = 'shrink-0 h-8 w-8 rounded-full border-2 border-foreground/15 bg-card flex items-center justify-center text-foreground/80 disabled:text-foreground/65 active:bg-foreground/10';
+// A SCALPPRO PRICE LINE'S DASHES: 4pt on, 4pt off, in the element's own colour
+// (a CSS dashed border's dashes are whatever the browser makes them).
+const SCALP_DASH: React.CSSProperties = { backgroundImage: 'repeating-linear-gradient(to right, currentColor 0 4px, transparent 4px 8px)' };
+// THE HAIRLINE UNDER A SCALPPRO NAME. Lemonn's is half a point thick and 2.2pt
+// under the letters. A text underline cannot be that thin (browsers draw it at
+// least a pixel thick), so it is a half-pixel band of the text's own colour
+// painted across the name's 18px line, 15.4px down.
+const SCALP_NAME_LINE: React.CSSProperties = {
+  backgroundImage: 'linear-gradient(currentColor, currentColor)', backgroundRepeat: 'no-repeat',
+  backgroundSize: '100% 0.5px', backgroundPosition: '0 15.4px',
+};
 
 const chartFontFamily = (customFontUrl: string) =>
   (customFontUrl ? "'UserCustomFont', " : '') +
@@ -3980,7 +4014,17 @@ function isOptionInstr(i: any): boolean {
  *              so every code path below that is not explicitly gated on a role
  *              behaves exactly as it did before this feature existed.
  */
-export function AdvancedChart({ paneRole, split = false, spotHidden = false, onClosePane, onShowSpot, scalp = false }: {
+/** ScalpPro's Limit / Trigger mode. One state for the screen's two charts, kept
+ *  by ScalpScreen: whether the mode is on, the price of the "At Price" line on
+ *  each chart (the option's premium; the index's level), and which of the two
+ *  lines the next order will wait at — the one that was moved last. */
+export type ScalpAt = { on: boolean; src: 'option' | 'spot'; optPx: number | null; spotPx: number | null };
+/** What each ScalpPro chart tells the other without a render: the index's live
+ *  price, token and name (the bar sits on the option chart and needs them to
+ *  arm a level on the index), and the option's short name for the index's chip. */
+export type ScalpShared = { spotNow: number; spotToken: string | null; spotName: string; optShort: string };
+
+export function AdvancedChart({ paneRole, split = false, spotHidden = false, onClosePane, onShowSpot, scalp = false, scalpAt, onScalpAt, scalpShared }: {
   paneRole?: 'spot' | 'option';
   /** PHONE ONLY: this pane is one of the two charts of the ScalpPro screen (see
    *  ScalpScreen in ChartWorkspace.tsx and THE SCALPPRO SCREEN below). The pane
@@ -3988,6 +4032,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
    *  buttons, shows a two-line name and price instead, and — the option one —
    *  ends in the Buy / Sell bar. */
   scalp?: boolean;
+  scalpAt?: ScalpAt;
+  onScalpAt?: (update: (a: ScalpAt) => ScalpAt) => void;
+  scalpShared?: React.MutableRefObject<ScalpShared>;
   /** Both panes are on screen side by side. The toolbar is then shown ONCE (on the
    *  option pane, at the right end of the row) and drives both charts. */
   split?: boolean;
@@ -5596,11 +5643,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const trailTpRef = useRef(trailTpOn);
   trailTpRef.current = trailTpOn;
   useEffect(() => { try { localStorage.setItem('trailTpOn', String(trailTpOn)); } catch (e) {} }, [trailTpOn]);
-  // My Order sheet (spot chart toolbar). The spot is captured when it opens so the
-  // strike box starts at the ATM strike.
-  const [myOrderOpen, setMyOrderOpen] = useState(false);
-  const [myOrderSpot, setMyOrderSpot] = useState<number | null>(null);
-
   // Refs for the two overlays dismissed by the document listener below. Declared
   // here because the JSX that uses them lives above the effect.
   const diagPanelRef = useRef<HTMLDivElement>(null);
@@ -8968,8 +9010,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     triggerLinesRef.current = [];
     const sym = selectedInstrument?.tradingsymbol;
     if (!sym) return;                                   // index chart: nothing to draw
+    // On the ScalpPro screen a waiting order is a line with a chip of its own
+    // (see LIMIT / TRIGGER); a second line under it would only double it.
+    if (scalp) return;
     for (const t of armedTriggers) {
       if (String(t.tradingsymbol).toUpperCase() !== String(sym).toUpperCase()) continue;
+      // A level on the index is not a price of this option: nowhere on this
+      // chart to draw it. It is in the list at the top of the index chart.
+      if (Number(t.watch_token) > 0) continue;
       const px = Number(t.trigger_price);
       if (!(px > 0)) continue;
       try {
@@ -11638,9 +11686,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         fontFamily: chartFontFamily(settings.customFontUrl),
         fontSize: axisFontPx(),
       },
+      // NO GRID ON THE SCALPPRO CHARTS (16 Nov 2026). Martin, of Lemonn's screen:
+      // "the scalp pro chart backgrounds does not have the repeating rectangles
+      // as in my app". Theirs is a plain surface with the candles on it, so the
+      // two charts of that screen draw no grid lines. Every other chart keeps
+      // its grid.
       grid: {
-        vertLines: { color: palette.grid },
-        horzLines: { color: palette.grid },
+        vertLines: { color: palette.grid, visible: !scalp },
+        horzLines: { color: palette.grid, visible: !scalp },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
@@ -11759,6 +11812,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         // its own axis, so the MAIN chart is the only thing that ever draws the
         // time scale. If this is ever off, the chart has no x-axis at all.
         visible: true,
+        // ScalpPro: Lemonn's time axis is 30pt tall (measured off Martin's
+        // screenshot); the library's own, for this font, is 26. The interval
+        // label in the corner is the same 30 (see data-scalp="interval").
+        ...(scalp ? { minimumHeight: 30 } : {}),
       },
       rightPriceScale: {
         borderColor: palette.border,
@@ -14114,11 +14171,31 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       if (!cEl) return;
       const prev = prevSessionCloseRef.current;
       let ct = '', color = '';
+      if (scalp) {
+        // ScalpPro's line is Lemonn's: "146.80 ▲ (0.58%)", the triangle drawn
+        // (see the pane's two lines). It sits on the middle of the figures:
+        // 2.3px up from the baseline it is laid on, turned over for a fall.
+        const aEl = cEl.querySelector('[data-chg="amt"]') as HTMLElement | null, qEl = cEl.querySelector('[data-chg="pct"]') as HTMLElement | null;
+        const tEl = cEl.querySelector('[data-chg="arrow"]') as SVGElement | null;
+        if (!aEl || !qEl || !tEl) return;
+        let a = '', q = '', up = true;
+        if (px > 0 && prev && prev > 0) {
+          const d = px - prev, pct = (d / prev) * 100;
+          up = d >= 0;
+          a = `${d < 0 ? '-' : ''}${fmt(Math.abs(d))}`; q = `(${Math.abs(pct).toFixed(2)}%)`;
+          color = up ? '#10b981' : '#f43f5e';
+        }
+        if (aEl.textContent !== a) aEl.textContent = a;
+        if (qEl.textContent !== q) qEl.textContent = q;
+        const show = a ? '' : 'none', turn = up ? 'translateY(-2.3px)' : 'translateY(-2.3px) rotate(180deg)';
+        if (tEl.style.display !== show) tEl.style.display = show;
+        if (tEl.style.transform !== turn) tEl.style.transform = turn;
+        if (cEl.style.color !== color) cEl.style.color = color;
+        return;
+      }
       if (px > 0 && prev && prev > 0) {
         const d = px - prev, pct = (d / prev) * 100;
-        ct = scalp
-          ? `${d < 0 ? '-' : ''}${fmt(Math.abs(d))} ${d >= 0 ? '▲' : '▼'} (${Math.abs(pct).toFixed(2)}%)`
-          : `${d >= 0 ? '▲' : '▼'} ${Math.abs(pct).toFixed(2)}% (${d >= 0 ? '+' : '−'}${fmt(Math.abs(d))})`;
+        ct = `${d >= 0 ? '▲' : '▼'} ${Math.abs(pct).toFixed(2)}% (${d >= 0 ? '+' : '−'}${fmt(Math.abs(d))})`;
         color = d >= 0 ? '#10b981' : '#f43f5e';
       }
       if (cEl.textContent !== ct) cEl.textContent = ct;
@@ -14321,7 +14398,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // and every 30 seconds after; the figure shown is that times the lots. The
   // first version asked again on every change of size, and stepping the lots a
   // few times set off the app's own "called 6 times in 15 seconds" warning.
-  const [scalpReq, setScalpReq] = useState<{ sym: string; buy: number | null; sell: number | null }>({ sym: '', buy: null, sell: null });
+  const [scalpReq, setScalpReq] = useState<{ sym: string; buy: number | null; sell: number | null; px: number }>({ sym: '', buy: null, sell: null, px: 0 });
   useEffect(() => {
     if (!scalpSym || !(scalpLot > 0)) return;
     let dead = false;
@@ -14333,7 +14410,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       }).then(r => (r.ok ? r.json() : null)).then(m => (m && Number.isFinite(Number(m.total)) ? Number(m.total) : null)).catch(() => null);
       Promise.all([one('BUY'), one('SELL')]).then(([buy, sell]) => {
         if (dead) return;
-        setScalpReq(prev => ({ sym: scalpSym, buy: buy ?? (prev.sym === scalpSym ? prev.buy : null), sell: sell ?? (prev.sym === scalpSym ? prev.sell : null) }));
+        setScalpReq(prev => ({ sym: scalpSym, buy: buy ?? (prev.sym === scalpSym ? prev.buy : null), sell: sell ?? (prev.sym === scalpSym ? prev.sell : null), px: buy !== null ? px : (prev.sym === scalpSym ? prev.px : 0) }));
       });
     };
     const first = setTimeout(ask, 400);
@@ -14394,7 +14471,236 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     try { window.dispatchEvent(new CustomEvent('exit_position_request', { detail: { symbol: scalpPos.symbol } })); } catch (e) {}
     setTimeout(() => { scalpBusyRef.current = null; setScalpBusy(null); }, 2500);
   };
-  const scalpRs = (v: number | null | undefined) => (v === null || v === undefined || !Number.isFinite(v) ? '—' : `₹${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`);
+  const scalpRs = (v: number | null | undefined) => (v === null || v === undefined || !Number.isFinite(v) ? '—' : `₹${Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+
+  // ===== LIMIT / TRIGGER: AN ORDER THAT WAITS AT A PRICE (ScalpPro, 16 Nov 2026) =====
+  // Martin sent a recording of how Lemonn places a limit / trigger order from
+  // the option chart or the spot chart and asked for the same here; later the
+  // same day, of his Lemonn screenshot: "I can't see the bottom market,
+  // limit/trigger button".
+  // What Lemonn does, and this does:
+  //   • a switch above Buy and Sell: Market | Limit/Trigger;
+  //   • on Limit/Trigger a dashed "At Price" line comes up on BOTH charts at
+  //     the live price, each with a chip to drag it by and a cross to put the
+  //     mode away;
+  //   • the buttons name the order the line makes: above the live price a buy
+  //     is a trigger (it buys when the price gets UP to the line) and a sell
+  //     is a limit; below it, the other way round;
+  //   • a tap on Buy or Sell places it — no confirmation, as on Market — the
+  //     mode goes back to Market, and the waiting order stays on its chart as
+  //     a chip, "B 0/65 TRG", with a cross that cancels it.
+  // THE LINE ON THE SPOT CHART IS A LEVEL IN THE INDEX: "buy this option when
+  // NIFTY gets to 25,300". The order waits at whichever line was moved last —
+  // that chip is the lit one — and the message after the tap says which.
+  //
+  // WHAT WAITS IS THE APP'S OWN ARMED ORDER (server/triggers.ts), not an order
+  // resting at the exchange: when the level is reached the server sends a
+  // market order. It is the engine the chart page's trigger box uses, with
+  // its rules — kept on the server, fired once, market hours only,
+  // gone at the close, sized again to the funds at that moment, the trade
+  // guard asked when it is armed and again when it fires.
+  const atOn = !!(scalp && scalpAt?.on);
+  const atMine: 'option' | 'spot' = isOptionPane ? 'option' : 'spot';
+  const atKey: 'optPx' | 'spotPx' = atMine === 'option' ? 'optPx' : 'spotPx';
+  const atPx: number | null = atOn ? (scalpAt as ScalpAt)[atKey] : null;
+  const atLit = atOn && (scalpAt as ScalpAt).src === atMine;
+  const atPxRef = useRef<number | null>(null);
+  atPxRef.current = atPx;
+  const atDragRef = useRef<number | null>(null);            // the price under the finger while the chip is held
+  const atRowRef = useRef<HTMLDivElement | null>(null);
+  const atAxisRef = useRef<HTMLSpanElement | null>(null);
+  const tick05 = (v: number) => +Math.max(0.05, Math.round(v / 0.05) * 0.05).toFixed(2);       // the exchange's tick
+  const tickUp = (v: number) => +Math.max(0.05, Math.ceil(v / 0.05 - 1e-6) * 0.05).toFixed(2);
+  const atOff = () => onScalpAt?.(() => ({ on: false, src: 'option', optPx: null, spotPx: null }));
+  // The spot chart tells the bar (on the option chart) what the index is doing.
+  useEffect(() => {
+    if (!scalp || !scalpShared) return;
+    if (isSpotPane) {
+      const w = () => { const sh = scalpShared.current; sh.spotNow = Number(lastCandleDataRef.current?.close) || 0; sh.spotToken = indexToken; sh.spotName = indexLabel; };
+      w();
+      const iv = setInterval(w, 250);
+      return () => clearInterval(iv);
+    }
+    const w = prettyOptionName(String(selectedInstrument?.tradingsymbol || '')).split(' ');       // "NIFTY 25200 CE 17 NOV"
+    scalpShared.current.optShort = w.length >= 3 ? `${w[1]} ${w[2]}` : '';
+  }, [scalp, isSpotPane, indexToken, indexLabel, selectedInstrument?.tradingsymbol]);
+  // The line starts at the live price of its own chart — on it, or on the
+  // tick just above when the price is between two: Lemonn's line starts as a
+  // "Buy Trg | Sell Lmt", which is what a line AT the price is called.
+  useEffect(() => {
+    if (!atOn || atPx !== null || !onScalpAt) return;
+    const set = () => {
+      const px = Number(lastCandleDataRef.current?.close);
+      if (!(px > 0)) return false;
+      onScalpAt((a) => (a.on && a[atKey] === null ? { ...a, [atKey]: tickUp(px) } : a));
+      return true;
+    };
+    if (set()) return;
+    const iv = setInterval(() => { if (set()) clearInterval(iv); }, 300);
+    return () => clearInterval(iv);
+  }, [atOn, atPx, atKey]);
+  // ANOTHER CONTRACT, OR ANOTHER INDEX, PUTS THE MODE AWAY. A price chosen for
+  // one contract means nothing on the next one, and an order must never wait at
+  // a line that was drawn for something else.
+  const atTokRef = useRef(instrumentToken);
+  useEffect(() => {
+    if (atTokRef.current === instrumentToken) return;
+    atTokRef.current = instrumentToken;
+    if (atOn) atOff();
+  }, [instrumentToken]);
+  const startAtDrag = (e: React.PointerEvent) => {
+    const ser = mainSeriesRef.current, cont = chartContainerRef.current, chart = mainChartRef.current;
+    if (!ser || !cont || !chart || !onScalpAt) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch (err) {}
+    const rect = cont.getBoundingClientRect();
+    let timeH = 30;
+    try { timeH = chart.timeScale().height() || 30; } catch (err) {}
+    const plotH = cont.clientHeight - timeH;
+    atDragRef.current = atPxRef.current;
+    let pushed = 0;
+    const move = (ev: PointerEvent) => {
+      const y = Math.max(8, Math.min(plotH - 8, ev.clientY - rect.top));
+      const p = ser.coordinateToPrice(y);
+      if (p === null || !Number.isFinite(p as number)) return;
+      const px = tick05(p as number);
+      atDragRef.current = px;
+      // The line itself follows the finger frame by frame (see the layout loop
+      // below); the bar's figures follow a few times a second.
+      const now = performance.now();
+      if (now - pushed > 120) { pushed = now; onScalpAt((a) => ({ ...a, src: atMine, [atKey]: px })); }
+    };
+    const end = () => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', end);
+      document.removeEventListener('pointercancel', end);
+      const px = atDragRef.current;
+      atDragRef.current = null;
+      if (px !== null) onScalpAt((a) => ({ ...a, src: atMine, [atKey]: px }));
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', end);
+    document.addEventListener('pointercancel', end);
+  };
+  // The orders waiting on THIS chart: in the option's premium on the option
+  // chart, in the index's level on the spot chart.
+  const scalpOrders: any[] = !scalp ? [] : armedTriggers.filter((t: any) => (isOptionPane
+    ? !(Number(t.watch_token) > 0) && String(t.tradingsymbol || '').toUpperCase() === String(selectedInstrument?.tradingsymbol || '').toUpperCase()
+    : Number(t.watch_token) > 0 && String(t.watch_token) === String(indexToken)));
+  const scalpOrderEls = useRef<Map<string, HTMLDivElement>>(new Map());
+  const scalpOrdersRef = useRef<any[]>([]);
+  scalpOrdersRef.current = scalpOrders;
+  // TRG or LMT: what the order is, from where its level stood when it was placed.
+  const orderKind = (t: any) => (Number(t.watch_token) > 0 ? 'TRG' : (t.side === 'BUY') === (t.direction === 'UP') ? 'TRG' : 'LMT');
+  const cancelScalpOrder = async (id: string) => {
+    const r = await fetch(`/api/triggers/${id}`, { method: 'DELETE' }).then((x) => x.json()).catch(() => null);
+    if (!r?.ok) toast.error(r?.error || 'Not cancelled');
+    refetchTriggers();
+  };
+  // Every line here is placed each frame from its price, so it stays on its
+  // price through a pan, a pinch and every tick — and is held at the edge of
+  // the plot, not lost, when its price is off the screen.
+  const scalpRowsOn = scalp && (atOn || scalpOrders.length > 0);
+  useEffect(() => {
+    if (!scalpRowsOn) return;
+    let raf = 0, stopped = false;
+    const frame = () => {
+      if (stopped) return;
+      try {
+        const ser = mainSeriesRef.current, chart = mainChartRef.current, cont = chartContainerRef.current;
+        if (ser && chart && cont) {
+          let timeH = 30, axisW = 56;
+          try { timeH = chart.timeScale().height() || 30; axisW = chart.priceScale('right').width() || 56; } catch (e) {}
+          const plotH = cont.clientHeight - timeH;
+          const put = (el: HTMLElement | null | undefined, price: number | null) => {
+            if (!el) return;
+            const y = price === null ? null : ser.priceToCoordinate(price);
+            if (y === null || !(plotH > 24)) { if (el.style.display !== 'none') el.style.display = 'none'; return; }
+            const yy = Math.round(Math.max(12, Math.min(plotH - 12, y as number)));       // half a chip from either edge
+            const t = `translateY(${yy}px)`;
+            if (el.style.transform !== t) el.style.transform = t;
+            if (el.style.getPropertyValue('--axw') !== `${axisW}px`) el.style.setProperty('--axw', `${axisW}px`);
+            // The chip starts where Lemonn's does (52pt in), and further along when
+            // one of the chart's own labels (15M HIGH, a level's name) is at that
+            // height.
+            let cx = 52;
+            for (const r of leftLabelRectsRef.current) if (Math.abs(r.y - yy) < 22 && r.right + 6 > cx) cx = r.right + 6;
+            if (el.style.getPropertyValue('--chipx') !== `${cx}px`) el.style.setProperty('--chipx', `${cx}px`);
+            if (el.style.display !== 'block') el.style.display = 'block';
+          };
+          const px = atDragRef.current ?? atPxRef.current;
+          put(atRowRef.current, px);
+          const ax = atAxisRef.current;
+          if (ax && px !== null) { const txt = px.toFixed(2); if (ax.textContent !== txt) ax.textContent = txt; }
+          for (const t of scalpOrdersRef.current) put(scalpOrderEls.current.get(String(t.id)), Number(t.trigger_price) || null);
+        }
+      } catch (e) {}
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => { stopped = true; cancelAnimationFrame(raf); };
+  }, [scalpRowsOn]);
+  // WHICH SIDE OF THE LIVE PRICE THE LINE IS ON — that is what names the two
+  // buttons. The live price is not in React state (it would re-render this page
+  // on every tick), so it is looked at a few times a second while the mode is on.
+  const [atAbove, setAtAbove] = useState(true);
+  useEffect(() => {
+    if (!atOn || !scalpBarOn) return;
+    const look = () => {
+      const a = scalpAt as ScalpAt;
+      const level = a.src === 'spot' ? a.spotPx : a.optPx;
+      const now = a.src === 'spot' ? Number(scalpShared?.current.spotNow) : Number(lastCandleDataRef.current?.close);
+      if (level === null || !(now > 0)) return;
+      setAtAbove(level >= now);
+    };
+    look();
+    const iv = setInterval(look, 300);
+    return () => clearInterval(iv);
+  }, [atOn, scalpBarOn, scalpAt?.src, scalpAt?.optPx, scalpAt?.spotPx]);
+  const atOnSpot = atOn && (scalpAt as ScalpAt).src === 'spot';
+  const atLevel: number | null = !atOn ? null : atOnSpot ? (scalpAt as ScalpAt).spotPx : (scalpAt as ScalpAt).optPx;
+  // On the index a level is always a trigger: there is no "limit" in a price
+  // the order is not placed in.
+  const atBuyLabel = atOnSpot || atAbove ? 'Buy Trg' : 'Buy Lmt';
+  const atSellLabel = atOnSpot || !atAbove ? 'Sell Trg' : 'Sell Lmt';
+  // What a buy at the line needs: the broker's figure for the live price,
+  // scaled to the line's (a bought option is paid for in full, so it scales
+  // with its price). A level on the index buys at whatever the option is then.
+  const atReqBuy = atOn && !atOnSpot && atLevel !== null && scalpReqNow.buy !== null && scalpReq.px > 0 ? scalpReqNow.buy * (atLevel / scalpReq.px) : scalpReqNow.buy;
+  const scalpArm = async (side: 'BUY' | 'SELL') => {
+    if (scalpBusyRef.current || Date.now() - scalpLastAtRef.current < 1200) return;
+    const a = scalpAt, c = scalpInfo;
+    if (!a?.on) return;
+    if (!c?.tradingsymbol || !c?.instrument_token || !(scalpLot > 0)) { toast.error('Contract not ready'); return; }
+    const onSpot = a.src === 'spot';
+    const level = onSpot ? a.spotPx : a.optPx;
+    const now = onSpot ? Number(scalpShared?.current.spotNow) : Number(lastCandleDataRef.current?.close);
+    const watchToken = onSpot ? Number(scalpShared?.current.spotToken) : 0;
+    if (level === null || !(level > 0)) { toast.error('Set a price'); return; }
+    if (!(now > 0) || (onSpot && !(watchToken > 0))) { toast.error('No live price yet'); return; }
+    scalpBusyRef.current = side; setScalpBusy(side);
+    try {
+      const res = await fetch('/api/triggers', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tradingsymbol: c.tradingsymbol, instrument_token: c.instrument_token, exchange: c.exchange || 'NFO',
+          side, product: 'NRML', quantity: scalpLots * scalpLot, lot_size: scalpLot,
+          trigger_price: level, current_price: now,
+          ...(onSpot ? { watch_token: watchToken, watch_name: scalpShared?.current.spotName || '' } : {}),
+        }),
+      });
+      const d = await res.json().catch(() => ({ ok: false }));
+      // The trade guard's refusal is its own sentence. A shortfall of funds is
+      // not offered an "anyway" here as it is in the trigger box: on a one-tap
+      // bar the answer is simply no.
+      if (!d.ok) { toast.error(d.needsConfirm ? 'Not enough funds' : (d.error || 'Not placed')); return; }
+      toast.success(`${side === 'BUY' ? 'Buy' : 'Sell'} at ${onSpot ? `${scalpShared?.current.spotName || 'index'} ` : ''}${level.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+      atOff();
+      refetchTriggers();
+    } catch (e) { toast.error('Not placed'); }
+    finally { scalpLastAtRef.current = Date.now(); scalpBusyRef.current = null; setScalpBusy(null); }
+  };
 
   // DESKTOP HEIGHT. The root used to be height:auto with a min-height of the
   // screen, so the chart's flex-grow had nothing to grow into and stopped at its
@@ -14404,7 +14710,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // overflow hidden so nothing can push the page into a scroll. The chart grows
   // to fill whatever the toolbar, tabs and strips leave. Mobile classes unchanged.
   return (
-    <div ref={pageRootRef} data-layout="page" className={`px-1 pt-0 pb-0 md:px-0 md:py-0 animate-in fade-in duration-500 max-w-none w-full mx-auto flex flex-col ${scalp ? 'h-full' : 'h-[calc(100dvh-124px-env(safe-area-inset-bottom))]'} md:h-full md:min-h-0 max-md:overflow-hidden md:overflow-visible relative`}>
+    <div ref={pageRootRef} data-layout="page" className={`${scalp ? 'px-0' : 'px-1'} pt-0 pb-0 md:px-0 md:py-0 animate-in fade-in duration-500 max-w-none w-full mx-auto flex flex-col ${scalp ? 'h-full' : 'h-[calc(100dvh-124px-env(safe-area-inset-bottom))]'} md:h-full md:min-h-0 max-md:overflow-hidden md:overflow-visible relative`}>
       
       {/* Tap anywhere outside to dismiss. The panel is a floating readout, not a
           setting to leave switched on, so it should get out of the way the moment
@@ -14774,28 +15080,47 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         {/* A SCALPPRO PANE'S TWO LINES: the chart's name, and its price with the
             day's change (the same two spans the chart page's header fills). On
             the spot pane the name opens the list of indices; on the option pane
-            the side is a button of its own — one tap flips Call and Put. */}
+            the side is a button of its own — one tap flips Call and Put.
+            THE SAME SURFACE AS THE CHART, AND LEMONN'S SIZES (16 Nov 2026).
+            Martin, of Lemonn's screen: "the Nifty and the option texts have the
+            same background color as the charts", and "make sure the text size
+            and the button sizes match them as it is 100%". So the two lines are
+            on the chart's own surface (bg-card, not the page's darker
+            background), and every size here is measured off his screenshot of
+            Lemonn, which is 430pt wide at 3 pixels a point: capitals 8.67pt
+            tall in both lines (12.3px in the phone's own font), the name's
+            capitals starting 18.3pt down, the price's baseline 18pt under the
+            name's, 57.5pt in all; the name underlined with a hairline, a pair
+            of solid triangles after what can be changed. */}
         {scalp && (
-          <div data-scalp-head={paneRole} className="relative shrink-0 px-2.5 pt-1.5 pb-1 bg-background" onPointerDown={(e) => e.stopPropagation()}>
-            <div className="flex items-center gap-2 text-[14px] font-semibold text-foreground">
+          <div data-scalp-head={paneRole} className="relative shrink-0 px-[15px] pt-[13.5px] pb-2 bg-card" onPointerDown={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-1 h-[18px] text-[12.3px] leading-[18px] font-medium text-foreground">
               {isSpotPane ? (
-                <button type="button" data-scalp="index" onClick={() => setIndexMenuOpen(o => !o)}
-                  className="flex items-center gap-1 underline decoration-foreground/30 underline-offset-4">
-                  {indexLabel}<ChevronsUpDown size={12} className="text-muted-foreground" />
+                <button type="button" data-scalp="index" onClick={() => setIndexMenuOpen(o => !o)} className="flex items-center gap-[3px]">
+                  <span className="block h-[18px]" style={SCALP_NAME_LINE}>{indexLabel}</span><UpDownMark />
                 </button>
               ) : scalpOpt ? (
                 <>
-                  <span data-scalp="option-name" className="truncate underline decoration-foreground/30 underline-offset-4">{scalpOpt.base}</span>
+                  <span data-scalp="option-name" className="block h-[18px] min-w-0 truncate" style={SCALP_NAME_LINE}>{scalpOpt.base}</span>
                   <button type="button" data-scalp="side" onClick={flipOptionSide} disabled={flipBusy}
-                    className="shrink-0 flex items-center gap-1 disabled:opacity-50">
-                    {scalpOpt.side === 'PE' ? 'Put' : 'Call'}<ChevronsUpDown size={12} className="text-muted-foreground" />
+                    className="shrink-0 flex items-center gap-1 font-normal disabled:opacity-50">
+                    {scalpOpt.side === 'PE' ? 'Put' : 'Call'}<UpDownMark />
                   </button>
                 </>
               ) : <span className="text-muted-foreground">—</span>}
             </div>
-            <div className="flex items-baseline gap-1.5 whitespace-nowrap">
-              <span ref={headPriceRef} data-head="price" className="text-[13px] font-medium tabular-nums text-foreground">—</span>
-              <span ref={headChangeRef} data-head="change" className="text-[13px] font-medium tabular-nums" />
+            {/* The change is three pieces — the amount, a solid triangle, the
+                percentage — because Lemonn's triangle is a flat 8 x 4pt one that
+                no letter of a font is; the paint loop fills the two texts and
+                turns the triangle over (see data-chg there). The figures are
+                not fixed-width here, as theirs are not. */}
+            <div className="flex items-baseline gap-[5px] h-[18px] whitespace-nowrap text-[12.3px] leading-[18px]">
+              <span ref={headPriceRef} data-head="price" className="font-medium text-foreground">—</span>
+              <span ref={headChangeRef} data-head="change" className="inline-flex items-baseline gap-1 font-normal">
+                <span data-chg="amt" />
+                <svg data-chg="arrow" width="8" height="4" viewBox="0 0 8 4" aria-hidden="true" className="shrink-0" style={{ display: 'none' }}><path d="M0 4 H8 L4 0 Z" fill="currentColor" /></svg>
+                <span data-chg="pct" />
+              </span>
             </div>
             {isSpotPane && indexMenuOpen && (
               <div data-scalp="index-menu" className="absolute left-2 top-full z-[60] min-w-[150px] bg-card border border-white/10 rounded-md shadow-2xl overflow-hidden">
@@ -16060,8 +16385,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           )}
           </div>
           {/* SETTINGS, ON A PHONE. These are the buttons that used to fill the right
-              half of the bottom bar — trailing SL or My Order, the trade guard,
-              reload, sync — "under the settings", as Martin asked. They are the
+              half of the bottom bar — trailing SL (and, until 16 Nov 2026, My
+              Order), the trade guard, reload, sync — "under the settings", as
+              Martin asked. They are the
               very same buttons (so nothing they do has changed), laid out as a
               sheet with their names beside them and shown only while Settings is
               open. The names are two words at most and there is no heading and no
@@ -16082,9 +16408,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               switches are not mistaken for each other at a glance.
               26 Oct: shown only on an OPTION premium chart while a trade is open —
               it governs that trade's exits, and on the spot chart it read as a
-              setting of the index (Martin asked for it off the spot chart). The
-              spot chart gets the My Order button in the same slot instead. A
-              toast confirms each change, since the colour alone was easy to miss. */}
+              setting of the index (Martin asked for it off the spot chart). A
+              toast confirms each change, since the colour alone was easy to miss.
+              (The spot chart had the My Order button in this slot from 26 Oct
+              to 16 Nov 2026, when Martin asked for that screen to go: "so that
+              I can place limit/trigger orders directly from the charts". An
+              order that waits at a price is now set by a line on the ScalpPro
+              screen — see LIMIT / TRIGGER.) */}
           {isOptionView && slActivePos ? (
           <button
             data-layout="icons"
@@ -16100,22 +16430,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             <TrendingUp size={17} />
             <span className="md:hidden text-left text-[13px] font-medium text-foreground">Trailing SL</span>
             <span className={`md:hidden ml-auto text-[12px] font-semibold ${trailTpOn ? 'text-emerald-400' : 'text-muted-foreground'}`}>{trailTpOn ? 'On' : 'Off'}</span>
-          </button>
-          ) : !isOptionView ? (
-          <button
-            data-layout="icons"
-            onClick={() => {
-              const last = chartDataRef.current?.candles?.[chartDataRef.current.candles.length - 1]?.close;
-              setMyOrderSpot(Number(last) > 0 ? Number(last) : null);
-              setMyOrderOpen(true);
-              setPhoneSettingsOpen(false);
-            }}
-            title="My order — set entry, SL and TP1-3 for a strike; bought automatically when the premium reaches the entry"
-            aria-label="My order"
-            className={`${isReferenceChart ? 'hidden' : 'flex'} ${sharedHidden} items-center justify-center h-9 w-9 shrink-0 md:order-2 rounded-md border border-0 transition-colors bg-muted/40 text-muted-foreground hover:text-foreground max-md:h-11 max-md:w-full max-md:justify-start max-md:gap-3 max-md:px-2.5 max-md:!bg-transparent`}
-          >
-            <ClipboardPen size={17} />
-            <span className="md:hidden text-left text-[13px] font-medium text-foreground">My order</span>
           </button>
           ) : null}
           {/* Trade guard (11 Nov 2026): one shield per screen — on the single chart,
@@ -16315,12 +16629,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 line. And only once: both panes render this component, and every
                 layout has exactly one non-option pane — the spot pane on desktop,
                 the single chart on mobile. */}
-            {paneRole !== 'option' && armedTriggers.length > 0 && (
+            {paneRole !== 'option' && !scalp && armedTriggers.length > 0 && (
               <div className="absolute top-12 left-2 z-40 flex flex-col gap-1.5 pointer-events-auto">
                 {armedTriggers.map((t: any) => (
                   <div key={t.id} className="flex items-center gap-2 bg-amber-500/15 border border-amber-500/40 rounded-lg px-2.5 py-1.5 backdrop-blur-sm">
                     <span className="text-[10px] font-mono font-bold text-amber-300">
-                      {t.side} {prettyOptionName(t.tradingsymbol)} @ {Number(t.trigger_price).toFixed(2)}
+                      {t.side} {prettyOptionName(t.tradingsymbol)} @ {Number(t.watch_token) > 0 ? `${t.watch_name || 'index'} ` : ''}{Number(t.trigger_price).toFixed(2)}
                       <span className="opacity-70"> · {t.direction === 'UP' ? 'on rise' : 'on fall'}</span>
                     </span>
                     <button
@@ -16956,6 +17270,44 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 </div>
               </div>
             )}
+            {/* SCALPPRO, LIMIT / TRIGGER: the At Price line of this chart, and the
+                orders waiting on it. Each is a row of no height laid across the
+                chart and moved to its price every frame: a dashed line as far as
+                the price axis, a chip on it, and the price in a box on the axis.
+                Over the chart, not inside its container (the container takes
+                every press first — see TRADE CHIPS). z-[43]/[42]: above the
+                trade chips, under the interval.
+                The look is Lemonn's, off a full-size frame of Martin's recording
+                of it: the chip 24pt tall with 4pt corners on the page's
+                background, 52pt in from the left; a 9pt cross, the words at
+                10px, six dots to drag by; a blue outline and white words on
+                the chart whose line is the one in use, grey on the other; the
+                line 4pt on, 4pt off; the price in a 20pt box that runs off the
+                screen's edge. */}
+            {scalp && atOn && (
+              <div ref={atRowRef} data-at-row={atMine} data-at-lit={atLit ? '1' : '0'} className="absolute inset-x-0 top-0 h-0 z-[43] pointer-events-none" style={{ display: 'none' }}>
+                <div className="absolute left-0 right-[var(--axw,56px)] h-px -translate-y-1/2 text-foreground/65" style={SCALP_DASH} />
+                <div data-at-chip="" onPointerDown={startAtDrag} style={{ touchAction: 'none' }}
+                  className={`pointer-events-auto absolute left-[var(--chipx,52px)] -translate-y-1/2 h-6 pr-2 rounded-[4px] border bg-background flex items-center text-[10px] leading-none select-none cursor-ns-resize ${atLit ? 'border-blue-400 text-foreground' : 'border-foreground/15 text-foreground/60'}`}>
+                  <button type="button" data-at="close" aria-label="Back to Market" onPointerDown={(e) => e.stopPropagation()} onClick={atOff} className="h-6 w-6 -my-px flex items-center justify-center"><X size={18} strokeWidth={1.4} /></button>
+                  <span className="whitespace-nowrap">At Price{isSpotPane && scalpShared?.current.optShort ? ` · ${scalpShared.current.optShort}` : ''}</span>
+                  <GripVertical size={16} className="ml-[2.5px] -mr-[4.5px]" />
+                </div>
+                <span ref={atAxisRef} data-at-axis="" className={`absolute right-0 -translate-y-1/2 w-[var(--axw,56px)] h-5 flex items-center justify-center rounded-l-[4px] border border-r-0 bg-background text-[10px] leading-none font-medium ${atLit ? 'border-foreground/60 text-foreground' : 'border-foreground/25 text-foreground/60'}`} />
+              </div>
+            )}
+            {scalp && scalpOrders.map((t: any) => (
+              <div key={t.id} data-order-row={t.id} ref={(el) => { if (el) scalpOrderEls.current.set(String(t.id), el); else scalpOrderEls.current.delete(String(t.id)); }}
+                className="absolute inset-x-0 top-0 h-0 z-[42] pointer-events-none" style={{ display: 'none' }}>
+                <div className={`absolute left-0 right-[var(--axw,56px)] h-px -translate-y-1/2 ${t.side === 'BUY' ? 'text-sky-400/80' : 'text-rose-400/80'}`} style={SCALP_DASH} />
+                <div className="pointer-events-auto absolute left-[var(--chipx,52px)] -translate-y-1/2 h-6 pl-1.5 rounded-[4px] border border-foreground/15 bg-background flex items-center gap-1.5 text-[10px] leading-none text-foreground select-none">
+                  <span className={`h-4 w-4 rounded-[3px] flex items-center justify-center text-[9px] font-bold text-white ${t.side === 'BUY' ? 'bg-sky-600' : 'bg-rose-600'}`}>{t.side === 'BUY' ? 'B' : 'S'}</span>
+                  <span className="whitespace-nowrap">0/{t.quantity} {orderKind(t)}{isSpotPane ? ` · ${prettyOptionName(t.tradingsymbol).split(' ').slice(1, 3).join(' ')}` : ''}</span>
+                  <button type="button" data-order="cancel" aria-label="Cancel this order" onClick={() => cancelScalpOrder(String(t.id))} className="h-6 w-6 -my-px -ml-1 flex items-center justify-center text-foreground/60"><X size={18} strokeWidth={1.4} /></button>
+                </div>
+                <span className={`absolute right-0 -translate-y-1/2 w-[var(--axw,56px)] h-5 flex items-center justify-center rounded-l-[4px] border border-r-0 bg-background text-[10px] leading-none font-medium ${t.side === 'BUY' ? 'border-sky-400/80 text-sky-300' : 'border-rose-400/80 text-rose-300'}`}>{Number(t.trigger_price).toFixed(2)}</span>
+              </div>
+            ))}
             {/* SCALPPRO: the interval in the corner where the two axes meet — each
                 chart has its own, as in Lemonn. z-[44]: above the chips and the
                 drawing tools. (Lemonn also has zoom in / out buttons beside the
@@ -16963,8 +17315,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 "Remove the zoom out and zoom in buttons from the scalp pro
                 charts". A pinch zooms, as on every chart in the app.) */}
             {scalp && (
-              <label data-scalp="interval" className="absolute right-0 bottom-0 z-[44] h-[26px] min-w-[52px] flex items-center justify-center gap-0.5 px-1 text-[12px] font-semibold text-foreground bg-card">
-                {tfLabelOf(timeframe)}<span className="text-[9px] leading-none">▼</span>
+              <label data-scalp="interval" className="absolute right-0 bottom-0 z-[44] h-[30px] min-w-[52px] flex items-center justify-end gap-[3px] pl-2 pr-[13px] text-[12.3px] font-medium text-foreground bg-card">
+                {tfLabelOf(timeframe)}<svg width="8" height="4" viewBox="0 0 8 4" aria-hidden="true"><path d="M0 0 H8 L4 4 Z" fill="currentColor" /></svg>
                 <select value={timeframe} onChange={(e) => setTimeframe(e.target.value)} aria-label="Interval" className="absolute inset-0 h-full w-full opacity-0">
                   <option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="15">15m</option>
                   <option value="60">1h</option><option value="240">4h</option><option value="1440">1D</option>
@@ -16975,7 +17327,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 component falls back to the index, and the index must not flash
                 up in the lower half while the first option is being found. */}
             {scalp && isOptionPane && !selectedInstrument && (
-              <div className="absolute inset-0 z-[130] bg-background flex items-center justify-center">
+              <div className="absolute inset-0 z-[130] bg-card flex items-center justify-center">
                 <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
               </div>
             )}
@@ -17046,53 +17398,93 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           {/* THE SCALPPRO BAR (see THE BUY / SELL BAR). Buy on the left, the size
               in the middle, Sell on the right; what each needs and the funds
               under them. While a trade is open in this contract the button that
-              would go against it is Exit. The look is Lemonn's, measured off
-              Martin's screenshot of it (16 Nov 2026: "does not match the lemon
-              screen 100%. Fix it."): a lime Buy (#bbe44a) with dark words, Sell
-              as an outline, 12px corners. The lime is theirs and deliberately
-              not one of the app's theme colours — it is the same in every theme. */}
+              would go against it is Exit.
+              THE LOOK AND EVERY SIZE ARE LEMONN'S, measured off Martin's
+              screenshot of it (16 Nov 2026: "does not match the lemon screen
+              100%. Fix it.", then "make sure the text size and the button sizes
+              match them as it is 100%"). The screenshot is 430pt wide at 3
+              pixels a point, so a third of a pixel count is a CSS pixel on his
+              phone:
+                the bar starts 4pt under the chart, on the page's own background;
+                the switch is 34pt tall with a 1pt outline and 12pt corners, its
+                  lit half a 24pt pill with 9pt corners, 9pt of space either side
+                  of the word;
+                2pt under it, Buy is 36pt tall, lime (#bbe44a) with dark words;
+                  Sell is 34pt with a 1pt outline; both run to 4pt from the
+                  screen's edge and stop 8pt short of the stepper;
+                the stepper's circles are 32pt with a 2pt ring, 44pt apart;
+                capitals are 8.67pt tall on the buttons and the switch (12.3px),
+                  10pt in the quantity, 7pt in "Req" (10px, bold) and 5.7pt in
+                  "Funds" (8px) — small, and theirs;
+                "Req" starts 8pt under the buttons, and the bar ends 22pt under
+                  them, above the home indicator's strip.
+              The lime is theirs and deliberately not one of the app's theme
+              colours — it is the same in every theme. The greys are the theme's
+              own, at the strengths that land on Lemonn's in the dark theme. */}
           {scalpBarOn && (
-            <div data-scalp-bar="" className="shrink-0 border-t border-border bg-background px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] select-none">
-              <div className="flex items-center gap-2">
-                {scalpPos && scalpPos.side === 'SELL' ? (
+            <div data-scalp-bar="" className="shrink-0 border-t border-border dark:border-t-0 bg-background px-1 pt-1 pb-[calc(4.5px+env(safe-area-inset-bottom))] select-none">
+              {/* MARKET | LIMIT/TRIGGER (see LIMIT / TRIGGER). On the second, the
+                  two buttons place an order that waits at the At Price line. Each
+                  half is pressed over the switch's whole height, not only its
+                  24pt pill (the ::after). */}
+              <div className="flex justify-center mb-0.5">
+                <div data-scalp="mode" className="inline-flex items-center h-[34px] rounded-[12px] border border-foreground/15 bg-card p-1 text-[12.3px] leading-none font-semibold">
+                  <button type="button" data-mode="market" aria-pressed={!atOn} onClick={() => { if (atOn) atOff(); }}
+                    className={`relative h-6 px-[9px] rounded-[9px] after:absolute after:inset-x-0 after:-inset-y-[5px] after:content-[''] ${!atOn ? 'bg-foreground text-background' : 'text-foreground'}`}>Market</button>
+                  <button type="button" data-mode="at" aria-pressed={atOn} onClick={() => { if (!atOn) onScalpAt?.(() => ({ on: true, src: 'option', optPx: null, spotPx: null })); }}
+                    className={`relative h-6 px-[9px] rounded-[9px] after:absolute after:inset-x-0 after:-inset-y-[5px] after:content-[''] ${atOn ? 'bg-foreground text-background' : 'text-foreground'}`}>Limit/Trigger</button>
+                </div>
+              </div>
+              <div className="flex items-center h-9">
+                {atOn ? (
+                  <button type="button" data-scalp="buy-at" disabled={!!scalpBusy || !(scalpLot > 0) || atLevel === null} onClick={() => scalpArm('BUY')}
+                    className={`${SCALP_BTN_FILL} bg-[#bbe44a] text-black`}>
+                    {scalpBusy === 'BUY' ? <Loader2 size={16} className="animate-spin" /> : atBuyLabel}
+                  </button>
+                ) : scalpPos && scalpPos.side === 'SELL' ? (
                   <button type="button" data-scalp="exit" disabled={!!scalpBusy} onClick={scalpExit}
-                    className="flex-1 h-10 rounded-[12px] bg-rose-500 text-white text-[13px] font-semibold flex items-center justify-center disabled:opacity-60 active:opacity-80">
+                    className={`${SCALP_BTN_FILL} bg-rose-500 text-white`}>
                     {scalpBusy === 'EXIT' ? <Loader2 size={16} className="animate-spin" /> : 'Exit'}
                   </button>
                 ) : (
                   <button type="button" data-scalp="buy" disabled={!!scalpBusy || !(scalpLot > 0)} onClick={() => scalpPlace('BUY')}
-                    className="flex-1 h-10 rounded-[12px] bg-[#bbe44a] text-black text-[13px] font-semibold flex items-center justify-center disabled:opacity-60 active:opacity-80">
+                    className={`${SCALP_BTN_FILL} bg-[#bbe44a] text-black`}>
                     {scalpBusy === 'BUY' ? <Loader2 size={16} className="animate-spin" /> : 'Buy at Mkt'}
                   </button>
                 )}
-                <div className="shrink-0 flex items-center gap-1.5">
+                <div className="shrink-0 self-stretch mx-2 flex items-center">
                   <button type="button" data-scalp="lots-minus" aria-label="One lot less" disabled={scalpLots <= 1 || !!scalpBusy}
-                    onClick={() => setScalpLots(l => Math.max(1, l - 1))}
-                    className="h-8 w-8 rounded-full border border-border bg-card flex items-center justify-center text-foreground disabled:opacity-40 active:bg-foreground/10"><Minus size={15} /></button>
-                  <div className="min-w-[46px] text-center leading-tight">
-                    <div data-scalp="qty" className="text-[16px] font-semibold tabular-nums text-foreground">{scalpQty > 0 ? scalpQty : '—'}</div>
-                    <div data-scalp="lots" className="text-[10px] text-muted-foreground">{scalpLots} lot{scalpLots > 1 ? 's' : ''}</div>
+                    onClick={() => setScalpLots(l => Math.max(1, l - 1))} className={SCALP_STEP}><Minus size={17.5} strokeWidth={2.05} /></button>
+                  <div className="self-start mt-[5px] w-[44px] text-center">
+                    <div data-scalp="qty" className="text-[14.2px] leading-[18.5px] font-medium tabular-nums text-foreground">{scalpQty > 0 ? scalpQty : '—'}</div>
+                    <div data-scalp="lots" className="text-[9.7px] leading-[14px] font-medium text-muted-foreground">{scalpLots} lot{scalpLots > 1 ? 's' : ''}</div>
                   </div>
                   <button type="button" data-scalp="lots-plus" aria-label="One lot more" disabled={scalpLots >= 25 || !!scalpBusy}
-                    onClick={() => setScalpLots(l => Math.min(25, l + 1))}
-                    className="h-8 w-8 rounded-full border border-border bg-card flex items-center justify-center text-foreground disabled:opacity-40 active:bg-foreground/10"><Plus size={15} /></button>
+                    onClick={() => setScalpLots(l => Math.min(25, l + 1))} className={SCALP_STEP}><Plus size={17.5} strokeWidth={2.05} /></button>
                 </div>
-                {scalpPos && scalpPos.side !== 'SELL' ? (
+                {atOn ? (
+                  <button type="button" data-scalp="sell-at" disabled={!!scalpBusy || !(scalpLot > 0) || atLevel === null} onClick={() => scalpArm('SELL')}
+                    className={SCALP_BTN_LINE}>
+                    {scalpBusy === 'SELL' ? <Loader2 size={16} className="animate-spin" /> : atSellLabel}
+                  </button>
+                ) : scalpPos && scalpPos.side !== 'SELL' ? (
                   <button type="button" data-scalp="exit" disabled={!!scalpBusy} onClick={scalpExit}
-                    className="flex-1 h-10 rounded-[12px] bg-rose-500 text-white text-[13px] font-semibold flex items-center justify-center disabled:opacity-60 active:opacity-80">
+                    className={`${SCALP_BTN_FILL} bg-rose-500 text-white`}>
                     {scalpBusy === 'EXIT' ? <Loader2 size={16} className="animate-spin" /> : 'Exit'}
                   </button>
                 ) : (
                   <button type="button" data-scalp="sell" disabled={!!scalpBusy || !(scalpLot > 0)} onClick={() => scalpPlace('SELL')}
-                    className="flex-1 h-10 rounded-[12px] border-[1.5px] border-foreground text-foreground text-[13px] font-semibold flex items-center justify-center disabled:opacity-60 active:bg-foreground/10">
+                    className={SCALP_BTN_LINE}>
                     {scalpBusy === 'SELL' ? <Loader2 size={16} className="animate-spin" /> : 'Sell at Mkt'}
                   </button>
                 )}
               </div>
-              <div className="flex items-center mt-1.5 text-[10px] font-semibold text-muted-foreground tabular-nums">
-                <span data-scalp="req-buy" className="flex-1 text-center">{scalpPos && scalpPos.side === 'SELL' ? '' : `Req: ${scalpRs(scalpReqNow.buy)}`}</span>
-                <span data-scalp="funds" className="shrink-0 px-1 text-[9px] font-normal">Funds: {scalpRs(availBalance)}</span>
-                <span data-scalp="req-sell" className="flex-1 text-center">{scalpPos && scalpPos.side !== 'SELL' ? '' : `Req: ${scalpRs(scalpReqNow.sell)}`}</span>
+              {/* The middle column is as wide as the stepper above it (8 + 32 +
+                  44 + 32 + 8), so each "Req" is centred under its own button. */}
+              <div className="flex items-start mt-[5.5px] text-[10px] leading-[12px] font-bold text-muted-foreground tabular-nums">
+                <span data-scalp="req-buy" className="flex-1 min-w-0 text-center whitespace-nowrap">{!atOn && scalpPos && scalpPos.side === 'SELL' ? '' : `Req: ${scalpRs(atOn ? atReqBuy : scalpReqNow.buy)}`}</span>
+                <span data-scalp="funds" className="shrink-0 w-[124px] -mt-[0.8px] text-center whitespace-nowrap text-[8px] leading-[10px] font-normal text-foreground/80">Funds: {scalpRs(availBalance)}</span>
+                <span data-scalp="req-sell" className="flex-1 min-w-0 text-center whitespace-nowrap">{!atOn && scalpPos && scalpPos.side !== 'SELL' ? '' : `Req: ${scalpRs(scalpReqNow.sell)}`}</span>
               </div>
             </div>
           )}
@@ -17309,9 +17701,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         />
       )}
 
-      {myOrderOpen && (
-        <MyOrderModal onClose={() => setMyOrderOpen(false)} underlying={underlying} spot={myOrderSpot} />
-      )}
       {isEditingBl && (
         <BreakerSettingsModal
           value={blSettings}
@@ -17806,13 +18195,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       {/* Rejected triggers stay on screen until dismissed. A toast can be missed;
           money that did not get invested because an order was silently rejected
           must not depend on the user having been watching at that second. */}
-      {failedTriggers.length > 0 && (
+      {failedTriggers.length > 0 && !(scalp && isSpotPane) && (
         <div className="fixed left-2 right-2 md:right-auto md:max-w-md bottom-[calc(11rem+env(safe-area-inset-bottom))] md:bottom-24 z-50 flex flex-col gap-1.5">
           {failedTriggers.map((t: any) => (
             <div key={t.id} className="flex items-start gap-2 bg-rose-500/20 border border-rose-500/50 rounded-lg px-2.5 py-2">
               <div className="min-w-0">
                 <div className="text-[11px] font-mono font-bold text-rose-200">
-                  ORDER NOT PLACED — {t.side} {t.quantity} {prettyOptionName(t.tradingsymbol)} @ {Number(t.trigger_price).toFixed(2)}
+                  ORDER NOT PLACED — {t.side} {t.quantity} {prettyOptionName(t.tradingsymbol)} @ {Number(t.watch_token) > 0 ? `${t.watch_name || 'index'} ` : ''}{Number(t.trigger_price).toFixed(2)}
                 </div>
                 <div className="text-[10px] text-rose-100/80 leading-snug mt-0.5">{t.error || 'Rejected by Zerodha.'}</div>
               </div>
