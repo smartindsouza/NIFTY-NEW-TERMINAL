@@ -192,7 +192,15 @@ export default function App() {
             while sitting BELOW the banner, so the banner's height overflowed the
             screen — that is the vertical scroll. md:pt-4 (was pt-8) buys the
             banner most of its space back. */}
-        <main className={`flex-1 w-full relative bg-transparent pl-0 ${isFocusedChart ? '' : 'md:pl-[80px]'} pt-[max(env(safe-area-inset-top),12px)] ${onChart ? 'md:pt-0 md:pb-0 md:h-screen md:min-h-0 md:flex-none md:flex md:flex-col md:overflow-hidden' : 'md:pt-8 md:pb-12 overflow-y-auto'} pr-0 ${onChart ? '' : 'md:pr-6 lg:pr-8'} ${onChart ? 'max-md:overflow-hidden max-md:overscroll-none pb-24 max-md:pb-0' : 'pb-24'}`}>
+        {/* ON A PHONE THE CHART ROUTE SCROLLS (17 Nov 2026). It used to be clipped
+            here (overflow hidden) because the chart page was the whole screen and
+            anything taller was a mistake. Martin asked for "a vertical scrolling
+            screen in the charts section": the chart page is the first screen and
+            its cards follow it, so the document scrolls, as it does on every
+            other route. The page sizes its own first screen (see THE PHONE'S PAGE
+            ENDS WHERE THE FIXED BUTTONS BEGIN in AdvancedChart). The desktop is as
+            it was: a fixed-height column that does not scroll. */}
+        <main className={`flex-1 w-full relative bg-transparent pl-0 ${isFocusedChart ? '' : 'md:pl-[80px]'} pt-[max(env(safe-area-inset-top),12px)] ${onChart ? 'md:pt-0 md:pb-0 md:h-screen md:min-h-0 md:flex-none md:flex md:flex-col md:overflow-hidden' : 'md:pt-8 md:pb-12 overflow-y-auto'} pr-0 ${onChart ? '' : 'md:pr-6 lg:pr-8'} ${onChart ? 'pb-24 max-md:pb-0' : 'pb-24'}`}>
           <ActivePositions />
           <Suspense fallback={<TerminalLoader />}>
             <Switch>

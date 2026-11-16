@@ -4,6 +4,7 @@ import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-quer
 import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsUp, ChevronsDown, ChevronRight, Copy, Trash2, Search, PencilRuler, Minus, Slash, RectangleHorizontal, AlignJustify, TrendingDown, Type as TypeIcon, Move as MoveIcon, ArrowLeft, CalendarRange, ChartNoAxesCombined, TrendingUp, Star, Bell, Link2, CandlestickChart, GripVertical, RotateCw } from "lucide-react";
 import { navigate } from "wouter/use-browser-location";
 import { TradeGuardButton } from "../components/TradeGuard";
+import { ChartCards } from "../components/ChartCards";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { useUserSettings, useResolvedTheme } from "../hooks/useUserSettings";
@@ -4076,6 +4077,31 @@ export type ScalpAt = { on: boolean; src: 'option' | 'spot'; optPx: number | nul
  *  arm a level on the index), and the option's short name for the index's chip. */
 export type ScalpShared = { spotNow: number; spotToken: string | null; spotName: string; optShort: string };
 
+/** The price line of the small header that shows once the chart page is
+ *  scrolled: a copy, twice a second, of what the page's own header says — "the
+ *  price", then the change up to its percentage ("▲ 0.58%"), in its colour. */
+function PinnedQuote({ priceEl, changeEl }: { priceEl: React.RefObject<HTMLSpanElement | null>; changeEl: React.RefObject<HTMLSpanElement | null> }) {
+  const [q, setQ] = useState<{ p: string; c: string; color: string }>({ p: '', c: '', color: '' });
+  useEffect(() => {
+    const read = () => {
+      const p = priceEl.current?.textContent || '';
+      const full = changeEl.current?.textContent || '';
+      const c = (/^[^%]*%/.exec(full)?.[0] || full).trim();
+      const color = changeEl.current?.style.color || '';
+      setQ((o) => (o.p === p && o.c === c && o.color === color ? o : { p, c, color }));
+    };
+    read();
+    const iv = setInterval(read, 500);
+    return () => clearInterval(iv);
+  }, [priceEl, changeEl]);
+  return (
+    <span data-pinned="quote" className="flex items-baseline gap-[6px] whitespace-nowrap tabular-nums">
+      <span className="text-[11px] leading-4 font-bold text-foreground">{q.p}</span>
+      <span className="text-[11px] leading-4 font-medium" style={{ color: q.color || undefined }}>{q.c}</span>
+    </span>
+  );
+}
+
 export function AdvancedChart({ paneRole, split = false, spotHidden = false, onClosePane, onShowSpot, scalp = false, scalpAt, onScalpAt, scalpShared }: {
   paneRole?: 'spot' | 'option';
   /** PHONE ONLY: this pane is one of the two charts of the ScalpPro screen (see
@@ -4212,14 +4238,59 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // distance from its own top to the bottom of the window, re-measured every
   // second (cheap: one rect, written only on change) and on resize, so the
   // positions banner appearing or vanishing above it is accounted for too.
-  // Mobile keeps its class-based height; the inline style is cleared there.
+  // Mobile kept its class-based height until 17 Nov 2026 — see THE PHONE'S
+  // PAGE ENDS WHERE THE FIXED BUTTONS BEGIN, just below.
   const pageRootRef = useRef<HTMLDivElement>(null);
+  // THE PHONE'S PAGE ENDS WHERE THE FIXED BUTTONS BEGIN, MEASURED (17 Nov 2026).
+  // The chart page scrolls now (Martin: "a vertical scrolling screen in the
+  // charts section" — the cards are under it, see ChartCards), so what used to
+  // be the whole screen is the FIRST screen: header, price, chart, the row of
+  // five, ending exactly where Option Chain | ScalpPro are fixed. Its height
+  // was calc(100dvh - 124px - safe-area), a sum that is right on no device
+  // exactly (a phone's own top inset is not the 12px it assumes, and the
+  // positions banner pushes the page down when a trade is on). That did not
+  // show while the tool bar was fixed over the page's foot and the chart was
+  // sized to the bar; with the row of five part of the page it would — a page
+  // too tall hides the row behind the buttons, one too short leaves a gap
+  // above them. So the height is the distance from the page's top to the top
+  // of the fixed buttons, both measured. The page's top is taken in the
+  // document, not on the screen, so the answer is the same however far the
+  // page is scrolled. ScalpPro's panes and the desktop's are sized by their
+  // own screens and are left alone.
+  // Two more things keep it from being SEEN to change. The class it starts
+  // from is the same sum done properly (the screen, less the top inset, the
+  // app's bottom bar and the fixed buttons), so with no banner the first paint
+  // is already right. And the measurement is taken the moment the fixed
+  // buttons are put on the page (their ref calls fitPhonePage), not a timer
+  // later — a page that corrects itself a second after it appears is the jump
+  // of the bottom buttons that v310 had just removed.
+  const fixedRowRef = useRef<HTMLDivElement | null>(null);
+  const fitPhonePage = () => {
+    const el = pageRootRef.current;
+    if (!el) return;
+    try {
+      const row = fixedRowRef.current;
+      if (!row || scalp || isPane) { if (el.style.height) el.style.height = ''; return; }
+      const h = Math.floor(row.getBoundingClientRect().top - (el.getBoundingClientRect().top + window.scrollY));
+      if (h < 200) return;                     // mid-layout nonsense: leave it
+      const want = `${h}px`;
+      if (el.style.height !== want) el.style.height = want;
+    } catch (e) {}
+  };
+  const fitPhonePageRef = useRef(fitPhonePage);
+  fitPhonePageRef.current = fitPhonePage;
+  // One function for the life of the page: a ref that is a new function on every
+  // render is called again on every render.
+  const setFixedRow = useRef((node: HTMLDivElement | null) => {
+    fixedRowRef.current = node;
+    if (node && typeof window !== 'undefined' && window.innerWidth < 768) fitPhonePageRef.current();
+  }).current;
   useEffect(() => {
     const el = pageRootRef.current;
     if (!el) return;
     const apply = () => {
       try {
-        if (!window.matchMedia('(min-width: 768px)').matches) { if (el.style.height) el.style.height = ''; return; }
+        if (!window.matchMedia('(min-width: 768px)').matches) { fitPhonePage(); return; }
         const top = el.getBoundingClientRect().top;
         // Anything the workspace puts UNDER the charts (the "Check bias" card)
         // marks itself data-layout="below-charts"; the page ends at its top
@@ -4233,9 +4304,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       } catch (e) {}
     };
     apply();
+    const settle = [60, 250, 700].map((ms) => setTimeout(apply, ms));     // the fixed buttons and the banner arrive a frame or two after the page
     const iv = setInterval(apply, 1000);
     window.addEventListener('resize', apply);
-    return () => { clearInterval(iv); window.removeEventListener('resize', apply); try { el.style.height = ''; } catch (e) {} };
+    return () => { settle.forEach(clearTimeout); clearInterval(iv); window.removeEventListener('resize', apply); try { el.style.height = ''; } catch (e) {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const rrCanvasRef = useRef<HTMLCanvasElement>(null);
   const serverTimeOffsetRef = useRef<number>(0);
@@ -9668,6 +9741,18 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // On the traded OPTION's chart only RSI stays on; index overlays (BB, S&R,
   // PDH/PDL, levels, OI bars, opening range, D/S zones, FVG) are hidden there.
   const isOptionView = !!selectedInstrument && (indexToken === null || instrumentToken !== indexToken);
+  // WHOSE OPTIONS THE CARDS UNDER THE CHART ARE ABOUT (see ChartCards): the index
+  // on screen, or the index an option on screen belongs to — read off its
+  // symbol, because an option can be open over any index's chart. None for a
+  // reference chart (GIFT NIFTY has no chain here) or a contract of anything
+  // else.
+  const cardsChain: string | null = (() => {
+    if (isOptionView) {
+      const ts = String(selectedInstrument?.tradingsymbol || '').toUpperCase();
+      return /^NIFTY\d/.test(ts) ? 'NIFTY 50' : /^BANKNIFTY\d/.test(ts) ? 'NIFTY BANK' : /^SENSEX\d/.test(ts) ? 'SENSEX' : null;
+    }
+    return isReferenceChart ? null : indexLabel;
+  })();
 
   // THE CHART'S KIND, AND ITS SWITCHES WHEN THE KIND CHANGES (see THE OPTION CHART
   // HAS ITS OWN INDICATOR SWITCHES). On the phone's chart page one chart is the
@@ -10089,6 +10174,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // banner comes and goes, which is the thing the chart knows how to follow.
   // Measured when the layout can have changed: on mount and as it settles, on a
   // resize, once a second as a net, and the moment a frame sees the chart moved.
+  // (17 Nov 2026: the tool bar is no longer fixed over the page — the row of
+  // five is part of it and has its own room, see THE ROW OF FIVE IS PART OF THE
+  // PAGE NOW — so there is nothing under a bar any more and this block measures
+  // nothing. It is left because it is harmless at nought and right again the
+  // day a bar is fixed over this page.)
   const underBarRef = useRef<HTMLDivElement | null>(null);
   const fitUnderBarRef = useRef<() => void>(() => {});
   fitUnderBarRef.current = () => {
@@ -12778,6 +12868,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         // So measure the real floor: the top of the fixed toolbar if it is fixed
         // (mobile), otherwise the visible viewport. The chart then ends exactly
         // where the visible area does and its axis can never be pushed off-screen.
+        // (17 Nov 2026: on a phone the tool bar is part of the page now and the
+        // page's height is measured, so the container is the right size by
+        // layout and this takes the desktop's path below. That also matters for
+        // a second reason: the page scrolls, and a height worked out from where
+        // the chart is ON THE SCREEN would change as it scrolled.)
         const vvH = (window as any).visualViewport?.height ?? window.innerHeight;
         let floorY = vvH;
         const bar = bottomBarRef.current;
@@ -14356,6 +14451,31 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   }, [chartData, timeframe]);
   const prevSessionCloseRef = useRef<number | null>(null);
   prevSessionCloseRef.current = prevSessionClose;
+  // THE DAY'S LOW AND HIGH OF THE CHART ON SCREEN, for the Daily Performance card
+  // under the chart (see ChartCards). Read off the candles this chart already
+  // holds — the newest session's — with the candle that is still forming taken
+  // live, so it costs no request and is the chart's own instrument: an
+  // option's on an option chart. Asked for once a second, and only while the
+  // card is on screen.
+  const dayStatsRef = useRef<() => { low: number; high: number; ltp: number } | null>(() => null);
+  dayStatsRef.current = () => {
+    const cs: any[] = chartData?.candles || [];
+    if (!cs.length) return null;
+    const last = cs[cs.length - 1];
+    const live = lastCandleDataRef.current;
+    let lo = Infinity, hi = -Infinity;
+    if ((parseInt(timeframe, 10) || 5) >= 1440) { lo = Number(last.low); hi = Number(last.high); }
+    else {
+      const dayOf = (c: any) => Math.floor((Number(c.time) + 19800) / 86400);       // the IST day
+      const d = dayOf(last);
+      for (let i = cs.length - 1; i >= 0 && dayOf(cs[i]) === d; i--) { lo = Math.min(lo, Number(cs[i].low)); hi = Math.max(hi, Number(cs[i].high)); }
+    }
+    const liveOn = live && Number(live.time) >= Number(last.time);
+    if (liveOn) { if (Number(live.low) > 0) lo = Math.min(lo, Number(live.low)); if (Number(live.high) > 0) hi = Math.max(hi, Number(live.high)); }
+    const ltp = Number(liveOn ? live.close : last.close);
+    if (!(lo > 0) || !(hi >= lo) || !(ltp > 0) || !Number.isFinite(hi)) return null;
+    return { low: lo, high: hi, ltp };
+  };
   useEffect(() => {
     const fmt = (v: number) => v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const paint = () => {
@@ -14489,20 +14609,72 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // its rounded foot hidden, and looked as if it carried on beneath the
   // buttons ("appears below the option chain/Scalp pro buttons"). The bar is
   // measured, and measured again whenever it changes size.
+  // Two figures since the row of five became part of the page (17 Nov 2026):
+  //   --chart-row-h  the row of five alone: the room kept for it at the page's
+  //                  foot (data-layout="row-space");
+  //   --chart-bar-h  the row AND the fixed buttons under it: how far above the
+  //                  app's bottom bar the row's top is while the page is at
+  //                  rest — which is where every sheet and App Diagnostics end,
+  //                  as before. (A button of the row brings the page back to
+  //                  rest before it opens its sheet: see pageToTop.)
   useEffect(() => {
     if (!barRowShown) return;
     const root = document.documentElement;
     const set = () => {
-      const el = bottomBarRef.current as HTMLElement | null;
-      const h = el && window.innerWidth < 768 ? Math.ceil(el.getBoundingClientRect().height) : 0;
-      root.style.setProperty('--chart-bar-h', h > 0 ? `${h}px` : '6.25rem');       // 6.25rem: 3.25rem of buttons + 3rem for the second row
+      const el = bottomBarRef.current as HTMLElement | null, fx = fixedRowRef.current as HTMLElement | null;
+      const phone = window.innerWidth < 768;
+      const row = el && phone ? Math.ceil(el.getBoundingClientRect().height) : 0;
+      const fixed = fx && phone ? Math.ceil(fx.getBoundingClientRect().height) : 0;
+      root.style.setProperty('--chart-row-h', row > 0 ? `${row}px` : '3.25rem');
+      root.style.setProperty('--chart-bar-h', row > 0 ? `${row + fixed}px` : '6.25rem');       // 6.25rem: 3.25rem of buttons + 3rem for the second row
     };
-    set();
+    // THE BAR IS NOT THERE WHEN THIS FIRST RUNS: it is drawn with the chart, once
+    // the first candles have arrived, and this runs when the page does. Run
+    // once, it read "no bar" and left the fallback figure for good whenever the
+    // candles were not already in memory (found 17 Nov 2026: the variable was
+    // 6.25rem on a first visit and 101px on a second). So it is read again as
+    // the page settles and every two seconds, and each of the two blocks is
+    // watched for a change of size from the moment it exists.
     let ro: ResizeObserver | null = null;
-    try { const el = bottomBarRef.current as HTMLElement | null; if (el) { ro = new ResizeObserver(set); ro.observe(el); } } catch (e) {}
+    try { ro = new ResizeObserver(() => set()); } catch (e) {}
+    const watched = new Set<Element>();
+    const watch = () => {
+      for (const el of [bottomBarRef.current as HTMLElement | null, fixedRowRef.current as HTMLElement | null]) {
+        if (el && ro && !watched.has(el)) { try { ro.observe(el); watched.add(el); } catch (e) {} }
+      }
+      set();
+    };
+    watch();
+    const settle = [120, 400, 1200, 2500].map((ms) => setTimeout(watch, ms));
+    const iv = setInterval(watch, 2000);
     window.addEventListener('resize', set);
-    return () => { try { ro?.disconnect(); } catch (e) {} window.removeEventListener('resize', set); root.style.removeProperty('--chart-bar-h'); };
+    return () => { settle.forEach(clearTimeout); clearInterval(iv); try { ro?.disconnect(); } catch (e) {} window.removeEventListener('resize', set); root.style.removeProperty('--chart-bar-h'); root.style.removeProperty('--chart-row-h'); };
   }, [barRowShown]);
+
+  // HOW FAR THE PAGE IS SCROLLED, as two yes / no answers (phone): off its rest
+  // position at all (the fixed buttons then show their top line), and far
+  // enough that the header and the price have gone off the top (the small
+  // header then comes down, see data-layout="pinned-head"). Kept as booleans so
+  // that scrolling re-renders this page twice, not on every frame.
+  const [pageScrolled, setPageScrolled] = useState(false);
+  const [headPinned, setHeadPinned] = useState(false);
+  useEffect(() => {
+    if (isPane || scalp) return;
+    const on = () => {
+      if (window.innerWidth >= 768) return;
+      const y = window.scrollY || 0;
+      setPageScrolled(y > 1);
+      setHeadPinned(y > 96);
+    };
+    on();
+    window.addEventListener('scroll', on, { passive: true });
+    return () => window.removeEventListener('scroll', on);
+  }, [isPane, scalp]);
+  // The page opens at rest, whatever the screen he came from had been scrolled to.
+  useEffect(() => { if (!isPane && !scalp) { try { window.scrollTo(0, 0); } catch (e) {} } }, [isPane, scalp]);
+  /** Back to rest. A sheet of the row of five opens just above where the row
+   *  rests, so the row has to be there. No-op when it already is. */
+  const pageToTop = () => { try { if (window.innerWidth < 768 && window.scrollY > 0) window.scrollTo(0, 0); } catch (e) {} };
 
   const tfLabelOf = (tf: any) => (({ '1': '1m', '3': '3m', '5': '5m', '15': '15m', '60': '1h', '240': '4h', '1440': '1D', '10080': '1W', '43200': '1M' } as Record<string, string>)[String(tf)] || `${tf}m`);
 
@@ -14912,7 +15084,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // place every frame from Home to Chart: 571 for 520ms, then 683. The fade is
   // now opacity alone (page-fade-in, in index.css), which places nothing.
   return (
-    <div ref={pageRootRef} data-layout="page" className={`${scalp ? 'px-0' : 'px-1'} pt-0 pb-0 md:px-0 md:py-0 page-fade-in max-w-none w-full mx-auto flex flex-col ${scalp ? 'h-full' : 'h-[calc(100dvh-124px-env(safe-area-inset-bottom))]'} md:h-full md:min-h-0 max-md:overflow-hidden md:overflow-visible relative`}>
+    <>
+    <div ref={pageRootRef} data-layout="page" className={`${scalp ? 'px-0' : 'px-1'} pt-0 pb-0 md:px-0 md:py-0 page-fade-in max-w-none w-full mx-auto flex flex-col ${scalp ? 'h-full' : 'h-[calc(100dvh-max(env(safe-area-inset-top),12px)-env(safe-area-inset-bottom)-4rem-50px)]'} md:h-full md:min-h-0 max-md:overflow-hidden md:overflow-visible relative`}>
       
       {/* Tap anywhere outside to dismiss. The panel is a floating readout, not a
           setting to leave switched on, so it should get out of the way the moment
@@ -15262,7 +15435,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
              </span>
           )}
           </div>
-          <MarketContext tabHidden={chartOverlayOpen || scalp} />
+          <MarketContext tabHidden={chartOverlayOpen || scalp || pageScrolled} />
         </div>
 
       </div>
@@ -15605,7 +15778,19 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               and the premium rule; only its tab is removed. */}
           <TradePnl sync={premSync} />
           </div>
-        <div ref={bottomBarRef} className={`fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-auto left-0 right-0 z-40 bg-card md:bg-transparent border-t border-border md:border-0 px-3 py-1.5 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-wrap justify-end md:shrink md:min-w-0 w-screen md:w-auto md:ml-auto md:mb-0 md:rounded-none md:border-0 md:bg-transparent max-w-[100vw] overflow-x-hidden md:overflow-visible`}>
+        {/* THE ROW OF FIVE IS PART OF THE PAGE NOW, NOT FIXED TO THE SCREEN (phone,
+            17 Nov 2026). The page scrolls (see THE PHONE'S PAGE ENDS WHERE THE
+            FIXED BUTTONS BEGIN), and in Lemonn's chart screen, which Martin sent
+            as the model, the row goes up with the chart and only Option Chain |
+            ScalpPro stay put. This block is written inside the header row (the
+            desktop tool bar lives there), so it cannot simply take its place in
+            the page's column: it is placed against the page (`absolute`, the page
+            is `relative`) at the page's foot, and an empty block of its height at
+            the end of the page (data-layout="row-space") keeps that foot free —
+            so the chart above ends where the row begins by ordinary layout, not
+            by measuring the screen. Where the row sits at rest, and how it
+            looks, is to the pixel what it was when it was fixed. */}
+        <div ref={bottomBarRef} className={`max-md:absolute md:static max-md:bottom-0 left-0 right-0 z-40 bg-card md:bg-transparent border-t border-border md:border-0 px-3 pt-1.5 pb-1 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-wrap justify-end md:shrink md:min-w-0 w-screen md:w-auto md:ml-auto md:mb-0 md:rounded-none md:border-0 md:bg-transparent max-w-[100vw] overflow-x-hidden md:overflow-visible`}>
           {/* ON A PHONE THIS IS THE ROW OF FIVE (see THE LEMONN LAYOUT ON A PHONE):
               Range, Interval, Indicators, Drawings, Settings — an icon or a value
               with its name under it, in that order whatever the order below (the
@@ -15615,7 +15800,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           {!isPane && (
             <div className="md:hidden relative flex-1 flex justify-center order-1">
               <button type="button" data-bar="range" title="How much of the chart is on screen"
-                onClick={() => { setPhoneSettingsOpen(false); setRangeOpen(o => !o); }}
+                onClick={() => { pageToTop(); setPhoneSettingsOpen(false); setRangeOpen(o => !o); }}
                 className={`h-10 w-full flex flex-col items-center justify-center gap-0.5 rounded-md ${rangeOpen ? 'text-primary' : 'text-foreground/90'}`}>
                 {rangeChoice ? <span className="h-[18px] text-[15px] leading-[18px] font-semibold">{rangeChoice === 'ALL' ? 'All' : rangeChoice}</span> : <CalendarRange size={18} />}
                 <span className="text-[10px] leading-none font-medium text-muted-foreground">Range</span>
@@ -15667,7 +15852,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               a box is up — and removing the box is the sheet's first row. */}
           <div className={`relative shrink-0 md:order-2 max-md:order-4 max-md:flex-1 max-md:flex max-md:justify-center ${sharedHidden}`} ref={rrMenuRef}>
             <button
-              onClick={() => { setRangeOpen(false); setPhoneSettingsOpen(false); setRrMenuOpen(o => !o); }}
+              onClick={() => { pageToTop(); setRangeOpen(false); setPhoneSettingsOpen(false); setRrMenuOpen(o => !o); }}
               title="Drawing tools"
               data-draw-button=""
               className={`flex items-center justify-center h-9 w-9 rounded-md transition-colors max-md:h-10 max-md:w-full max-md:flex-col max-md:gap-0.5 max-md:!bg-transparent ${
@@ -15763,7 +15948,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             <div className="relative max-md:w-full" ref={indicatorsRef}>
               <button
                 data-bar="indicators"
-                onClick={() => { setRangeOpen(false); setPhoneSettingsOpen(false); setIsIndicatorsOpen(!isIndicatorsOpen); }}
+                onClick={() => { pageToTop(); setRangeOpen(false); setPhoneSettingsOpen(false); setIsIndicatorsOpen(!isIndicatorsOpen); }}
                 className={`flex items-center justify-center gap-1.5 h-9 w-9 text-sm font-medium rounded-md transition-colors max-md:h-10 max-md:w-full max-md:flex-col max-md:gap-0.5 max-md:!bg-transparent ${isIndicatorsOpen ? 'bg-primary/20 text-primary md:bg-background/50' : 'bg-muted/40 md:bg-transparent text-muted-foreground hover:bg-background/50 hover:text-foreground max-md:text-foreground/90'}`}
               >
                 {/* Trend line over bars — the icon Martin picked for Indicators. */}
@@ -16582,7 +16767,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           {!isPane && (
             <div className="md:hidden relative flex-1 flex justify-center order-5">
               <button type="button" data-bar="settings" title="Settings"
-                onClick={() => { setRangeOpen(false); setRrMenuOpen(false); setIsIndicatorsOpen(false); setPhoneSettingsOpen(o => !o); }}
+                onClick={() => { pageToTop(); setRangeOpen(false); setRrMenuOpen(false); setIsIndicatorsOpen(false); setPhoneSettingsOpen(o => !o); }}
                 className={`h-10 w-full flex flex-col items-center justify-center gap-0.5 rounded-md ${phoneSettingsOpen ? 'text-primary' : 'text-foreground/90'}`}>
                 <Settings size={18} />
                 <span className="text-[10px] leading-none font-medium text-muted-foreground">Settings</span>
@@ -16707,25 +16892,31 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           )}
 
           </div>
-          {/* OPTION CHAIN | SCALPPRO, as Lemonn's chart screen ends (phone). A
-              second row of this bar, so the chart above stops at it like at the
-              row of five (the chart is sized to the bar's top). 3rem tall with
-              the bar's own gap between its two rows: see --chart-bar-h. Option
-              Chain opens the Chain page; ScalpPro swaps this page for the
-              two-chart screen. */}
-          {barRowShown && (
-            <div data-bar-row="scalp" className="md:hidden basis-full w-full flex items-center gap-2">
-              <button type="button" data-bar="chain" onClick={() => navigate('/option-chain')}
-                className="flex-1 h-10 rounded-lg border border-border text-[13px] font-semibold text-foreground flex items-center justify-center gap-2 active:bg-foreground/10">
-                <Link2 size={15} /> Option Chain
-              </button>
-              <button type="button" data-bar="scalp" onClick={openScalp}
-                className="flex-1 h-10 rounded-lg bg-foreground text-background text-[13px] font-semibold flex items-center justify-center gap-2 active:opacity-80">
-                <CandlestickChart size={15} /> ScalpPro
-              </button>
-            </div>
-          )}
         </div>
+        {/* OPTION CHAIN | SCALPPRO, as Lemonn's chart screen ends (phone): fixed
+            above the app's bottom bar while the page scrolls under them. Until
+            17 Nov 2026 they were the second row of the bar above; they are a
+            block of their own now that the row of five scrolls. 50px — a 1px
+            line, 3 above the buttons, 6 below — which with the row of five's 51
+            is the 101px the two had as one bar, the same 8px between them: at
+            rest nothing has moved. The line along its top is clear until the
+            page has been scrolled, when what is above it is no longer the row
+            of five.
+            Option Chain opens the Chain page; ScalpPro swaps this page for the
+            two-chart screen. */}
+        {barRowShown && (
+          <div ref={setFixedRow} data-bar-row="scalp" data-scrolled={pageScrolled ? '1' : '0'}
+            className={`md:hidden fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] left-0 right-0 z-40 bg-card px-3 pt-[3px] pb-1.5 flex items-center gap-2 border-t ${pageScrolled ? 'border-border' : 'border-transparent'} box-content h-10`}>
+            <button type="button" data-bar="chain" onClick={() => navigate('/option-chain')}
+              className="flex-1 h-10 rounded-lg border border-border text-[13px] font-semibold text-foreground flex items-center justify-center gap-2 active:bg-foreground/10">
+              <Link2 size={15} /> Option Chain
+            </button>
+            <button type="button" data-bar="scalp" onClick={openScalp}
+              className="flex-1 h-10 rounded-lg bg-foreground text-background text-[13px] font-semibold flex items-center justify-center gap-2 active:opacity-80">
+              <CandlestickChart size={15} /> ScalpPro
+            </button>
+          </div>
+        )}
         </div>
 
 
@@ -18357,10 +18548,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           when expanded. The bottom margin clears the fixed toolbar, as the
           option-reality strip does. */}
       {!isPane && !isOptionView && !isFocusedChart && !biasCardHidden && (
-        <div className="shrink-0 px-1 pt-1 max-md:mb-[var(--chart-bar-h,3.25rem)] max-h-[42vh] overflow-y-auto">
+        <div className="shrink-0 px-1 pt-1 max-h-[42vh] overflow-y-auto">
           <bias-panel compact="" />
         </div>
       )}
+      {/* THE ROOM THE ROW OF FIVE STANDS IN (phone): see THE ROW OF FIVE IS PART OF
+          THE PAGE NOW. Last in the page, exactly as tall as the row. */}
+      {!isPane && !scalp && <div data-layout="row-space" className="md:hidden shrink-0 h-[var(--chart-row-h,3.25rem)]" aria-hidden="true" />}
 
       {/* Armed triggers — always visible while any exist. A pending instruction to
           buy or sell that the user cannot SEE is the thing most likely to surprise
@@ -18608,6 +18802,38 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         />
       )}
     </div>
+    {/* UNDER THE FIRST SCREEN (phone): the cards the page scrolls down to — see
+        ChartCards. Outside the page above on purpose: that block is exactly one
+        screen tall and cuts off what does not fit in it. Not on ScalpPro, not
+        in a pane (the desktop has no such page), not in a one-contract window. */}
+    {!isPane && !scalp && !isFocusedChart && (
+      <ChartCards
+        chainSymbol={cardsChain}
+        getDay={() => dayStatsRef.current()}
+        onOpenOption={(instr) => { openOptionChart(instr); try { window.scrollTo(0, 0); } catch (e) {} }}
+        onOpenPositions={() => navigate('/journal')}
+      />
+    )}
+    {/* THE SMALL HEADER THAT COMES DOWN ONCE THE PAGE'S OWN HAS SCROLLED AWAY
+        (phone), as Lemonn's does: the back arrow, and in the middle the chart's
+        name over its price and the day's change. The price is not kept twice:
+        it is read off the big header's line, which is still being written a
+        few times a second just above the top of the screen. */}
+    {!isPane && !scalp && !isFocusedChart && headPinned && (
+      <div data-layout="pinned-head" className="md:hidden fixed top-0 inset-x-0 z-[46] bg-background border-b border-white/10 pt-[max(env(safe-area-inset-top),12px)]">
+        <div className="relative h-[52px] flex items-center">
+          <button type="button" onClick={() => { try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { window.scrollTo(0, 0); } }} aria-label="Back to the chart"
+            className="absolute left-1 top-1/2 -translate-y-1/2 h-11 w-9 flex items-center justify-center text-foreground active:opacity-60">
+            <ArrowLeft size={27} strokeWidth={1.8} />
+          </button>
+          <div className="mx-auto flex flex-col items-center min-w-0 max-w-[70%]">
+            <span data-pinned="name" className="text-[16px] leading-5 font-semibold text-foreground truncate max-w-full">{isOptionView && selectedInstrument ? shortOptionName(selectedInstrument.tradingsymbol) : indexLabel}</span>
+            <PinnedQuote priceEl={headPriceRef} changeEl={headChangeRef} />
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 

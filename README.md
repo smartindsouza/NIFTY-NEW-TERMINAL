@@ -272,13 +272,15 @@ futures contract).
   time cost / hope value / IV" chips went on 16 Nov 2026, and the app no longer
   calls `/api/option-analytics` (the endpoint is still on the server). Delta,
   theta a day and IV are behind the **i** button on the option chart.
-- **The option chart ends exactly where the fixed tool bar begins**, whatever is
-  above it. The positions banner that appears while a trade is on pushes the
-  page down; the chart gives up exactly that much and takes it back when the
-  trade is exited. (It used to keep the shorter size after an exit, leaving an
-  empty band under the chart, and on entry could run under the tool bar.) The
-  clearance is measured ("THE PART OF THIS PAGE THAT LIES UNDER THE FIXED TOOL
-  BAR"), not a fixed number.
+- **The chart ends exactly where the row of five begins**, whatever is above
+  it. The positions banner that appears while a trade is on pushes the page
+  down; the chart gives up exactly that much and takes it back when the trade
+  is exited. Since v311 this is ordinary layout: the first screen's height is
+  measured (from the page's top to the fixed Option Chain | ScalpPro buttons),
+  the row of five has its own room at the foot of it, and the chart has what
+  is left. (Until v310 the tool bar was fixed over the page's foot and the
+  chart was sized to the bar's top on the screen; an index chart with the bias
+  card shown lost a 48px band to that sum, which it has back.)
 - **Any chart re-fits itself when it is moved**, not only when it is resized
   ("THE CHART MOVED WITHOUT CHANGING SIZE").
 
@@ -343,8 +345,57 @@ tool bar and the split view are untouched.
   chips used to lie across the Trade guard sheet). The RSI pane does the same,
   so the strike menu, which is taller than a short phone chart, lies over the
   pane and every row of it can be pressed.
-- **A second row in the bar:** Option Chain (opens the Chain page) and ScalpPro
-  (below).
+- **Option Chain | ScalpPro**, fixed above the app's bottom bar: Option Chain
+  opens the Chain page, ScalpPro the two-chart screen (below). They were the
+  second row of the tool bar until v311; the row of five now scrolls with the
+  page and these two stay.
+
+## Chart on a phone: the page scrolls down to cards
+
+`src/components/ChartCards.tsx`, `src/pages/AdvancedChart.tsx` ("THE PHONE'S
+PAGE ENDS WHERE THE FIXED BUTTONS BEGIN", "THE ROW OF FIVE IS PART OF THE PAGE
+NOW"), `src/App.tsx`. Martin, 17 Nov 2026, with three screenshots of Lemonn's
+chart screen scrolled down: "I want a vertical scrolling screen in the charts
+section which scrolls down to show the things shown in the screenshot."
+
+- **The first screen is what the chart page was:** header, price, chart, the
+  row of five, ending at Option Chain | ScalpPro. Nothing on it has moved.
+- **Swipe up** from anywhere that is not the chart — the row of five, the two
+  buttons, the bottom bar, the header — and the page scrolls. A drag on the
+  chart is still the chart's. The row of five goes up with the chart; Option
+  Chain | ScalpPro and the bottom bar stay.
+- **A small header comes down** once the page's own has scrolled away: the
+  chart's name over its price and the day's change. Its arrow returns to the
+  top.
+- **A button of the row of five brings the page back to the top first**, so its
+  sheet opens above the row as it always has.
+- **The cards**, in Lemonn's order:
+  - **Your Positions** — today's P&L (`/api/positions-live`, the banner's own
+    figure); a tap opens the Trade Journal. No order history, as he said.
+  - **Open Interest (OI)** — put and call open interest of every strike of the
+    expiry, a red | green bar split at their share, and the put : call ratio.
+  - **Daily Performance** — the low and high of the latest session of the chart
+    on screen, with a bolt where the last price stands between them. On an
+    option's chart it is the option's own day. Read off the chart's candles: no
+    request.
+  - **Top Options (By Trade Volume)** — the five most traded contracts of the
+    expiry, All | Call | Put. "Price" at the right switches each row between
+    its price and its volume. A tap on a row opens that option's chart.
+- **Zerodha has no "most traded" list.** It gives each contract's volume for
+  the day (`volume` in a quote); the list is the app's option chain
+  (`/api/option-chain`, which already carries it) sorted by that. The chain
+  covers the strikes within 1,500 points of NIFTY, where the most traded
+  contracts always are.
+- **An option's chart shows its index's cards** (the index is read off the
+  option's symbol). GIFT NIFTY and the other reference charts have no option
+  chain here: they show Your Positions and Daily Performance.
+- **It asks only while a card is on screen** — positions every 5 seconds, the
+  chain every 15 — and not at all at rest, when the cards are under the fold.
+- **Measured, not judged by eye.** His screenshots are 1290px wide, a 430pt
+  phone at 3 pixels a point; every size and distance in the cards is a pixel
+  count off them, and each text's size is the Manrope size whose width it has.
+  The surfaces and text are the app's theme (so the light theme works); the
+  red, green, lime and blue are Lemonn's.
 
 ## The phone's bottom bar
 
