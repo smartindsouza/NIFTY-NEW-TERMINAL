@@ -2021,6 +2021,25 @@ export function prettyOptionName(tradingsymbol: string, expiryIso?: string | nul
   return tradingsymbol;
 }
 
+// ONE DOWNLOAD WHEN THE SAME CHART DATA IS ASKED FOR TWICE AT ONCE (16 Nov 2026).
+// The chart's candles and the "decision" read are two queries with the same
+// address, and on every change of timeframe or chart both went out in the same
+// instant: the same 150-280 KB (5,000-10,000 candles) fetched twice over the
+// phone's connection, exactly when the wait is being watched. A request for an
+// address already asked for within the last two seconds now shares that
+// download. Each caller still gets its own parsed copy — the text is shared,
+// not the object — so neither can be changed under the other.
+const taTextShared = new Map<string, { at: number; p: Promise<{ ok: boolean; status: number; text: string }> }>();
+const fetchTaShared = (url: string): Promise<{ ok: boolean; status: number; text: string }> => {
+  const hit = taTextShared.get(url);
+  if (hit && Date.now() - hit.at < 2000) return hit.p;
+  const p = fetch(url).then(async (res) => ({ ok: res.ok, status: res.status, text: res.ok ? await res.text() : '' }));
+  taTextShared.set(url, { at: Date.now(), p });
+  const drop = () => { setTimeout(() => { if (taTextShared.get(url)?.p === p) taTextShared.delete(url); }, 2000); };
+  p.then(drop, drop);
+  return p;
+};
+
 const toUnixSeconds = (value: any): number => {
   if (typeof value === "number") {
     return value > 1_000_000_000_000 ? Math.floor(value / 1000) : Math.floor(value);
@@ -9667,14 +9686,16 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const { data: taInfo, isLoading: isLoadingTa, isError: isTaError, error: taError, refetch: refetchTa } = useQuery({
     queryKey: ["ta-data-live-chart", timeframe, instrumentToken],
     queryFn: async () => {
-      const res = await fetch(`/api/ta?timeframe=${timeframe}&token=${instrumentToken}&symbol=${encodeURIComponent(selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel)}`);
+      // Shared with the "decision" query just below, which asks for the same
+      // address at the same moment: one download (see fetchTaShared).
+      const res = await fetchTaShared(`/api/ta?timeframe=${timeframe}&token=${instrumentToken}&symbol=${encodeURIComponent(selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel)}`);
       if (!res.ok) {
         if (res.status === 429) {
           throw Object.assign(new Error("Rate Limit Exceeded"), { status: 429 });
         }
         throw new Error("Network error");
       }
-      const data = await res.json();
+      const data = JSON.parse(res.text);
       writeTaSnapshot(String(timeframe), String(instrumentToken), data);   // next first load paints from this
       return data;
     },
@@ -9720,9 +9741,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const { data: liveTa } = useQuery({
     queryKey: ["ta-data-decision", timeframe, instrumentToken],
     queryFn: async () => {
-      const res = await fetch(`/api/ta?timeframe=${timeframe}&token=${instrumentToken}&symbol=${encodeURIComponent(selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel)}`);
+      const res = await fetchTaShared(`/api/ta?timeframe=${timeframe}&token=${instrumentToken}&symbol=${encodeURIComponent(selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel)}`);
       if (!res.ok) return null;
-      return res.json();
+      return JSON.parse(res.text);
     },
     // 15s only while the market can actually move — this poll used to run all
     // evening and weekend for data that cannot change, and was one of the callers
@@ -9797,6 +9818,64 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     }, 1200);   // let the visible chart finish loading first
     return () => clearTimeout(t);
   }, [timeframe, instrumentToken, selectedInstrument, sensexTokenData?.token]);
+
+  // THE TIMEFRAMES HE USES ARE KEPT READY (16 Nov 2026, Martin: candles should
+  // come up fast when the timeframe is changed). A change to a timeframe not
+  // already in memory waited for the server, and the server waited on the
+  // broker for the whole window again: 1.4 to 3.6 seconds, measured. The server
+  // now answers in a fraction of that (server/history_tail.ts); this is the
+  // other half. The last three timeframes he has chosen are remembered, and
+  // while a chart is on screen the other two are fetched quietly in the
+  // background — once the chart has settled, and again every few minutes while
+  // the market is open — into the same cache the chart reads. A change to one
+  // of them then paints at once from memory, and the usual fetch behind it
+  // brings the newest candles a moment later: the same two steps as coming
+  // back to a timeframe seen a minute ago, which is how this has always
+  // worked. What is painted first can be a few minutes old, never more than
+  // the refresh interval.
+  useEffect(() => {
+    if (!timeframe) return;
+    try {
+      const cur = JSON.parse(localStorage.getItem('timeframesRecent') || '[]');
+      const next = [String(timeframe), ...(Array.isArray(cur) ? cur : []).map(String).filter((t: string) => t !== String(timeframe))].slice(0, 3);
+      localStorage.setItem('timeframesRecent', JSON.stringify(next));
+    } catch (e) {}
+  }, [timeframe]);
+  useEffect(() => {
+    if (!timeframe || !instrumentToken) return;
+    const REFRESH_MS = 3 * 60000;
+    const symbol = selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel;
+    let stopped = false;
+    const run = () => {
+      // Never for a chart nobody is looking at: this is the phone's data.
+      if (stopped || document.visibilityState !== 'visible') return;
+      let others: string[] = [];
+      try {
+        const saved = JSON.parse(localStorage.getItem('timeframesRecent') || '[]');
+        others = (Array.isArray(saved) ? saved : []).map(String).filter((t: string) => t !== String(timeframe) && /^\d+$/.test(t)).slice(0, 2);
+      } catch (e) {}
+      for (const tf of others) {
+        queryClient.prefetchQuery({
+          queryKey: ["ta-data-live-chart", tf, instrumentToken],
+          queryFn: async () => {
+            const res = await fetchTaShared(`/api/ta?timeframe=${tf}&token=${instrumentToken}&symbol=${encodeURIComponent(symbol)}`);
+            if (!res.ok) throw new Error('prefetch failed');
+            return JSON.parse(res.text);
+          },
+          // Left alone if what is in memory is fresher than this — a timeframe
+          // he was on a moment ago already is.
+          staleTime: REFRESH_MS - 20000,
+          gcTime: 10 * 60000,
+        }).catch(() => {});
+      }
+    };
+    const first = setTimeout(run, 3000);          // let the chart on screen finish loading first
+    const iv = setInterval(() => {
+      const now = Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current;
+      if (isReferenceChartRef.current ? refDataWindow(now) : isDataWindow(now)) run();
+    }, REFRESH_MS);
+    return () => { stopped = true; clearTimeout(first); clearInterval(iv); };
+  }, [timeframe, instrumentToken, selectedInstrument?.tradingsymbol, indexLabel]);
 
   // (The "option reality" request lived here — /api/option-analytics every 20 s
   // on an option chart, for the strip under the chart. The strip went on 16 Nov

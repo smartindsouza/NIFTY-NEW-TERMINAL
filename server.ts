@@ -10,6 +10,7 @@ import Database from 'better-sqlite3';
 import { generateSimulatedChain } from './server/simulate_data';
 import { computeAnalytics } from './server/analytics_engine';
 import { getTechnicalAnalysis, kiteDiagnostics, taFreshness } from './server/technical_analysis';
+import { historyTailStats } from './server/history_tail';
 import { getKiteClient, getKiteUserId, generateSession, getLiveOptionChain, getKiteLoginUrl, searchInstruments, clearInstrumentsCache, getKiteReportData, getIndexFuturesTokens, getBseIndexToken, getOptionToken, getContractInfo, getOrderMargin, resolveOptionContract, getGiftNiftyInstrument, getNfoInstruments, findNearestExpiryOption } from './server/kite_service';
 import { getHistoricalAnalytics } from './server/analytics_service';
 import { runRsiBacktest } from './server/rsi_backtest';
@@ -2892,6 +2893,10 @@ setInterval(() => {
         taHeld: kiteDiagnostics.taFallbacks, taLastHeldAt: kiteDiagnostics.taLastFallbackAt || null,
         taPlaceholderServed: kiteDiagnostics.taMockServed,
       },
+      // Chart history: how many fetches brought the whole window back (once a
+      // day per chart and interval) and how many only today's candles, with the
+      // candles each kind carried — see server/history_tail.ts.
+      historyTail: historyTailStats(),
     });
   });
 

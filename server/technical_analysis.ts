@@ -2,6 +2,7 @@ import { isUs30Token, fetchUs30Candles } from './us30';
 import { getKiteClient, getIndexFuturesTokens, findInstrumentAnyExchange, filterInstrumentsAnyExchange } from "./kite_service.js";
 import { getLatestTick } from "./ticker_service.js";
 import { aggregateCandles } from "./aggregator.js";
+import { historyWithTail } from "./history_tail.js";
 import { scoreBounceAt } from "./bounce_conviction.js";
 import Database from "better-sqlite3";
 
@@ -603,12 +604,15 @@ export async function getTechnicalAnalysis(
           rawHist = u.candles;
           baseIntervalMin = u.baseMin;
         } else {
-          rawHist = await throttleRequest(() => kc.getHistoricalData(
-            parseInt(instrument_token, 10),
-            intervalName as any,
-            fromDate,  // IST-formatted string — Kite always receives correct time
-            toDate,    // IST-formatted string — Kite always receives correct time
-          ), `historical_${intervalName}`);
+          // The full window once a day, then only today's candles (history_tail.ts):
+          // a refresh used to bring back every candle of the window again.
+          rawHist = await historyWithTail(`${instrument_token}_${intervalName}`, intervalName, fromDate, toDate,
+            (fromIst, toIst) => throttleRequest(() => kc.getHistoricalData(
+              parseInt(instrument_token, 10),
+              intervalName as any,
+              fromIst,   // IST-formatted string — Kite always receives correct time
+              toIst,     // IST-formatted string — Kite always receives correct time
+            ), `historical_${intervalName}`));
         }
         
         console.log(`[Kite API Request] Symbol: ${symbol}, Token: ${instrument_token}, Timeframe: ${timeframeMin}m, Candles: ${rawHist?.length || 0}`);
@@ -661,9 +665,12 @@ export async function getTechnicalAnalysis(
               const useRemembered = remembered && remembered.day === istDay()
                 && futs.some(f => f.token === remembered.token);
               const pullOne = async (fut: { token: number; expiry: string }) => {
-                const h = await throttleRequest(() => kc.getHistoricalData(
-                  fut.token, intervalName as any, fromDate, toDate,
-                ), `historical_fut_${intervalName}`);
+                // The same once-a-day-then-today rule as the candles themselves: this
+                // series is as long as they are, and was the second half of the wait.
+                const h = await historyWithTail(`${fut.token}_${intervalName}`, intervalName, fromDate, toDate,
+                  (fromIst, toIst) => throttleRequest(() => kc.getHistoricalData(
+                    fut.token, intervalName as any, fromIst, toIst,
+                  ), `historical_fut_${intervalName}`));
                 if (!h || h.length === 0) return null;
                 const m = new Map<number, number>();
                 let total = 0;

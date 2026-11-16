@@ -208,6 +208,30 @@ On phones (under 768px wide) both axes are drawn at 10px, the price axis is 52px
 wide, and tick labels drop ".00" — sizes measured off the Lemonn app. Desktop text
 is unchanged. The indicators list closes on a tap anywhere on the chart.
 
+## Chart: a change of timeframe is fast
+
+Measured on 16 Nov 2026: a change to a timeframe the server had nothing fresh
+for took 1.4 s (15m), 2.1 s (3m) or 3.6 s (1m) on the server alone — about
+0.65 s plus 0.3 s per thousand candles — because every refresh asked the broker
+for the whole window again, and for an index twice (its volume comes from a
+futures contract).
+
+- **`server/history_tail.ts`** — the full window is fetched once a day per
+  instrument and interval and kept in memory; a refresh asks only for today's
+  candles and puts them on the end. Same list as a full fetch (`npx tsx
+  server/history_tail.test.ts`). Daily candles are always fetched in full.
+  `/api/diagnostics` → `historyTail` counts both kinds and the candles each
+  carried.
+- **One download, not two** — the chart and the "decision" read ask for the same
+  address at the same instant on every change; they now share the download
+  (`fetchTaShared` in `src/pages/AdvancedChart.tsx`).
+- **The timeframes you use are kept ready** — the last three you chose are
+  remembered (`timeframesRecent` in the browser). While a chart is on screen the
+  other two are fetched in the background, 3 s after the chart loads and every
+  3 minutes while the market is open. A change to one of them paints at once
+  from memory and the newest candles follow a moment later; what is painted
+  first is never more than about 3 minutes old.
+
 ## Chart on a phone: fills down to the tool bar
 
 `src/pages/AdvancedChart.tsx`.
