@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect, useLayoutEffect } from "react";
 import { useTodayBias, isRecord as isBiasRecord, istToday as biasIstToday, BIAS_LINES_KEY, useBiasCardHidden } from "../lib/bias";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, ChevronsUp, ChevronsDown, ChevronRight, Copy, Trash2, Scale, Search, ChartNoAxesCombined, TrendingUp, Star, Bell, ClipboardPen } from "lucide-react";
+import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, ChevronsUp, ChevronsDown, ChevronRight, Copy, Trash2, Search, PencilRuler, Minus, Slash, RectangleHorizontal, AlignJustify, TrendingDown, Type as TypeIcon, Move as MoveIcon, ChartNoAxesCombined, TrendingUp, Star, Bell, ClipboardPen } from "lucide-react";
 import MyOrderModal from "../components/MyOrderModal";
 import { TradeGuardButton } from "../components/TradeGuard";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import { zoomDiag } from "../lib/zoomDiag";
 import { confluenceSignals, detectSwapSweep, ssIstDay, type SsConfluence, type SsSignal } from "../lib/swapSweep";
 import { detectGiftDivergence, type GiftDiv } from "../lib/giftDivergence";
 import { mergeLiveCandles, archiveFingerprint } from "../lib/liveCandles";
+import { DRAWINGS_KEY, DRAW_COLORS, FIB_LEVELS, parseDrawings, timeToIndex, indexToTime, hitDrawing, anchorsOf, moveAnchor, slideDrawing, textSizePx, type Drawing, type DrawingType, type DrawPoint, type DrawGeom, type AnchorKey } from "../lib/chartDrawings";
 import { getDivergences } from "../lib/divergence";
 import { evaluateBreakout } from "../lib/breakoutQuality";
 import { calculateBollingerBands } from "../indicators/bollingerBands";
@@ -1229,6 +1230,38 @@ const phoneAxisPrice = (p: number): string => {
 const PHONE_AXIS_MIN_WIDTH = 52;
 // Colours offered for a hand-drawn line. The first is what a new line gets.
 const LINE_TOOL_COLORS = ['#facc15', '#e5e7eb', '#f43f5e', '#10b981', '#3b82f6', '#a855f7', '#f97316', '#06b6d4'];
+// Drawings are kept for good, on every chart they were made on. A cap so that
+// years of them cannot fill the browser's storage: past it the oldest go.
+const DRAW_MAX = 300;
+// WHERE THE TOOL BAR OF A SELECTED LINE OR DRAWING GOES. It sat fixed at the top
+// left, and a line drawn near the top of a phone chart had its handle underneath
+// it — the one thing needed to move the line could not be reached. The bar now
+// takes the first corner of the plot that has no handle under it: top left, then
+// bottom left, top right, bottom right. `pts` are the handles, in the plot's own
+// pixels. The corner in use is kept until a handle is really under it, and a
+// better corner is taken back only when it is clear by a margin — otherwise a
+// line sitting at the edge of the bar would throw it to and fro on every tick.
+// On a chart too small for any corner to be clear (a short phone chart with a
+// drawing across all of it), the corner furthest from the nearest handle.
+type ToolsPos = 'tl' | 'bl' | 'tr' | 'br';
+const pickToolsPos = (pts: { x: number; y: number }[], plotW: number, plotH: number, cur: ToolsPos): ToolsPos => {
+  const W = 216, H = 54, R = 20;        // the bar's footprint, and half a handle's touch target
+  const corners: ToolsPos[] = ['tl', 'bl', 'tr', 'br'];
+  // How far the nearest handle is from the bar in that corner (0: under it).
+  const gap = (c: ToolsPos) => {
+    const x0 = c[1] === 'l' ? 0 : Math.max(0, plotW - W), y0 = c[0] === 't' ? 0 : Math.max(0, plotH - H);
+    let g = Infinity;
+    for (const q of pts) {
+      const dx = Math.max(x0 - q.x, 0, q.x - (x0 + W)), dy = Math.max(y0 - q.y, 0, q.y - (y0 + H));
+      g = Math.min(g, Math.hypot(dx, dy));
+    }
+    return g;
+  };
+  for (const c of corners) if (gap(c) >= (c === cur ? R : R + 12)) return c;
+  let best = cur;
+  for (const c of corners) if (gap(c) > gap(best) + 12) best = c;
+  return best;
+};
 
 const hexToRgba = (hex: string, alpha: number) => {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -5334,12 +5367,65 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   selectedLineIdRef.current = selectedLineId;
   const [lineToolPop, setLineToolPop] = useState<null | 'color' | 'width'>(null);
   const lineHandleRef = useRef<HTMLDivElement | null>(null);
+  // Which corner the selected line's / drawing's tool bar is in (see pickToolsPos).
+  const [lineToolsPos, setLineToolsPos] = useState<ToolsPos>('tl');
+  const lineToolsPosRef = useRef<ToolsPos>('tl');
+  const [drawToolsPos, setDrawToolsPos] = useState<ToolsPos>('tl');
+  const drawToolsPosRef = useRef<ToolsPos>('tl');
   // A LINE BELONGS TO THE CHART IT WAS DRAWN ON. They were one list shown on
   // every chart, so a level drawn on NIFTY also sat on BANKNIFTY and on every
   // option chart whose prices happened to reach it. New lines carry the
   // instrument they were drawn on and show only there. Lines from before this
   // have no such mark and keep showing everywhere, as they always did.
   const lineIsHere = (l: any) => !l?.token || String(l.token) === String(instrumentTokenRef.current);
+
+  // DRAWINGS (16 Nov 2026). Martin, of the Lemonn chart: "the way the drawings
+  // show me variety of options to draw on the chart… these are the things I
+  // want." Its Drawing Tools sheet lists Horizontal Line, Trend Line, Rectangle,
+  // Fibonacci Retracement, Long Position, Short Position and Text. The first is
+  // his own line, above, and the positions are the risk:reward box, both older
+  // than this; the other four are these. The shapes and their arithmetic are in
+  // lib/chartDrawings, where they are tested without a browser; what is here is
+  // the part that needs a chart.
+  //
+  // A drawing belongs to the chart it was drawn on, as a new line does, and its
+  // points are a TIME and a price — so it sits in the same place on every
+  // timeframe of that chart.
+  const [drawings, setDrawings] = useState<Drawing[]>(() => {
+    try { return parseDrawings(localStorage.getItem(DRAWINGS_KEY)); } catch (e) { return []; }
+  });
+  // While a handle is held the REF is ahead of the state — it moves with the
+  // finger every frame, and the state catches up when the finger lifts — so it
+  // is refreshed from state only while nothing is held. (Ticks re-render this
+  // page many times a second; syncing on every render would put the drawing
+  // back where it was, under the finger moving it.)
+  const drawingsRef = useRef<Drawing[]>(drawings);
+  const drawDragRef = useRef<{ id: number } | null>(null);
+  if (!drawDragRef.current) drawingsRef.current = drawings;
+  const [selectedDrawId, setSelectedDrawId] = useState<number | null>(null);
+  const selectedDrawIdRef = useRef<number | null>(null);
+  selectedDrawIdRef.current = selectedDrawId;
+  const [drawToolPop, setDrawToolPop] = useState<null | 'color' | 'width'>(null);
+  // The tool waiting for its taps ('hline' is the horizontal line).
+  const [drawArm, setDrawArm] = useState<null | DrawingType | 'hline'>(null);
+  const drawArmRef = useRef(drawArm);
+  drawArmRef.current = drawArm;
+  // The first point of a two-tap drawing, and the chart it was tapped on. In the
+  // split view a tool is armed on both halves; its points belong to one.
+  const drawFirstRef = useRef<(DrawPoint & { token: string }) | null>(null);
+  const [drawFirstSet, setDrawFirstSet] = useState(false);
+  const [drawTextEdit, setDrawTextEdit] = useState<null | { id: number | null; at?: DrawPoint; token?: string; value: string }>(null);
+  // Where each drawing on this chart was painted in the last frame: what a tap is tested against.
+  const drawGeomRef = useRef<Map<number, DrawGeom>>(new Map());
+  const drawAnchorEls = useRef<(HTMLDivElement | null)[]>([]);
+  const drawMoveEl = useRef<HTMLDivElement | null>(null);
+  // The colour and thickness last given to a drawing of each kind are what the
+  // next one of that kind starts with.
+  const drawDefaultsRef = useRef<Record<string, { color?: string; width?: number }> | null>(null);
+  if (drawDefaultsRef.current === null) {
+    try { const v = JSON.parse(localStorage.getItem('chartDrawingDefaults') || '{}'); drawDefaultsRef.current = v && typeof v === 'object' ? v : {}; }
+    catch (e) { drawDefaultsRef.current = {}; }
+  }
   
   const [editingLineId, setEditingLineId] = useState<number | null>(null);
   const [isEditingPdhPdl, setIsEditingPdhPdl] = useState(false);
@@ -5572,7 +5658,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     isEditingPdhPdl || isEditingSnR || isEditingBB || isEditingOiBars ||
     isEditingDz || isEditingTpSl || isEditingRsi || isEditingHLevels ||
     isEditingOpeningRange || isEditingStruct || isEditingFvg || isEditingDsZones ||
-    isEditingLevelAlerts || isEditingZoneTapAlerts || isEditingBreakoutAlerts || isEditingVolume
+    isEditingLevelAlerts || isEditingZoneTapAlerts || isEditingBreakoutAlerts || isEditingVolume ||
+    !!drawTextEdit
   );
 
   const logicalRangeRef = useRef<any>(null);
@@ -7370,6 +7457,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             const t = `translate(${Math.round(plotW / 2)}px, ${Math.round(y)}px) translate(-50%, -50%)`;
             if (el.style.transform !== t) el.style.transform = t;
           }
+          // The tool bar keeps clear of the handle — but stays put while the line
+          // is held, so it does not jump about under a finger that is busy.
+          if (plotW > 0 && lineDragIdRef.current === null && !draggingLineRef.current) {
+            const want = pickToolsPos(y === null ? [] : [{ x: plotW / 2, y }], plotW, plotH, lineToolsPosRef.current);
+            if (want !== lineToolsPosRef.current) { lineToolsPosRef.current = want; setLineToolsPos(want); }
+          }
         }
       } catch (e) {}
       raf = requestAnimationFrame(frame);
@@ -7384,6 +7477,479 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     const l = manualLineIds.find((x) => x.id === selectedLineId);
     if (!l || !lineIsHere(l)) { setSelectedLineId(null); setLineToolPop(null); }
   });
+
+  // ===== Drawings: trend line, rectangle, Fibonacci retracement, text =====
+  // (their state, and what they are for, is beside the lines' state above)
+
+  // One thing is selected at a time: taking hold of a line lets go of a drawing,
+  // and the other way round.
+  useEffect(() => { if (selectedLineId !== null) { setSelectedDrawId(null); setDrawToolPop(null); } }, [selectedLineId]);
+  useEffect(() => { if (selectedDrawId !== null) { setSelectedLineId(null); setLineToolPop(null); } }, [selectedDrawId]);
+
+  // THE RULER. A drawing's points are times; the chart counts candles. This is
+  // the candles' own times in the chart's own numbering, asked for on every
+  // frame and rebuilt only when a candle has been added at either end.
+  const drawTimesRef = useRef<{ key: string; times: number[] }>({ key: '', times: [] });
+  const drawStepRef = useRef(300);
+  drawStepRef.current = (parseInt(timeframe, 10) || 5) * 60;
+  const drawTimes = (ts: any, ser: any): number[] => {
+    try {
+      // A time far in the future lands on the last candle, whose number is how
+      // many there are. (-1 and 1 below: the nearest candle to the left, to the right.)
+      const last = ts.timeToIndex(4e10 as any, true);
+      if (last === null) return [];
+      const first = ser.dataByIndex(0, 1), end = ser.dataByIndex(last, -1);
+      const key = `${last}|${first?.time}|${end?.time}`;
+      if (drawTimesRef.current.key === key) return drawTimesRef.current.times;
+      const rows = ser.data();
+      let times: number[] = [];
+      if (rows.length === last + 1) times = rows.map((r: any) => Number(r.time));
+      else {
+        // Some other series on this chart has a time the candles do not, so a
+        // candle's place in its own list is not its number on the chart. Go by
+        // the chart's numbering instead, one candle at a time.
+        for (let i = 0; i <= last; i++) { const r = ser.dataByIndex(i, -1) || ser.dataByIndex(i, 1); times.push(r ? Number(r.time) : NaN); }
+      }
+      // Times that are not plain seconds (a chart of dated days) cannot be measured against.
+      if (times.some((t) => !Number.isFinite(t))) times = [];
+      drawTimesRef.current = { key, times };
+      return times;
+    } catch (e) { return []; }
+  };
+  // Everything needed to put a point on the screen and to read one back off it.
+  // NOT timeScale.logicalToCoordinate for a point between two candles: this
+  // version of the library answers 0 for any candle number that is not whole,
+  // which would stack every such point on the left edge. Candles are evenly
+  // spaced, so two whole ones give the rest.
+  const drawMapper = () => {
+    const chart = mainChartRef.current, ser = mainSeriesRef.current, cont = chartContainerRef.current;
+    if (!chart || !ser || !cont) return null;
+    try {
+      const ts = chart.timeScale();
+      const c0 = ts.logicalToCoordinate(0 as any), c1 = ts.logicalToCoordinate(1 as any);
+      if (c0 === null || c1 === null) return null;
+      const x0 = c0 as number, sp = (c1 as number) - x0;
+      if (!(sp > 0)) return null;
+      const times = drawTimes(ts, ser);
+      if (!times.length) return null;
+      const step = drawStepRef.current;
+      const plotW = cont.clientWidth - (chart.priceScale('right').width() || 0);
+      const plotH = cont.clientHeight - (ts.height() || 26);
+      const xOf = (t: number): number | null => { const i = timeToIndex(times, t, step); return i === null ? null : x0 + i * sp; };
+      const yOf = (price: number): number | null => { const y = ser.priceToCoordinate(price); return y === null ? null : (y as number); };
+      // A point under a finger: the nearest candle, and a price that can exist.
+      const pointAt = (x: number, y: number): DrawPoint | null => {
+        const t = indexToTime(times, Math.round((x - x0) / sp), step);
+        const raw = ser.coordinateToPrice(y);
+        if (t === null || raw === null || !Number.isFinite(Number(raw))) return null;
+        return { t, p: +snapTick(Number(raw)).toFixed(2) };
+      };
+      return { sp, plotW, plotH, times, step, xOf, yOf, pointAt };
+    } catch (e) { return null; }
+  };
+
+  const drawStyleFor = (type: DrawingType) => {
+    const d = drawDefaultsRef.current?.[type];
+    const w = Number(d?.width);
+    return {
+      color: typeof d?.color === 'string' && d.color ? d.color : DRAW_COLORS[0],
+      width: Number.isFinite(w) && w >= 1 ? Math.min(4, Math.round(w)) : (type === 'text' ? 2 : 1),
+    };
+  };
+  const rememberDrawStyle = (type: DrawingType, patch: { color?: string; width?: number }) => {
+    const next = { ...drawStyleFor(type) };
+    if (patch.color !== undefined) next.color = patch.color;
+    if (patch.width !== undefined) next.width = patch.width;
+    drawDefaultsRef.current = { ...(drawDefaultsRef.current || {}), [type]: next };
+    try { localStorage.setItem('chartDrawingDefaults', JSON.stringify(drawDefaultsRef.current)); } catch (e) {}
+  };
+
+  // PAINTED ON THE R:R CANVAS, by its frame (see "Dedicated R:R renderer"). One
+  // more canvas the size of the chart is several megabytes on a phone, and that
+  // loop already runs every frame and reads only refs. Clipped to the plot, so a
+  // drawing never runs over the prices. Where each one landed is kept for taps.
+  const drawFontRef = useRef('monospace');
+  drawFontRef.current = chartFontFamily(settings.customFontUrl);
+  const paintDrawingsRef = useRef<(ctx: CanvasRenderingContext2D, cw: number, ch: number) => void>(() => {});
+  paintDrawingsRef.current = (ctx, cw, ch) => {
+    const geoms = drawGeomRef.current;
+    geoms.clear();
+    const tok = String(instrumentTokenRef.current ?? '');
+    const list = drawingsRef.current;
+    const arm = drawArmRef.current;
+    const first = drawFirstRef.current && drawFirstRef.current.token === tok ? drawFirstRef.current : null;
+    if (!first && !list.some((d) => d.token === tok)) return;
+    const m = drawMapper();
+    if (!m) return;
+    const font = drawFontRef.current;
+    ctx.save();
+    try {
+      ctx.beginPath(); ctx.rect(0, 0, Math.max(0, m.plotW), ch); ctx.clip();
+      ctx.lineCap = 'round'; ctx.setLineDash([]);
+      const paint = (type: DrawingType, ax: number, ay: number, bx: number, by: number, pa: number, pb: number,
+                     color: string, width: number, text?: string): DrawGeom => {
+        const g: DrawGeom = { ax, ay, bx, by };
+        const alpha = ctx.globalAlpha;
+        ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = width;
+        if (type === 'trend') {
+          ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+        } else if (type === 'rect') {
+          const x = Math.min(ax, bx), y = Math.min(ay, by), w = Math.abs(bx - ax), h = Math.abs(by - ay);
+          ctx.globalAlpha = alpha * 0.18; ctx.fillRect(x, y, w, h);
+          ctx.globalAlpha = alpha; ctx.strokeRect(x, y, w, h);
+        } else if (type === 'fib') {
+          const xl = Math.min(ax, bx), xr = Math.max(ax, bx);
+          ctx.globalAlpha = alpha * 0.07; ctx.fillRect(xl, Math.min(ay, by), xr - xl, Math.abs(by - ay));
+          // the move being measured, faintly
+          ctx.globalAlpha = alpha * 0.45; ctx.lineWidth = 1; ctx.setLineDash([3, 4]);
+          ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+          ctx.setLineDash([]); ctx.globalAlpha = alpha; ctx.lineWidth = width;
+          ctx.font = `600 10px ${font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+          g.ys = [];
+          let lastLabelY: number | null = null;
+          for (const lvl of FIB_LEVELS) {
+            const price = pb + (pa - pb) * lvl;                 // 0 at the second point, 1 at the first
+            const yy = m.yOf(price);
+            if (yy === null) continue;
+            g.ys.push(yy);
+            ctx.beginPath(); ctx.moveTo(xl, yy); ctx.lineTo(xr, yy); ctx.stroke();
+            // On a small retracement the levels are closer together than a line
+            // of text is tall: a label that would sit on the last one is left
+            // out, and the level's line is still there.
+            if (lastLabelY !== null && Math.abs(yy - lastLabelY) < 11) continue;
+            lastLabelY = yy;
+            ctx.fillText(`${lvl} (${price.toFixed(2)})`, xl + 3, yy - 2);
+          }
+        } else {
+          const px = textSizePx(width);
+          ctx.font = `600 ${px}px ${font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+          const str = text || '';
+          // 8px to the right of its point, which is where its handle sits when it is selected.
+          ctx.fillText(str, ax + 8, ay);
+          g.textW = ctx.measureText(str).width + 8; g.textH = px + 6;
+        }
+        return g;
+      };
+      for (const d of list) {
+        if (d.token !== tok) continue;
+        const ax = m.xOf(d.a.t), ay = m.yOf(d.a.p), bx = m.xOf(d.b.t), by = m.yOf(d.b.p);
+        if (ax === null || ay === null || bx === null || by === null) continue;
+        const g = paint(d.type, ax, ay, bx, by, d.a.p, d.b.p, d.color, Math.max(1, Math.min(4, Number(d.width) || 1)), d.text);
+        geoms.set(d.id, g);
+        if (d.type === 'text' && d.id === selectedDrawIdRef.current) {
+          // Selected text has no outline of its own to show it: a dotted box round it.
+          ctx.save();
+          ctx.globalAlpha = 0.7; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); ctx.strokeStyle = d.color;
+          ctx.strokeRect(ax + 3, ay - (g.textH || 16) / 2, (g.textW || 0) + 2, g.textH || 16);
+          ctx.restore();
+        }
+      }
+      // A drawing still being placed: its first point, and on a desktop a
+      // preview out to the pointer. (A finger has no pointer to preview to.)
+      if (first && arm && arm !== 'hline' && arm !== 'text') {
+        const fx = m.xOf(first.t), fy = m.yOf(first.p);
+        if (fx !== null && fy !== null) {
+          const st = drawStyleFor(arm);
+          const cross = crosshairInfoRef.current;
+          if (cross && Number.isFinite(cross.x) && Number.isFinite(cross.y)) {
+            ctx.globalAlpha = 0.6;
+            paint(arm, fx, fy, cross.x, cross.y, first.p, cross.price, st.color, st.width);
+            ctx.globalAlpha = 1;
+          }
+          ctx.beginPath(); ctx.arc(fx, fy, 4.5, 0, Math.PI * 2);
+          ctx.fillStyle = st.color; ctx.fill();
+          ctx.lineWidth = 1.5; ctx.strokeStyle = '#ffffff'; ctx.setLineDash([]); ctx.stroke();
+        }
+      }
+    } finally { ctx.restore(); }
+  };
+
+  // Which drawing, if any, is under a tap — the newest first, as it is painted
+  // on top. `fill` false: only the lines of a rectangle or a Fibonacci count,
+  // not the space inside.
+  const drawHitAt = (x: number, y: number, fill: boolean, tol: number): number | null => {
+    const tok = String(instrumentTokenRef.current ?? '');
+    const list = drawingsRef.current;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const d = list[i];
+      if (d.token !== tok) continue;
+      const g = drawGeomRef.current.get(d.id);
+      if (g && hitDrawing(d.type, g, x, y, tol, fill)) return d.id;
+    }
+    return null;
+  };
+  // The chart's click handler is built once per chart rebuild and cannot see
+  // state, so it reaches these two through refs.
+  //
+  // QUICK TRADE ON: the inside of a rectangle or a Fibonacci lets the tap
+  // through. With it on, a tap on the option chart opens the order ticket, and
+  // a zone drawn there can cover most of the screen — the tap he switched Quick
+  // Trade on for must not select a drawing instead. Its lines still select, as
+  // his own lines do.
+  const drawHitRef = useRef<(x: number, y: number) => number | null>(() => null);
+  drawHitRef.current = (x, y) => drawHitAt(x, y, !quickTradeEnabledRef.current, 12);
+  // A tap on the chart while a tool is armed: the tool's next point.
+  const drawTapRef = useRef<(x: number, y: number) => void>(() => {});
+  drawTapRef.current = (x, y) => {
+    const arm = drawArmRef.current;
+    if (!arm) return;
+    const m = drawMapper();
+    const pt = m ? m.pointAt(x, y) : null;
+    if (!m || !pt) return;
+    const tok = String(instrumentTokenRef.current ?? '');
+    // A chart that does not yet know what it is showing has nothing to tie a
+    // drawing to: it would be saved with no owner and turn up on other charts.
+    if (!tok) return;
+    if (arm === 'hline') {
+      // His own line, exactly as the long-press plus makes it.
+      const id = Date.now() + Math.random();
+      setManualLineIds(prev => [...prev, { id, price: pt.p, color: '#facc15', lineWidth: 1, axisLabelVisible: true, lineStyle: 0, alertOn: false, token: tok }]);
+      setSelectedLineId(id); setLineToolPop(null);
+      setDrawArm(null);
+      return;
+    }
+    if (arm === 'text') { setDrawTextEdit({ id: null, at: pt, token: tok, value: '' }); setDrawArm(null); return; }
+    const first = drawFirstRef.current && drawFirstRef.current.token === tok ? drawFirstRef.current : null;
+    if (!first) { drawFirstRef.current = { ...pt, token: tok }; setDrawFirstSet(true); return; }
+    // A second tap on the very same spot is not a drawing; keep waiting for one.
+    if (first.t === pt.t && first.p === pt.p) return;
+    const st = drawStyleFor(arm);
+    const d: Drawing = { id: Date.now() + Math.random(), type: arm, token: tok, a: { t: first.t, p: first.p }, b: pt, color: st.color, width: st.width };
+    setDrawings(prev => [...prev, d].slice(-DRAW_MAX));
+    setSelectedDrawId(d.id); setDrawToolPop(null);
+    setDrawArm(null);
+  };
+  // A tool put down, or swapped for another, forgets the point it had.
+  useEffect(() => { drawFirstRef.current = null; setDrawFirstSet(false); }, [drawArm]);
+  // A tool being placed has the chart to itself: nothing stays selected under it.
+  useEffect(() => {
+    if (!drawArm && !rrArm) return;
+    setSelectedLineId(null); setLineToolPop(null); setSelectedDrawId(null); setDrawToolPop(null);
+  }, [drawArm, rrArm]);
+
+  // EVERY DRAG OF A DRAWING STARTS ON ONE OF ITS HANDLES — its points, and a
+  // round one in the middle that moves the whole of it — and never on its body.
+  // A rectangle can cover half the chart: if its body could be picked up, a
+  // swipe to scroll that began inside it would move it instead, and a zone
+  // drawn with care would be somewhere else without his meaning it. The handles
+  // sit outside the chart's own container, so a press on one is never a press
+  // on the chart. Document listeners, like the SL/TP chips: the drag survives
+  // the finger leaving the handle or the chart.
+  const startDrawDrag = (which: AnchorKey | 'move') => (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = selectedDrawIdRef.current;
+    const cont = chartContainerRef.current, ser = mainSeriesRef.current;
+    const d0 = drawingsRef.current.find((d) => d.id === id);
+    const m0 = drawMapper();
+    if (id === null || !cont || !ser || !d0 || !m0) return;
+    // Where the held point is drawn, and how far from it the finger came down.
+    // It keeps that distance, so it follows the finger instead of jumping under it.
+    let hx: number | null = null, hy: number | null = null;
+    if (which === 'move') {
+      const ax = m0.xOf(d0.a.t), ay = m0.yOf(d0.a.p), bx = m0.xOf(d0.b.t), by = m0.yOf(d0.b.p);
+      if (ax !== null && ay !== null && bx !== null && by !== null) { hx = (ax + bx) / 2; hy = (ay + by) / 2; }
+    } else {
+      const an = anchorsOf(d0).find((a) => a.key === which);
+      if (an) { hx = m0.xOf(an.t); hy = m0.yOf(an.p); }
+    }
+    if (hx === null || hy === null) return;
+    const rect0 = cont.getBoundingClientRect();
+    const startX = hx, startY = hy;
+    const grabX = startX - (e.clientX - rect0.left), grabY = startY - (e.clientY - rect0.top);
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch (err) {}
+    drawDragRef.current = { id };
+    setDrawToolPop(null);
+    let moved = false;
+    const put = (next: Drawing) => { drawingsRef.current = drawingsRef.current.map((d) => (d.id === id ? next : d)); };
+    const move = (ev: PointerEvent) => {
+      const m = drawMapper();
+      if (!m) return;
+      const rect = cont.getBoundingClientRect();
+      const x = ev.clientX - rect.left + grabX;
+      const y = Math.max(2, Math.min(m.plotH - 2, ev.clientY - rect.top + grabY));
+      if (!moved && Math.abs(x - startX) + Math.abs(y - startY) < 3) return;
+      moved = true;
+      if (which === 'move') {
+        // The whole drawing, by whole candles and by price — always measured
+        // from where it was when picked up, so rounding never builds up.
+        const p0 = ser.coordinateToPrice(startY), p1 = ser.coordinateToPrice(y);
+        if (p0 === null || p1 === null) return;
+        put(slideDrawing(d0, m.times, m.step, Math.round((x - startX) / m.sp), snapTick(Number(p1) - Number(p0))));
+      } else {
+        const to = m.pointAt(Math.max(0, Math.min(m.plotW, x)), y);
+        const cur = drawingsRef.current.find((d) => d.id === id);
+        if (to && cur) put(moveAnchor(cur, which, to));
+      }
+    };
+    const end = () => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', end);
+      document.removeEventListener('pointercancel', end);
+      const fin = drawingsRef.current;
+      drawDragRef.current = null;
+      if (moved) setDrawings(fin.slice());
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', end);
+    document.addEventListener('pointercancel', end);
+  };
+  // The handles are placed every frame while a drawing is selected: it moves
+  // with every pan and zoom, and under the finger that holds one of them.
+  useEffect(() => {
+    if (selectedDrawId === null) return;
+    let raf = 0, stopped = false;
+    const place = (el: HTMLDivElement | null, x: number | null, y: number | null, m: { plotW: number; plotH: number } | null) => {
+      if (!el) return;
+      const on = !!m && x !== null && y !== null && x >= -6 && x <= m.plotW + 6 && y >= -6 && y <= m.plotH + 6;
+      if (!on) { if (el.style.display !== 'none') el.style.display = 'none'; return; }
+      if (el.style.display !== 'block') el.style.display = 'block';
+      const t = `translate(${Math.round(x as number)}px, ${Math.round(y as number)}px) translate(-50%, -50%)`;
+      if (el.style.transform !== t) el.style.transform = t;
+    };
+    const frame = () => {
+      if (stopped) return;
+      try {
+        const d = drawingsRef.current.find((x) => x.id === selectedDrawIdRef.current);
+        const m = d ? drawMapper() : null;
+        const an = d && m ? anchorsOf(d) : [];
+        for (let i = 0; i < 4; i++) {
+          const a = an[i];
+          place(drawAnchorEls.current[i], a && m ? m.xOf(a.t) : null, a && m ? m.yOf(a.p) : null, m);
+        }
+        let mx: number | null = null, my: number | null = null;
+        if (d && m && d.type !== 'text') {
+          const ax = m.xOf(d.a.t), ay = m.yOf(d.a.p), bx = m.xOf(d.b.t), by = m.yOf(d.b.p);
+          if (ax !== null && ay !== null && bx !== null && by !== null) {
+            mx = (ax + bx) / 2; my = (ay + by) / 2;
+            // A drawing too small to hold three handles apart: the middle one
+            // steps below it (above, at the bottom of the chart), clear of the points.
+            if (Math.hypot(bx - ax, by - ay) < 72) my = my + 34 <= m.plotH - 8 ? my + 34 : my - 34;
+          }
+        }
+        place(drawMoveEl.current, mx, my, m);
+        // The tool bar keeps clear of the handles, and stays put while one is held.
+        if (m && !drawDragRef.current) {
+          const pts: { x: number; y: number }[] = [];
+          for (const a of an) { const x = m.xOf(a.t), y = m.yOf(a.p); if (x !== null && y !== null) pts.push({ x, y }); }
+          if (mx !== null && my !== null) pts.push({ x: mx, y: my });
+          const want = pickToolsPos(pts, m.plotW, m.plotH, drawToolsPosRef.current);
+          if (want !== drawToolsPosRef.current) { drawToolsPosRef.current = want; setDrawToolsPos(want); }
+        }
+      } catch (e) {}
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => { stopped = true; cancelAnimationFrame(raf); };
+  }, [selectedDrawId]);
+
+  // The corner a tool bar is in, as the classes and offsets that put it there.
+  // At the bottom its colour and thickness menus open upwards, so they are not
+  // cut off by the edge of the chart; on the right it stops short of the prices.
+  const toolsBarPlace = (pos: ToolsPos): { className: string; style: React.CSSProperties } => {
+    let axisW = 60, timeH = 26;
+    try { axisW = mainChartRef.current?.priceScale('right').width() || 60; timeH = mainChartRef.current?.timeScale().height() || 26; } catch (e) {}
+    return {
+      className: `absolute pointer-events-auto flex gap-1 ${pos[0] === 't' ? 'flex-col' : 'flex-col-reverse'} ${pos[1] === 'l' ? 'items-start' : 'items-end'}`,
+      style: { [pos[1] === 'l' ? 'left' : 'right']: pos[1] === 'l' ? 8 : axisW + 8, [pos[0] === 't' ? 'top' : 'bottom']: pos[0] === 't' ? 8 : timeH + 8 },
+    };
+  };
+
+  // ----- the selected drawing's tools -----
+  const patchSelectedDrawing = (patch: { color?: string; width?: number }) => {
+    const id = selectedDrawIdRef.current;
+    if (id === null) return;
+    const cur = drawingsRef.current.find((d) => d.id === id);
+    if (cur) rememberDrawStyle(cur.type, patch);
+    setDrawings(prev => prev.map(d => d.id === id ? { ...d, ...patch } : d));
+  };
+  const deleteSelectedDrawing = () => {
+    const id = selectedDrawIdRef.current;
+    if (id === null) return;
+    setDrawings(prev => prev.filter(d => d.id !== id));
+    setSelectedDrawId(null);
+    setDrawToolPop(null);
+  };
+  const copySelectedDrawing = () => {
+    const id = selectedDrawIdRef.current;
+    const src = drawingsRef.current.find((d) => d.id === id);
+    const ser = mainSeriesRef.current, m = drawMapper();
+    if (!src || !ser || !m) return;
+    // The copy lands a little up and to the right, so it can be seen and picked up.
+    let dp = 0;
+    try {
+      const y = ser.priceToCoordinate(src.a.p);
+      const up = y === null ? null : ser.coordinateToPrice((y as number) - 16);
+      if (up !== null && Number.isFinite(Number(up))) dp = snapTick(Number(up) - src.a.p);
+    } catch (e) {}
+    const copy: Drawing = { ...slideDrawing(src, m.times, m.step, 2, dp), id: Date.now() + Math.random() };
+    setDrawings(prev => [...prev, copy].slice(-DRAW_MAX));
+    setSelectedDrawId(copy.id);
+    setDrawToolPop(null);
+  };
+  const saveDrawText = () => {
+    const ed = drawTextEdit;
+    if (!ed) return;
+    const value = ed.value.trim().slice(0, 80);
+    setDrawTextEdit(null);
+    if (ed.id === null) {
+      if (!value || !ed.at) return;
+      const st = drawStyleFor('text');
+      const d: Drawing = { id: Date.now() + Math.random(), type: 'text', token: ed.token ?? String(instrumentTokenRef.current ?? ''),
+                           a: { ...ed.at }, b: { ...ed.at }, color: st.color, width: st.width, text: value };
+      setDrawings(prev => [...prev, d].slice(-DRAW_MAX));
+      setSelectedDrawId(d.id);
+      setDrawToolPop(null);
+    } else if (value) {
+      setDrawings(prev => prev.map(d => d.id === ed.id ? { ...d, text: value } : d));
+    } else {
+      // Text with nothing in it is nothing to show: emptying it removes it.
+      setDrawings(prev => prev.filter(d => d.id !== ed.id));
+      setSelectedDrawId(null);
+      setDrawToolPop(null);
+    }
+  };
+
+  // Saved; and handed to the other half of a split view at once, for the same
+  // reason the lines are (two copies of one list saved under one key).
+  useEffect(() => { try { localStorage.setItem(DRAWINGS_KEY, JSON.stringify(drawings)); } catch (e) {} }, [drawings]);
+  useEffect(() => {
+    try { window.dispatchEvent(new CustomEvent('terminal:drawings-changed', { detail: { from: paneRole || 'single', drawings } })); } catch (e) {}
+  }, [drawings]);
+  useEffect(() => {
+    const onDrawings = (ev: any) => {
+      const d = ev?.detail;
+      if (!d || d.from === (paneRole || 'single') || !Array.isArray(d.drawings)) return;
+      setDrawings((prev) => (JSON.stringify(prev) === JSON.stringify(d.drawings) ? prev : d.drawings));
+    };
+    window.addEventListener('terminal:drawings-changed', onDrawings as any);
+    return () => window.removeEventListener('terminal:drawings-changed', onDrawings as any);
+  }, []);
+  // A selection that no longer points at a drawing on this chart (deleted, or
+  // the chart changed to another instrument) is let go.
+  useEffect(() => {
+    if (selectedDrawId === null) return;
+    const d = drawings.find((x) => x.id === selectedDrawId);
+    if (!d || d.token !== String(instrumentTokenRef.current ?? '')) { setSelectedDrawId(null); setDrawToolPop(null); }
+  });
+  // With a keyboard: Escape puts an armed tool down, or lets go of the selected
+  // drawing; Delete removes it. Never while typing in a field.
+  useEffect(() => {
+    if (!drawArm && selectedDrawId === null) return;
+    const onKey = (ev: KeyboardEvent) => {
+      const el = ev.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
+      if (ev.key === 'Escape') {
+        if (drawArmRef.current) setDrawArm(null);
+        else { setSelectedDrawId(null); setDrawToolPop(null); }
+      } else if ((ev.key === 'Delete' || ev.key === 'Backspace') && !drawArmRef.current && selectedDrawIdRef.current !== null) {
+        ev.preventDefault();
+        deleteSelectedDrawing();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [drawArm, selectedDrawId]);
 
   // ===== Phase 2: SL/Target auto-exit lines =====
 
@@ -9350,6 +9916,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const paneSync: Record<string, [any, (v: any) => void]> = {
     quickTradeEnabled: [quickTradeEnabled, setQuickTradeEnabled], trailTpOn: [trailTpOn, setTrailTpOn],
     rrArm: [rrArm, setRrArm], rrCapital: [rrCapital, setRrCapital],
+    // A drawing tool is armed on both halves, like the R:R tool: the button is
+    // drawn once, and the next tap on EITHER chart is where the drawing goes.
+    drawArm: [drawArm, setDrawArm],
   };
   // Each half's own indicator settings. The settings are also saved under their
   // usual global keys (the phone reads those), so each half keeps a snapshot of
@@ -11133,43 +11702,16 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         if (draggingLineRef.current) return; // Prevent click action right after dragging
         if (param.point) {
           const y = param.point.y;
-
-          // HIS OWN LINES come first. A tap on one selects it (handle and tools
-          // appear); with one selected, a tap anywhere else only lets go of it.
-          // Both END the tap here: it must not go on to be read as a tap on the
-          // chart, which with Quick Trade on opens an order ticket.
-          for (const l of manualLinesRef.current) {
-            const ly = mainSeries.priceToCoordinate(l.price);
-            if (ly !== null && Math.abs((ly as number) - y) < 12) { setSelectedLineId(l.id); setLineToolPop(null); return; }
-          }
-          if (selectedLineIdRef.current !== null) { setSelectedLineId(null); setLineToolPop(null); return; }
-
-          // Check PDH/PDL click
-          if (showPdhPdl && intradayLevelsAllowed && !isOptionView && pdhPrice !== null && pdlPrice !== null) {
-            const pdhY = mainSeries.priceToCoordinate(pdhPrice);
-            if (pdhY !== null && Math.abs(pdhY - y) < 10) {
-              setIsEditingPdhPdl(true);
-              return;
-            }
-            const pdlY = mainSeries.priceToCoordinate(pdlPrice);
-            if (pdlY !== null && Math.abs(pdlY - y) < 10) {
-              setIsEditingPdhPdl(true);
-              return;
-            }
-          }
-
           const price = mainSeries.coordinateToPrice(y);
 
-          // GIFT NIFTY is a reference chart. Nothing here is tradeable through this
-          // terminal — it is a USD-denominated NSE IX future — so the tap stops
-          // before every order path below. Placed after the R:R capture so the
-          // measuring tool still works, which is the one interaction that makes
-          // sense on a chart you cannot trade.
-          // (The R:R branch immediately below returns on its own when armed.)
-
-          // R:R tool takes the tap before anything else, so arming it cannot fire
-          // a trade by accident — and it returns, so the click never reaches the
-          // order paths below.
+          // A TOOL WAITING FOR ITS TAP GETS IT, before anything already on the
+          // chart: the tap is where the new thing goes, even on top of a line or
+          // inside another drawing. It ENDS here, so arming a tool can never fire
+          // a trade by accident — the click never reaches the order paths below.
+          // (The R:R tool sat below the lines' check for one version, so a tap
+          // near a line with the tool armed selected the line and left the tool
+          // waiting.)
+          if (drawArmRef.current) { drawTapRef.current(param.point.x, y); return; }
           if (rrArmRef.current && price !== null) {
             const kind = rrArmRef.current;
             // Stop distance from recent range rather than a fixed percentage, so
@@ -11188,7 +11730,44 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             return;
           }
 
-          if (isReferenceChartRef.current) return;   // GIFT NIFTY: measure only
+          // HIS OWN LINES AND DRAWINGS come next. A tap on one selects it (its
+          // handles and tools appear); with one selected, a tap anywhere else
+          // only lets go of it. Both END the tap here: it must not go on to be
+          // read as a tap on the chart, which with Quick Trade on opens an order
+          // ticket. A line is tried before a drawing: it is the thinner target,
+          // and may well lie inside a rectangle.
+          for (const l of manualLinesRef.current) {
+            const ly = mainSeries.priceToCoordinate(l.price);
+            if (ly !== null && Math.abs((ly as number) - y) < 12) { setSelectedLineId(l.id); setLineToolPop(null); return; }
+          }
+          const drawnId = drawHitRef.current(param.point.x, y);
+          if (drawnId !== null) { setSelectedDrawId(drawnId); setDrawToolPop(null); return; }
+          if (selectedLineIdRef.current !== null || selectedDrawIdRef.current !== null) {
+            setSelectedLineId(null); setLineToolPop(null);
+            setSelectedDrawId(null); setDrawToolPop(null);
+            return;
+          }
+
+          // Check PDH/PDL click
+          if (showPdhPdl && intradayLevelsAllowed && !isOptionView && pdhPrice !== null && pdlPrice !== null) {
+            const pdhY = mainSeries.priceToCoordinate(pdhPrice);
+            if (pdhY !== null && Math.abs(pdhY - y) < 10) {
+              setIsEditingPdhPdl(true);
+              return;
+            }
+            const pdlY = mainSeries.priceToCoordinate(pdlPrice);
+            if (pdlY !== null && Math.abs(pdlY - y) < 10) {
+              setIsEditingPdhPdl(true);
+              return;
+            }
+          }
+
+          // GIFT NIFTY is a reference chart. Nothing here is tradeable through this
+          // terminal — it is a USD-denominated NSE IX future — so the tap stops
+          // before every order path below. Placed after the armed tools at the top
+          // of this handler, so measuring and drawing still work: the interactions
+          // that make sense on a chart you cannot trade.
+          if (isReferenceChartRef.current) return;   // GIFT NIFTY: measure and draw only
 
           // TAP TOGGLES THE CARD. The close runs on pointerdown and this handler
           // on click, and React re-renders in between — so an open/closed check
@@ -11869,6 +12448,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         if (canvas.style.height !== `${ch}px`) canvas.style.height = `${ch}px`;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, cw, ch);
+
+        // His drawings share this canvas and this frame (see DRAWINGS), under the box.
+        try { paintDrawingsRef.current(ctx, cw, ch); } catch (e) { /* a bad frame must not stop the box */ }
 
         const rrB = rrBoxRef.current;
         if (!rrB) return;
@@ -13896,57 +14478,80 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           />
           </div>
 
-          {/* Risk:Reward tool — sits between search and timeframe. md:order-2 puts
-              it in the same slot on desktop, where the toolbar children are
-              explicitly ordered rather than laid out in source order. */}
+          {/* DRAWING TOOLS — sits between search and timeframe. md:order-2 puts it
+              in the same slot on desktop, where the toolbar children are explicitly
+              ordered rather than laid out in source order.
+              This was the risk:reward button: it opened a menu of two (long, short)
+              and, with a box on the chart, cleared the box instead. The two
+              position boxes are now two of seven tools on one sheet (see DRAWINGS),
+              so the button always opens the sheet — he may want a trend line while
+              a box is up — and removing the box is the sheet's first row. */}
           <div className={`relative shrink-0 md:order-2 ${sharedHidden}`} ref={rrMenuRef}>
             <button
-              onClick={() => {
-                // A placed box is cleared by the same button, so the tool needs no
-                // separate delete affordance on a phone.
-                // Split view: one button for both charts, so it clears a box on
-                // either of them.
-                const anyBox = !!rrBox || (split && peerRrBox);
-                if (anyBox) { setRrBox(null); setRrArm(null); setRrMenuOpen(false); if (split) paneCmd('rr-clear'); return; }
-                setRrMenuOpen(o => !o);
-              }}
-              title={(rrBox || (split && peerRrBox)) ? 'Clear risk:reward box' : 'Risk:reward tool'}
+              onClick={() => setRrMenuOpen(o => !o)}
+              title="Drawing tools"
+              data-draw-button=""
               className={`flex items-center justify-center h-9 w-9 rounded-md transition-colors ${
-                rrArm ? 'bg-primary/25 text-primary' : (rrBox || (split && peerRrBox)) ? 'bg-emerald-500/15 text-emerald-300' : 'bg-muted/40 text-muted-foreground hover:text-foreground'}`}
+                (rrArm || drawArm) ? 'bg-primary/25 text-primary' : (rrBox || (split && peerRrBox)) ? 'bg-emerald-500/15 text-emerald-300' : 'bg-muted/40 text-muted-foreground hover:text-foreground'}`}
             >
-              <Scale size={17} />
+              <PencilRuler size={17} />
             </button>
-            {rrMenuOpen && !rrBox && !(split && peerRrBox) && (
-              <div className="fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)] md:bottom-full md:mb-2 md:right-0 z-[90] md:w-48 bg-card border border-white/10 rounded-lg shadow-2xl md:shadow-xl overflow-hidden">
-                {/* Capital: optional. Leave it at 0 and the tags show points and
-                    percent as before; set it and they add the rupee loss at SL
-                    and profit at TP for that amount. */}
-                <div className="px-3 pt-2 pb-1.5 border-b border-white/10">
-                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Capital (₹)</div>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={0}
-                    step={1000}
-                    value={rrCapital || ''}
-                    placeholder="e.g. 50000"
-                    onChange={(e) => setRrCapital(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    className="w-full h-8 px-2 rounded-md bg-muted/40 border border-white/10 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
+            {rrMenuOpen && (() => {
+              const pick = (k: DrawingType | 'hline' | 'long' | 'short') => {
+                setRrMenuOpen(false);
+                // One tool at a time: arming one puts the other down.
+                if (k === 'long' || k === 'short') { setDrawArm(null); setRrArm(k); }
+                else { setRrArm(null); setDrawArm(k); }
+              };
+              const row = 'w-full flex items-center gap-3 px-3 py-2.5 md:py-2 text-left text-[13px] md:text-xs font-medium hover:bg-muted active:bg-muted transition-colors';
+              const tools: { k: DrawingType | 'hline' | 'long' | 'short'; label: string; icon: React.ReactNode; tone: string }[] = [
+                { k: 'hline', label: 'Horizontal Line', icon: <Minus size={16} />, tone: 'text-foreground' },
+                { k: 'trend', label: 'Trend Line', icon: <Slash size={16} />, tone: 'text-foreground' },
+                { k: 'rect', label: 'Rectangle', icon: <RectangleHorizontal size={16} />, tone: 'text-foreground' },
+                { k: 'fib', label: 'Fibonacci Retracement', icon: <AlignJustify size={16} />, tone: 'text-foreground' },
+                { k: 'long', label: 'Long Position', icon: <TrendingUp size={16} />, tone: 'text-emerald-400' },
+                { k: 'short', label: 'Short Position', icon: <TrendingDown size={16} />, tone: 'text-rose-400' },
+                { k: 'text', label: 'Text', icon: <TypeIcon size={16} />, tone: 'text-foreground' },
+              ];
+              return (
+                // Phone: a card above the bottom tool bar. Desktop: it drops DOWN from
+                // the button — the tool bar is at the top of the chart there, and the
+                // old two-item menu opened upwards, off the top of the page; seven
+                // rows would have left only the last of them on screen.
+                <div data-draw-sheet="" className="fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)] md:bottom-auto md:top-full md:mt-2 md:right-0 z-[90] md:w-60 bg-card border border-white/10 rounded-xl md:rounded-lg shadow-2xl md:shadow-xl overflow-hidden">
+                  <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Drawing Tools</div>
+                  {(rrBox || (split && peerRrBox)) && (
+                    // Split view: one sheet for both charts, so it clears a box on either of them.
+                    <button data-draw-pick="rr-clear" className={`${row} text-rose-400`}
+                      onClick={() => { setRrBox(null); setRrArm(null); setRrMenuOpen(false); if (split) paneCmd('rr-clear'); }}>
+                      <Trash2 size={16} /> Remove the position box
+                    </button>
+                  )}
+                  {tools.map((t) => (
+                    <button key={t.k} data-draw-pick={t.k} className={`${row} ${t.tone}`} onClick={() => pick(t.k)}>
+                      {t.icon} {t.label}
+                    </button>
+                  ))}
+                  {/* Capital: optional, for the two position boxes. Leave it at 0
+                      and their tags show points and percent; set it and they add
+                      the rupee loss at SL and profit at TP for that amount. */}
+                  <div className="px-3 pt-2 pb-2.5 border-t border-white/10">
+                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Capital for a position (₹)</div>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      step={1000}
+                      value={rrCapital || ''}
+                      placeholder="e.g. 50000"
+                      onChange={(e) => setRrCapital(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      className="w-full h-8 px-2 rounded-md bg-muted/40 border border-white/10 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                  </div>
                 </div>
-                <button
-                  onClick={() => { setRrArm('long'); setRrMenuOpen(false); }}
-                  className="w-full text-left px-3 py-2 text-xs font-medium text-emerald-300 hover:bg-muted transition-colors">
-                  Long position
-                </button>
-                <button
-                  onClick={() => { setRrArm('short'); setRrMenuOpen(false); }}
-                  className="w-full text-left px-3 py-2 text-xs font-medium text-rose-300 hover:bg-muted transition-colors">
-                  Short position
-                </button>
-              </div>
-            )}
+              );
+            })()}
           </div>
 
           <div className="flex items-center gap-2 shrink-0 md:order-4">
@@ -15075,6 +15680,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               const col = sel.color || '#facc15';
               const w = Number(sel.lineWidth) || 1;
               const tool = 'h-8 w-8 rounded-md flex items-center justify-center text-foreground/80 hover:bg-foreground/10 active:bg-foreground/15';
+              const bar = toolsBarPlace(lineToolsPos);
               return (
                 <div className="absolute inset-0 z-[42] pointer-events-none overflow-hidden select-none" data-line-tools=""
                   style={{ fontFamily: chartFontFamily(settings.customFontUrl) }}>
@@ -15091,7 +15697,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       {[0, 1, 2].map((i) => <span key={i} className="block h-[1.5px] w-3.5 rounded-full" style={{ background: col }} />)}
                     </div>
                   </div>
-                  <div className="absolute top-2 left-2 pointer-events-auto" data-line-toolbar="">
+                  <div className={bar.className} style={bar.style} data-line-toolbar="" data-tools-pos={lineToolsPos}>
                     <div className="flex items-center gap-0.5 h-10 px-1 rounded-lg border border-border bg-card/95 shadow-lg backdrop-blur-sm">
                       <button type="button" data-line-tool="color" title="Colour" className={tool}
                         onClick={() => setLineToolPop((v) => (v === 'color' ? null : 'color'))}>
@@ -15108,7 +15714,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       <button type="button" data-line-tool="delete" title="Delete this line" className={`${tool} text-rose-400`} onClick={deleteSelectedLine}><Trash2 size={16} /></button>
                     </div>
                     {lineToolPop === 'color' && (
-                      <div className="mt-1 inline-flex items-center gap-1.5 p-1.5 rounded-lg border border-border bg-card/95 shadow-lg backdrop-blur-sm">
+                      <div className="inline-flex items-center gap-1.5 p-1.5 rounded-lg border border-border bg-card/95 shadow-lg backdrop-blur-sm">
                         {LINE_TOOL_COLORS.map((c) => (
                           <button key={c} type="button" data-line-color={c} title={c}
                             className={`h-7 w-7 rounded-md border ${c.toLowerCase() === String(col).toLowerCase() ? 'border-white ring-1 ring-white/60' : 'border-white/20'}`}
@@ -15118,7 +15724,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       </div>
                     )}
                     {lineToolPop === 'width' && (
-                      <div className="mt-1 inline-flex items-center gap-1 p-1 rounded-lg border border-border bg-card/95 shadow-lg backdrop-blur-sm">
+                      <div className="inline-flex items-center gap-1 p-1 rounded-lg border border-border bg-card/95 shadow-lg backdrop-blur-sm">
                         {[1, 2, 3, 4].map((px) => (
                           <button key={px} type="button" data-line-width={px}
                             className={`h-8 px-2.5 rounded-md text-[12px] font-semibold ${px === w ? 'bg-primary/25 text-primary' : 'text-foreground/85 hover:bg-foreground/10'}`}
@@ -15132,6 +15738,141 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 </div>
               );
             })()}
+            {/* THE SELECTED DRAWING'S HANDLES AND TOOLS (see DRAWINGS). Like the
+                line's: over the chart and outside its container, so a press on a
+                handle or a tool is never a press on the chart. A point at each
+                end (each corner, for a rectangle) reshapes it; the round one in
+                the middle moves the whole of it. */}
+            {(() => {
+              const sel = selectedDrawId === null ? null : drawings.find((d) => d.id === selectedDrawId && d.token === String(instrumentToken ?? ''));
+              if (!sel) return null;
+              const col = sel.color;
+              const w = Math.max(1, Math.min(4, Math.round(Number(sel.width)) || 1));
+              const isText = sel.type === 'text';
+              const tool = 'h-8 w-8 rounded-md flex items-center justify-center text-foreground/80 hover:bg-foreground/10 active:bg-foreground/15';
+              const bar = toolsBarPlace(drawToolsPos);
+              return (
+                <div className="absolute inset-0 z-[42] pointer-events-none overflow-hidden select-none" data-draw-tools=""
+                  style={{ fontFamily: chartFontFamily(settings.customFontUrl) }}>
+                  {!isText && (
+                    <div
+                      ref={drawMoveEl}
+                      data-draw-move=""
+                      onPointerDown={startDrawDrag('move')}
+                      title="Drag to move the whole drawing"
+                      // Padding = the touch target; the visible handle is 22px across.
+                      className="absolute left-0 top-0 pointer-events-auto p-2.5 cursor-move"
+                      style={{ display: 'none', touchAction: 'none', willChange: 'transform' }}
+                    >
+                      <div className="h-[22px] w-[22px] rounded-full bg-white shadow-md flex items-center justify-center" style={{ border: `1.5px solid ${col}`, color: col }}>
+                        <MoveIcon size={13} strokeWidth={2.5} />
+                      </div>
+                    </div>
+                  )}
+                  {anchorsOf(sel).map((a, i) => (
+                    <div
+                      key={a.key}
+                      ref={(el) => { drawAnchorEls.current[i] = el; }}
+                      data-draw-anchor={a.key}
+                      onPointerDown={startDrawDrag(a.key)}
+                      title={isText ? 'Drag to move the text' : 'Drag to move this point'}
+                      className="absolute left-0 top-0 pointer-events-auto p-3 cursor-grab"
+                      style={{ display: 'none', touchAction: 'none', willChange: 'transform' }}
+                    >
+                      <div className="h-[13px] w-[13px] rounded-full shadow" style={{ background: col, border: '2px solid #ffffff' }} />
+                    </div>
+                  ))}
+                  <div className={bar.className} style={bar.style} data-draw-toolbar="" data-tools-pos={drawToolsPos}>
+                    <div className="flex items-center gap-0.5 h-10 px-1 rounded-lg border border-border bg-card/95 shadow-lg backdrop-blur-sm">
+                      <button type="button" data-draw-tool="color" title="Colour" className={tool}
+                        onClick={() => setDrawToolPop((v) => (v === 'color' ? null : 'color'))}>
+                        <span className="block h-[18px] w-[18px] rounded-[5px] border border-white/30" style={{ background: col }} />
+                      </button>
+                      <button type="button" data-draw-tool="width" title={isText ? 'Text size' : 'Thickness'}
+                        className="h-8 px-2 rounded-md flex items-center gap-1 text-[12px] font-semibold text-foreground/90 hover:bg-foreground/10 active:bg-foreground/15"
+                        onClick={() => setDrawToolPop((v) => (v === 'width' ? null : 'width'))}>
+                        {isText ? ['S', 'M', 'L', 'XL'][w - 1] : `${w}px`} <ChevronDown size={13} className="opacity-70" />
+                      </button>
+                      {isText && (
+                        <button type="button" data-draw-tool="edit" title="Change the text" className={tool}
+                          onClick={() => { setDrawToolPop(null); setDrawTextEdit({ id: sel.id, value: sel.text || '' }); }}><Edit2 size={15} /></button>
+                      )}
+                      <button type="button" data-draw-tool="copy" title="Copy this drawing" className={tool} onClick={copySelectedDrawing}><Copy size={16} /></button>
+                      <button type="button" data-draw-tool="delete" title="Delete this drawing" className={`${tool} text-rose-400`} onClick={deleteSelectedDrawing}><Trash2 size={16} /></button>
+                    </div>
+                    {drawToolPop === 'color' && (
+                      <div className="inline-flex items-center gap-1.5 p-1.5 rounded-lg border border-border bg-card/95 shadow-lg backdrop-blur-sm">
+                        {DRAW_COLORS.map((c) => (
+                          <button key={c} type="button" data-draw-color={c} title={c}
+                            className={`h-7 w-7 rounded-md border ${c.toLowerCase() === String(col).toLowerCase() ? 'border-white ring-1 ring-white/60' : 'border-white/20'}`}
+                            style={{ background: c }}
+                            onClick={() => { patchSelectedDrawing({ color: c }); setDrawToolPop(null); }} />
+                        ))}
+                      </div>
+                    )}
+                    {drawToolPop === 'width' && (
+                      <div className="inline-flex items-center gap-1 p-1 rounded-lg border border-border bg-card/95 shadow-lg backdrop-blur-sm">
+                        {[1, 2, 3, 4].map((px) => (
+                          <button key={px} type="button" data-draw-width={px}
+                            className={`h-8 px-2.5 rounded-md text-[12px] font-semibold ${px === w ? 'bg-primary/25 text-primary' : 'text-foreground/85 hover:bg-foreground/10'}`}
+                            onClick={() => { patchSelectedDrawing({ width: px }); setDrawToolPop(null); }}>
+                            {isText ? ['S', 'M', 'L', 'XL'][px - 1] : `${px}px`}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+            {/* A TOOL WAITING FOR ITS TAP SAYS SO, and what the next tap is for —
+                on a phone the sheet it was picked from has closed and nothing
+                else shows that the next tap will draw. The cross puts it down.
+                Only the cross takes a press: the words let a tap through to the
+                chart beneath them, or the top middle of the chart would be the
+                one place a point could not be put. */}
+            {(drawArm || rrArm) && (() => {
+              const label = rrArm ? `${rrArm === 'long' ? 'Long' : 'Short'} position · tap the entry price`
+                : drawArm === 'hline' ? 'Horizontal line · tap the price'
+                : drawArm === 'trend' ? `Trend line · tap the ${drawFirstSet ? 'second' : 'first'} point`
+                : drawArm === 'rect' ? `Rectangle · tap ${drawFirstSet ? 'the opposite corner' : 'one corner'}`
+                : drawArm === 'fib' ? `Fibonacci · tap where the move ${drawFirstSet ? 'ended' : 'began'}`
+                : 'Text · tap where it goes';
+              return (
+                <div className="absolute top-2 inset-x-0 z-[43] flex justify-center pointer-events-none select-none" data-draw-hint="">
+                  <div className="flex items-center gap-1.5 h-8 pl-3 pr-1 max-w-[94%] rounded-full border border-primary/50 bg-card/90 shadow-lg text-[11px] font-semibold text-foreground">
+                    <span className="truncate">{label}</span>
+                    <button type="button" title="Cancel" data-draw-cancel=""
+                      className="pointer-events-auto h-6 w-6 shrink-0 rounded-full flex items-center justify-center text-foreground/70 hover:bg-foreground/10 active:bg-foreground/15"
+                      onClick={() => { setDrawArm(null); setRrArm(null); }}><X size={13} /></button>
+                  </div>
+                </div>
+              );
+            })()}
+            {drawTextEdit && (
+              // Near the top of the screen, not the middle: on a phone the keyboard
+              // takes the lower half the moment the field has the cursor.
+              <div className="fixed inset-0 z-[95] flex items-start justify-center pt-24 px-4 bg-black/40" data-draw-text=""
+                onPointerDown={(e) => { if (e.target === e.currentTarget) setDrawTextEdit(null); }}>
+                <div className="w-full max-w-xs rounded-xl border border-border bg-card shadow-2xl p-3">
+                  <div className="text-xs font-semibold text-foreground mb-2">{drawTextEdit.id === null ? 'Text on the chart' : 'Change the text'}</div>
+                  <input
+                    autoFocus
+                    type="text"
+                    maxLength={80}
+                    value={drawTextEdit.value}
+                    placeholder="Type a note"
+                    onChange={(e) => { const v = e.target.value; setDrawTextEdit((cur) => (cur ? { ...cur, value: v } : cur)); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveDrawText(); } else if (e.key === 'Escape') setDrawTextEdit(null); }}
+                    className="w-full h-9 px-2.5 rounded-md bg-muted/40 border border-white/10 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <div className="flex justify-end gap-2 mt-3">
+                    <button type="button" className="h-8 px-3 rounded-md text-xs font-semibold text-foreground/80 hover:bg-foreground/10" onClick={() => setDrawTextEdit(null)}>Cancel</button>
+                    <button type="button" data-draw-text-save="" className="h-8 px-3 rounded-md text-xs font-semibold bg-primary text-white hover:bg-primary/90" onClick={() => saveDrawText()}>{drawTextEdit.id === null ? 'Add' : 'Save'}</button>
+                  </div>
+                </div>
+              </div>
+            )}
             {showJumpToLatest && !chartOverlayOpen && (
               <button
                 onClick={() => {

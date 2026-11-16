@@ -262,4 +262,36 @@ own copy; anything restyled after that stays as set.
   carry no chart and still show on every chart, as they always did.
 - The two halves of a split view share the list as it changes (they used to
   overwrite each other's additions).
+- The tool bar moves to another corner of the chart when the line's handle would
+  be underneath it (a line near the top of a phone chart).
+
+## Chart: drawing tools (trend line, rectangle, Fibonacci, text)
+
+`src/lib/chartDrawings.ts` (the shapes and their arithmetic; test with
+`npx tsx src/lib/chartDrawings.test.ts`) and `src/pages/AdvancedChart.tsx`
+("DRAWINGS").
+
+- **The pencil-and-ruler button** on the chart's tool bar (it was the risk:reward
+  button) opens **Drawing Tools**: Horizontal Line, Trend Line, Rectangle,
+  Fibonacci Retracement, Long Position, Short Position, Text.
+- **Placing one:** pick the tool, then tap the chart — once for a horizontal
+  line, a position box or text; twice (two points) for a trend line, a rectangle
+  or a Fibonacci. A chip at the top says what the next tap is for; its cross
+  cancels. A tap that places a drawing never opens an order ticket.
+- **A drawing that is selected** (just placed, or tapped) shows a dot on each of
+  its points — drag one to reshape it — a round handle in the middle that moves
+  the whole of it, and a tool bar: colour, thickness (size, for text), copy and
+  delete, plus "change the text" for text. A tap anywhere else lets go of it.
+  With a keyboard, Delete removes it and Escape lets go.
+- **A drawing is only ever moved by its handles**, never by its body: a swipe
+  that starts inside a rectangle scrolls the chart.
+- **Quick Trade on:** a tap in the middle of a rectangle or a Fibonacci goes
+  through to the chart (so it can open the order ticket); its lines still select.
+- **Where it lives:** on the chart (instrument) it was drawn on, at the same
+  times on every timeframe, saved in the browser under `chartDrawings` (the
+  newest 300). The last colour and thickness used for each kind of drawing are
+  what the next one of that kind starts with.
+- **Position boxes** are the risk:reward box as before; with one on the chart the
+  sheet's first row removes it. Capital for the rupee figures is at the bottom of
+  the sheet.
 
