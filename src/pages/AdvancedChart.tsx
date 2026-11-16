@@ -23,7 +23,7 @@ import { format } from "date-fns";
 import { SymbolSearch } from "../components/SymbolSearch";
 import MarketContext from "../components/MarketContext";
 import BounceConviction from "../components/BounceConviction";
-import { DownloadCloud } from 'lucide-react';
+import { DownloadCloud, Globe } from 'lucide-react';
 import { Instrument } from "../hooks/useSymbolSearch";
 import { 
   createChart, 
@@ -15532,9 +15532,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               button is present" — the app's bottom bar already goes everywhere
               the arrow went. The button is the arrow's own box (36px, the same
               margins), so the tab beside it begins where it began. The row's
-              right end, where search was, is kept clear by a box of the size
-              search had there (data-head="tail"), so the tabs are no wider for
-              it — and the index tab is the same width whether an option's chart
+              right end, where search was, holds the globe in a box of the size
+              search had there (data-head="context"), so the tabs are no wider
+              for it — and the index tab is the same width whether an option's chart
               is open or not (see data-head="tab-room"). Tapped, the button
               gives way to the field, which opens in the header in place of the
               chart's name with its results below, as it did from the right. */}
@@ -15722,9 +15722,20 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             )}
           </div>
 
-          {/* PHONE HEADER, right: nothing — the room search had here (its 36px
-              box and 2px margin), left empty so the tab is no wider than it was. */}
-          {!isPane && !phoneSearchOpen && <div data-head="tail" className="md:hidden shrink-0 h-11 w-9 mr-0.5" aria-hidden="true" />}
+          {/* PHONE HEADER, right: the globe (17 Nov 2026). Market context was a
+              pull tab on the chart's right edge, half-way down; Martin: "move the
+              sidebar globe icon to the top right of the screen where the search
+              icon appeared previously". So it is a button in the box search had
+              here (36px, 2px margin), and the pull tab is not drawn on a phone
+              (MarketContext.tsx). The panel itself lives in that component and
+              opens when it hears this event. */}
+          {!isPane && !phoneSearchOpen && (
+            <button type="button" onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(false); try { window.dispatchEvent(new Event('market_context_open')); } catch (e) {} }}
+              aria-label="Market context" title="Market context" data-head="context"
+              className="md:hidden shrink-0 h-11 w-9 mr-0.5 flex items-center justify-center text-foreground/90 active:opacity-60">
+              <Globe size={19} />
+            </button>
+          )}
 
           {/* The old tab strip is retired — the dropdowns above replace it on every
               size. Kept rendered but hidden rather than deleted in the same commit

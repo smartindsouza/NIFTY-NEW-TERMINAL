@@ -238,6 +238,15 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
   useEffect(() => {
     try { window.dispatchEvent(new CustomEvent('chart_overlay', { detail: { id: 'market-context', open } })); } catch (e) {}
   }, [open]);
+  // ON A PHONE THE WAY IN IS THE GLOBE IN THE CHART'S HEADER (17 Nov 2026), not
+  // the pull tab below — Martin had it moved to the top right, where search
+  // used to be. The header's button (data-head="context" in AdvancedChart.tsx)
+  // cannot reach this component's state, so it says so with an event.
+  useEffect(() => {
+    const f = () => setOpen(true);
+    window.addEventListener('market_context_open', f);
+    return () => window.removeEventListener('market_context_open', f);
+  }, []);
   // Which categories are hidden. Persisted so the sidebar opens how you left it.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
     try { return JSON.parse(localStorage.getItem("mc_collapsed") || "{}"); } catch { return {}; }
@@ -341,12 +350,14 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
   // for another.
   return createPortal(
     <>
-      {/* Pull tab — always visible on the right edge of the chart */}
+      {/* Pull tab on the right edge of the chart — desktop only; a phone has
+          the globe in the chart's header instead (see above). */}
       {!open && !tabHidden && (
         <button
           onClick={() => setOpen(true)}
           title="Market context"
-          className="fixed top-1/2 -translate-y-1/2 right-0 z-[9997] bg-card border border-border border-r-0 rounded-l-lg px-1.5 py-3 text-slate-300 hover:text-foreground hover:bg-white/5 transition-colors flex flex-col items-center gap-1"
+          data-context-tab=""
+          className="max-md:hidden fixed top-1/2 -translate-y-1/2 right-0 z-[9997] bg-card border border-border border-r-0 rounded-l-lg px-1.5 py-3 text-slate-300 hover:text-foreground hover:bg-white/5 transition-colors flex flex-col items-center gap-1"
         >
           <ChevronLeft className="w-4 h-4" />
           <Globe className="w-4 h-4" />

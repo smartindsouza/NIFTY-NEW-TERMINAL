@@ -265,17 +265,31 @@ export default function App() {
             was the wrong pair to leave next to the diagnostics toggle. */}
 
         {/* Floating live diagnostics view.
-            Phone: fill the chart area, from under the app header down to just
-            above the chart toolbar and the bottom nav — 8px above, so its
-            rounded foot is seen to end there (17 Nov 2026: it ran 3px UNDER the
-            bar, and Martin read it, fairly, as carrying on beneath the buttons;
-            the bar's height is now measured, see --chart-bar-h). The bar and
-            the nav are not covered, so they take touches as ever. The old 320px card at
-            the bottom-right corner clipped its own heading (build stamp + SYS
-            badge) and left the readout in a narrow column. Desktop keeps the
+            PHONE: IT IS A SCREEN OF ITS OWN, OVER EVERYTHING BUT THE APP'S BOTTOM
+            BAR (17 Nov 2026). It runs from under the app header to 8px above
+            the bottom bar on every page, the chart page included, and it is
+            drawn over the chart's own tool bar (the row of five and Option
+            Chain | ScalpPro). Until now it stopped at that tool bar on the
+            chart page, so its readout was cut off where the chart's buttons
+            began and looked as though it carried on beneath them. Martin said
+            so twice — of v309: "appears below the option chain/Scalp pro
+            buttons as well as the other bottom icons. Make it show above it
+            without affecting their touch"; and after v310 had only moved its
+            foot 8px clear of them: "still appears below the bottom bar". The
+            bottom bar is never covered, so Diag still closes it and every tab
+            still works; the chart's buttons are simply under it while it is
+            open and are what they were when it closes. It has its own frame
+            (border, corners) so that its foot is seen to end above the bar
+            whatever part of the readout is scrolled into it. Desktop keeps the
             floating card. */}
+        {/* The page it stands on is put away while it is open (phone): a plain
+            sheet of the app's background from the top of the screen to the
+            bottom bar, under the panel. Without it the page showed round the
+            panel's rounded corners — on the chart page, the white ScalpPro
+            button, as a bright sliver at its foot. */}
+        {showDiagnostics && <div data-diagnostics-back="" className="md:hidden fixed inset-x-0 top-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-[49] bg-background" aria-hidden="true" />}
         {showDiagnostics && (
-          <div className={`fixed inset-x-2 top-[60px] ${onChart ? 'bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+0.5rem)]' : 'bottom-[calc(4rem+env(safe-area-inset-bottom)+0.5rem)]'} md:inset-x-auto md:top-auto md:bottom-20 md:right-6 z-50 md:w-96 max-h-none md:max-h-[70vh] overflow-y-auto overflow-x-hidden animate-in slide-in-from-bottom-5 duration-300 rounded-2xl`}>
+          <div data-diagnostics="" className="fixed inset-x-2 top-[60px] bottom-[calc(4rem+env(safe-area-inset-bottom)+0.5rem)] md:inset-x-auto md:top-auto md:bottom-20 md:right-6 z-50 md:w-96 max-h-none md:max-h-[70vh] overflow-y-auto overflow-x-hidden animate-in slide-in-from-bottom-5 duration-300 rounded-2xl max-md:bg-card max-md:border max-md:border-foreground/15">
             <DiagnosticsPanel />
           </div>
         )}

@@ -292,14 +292,15 @@ runs the code its old button ran — only where it is has changed. The desktop
 tool bar and the split view are untouched.
 
 - **Header:** a search button at the left, which opens the symbol search in the
-  header with its results below, and the chart's name (the index and option
-  choosers). Under it, the live price with the day's change (against the last
+  header with its results below, the chart's name (the index and option
+  choosers), and at the right a globe that opens Market context (v314: it was
+  a pull tab half-way down the chart's right edge, which the desktop keeps;
+  Martin asked for it at the top right, where search used to be). Under it, the live price with the day's change (against the last
   close of the previous session) and the clock. The "Advanced Trading Chart"
   title row is gone on a phone.
   - **No back arrow** (v312). It stood at the left until Martin had it removed
     and search moved into its place; the app's bottom bar goes everywhere it
-    went. The row's right end, where search used to be, is empty, so the tabs
-    are no wider for it. ScalpPro keeps its own back arrow.
+    went. ScalpPro keeps its own back arrow.
   - **The index tab is one width** (v313): half the row, whether an option's
     chart is open beside it or not. With no option chart open it used to run
     the whole row and shrink when one was opened; Martin asked for it to stay
@@ -338,11 +339,16 @@ tool bar and the split view are untouched.
   his own rule of 30 Oct, and a thumb scrolling this page must not be able to
   move a stop. They move on ScalpPro, as they always have without the switch.
   The desktop's tool bar keeps its ⚡ button and everything it switches on.
-- **App Diagnostics ends above the bar** (v310). The panel the Diag tab opens
-  used to run down behind the row of five and the Option Chain / ScalpPro
-  buttons. It now stops 8px above them (the bar's real height is measured, not
-  assumed), so its last row can be read and every button under it is pressed
-  as usual.
+- **App Diagnostics is a screen of its own** (v314). The panel the Diag tab
+  opens runs from under the app header to 8px above the app's bottom bar on
+  every page — the chart page too, where it is drawn over the chart's own tool
+  bar (the row of five and Option Chain | ScalpPro) — on a plain sheet of the
+  app's background, in a frame of its own, so its foot is seen to end above
+  the bottom bar. The bottom bar is never covered: Diag closes it and every
+  tab works. (Through v313 it stopped at the chart's tool bar, where its
+  readout was cut off and looked as though it carried on under the buttons;
+  Martin asked twice for it to show above them.) Desktop keeps the floating
+  card.
 - **The bar does not jump when you come back from Home** (v310). The page fades
   in, and the fade the animation library gives starts from a transform — which
   makes the page, for that half second, the box its fixed bar is placed
