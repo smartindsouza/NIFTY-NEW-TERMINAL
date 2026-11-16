@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect, useLayoutEffect } from "react";
 import { useTodayBias, isRecord as isBiasRecord, istToday as biasIstToday, BIAS_LINES_KEY, useBiasCardHidden } from "../lib/bias";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, ChevronsUp, ChevronsDown, ChevronRight, Scale, Search, ChartNoAxesCombined, TrendingUp, Star, Bell, ClipboardPen } from "lucide-react";
+import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, ChevronsUp, ChevronsDown, ChevronRight, Copy, Trash2, Scale, Search, ChartNoAxesCombined, TrendingUp, Star, Bell, ClipboardPen } from "lucide-react";
 import MyOrderModal from "../components/MyOrderModal";
 import { TradeGuardButton } from "../components/TradeGuard";
 import { toast } from "sonner";
@@ -1227,6 +1227,8 @@ const phoneAxisPrice = (p: number): string => {
 // Wide enough for the app's own last-price badge ("25210.95", bold) at the phone
 // axis size, so the badge is never clipped when every tick label is shorter.
 const PHONE_AXIS_MIN_WIDTH = 52;
+// Colours offered for a hand-drawn line. The first is what a new line gets.
+const LINE_TOOL_COLORS = ['#facc15', '#e5e7eb', '#f43f5e', '#10b981', '#3b82f6', '#a855f7', '#f97316', '#06b6d4'];
 
 const hexToRgba = (hex: string, alpha: number) => {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -5320,6 +5322,24 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   useEffect(() => {
     manualLineIdsRef.current = manualLineIds;
   }, [manualLineIds]);
+  // HIS OWN LINES, THE LEMONN WAY (16 Nov 2026). Martin: "the tap and hold on
+  // the chart pops up a plus sign to add a line and move it easily up and down."
+  // The plus was already there after a long press; what was missing is the
+  // second half. A line just added, or tapped, is now SELECTED: it grows a
+  // handle in the middle to drag it by, and a small bar of tools appears —
+  // colour, thickness, copy, the full editor, delete. A tap anywhere else lets
+  // go of it.
+  const [selectedLineId, setSelectedLineId] = useState<number | null>(null);
+  const selectedLineIdRef = useRef<number | null>(null);
+  selectedLineIdRef.current = selectedLineId;
+  const [lineToolPop, setLineToolPop] = useState<null | 'color' | 'width'>(null);
+  const lineHandleRef = useRef<HTMLDivElement | null>(null);
+  // A LINE BELONGS TO THE CHART IT WAS DRAWN ON. They were one list shown on
+  // every chart, so a level drawn on NIFTY also sat on BANKNIFTY and on every
+  // option chart whose prices happened to reach it. New lines carry the
+  // instrument they were drawn on and show only there. Lines from before this
+  // have no such mark and keep showing everywhere, as they always did.
+  const lineIsHere = (l: any) => !l?.token || String(l.token) === String(instrumentTokenRef.current);
   
   const [editingLineId, setEditingLineId] = useState<number | null>(null);
   const [isEditingPdhPdl, setIsEditingPdhPdl] = useState(false);
@@ -7092,9 +7112,16 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       }
     }
 
+    // His own lines. With a MOUSE any of them can be picked up where the pointer
+    // is. With a FINGER only the selected one can: an unselected line used to
+    // take the press too, so a swipe to scroll that began near any line moved
+    // the line instead. Tap a line to select it (the tap is seen by the chart's
+    // click, below in the chart build), then drag it or its handle.
+    const byFinger = e.pointerType !== 'mouse';
     let foundLineId = null;
     for (let i = 0; i < manualLinesRef.current.length; i++) {
         const line = manualLinesRef.current[i];
+        if (byFinger && line.id !== selectedLineIdRef.current) continue;
         const lineY = mainSeriesRef.current.priceToCoordinate(line.price);
         if (lineY !== null && Math.abs(lineY - y) < 15) {
             foundLineId = line.id;
@@ -7124,7 +7151,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     // distance from the thumb it had when grabbed, so it tracks rather than jumps.
     const anchoredY = y + (draggingLineRef.current.grabOffset || 0);
     const rawPrice = mainSeriesRef.current.coordinateToPrice(anchoredY);
-    const newPrice = rawPrice === null ? null : snapTick(rawPrice);
+    // Rounded as well as snapped: 505236 ticks of 0.05 is 25261.800000000003, and
+    // that is what was being saved.
+    const newPrice = rawPrice === null ? null : +snapTick(rawPrice).toFixed(2);
 
     // The SL/TP and spot-mirror move branches are gone: those drags run on
     // document listeners now (startExitLineDrag), so they never depend on the
@@ -7164,6 +7193,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         if (lineObj && draggingLineRef.current.dragged) {
             setManualLineIds(prev => prev.map(l => l.id === id ? { ...l, price: lineObj.price } : l));
         }
+        // A press on a line that did not move it is a tap on it: select it. (The
+        // chart's own click never sees this one — it stands down while a line is
+        // held, so that a drag is not also read as a tap.)
+        if (lineObj) { setSelectedLineId(id); setLineToolPop(null); }
         
         mainChartRef.current.applyOptions({
            handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
@@ -7179,23 +7212,178 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     }
   };
 
-  const handleAddManualLine = () => {
-    if (crosshairInfo && mainSeriesRef.current) {
-        const price = crosshairInfo.price;
-        const newPriceLine = mainSeriesRef.current.createPriceLine({
-            price: price,
-            color: '#facc15',
-            lineWidth: 2,
-            lineStyle: 0,
-            axisLabelVisible: true,
-            title: '',
-        });
-        const id = Date.now() + Math.random();
-        manualLinesRef.current.push({ id, price: price, instance: newPriceLine, color: '#facc15', lineWidth: 2, axisLabelVisible: true, lineStyle: 0, alertOn: false });
-        setManualLineIds(prev => [...prev, { id, price, color: '#facc15', lineWidth: 2, axisLabelVisible: true, lineStyle: 0, alertOn: false }]);
-        setCrosshairInfo(null);
+  // The price lines on the chart are kept in step with the list, whichever way
+  // the list changed: added here, edited in the tool bar, changed in the other
+  // half of a split view. Create what is missing, update what differs, remove
+  // what has gone or belongs to another chart.
+  const syncLineInstances = (list: any[]) => {
+    const ser = mainSeriesRef.current;
+    if (!ser) return;
+    const want = list.filter(lineIsHere);
+    const have = manualLinesRef.current;
+    for (const h of [...have]) {
+      if (want.some((w) => w.id === h.id)) continue;
+      try { ser.removePriceLine(h.instance); } catch (e) {}
+      have.splice(have.indexOf(h), 1);
+    }
+    for (const w of want) {
+      const opts = { price: w.price, color: w.color || '#facc15', lineWidth: w.lineWidth || 1, lineStyle: w.lineStyle || 0,
+                     axisLabelVisible: w.axisLabelVisible ?? true, title: w.title || '' };
+      const h = have.find((x) => x.id === w.id);
+      if (h) {
+        // A line under a finger keeps the price the finger gave it; the list
+        // catches up when the finger lifts.
+        const held = lineDragIdRef.current === w.id || draggingLineRef.current?.id === w.id;
+        const inst = h.instance;
+        Object.assign(h, w, held ? { price: h.price } : null, { instance: inst });
+        try { inst.applyOptions(held ? { ...opts, price: h.price } : opts); } catch (e) {}
+      } else {
+        try { have.push({ ...w, instance: ser.createPriceLine(opts as any) }); } catch (e) {}
+      }
     }
   };
+  useEffect(() => { syncLineInstances(manualLineIds); }, [manualLineIds]);
+  // Both halves of a split view keep their own copy of the list and both save
+  // it under the one key — so a line added in one half was dropped the next time
+  // the other half saved its older copy. A change in one is now handed to the
+  // other at once.
+  useEffect(() => {
+    try { window.dispatchEvent(new CustomEvent('terminal:lines-changed', { detail: { from: paneRole || 'single', lines: manualLineIds } })); } catch (e) {}
+  }, [manualLineIds]);
+  useEffect(() => {
+    const onLines = (ev: any) => {
+      const d = ev?.detail;
+      if (!d || d.from === (paneRole || 'single') || !Array.isArray(d.lines)) return;
+      setManualLineIds((prev) => (JSON.stringify(prev) === JSON.stringify(d.lines) ? prev : d.lines));
+    };
+    window.addEventListener('terminal:lines-changed', onLines as any);
+    return () => window.removeEventListener('terminal:lines-changed', onLines as any);
+  }, []);
+
+  const handleAddManualLine = () => {
+    if (crosshairInfo && mainSeriesRef.current) {
+        const price = +snapTick(crosshairInfo.price).toFixed(2);
+        const id = Date.now() + Math.random();
+        // Thin, like the indicator lines. The price line itself is created by
+        // the sync above, from the list.
+        setManualLineIds(prev => [...prev, { id, price, color: '#facc15', lineWidth: 1, axisLabelVisible: true, lineStyle: 0, alertOn: false,
+                                              token: String(instrumentTokenRef.current ?? '') }]);
+        setSelectedLineId(id);
+        setLineToolPop(null);
+        setCrosshairInfo(null);
+        // The library keeps its crosshair up after a long press until the next
+        // tap; with the line placed it has done its job.
+        try { mainChartRef.current?.clearCrosshairPosition(); } catch (e) {}
+    }
+  };
+  // ----- the selected line's tools -----
+  const lineDragIdRef = useRef<number | null>(null);
+  const patchSelectedLine = (patch: Record<string, any>) => {
+    const id = selectedLineIdRef.current;
+    if (id === null) return;
+    setManualLineIds(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
+  };
+  const deleteSelectedLine = () => {
+    const id = selectedLineIdRef.current;
+    if (id === null) return;
+    setManualLineIds(prev => prev.filter(l => l.id !== id));
+    setSelectedLineId(null);
+    setLineToolPop(null);
+  };
+  const copySelectedLine = () => {
+    const id = selectedLineIdRef.current;
+    const src = manualLineIdsRef.current.find((l) => l.id === id);
+    const ser = mainSeriesRef.current;
+    if (!src || !ser) return;
+    // The copy lands a finger's width above, so it can be seen and picked up.
+    let price = Number(src.price);
+    try {
+      const y = ser.priceToCoordinate(price);
+      const up = y === null ? null : ser.coordinateToPrice(Math.max(4, (y as number) - 14));
+      if (up !== null && Number.isFinite(Number(up))) price = +snapTick(Number(up)).toFixed(2);
+    } catch (e) {}
+    const nid = Date.now() + Math.random();
+    setManualLineIds(prev => [...prev, { ...src, id: nid, price, alertOn: false }]);
+    setSelectedLineId(nid);
+    setLineToolPop(null);
+  };
+  // Dragging by the handle. Document listeners, like the SL/TP chips: the drag
+  // survives the finger leaving the handle or the chart.
+  const startLineHandleDrag = (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = selectedLineIdRef.current;
+    const ser = mainSeriesRef.current, cont = chartContainerRef.current, chart = mainChartRef.current;
+    const lineObj = manualLinesRef.current.find((l: any) => l.id === id);
+    if (id === null || !lineObj || !ser || !cont || !chart) return;
+    const lineY = ser.priceToCoordinate(lineObj.price);
+    if (lineY === null) return;
+    const grab = (lineY as number) - (e.clientY - cont.getBoundingClientRect().top);
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch (err) {}
+    lineDragIdRef.current = id;
+    setLineToolPop(null);
+    const move = (ev: PointerEvent) => {
+      const rect = cont.getBoundingClientRect();
+      let paneH = rect.height;
+      try { paneH = rect.height - (chart.timeScale().height() || 26); } catch (err) {}
+      const y = Math.max(2, Math.min(paneH - 2, ev.clientY - rect.top + grab));
+      const raw = ser.coordinateToPrice(y);
+      if (raw === null) return;
+      const p = +snapTick(Number(raw)).toFixed(2);
+      if (p === lineObj.price) return;
+      lineObj.price = p;
+      try { lineObj.instance.applyOptions({ price: p }); } catch (err) {}
+    };
+    const end = () => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', end);
+      document.removeEventListener('pointercancel', end);
+      lineDragIdRef.current = null;
+      const p = lineObj.price;
+      setManualLineIds(prev => prev.map(l => l.id === id ? { ...l, price: p } : l));
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', end);
+    document.addEventListener('pointercancel', end);
+  };
+  // The handle sits on the middle of its line; placed each frame while a line
+  // is selected (the line moves with every pan, zoom and tick).
+  useEffect(() => {
+    if (selectedLineId === null) return;
+    let raf = 0, stopped = false;
+    const frame = () => {
+      if (stopped) return;
+      try {
+        const el = lineHandleRef.current, ser = mainSeriesRef.current, chart = mainChartRef.current, cont = chartContainerRef.current;
+        const lineObj = manualLinesRef.current.find((l: any) => l.id === selectedLineIdRef.current);
+        if (el) {
+          let y: number | null = null, plotW = 0, plotH = 0;
+          if (lineObj && ser && chart && cont) {
+            plotW = cont.clientWidth - (chart.priceScale('right').width() || 0);
+            plotH = cont.clientHeight - (chart.timeScale().height() || 26);
+            const yy = ser.priceToCoordinate(lineObj.price);
+            y = yy === null || (yy as number) < 4 || (yy as number) > plotH - 4 ? null : (yy as number);
+          }
+          if (y === null) { if (el.style.display !== 'none') el.style.display = 'none'; }
+          else {
+            if (el.style.display !== 'block') el.style.display = 'block';
+            const t = `translate(${Math.round(plotW / 2)}px, ${Math.round(y)}px) translate(-50%, -50%)`;
+            if (el.style.transform !== t) el.style.transform = t;
+          }
+        }
+      } catch (e) {}
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => { stopped = true; cancelAnimationFrame(raf); };
+  }, [selectedLineId]);
+  // A selection that no longer points at a line on this chart (deleted, or the
+  // chart changed to another instrument) is let go.
+  useEffect(() => {
+    if (selectedLineId === null) return;
+    const l = manualLineIds.find((x) => x.id === selectedLineId);
+    if (!l || !lineIsHere(l)) { setSelectedLineId(null); setLineToolPop(null); }
+  });
 
   // ===== Phase 2: SL/Target auto-exit lines =====
 
@@ -10226,6 +10414,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     // so it carries `always` and the detector honours it on its own.
     for (const ln of manualLineIds) {
       if (!ln?.alertOn) continue;
+      if (ln.token && String(ln.token) !== String(instrumentToken)) continue;   // another chart's line
       add(`ml${ln.id}`, ln.title?.trim() || `Line ${Math.round(Number(ln.price) || 0)}`, ln.price);
       const last = L[L.length - 1];
       if (last && last.key === `ml${ln.id}`) (last as any).always = true;
@@ -10906,11 +11095,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
     manualLinesRef.current = [];
     manualLineIdsRef.current.forEach(line => {
+      if (line?.token && String(line.token) !== String(instrumentToken)) return;   // drawn on another chart
       try {
         const newPriceLine = mainSeries.createPriceLine({
           price: line.price,
           color: line.color || '#facc15',
-          lineWidth: line.lineWidth || 2,
+          lineWidth: line.lineWidth || 1,
           lineStyle: line.lineStyle || 0,
           axisLabelVisible: line.axisLabelVisible ?? true,
           title: line.title || '',
@@ -10943,6 +11133,16 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         if (draggingLineRef.current) return; // Prevent click action right after dragging
         if (param.point) {
           const y = param.point.y;
+
+          // HIS OWN LINES come first. A tap on one selects it (handle and tools
+          // appear); with one selected, a tap anywhere else only lets go of it.
+          // Both END the tap here: it must not go on to be read as a tap on the
+          // chart, which with Quick Trade on opens an order ticket.
+          for (const l of manualLinesRef.current) {
+            const ly = mainSeries.priceToCoordinate(l.price);
+            if (ly !== null && Math.abs((ly as number) - y) < 12) { setSelectedLineId(l.id); setLineToolPop(null); return; }
+          }
+          if (selectedLineIdRef.current !== null) { setSelectedLineId(null); setLineToolPop(null); return; }
 
           // Check PDH/PDL click
           if (showPdhPdl && intradayLevelsAllowed && !isOptionView && pdhPrice !== null && pdlPrice !== null) {
@@ -13011,7 +13211,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 // chart's right edge (right-[65px] w-5), so the pill's right edge
                 // goes 8px left of the button's left edge — anchored to where the
                 // button actually is rather than nudged by eye.
-                const PLUS_RIGHT = 65, PLUS_W = 20, GAP = 8;   // w-5, matched to the pill
+                // (20px wide and 65px in on a desktop; a 28px thumb target 60px in on a phone.)
+                const onPhone = isPhoneChart();
+                const PLUS_RIGHT = onPhone ? 60 : 65, PLUS_W = onPhone ? 28 : 20, GAP = 8;
                 const rightEdge = Math.min(x - GAP, cw - PLUS_RIGHT - PLUS_W - GAP);
                 const px = Math.max(4, rightEdge - pw);
                 const py = crossY - ph / 2;
@@ -14863,6 +15065,73 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 </div>
               );
             })()}
+            {/* THE SELECTED LINE'S HANDLE AND TOOLS (see HIS OWN LINES, THE LEMONN
+                WAY). Over the chart and outside its container, like the trade chips,
+                so a press on a tool is never a press on the chart. z-[42]: just
+                above the trade chips. */}
+            {(() => {
+              const sel = selectedLineId === null ? null : manualLineIds.find((l) => l.id === selectedLineId && lineIsHere(l));
+              if (!sel) return null;
+              const col = sel.color || '#facc15';
+              const w = Number(sel.lineWidth) || 1;
+              const tool = 'h-8 w-8 rounded-md flex items-center justify-center text-foreground/80 hover:bg-foreground/10 active:bg-foreground/15';
+              return (
+                <div className="absolute inset-0 z-[42] pointer-events-none overflow-hidden select-none" data-line-tools=""
+                  style={{ fontFamily: chartFontFamily(settings.customFontUrl) }}>
+                  <div
+                    ref={lineHandleRef}
+                    data-line-handle=""
+                    onPointerDown={startLineHandleDrag}
+                    title="Drag to move the line"
+                    // Padding = the touch target; the visible handle is 30 x 18.
+                    className="absolute left-0 top-0 pointer-events-auto p-3 cursor-ns-resize"
+                    style={{ display: 'none', touchAction: 'none', willChange: 'transform' }}
+                  >
+                    <div className="h-[18px] w-[30px] rounded-[6px] bg-white shadow-md flex flex-col items-center justify-center gap-[2.5px]" style={{ border: `1.5px solid ${col}` }}>
+                      {[0, 1, 2].map((i) => <span key={i} className="block h-[1.5px] w-3.5 rounded-full" style={{ background: col }} />)}
+                    </div>
+                  </div>
+                  <div className="absolute top-2 left-2 pointer-events-auto" data-line-toolbar="">
+                    <div className="flex items-center gap-0.5 h-10 px-1 rounded-lg border border-border bg-card/95 shadow-lg backdrop-blur-sm">
+                      <button type="button" data-line-tool="color" title="Colour" className={tool}
+                        onClick={() => setLineToolPop((v) => (v === 'color' ? null : 'color'))}>
+                        <span className="block h-[18px] w-[18px] rounded-[5px] border border-white/30" style={{ background: col }} />
+                      </button>
+                      <button type="button" data-line-tool="width" title="Thickness"
+                        className="h-8 px-2 rounded-md flex items-center gap-1 text-[12px] font-semibold text-foreground/90 hover:bg-foreground/10 active:bg-foreground/15"
+                        onClick={() => setLineToolPop((v) => (v === 'width' ? null : 'width'))}>
+                        {w}px <ChevronDown size={13} className="opacity-70" />
+                      </button>
+                      <button type="button" data-line-tool="copy" title="Copy this line" className={tool} onClick={copySelectedLine}><Copy size={16} /></button>
+                      <button type="button" data-line-tool="more" title="Price, style, label and alert" className={tool}
+                        onClick={() => { setLineToolPop(null); setEditingLineId(sel.id); }}><SlidersHorizontal size={16} /></button>
+                      <button type="button" data-line-tool="delete" title="Delete this line" className={`${tool} text-rose-400`} onClick={deleteSelectedLine}><Trash2 size={16} /></button>
+                    </div>
+                    {lineToolPop === 'color' && (
+                      <div className="mt-1 inline-flex items-center gap-1.5 p-1.5 rounded-lg border border-border bg-card/95 shadow-lg backdrop-blur-sm">
+                        {LINE_TOOL_COLORS.map((c) => (
+                          <button key={c} type="button" data-line-color={c} title={c}
+                            className={`h-7 w-7 rounded-md border ${c.toLowerCase() === String(col).toLowerCase() ? 'border-white ring-1 ring-white/60' : 'border-white/20'}`}
+                            style={{ background: c }}
+                            onClick={() => { patchSelectedLine({ color: c }); setLineToolPop(null); }} />
+                        ))}
+                      </div>
+                    )}
+                    {lineToolPop === 'width' && (
+                      <div className="mt-1 inline-flex items-center gap-1 p-1 rounded-lg border border-border bg-card/95 shadow-lg backdrop-blur-sm">
+                        {[1, 2, 3, 4].map((px) => (
+                          <button key={px} type="button" data-line-width={px}
+                            className={`h-8 px-2.5 rounded-md text-[12px] font-semibold ${px === w ? 'bg-primary/25 text-primary' : 'text-foreground/85 hover:bg-foreground/10'}`}
+                            onClick={() => { patchSelectedLine({ lineWidth: px }); setLineToolPop(null); }}>
+                            {px}px
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
             {showJumpToLatest && !chartOverlayOpen && (
               <button
                 onClick={() => {
@@ -14903,7 +15172,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 // had last been. 45 still clears the overlay canvases (30/31) and
                 // the armed-order chips (40), and sits under the nav bar and every
                 // sheet and dialog (50 and up).
-                className="absolute right-[65px] w-5 h-5 rounded-full flex items-center justify-center z-[45] transition-opacity hover:opacity-80"
+                // 20px matches the desktop pill beside it; on a phone it is a 28px
+                // circle (a thumb target), as the Lemonn chart's is.
+                className="absolute right-[60px] md:right-[65px] w-7 h-7 md:w-5 md:h-5 rounded-full flex items-center justify-center z-[45] transition-opacity hover:opacity-80"
                 style={{
                   top: `${crosshairInfo.y}px`,
                   transform: 'translateY(-50%)', // Center vertically
@@ -14913,7 +15184,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   color: resolvedTheme === 'light' ? '#0f172a' : '#e2e8f0',
                 }}
               >
-                <Plus size={12} strokeWidth={2.5} />
+                <Plus size={isPhoneChart() ? 16 : 12} strokeWidth={2.5} />
               </button>
             )}
             {slPanelOpen && slActivePos && (

@@ -244,3 +244,22 @@ to thin and solid **once** per device (`indicatorLinesThin` in localStorage, set
 at the top of `src/pages/AdvancedChart.tsx`), including each split-view half's
 own copy; anything restyled after that stays as set.
 
+## Chart: your own lines (tap and hold, plus, drag)
+
+`src/pages/AdvancedChart.tsx` ("HIS OWN LINES, THE LEMONN WAY").
+
+- **Add:** tap and hold on the chart, then tap the round **+** beside the price
+  axis (hover and click it on a desktop). The line is thin and yellow and goes
+  where the crosshair was.
+- **A line that is selected** (just added, or tapped) shows a handle in the
+  middle and a small bar of tools at the top left: colour, thickness (1-4px),
+  copy, the full editor (price, style, label, alert) and delete. A tap anywhere
+  else lets go of it.
+- **Move:** drag the handle, or the selected line itself. With a mouse any line
+  can be dragged directly. With a finger only the selected one can, so a swipe
+  that starts near a line scrolls the chart instead of moving the line.
+- **A line belongs to the chart it was drawn on.** Lines made before 16 Nov 2026
+  carry no chart and still show on every chart, as they always did.
+- The two halves of a split view share the list as it changes (they used to
+  overwrite each other's additions).
+
