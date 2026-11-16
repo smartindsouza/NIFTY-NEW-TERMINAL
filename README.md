@@ -182,3 +182,15 @@ after a restart, or if that read fails for five minutes, it shows the near-strik
 totals and says "strikes near spot". Everything that decides — the Home decision,
 PCR Context, max pain, the zones — still uses the strikes near spot.
 Test: `npx tsx server/analytics_engine.test.ts`.
+
+## Chart: price range fits itself, compact axes on phones
+
+`src/pages/AdvancedChart.tsx`. The price scale **auto-fits** the candles on screen,
+so scrolling back in time or zooming never leaves them off the top or bottom of
+the pane. The rules are the charting library's (and TradingView's): while auto-fit
+is on, a vertical drag in the chart body does nothing; **dragging the price axis**
+takes over by hand (the body can then be dragged up and down too); a double-tap on
+the axis, the jump-to-latest button or a reload hands it back.
+On phones (under 768px wide) both axes are drawn at 10px, the price axis is 52px
+wide, and tick labels drop ".00" — sizes measured off the Lemonn app. Desktop text
+is unchanged. The indicators list closes on a tap anywhere on the chart.

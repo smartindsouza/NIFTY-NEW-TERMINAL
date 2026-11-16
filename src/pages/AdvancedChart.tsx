@@ -1157,6 +1157,31 @@ const chartFontFamily = (customFontUrl: string) =>
   (customFontUrl ? "'UserCustomFont', " : '') +
   "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
 
+// COMPACT AXES ON PHONES (16 Nov 2026). Martin put this chart beside the Lemonn
+// app's and asked for its axis text: "smaller fonts to fit the screen and avoid
+// wastage of space". Measured off his recording, Lemonn draws both axes at 10px
+// and its price axis is 50px wide on a 430px screen; this chart used the
+// library's default 12px, whose "25350.00" labels made the axis ~70px — nearly a
+// fifth of a phone's width given to numbers. Phones only: on a desktop there is
+// room, and nothing there changes.
+const isPhoneChart = () => typeof window !== 'undefined' && window.innerWidth < 768;
+const axisFontPx = () => (isPhoneChart() ? 10 : 12);
+// Axis labels on phones: no ".00" on a whole number ("25350", as Lemonn shows
+// it), and at most one decimal on an index-sized price — so the widest label an
+// index chart can produce is seven characters and the axis keeps ONE width
+// whether or not the crosshair is up. Without that cap the crosshair's
+// "25275.71" would widen the axis and shove the candles sideways on every
+// long-press. Option premiums keep their paise.
+const phoneAxisPrice = (p: number): string => {
+  if (!Number.isFinite(p)) return '';
+  if (Math.abs(p) >= 10000) { const r = Math.round(p * 10) / 10; return Number.isInteger(r) ? String(r) : r.toFixed(1); }
+  const r = Math.round(p * 100) / 100;
+  return Number.isInteger(r) ? String(r) : r.toFixed(2);
+};
+// Wide enough for the app's own last-price badge ("25210.95", bold) at the phone
+// axis size, so the badge is never clipped when every tick label is shorter.
+const PHONE_AXIS_MIN_WIDTH = 52;
+
 const hexToRgba = (hex: string, alpha: number) => {
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
@@ -6783,18 +6808,18 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // External "reload chart" button (in the app shell) → refetch full history and
   // snap the view back to the latest candle. Fixes a chart that's scrolled away or
   // stuck on stale data on mobile without a full app refresh.
-  // Jumping back to the latest candle used to land on empty space: the main price
-  // scale is created with autoScale:false (so the vertical range stays put while
-  // you pan), which means it keeps whatever range the PAST view had and the recent
-  // candles can sit far outside it. Refit once, then hand the scale back to manual
-  // so panning behaves exactly as before.
+  // Hands the price scale back to auto-fit. The scale auto-fits by default now
+  // (see rightPriceScale where the chart is built), so this only matters after
+  // Martin has dragged the price axis to scale it by hand: jump-to-latest and
+  // reload both mean "show me the market", and that includes the price range.
+  // It used to refit once and then switch auto OFF again 150ms later, because
+  // the scale was manual by design; that second half is gone with the design.
   const refitPriceScaleRef = useRef<() => void>(() => {});
   refitPriceScaleRef.current = () => {
     try {
       const ps = mainSeriesRef.current?.priceScale?.();
       if (!ps) return;
       ps.applyOptions({ autoScale: true });
-      setTimeout(() => { try { ps.applyOptions({ autoScale: false }); } catch (e) {} }, 150);
     } catch (e) {}
   };
 
@@ -10114,6 +10139,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         background: { type: ColorType.Solid, color: 'transparent' },
         textColor: palette.text,
         fontFamily: chartFontFamily(settings.customFontUrl),
+        fontSize: axisFontPx(),
       },
       grid: {
         vertLines: { color: palette.grid },
@@ -10208,6 +10234,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
           return `${weekday} ${day} ${month}, ${hour}:${minute} ${dayPeriod}`;
         },
+        ...(isPhoneChart() ? { priceFormatter: phoneAxisPrice } : {}),
       },
       handleScale: {
         axisPressedMouseMove: true,
@@ -10238,7 +10265,18 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       },
       rightPriceScale: {
         borderColor: palette.border,
-        autoScale: false,
+        // AUTO-FIT (16 Nov 2026). This was false "so the vertical range stays put
+        // while you pan" — which also meant that scrolling back in time slid the
+        // candles off the top or bottom of the pane, and only the reload button
+        // brought them back. Martin asked for what the Lemonn chart does: the
+        // price range follows whatever candles are on screen. That is the
+        // library's own auto-scale. Its rules, which are TradingView's too:
+        // while it is on, panning refits and a vertical drag in the chart body
+        // does nothing; dragging the price AXIS takes over by hand (auto goes
+        // off and the body can then be dragged up and down); a double-tap on the
+        // axis, the jump-to-latest button or the reload button hands it back.
+        autoScale: true,
+        ...(isPhoneChart() ? { minimumWidth: PHONE_AXIS_MIN_WIDTH } : {}),
       },
     });
 
@@ -11303,7 +11341,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             const priceScaleWidth = mainChartRef.current ? mainChartRef.current.priceScale('right').width() : 60;
             const badgeWidth = priceScaleWidth;
             const x = cw - priceScaleWidth;
-            const badgeHeight = 18;
+            // Sized with the axis text: 12px on a desktop as before, 10px on a
+            // phone (see COMPACT AXES ON PHONES), in a box to match.
+            const badgeFont = axisFontPx();
+            const badgeHeight = badgeFont === 12 ? 18 : 15;
             const spotY = y - badgeHeight / 2;
             const badgeY = y + badgeHeight / 2; 
 
@@ -11325,7 +11366,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             ctx.fillStyle = spotColor;
             ctx.fillRect(x, spotY, badgeWidth, badgeHeight);
             ctx.fillStyle = '#ffffff';
-            ctx.font = "bold 12px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
+            ctx.font = `bold ${badgeFont}px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(lastCandle.close.toFixed(2), x + badgeWidth / 2, spotY + badgeHeight / 2);
@@ -11350,7 +11391,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               // User said "keep the market closed background and the countdown to close background to match the spot price background"
               ctx.fillStyle = spotColor;
               ctx.fillRect(x, badgeY, badgeWidth, badgeHeight);
-              ctx.font = "12px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
+              ctx.font = `${badgeFont === 12 ? 12 : 9}px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif`;
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
 
@@ -13202,6 +13243,21 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 {/* Trend line over bars — the icon Martin picked for Indicators. */}
                 <ChartNoAxesCombined size={18} />
               </button>
+              {/* A TAP ON THE CHART CLOSES THE LIST (16 Nov 2026). The list already
+                  closed on an outside "mousedown" — but the chart cancels its own
+                  touches so the page does not scroll under a pan, and a cancelled
+                  touch never becomes a mousedown. So on a phone a tap on the
+                  chart, which is most of the screen, left the list open. On
+                  phones a see-through layer now sits behind the list: the tap
+                  lands on it, closes the list and goes no further — it must not
+                  also reach the chart, where with Quick Trade on a tap means
+                  something. Desktop is unchanged (the mousedown handler works
+                  there, and a click outside should still reach what it hit). */}
+              {isIndicatorsOpen && (
+                <div className="fixed inset-0 z-[44] md:hidden" aria-hidden="true"
+                  onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setIsIndicatorsOpen(false); }}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); }} />
+              )}
               {isIndicatorsOpen && (
                 <div className="fixed md:absolute inset-x-0 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+3.25rem)] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto md:overflow-hidden bg-card border-y border-white/10 md:border-0 rounded-none md:rounded-md py-1.5 z-[45] shadow-2xl flex flex-col">
                   <div className="order-0 px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase">Available Indicators</div>
