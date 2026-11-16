@@ -291,11 +291,16 @@ the chart page is laid out the way the Lemonn chart screen is. Every control
 runs the code its old button ran — only where it is has changed. The desktop
 tool bar and the split view are untouched.
 
-- **Header:** a back arrow (the screen you came from, or Home), the chart's name
-  (the index and option choosers), and a search button that opens the symbol
-  search in the header with its results below. Under it, the live price with the
-  day's change (against the last close of the previous session) and the clock.
-  The "Advanced Trading Chart" title row is gone on a phone.
+- **Header:** a search button at the left, which opens the symbol search in the
+  header with its results below, and the chart's name (the index and option
+  choosers). Under it, the live price with the day's change (against the last
+  close of the previous session) and the clock. The "Advanced Trading Chart"
+  title row is gone on a phone.
+  - **No back arrow** (v312). It stood at the left until Martin had it removed
+    and search moved into its place; the app's bottom bar goes everywhere it
+    went. The tab beside it is where it was and as wide as it was (he asked for
+    its width to be kept), so the row's right end, where search used to be, is
+    empty. ScalpPro keeps its own back arrow.
   - **The two choosers are folder tabs** (v309; Martin, of ScalpPro's top row:
     "Use the same design at the top for the main nifty screen"). The chart on
     screen is the tab, in the chart's own colour, so the tab, the price under
@@ -560,6 +565,17 @@ whatever was on for NIFTY was drawn over an option's premium too.
 - Session breaks — a style with its own editor, not a plain switch — are kept
   the same way: an option chart's start from their defaults, which are off.
 
+## Charts carry no TradingView mark
+
+The charts are drawn with TradingView's Lightweight Charts. The library puts its
+mark in the corner of each chart; since v312 it does not (`attributionLogo:
+false` in the options both charts are made from, `src/pages/AdvancedChart.tsx`)
+— Martin asked for the marks to go, as on Lemonn's charts. The library's licence
+asks for its notice and a link to tradingview.com on a page of the app, and the
+mark was how it carried them, so they are now a line at the foot of the Control
+page (`src/pages/TerminalControl.tsx`, `data-credit="charts"`). **The two go
+together: do not remove that line without switching the mark back on.**
+
 ## The app's font is Manrope
 
 `src/index.css` (`--font-sans`, `--font-mono`), `index.html` (the font's
@@ -604,7 +620,9 @@ own copy; anything restyled after that stays as set.
 
 - **Add:** tap and hold on the chart, then tap the round **+** beside the price
   axis (hover and click it on a desktop). The line is thin and yellow and goes
-  where the crosshair was.
+  where the crosshair was. The + is a 20px circle on every screen (v312; a
+  phone's was 28px until Martin asked for it smaller); on a phone a touch up to
+  8px outside the circle still counts.
 - **A long press is the only thing that brings the + up on a phone, and it does
   not stay** (v309). The crosshair goes when the finger lifts; the + and the
   candle's O H L C / Vol line stay three and a half seconds more — long enough

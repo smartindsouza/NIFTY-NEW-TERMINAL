@@ -11894,6 +11894,15 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         textColor: scalp && resolvedTheme !== 'light' ? 'rgba(255, 255, 255, 0.66)' : palette.text,
         fontFamily: manropeReady() ? SCALP_CHART_FONT(settings.customFontUrl) : chartFontFamily(settings.customFontUrl),
         fontSize: axisFontPx(),
+        // NO TRADINGVIEW MARK ON ANY CHART (17 Nov 2026). Martin: "Remove the
+        // trading view icons from every chart like in the lemon charts." The
+        // mark is the library's way of carrying the link its licence asks for;
+        // the licence allows switching it off when the notice and the link are
+        // on a page of the app instead — they are at the foot of the Control
+        // page (src/pages/TerminalControl.tsx). Do not remove that line without
+        // putting this back. Both charts (price and RSI) are made from these
+        // options.
+        attributionLogo: false,
       },
       // NO GRID ON THE SCALPPRO CHARTS (16 Nov 2026). Martin, of Lemonn's screen:
       // "the scalp pro chart backgrounds does not have the repeating rectangles
@@ -14428,11 +14437,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // as they were. What has changed is WHERE things are, not what they do — each
   // control here runs the same code its old button did.
 
-  // The header's back arrow: the screen he came from, or Home when the chart is
-  // where the app was opened.
-  const goBackFromChart = () => {
-    try { if (window.history.length > 1) window.history.back(); else window.location.assign('/'); } catch (e) {}
-  };
+  // (The header had a back arrow until 17 Nov 2026, when Martin had it removed;
+  // search stands where it was. The app's bottom bar goes everywhere it went.)
   // THE PRICE IN THE HEADER. Written straight into the page a few times a second
   // from the same live candle the chart draws — not through React state, which
   // would re-render this whole page on every tick for one line of text.
@@ -15520,13 +15526,30 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               by the two panes happening to contain the same things. */}
           {isOptionPane && split && <div className="hidden md:block h-9 shrink-0" aria-hidden="true" />}
 
-          {/* PHONE HEADER, left: back to the screen he came from. */}
-          {!isPane && (
-            <button type="button" onClick={goBackFromChart} aria-label="Back" title="Back" data-head="back"
-              className="md:hidden shrink-0 h-11 w-9 -mr-1 flex items-center justify-center text-foreground active:opacity-60">
-              <ArrowLeft size={27} strokeWidth={1.8} />
+          {/* PHONE HEADER, left: search (17 Nov 2026). Martin, of the back arrow
+              that stood here: "remove the back button shown in the screenshot"
+              and "Move the search button on the opposite side where the back
+              button is present" — the app's bottom bar already goes everywhere
+              the arrow went. The button is the arrow's own box (36px, the same
+              margins), so the tab beside it begins where it began: "Do not
+              increase the tab shaped top width ... Keep the width as it is".
+              The row's right end, where search was, is kept clear by a box of
+              the size search had there (data-head="tail"). Tapped, the button
+              gives way to the field, which opens in the header in place of the
+              chart's name with its results below, as it did from the right. */}
+          {!isPane && (phoneSearchOpen ? (
+            <div className="md:hidden flex-1 min-w-0 px-1.5 py-1" data-head="search-field" onPointerDown={(e) => e.stopPropagation()}>
+              <SymbolSearch autoOpen onClose={() => setPhoneSearchOpen(false)}
+                onSelect={(i) => { setSelectedInstrument(i); setPhoneSearchOpen(false); }}
+                currentSymbol={selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel} />
+            </div>
+          ) : (
+            <button type="button" onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(false); setPhoneSearchOpen(true); }}
+              aria-label="Search symbol" title="Search symbol" data-head="search"
+              className="md:hidden shrink-0 h-11 w-9 -mr-1 flex items-center justify-center text-foreground/90 active:opacity-60">
+              <Search size={19} />
             </button>
-          )}
+          ))}
 
           {/* Two dropdowns in place of the tab strip, on every size. Desktop had
               a scrolling strip of index tabs plus one tab per opened option chart,
@@ -15689,22 +15712,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             )}
           </div>
 
-          {/* PHONE HEADER, right: search. It was a field in the bottom tool bar,
-              where its results opened downwards off the screen; here it opens in
-              the header, in place of the chart's name, with its results below. */}
-          {!isPane && (phoneSearchOpen ? (
-            <div className="md:hidden flex-1 min-w-0 px-1.5 py-1" data-head="search-field" onPointerDown={(e) => e.stopPropagation()}>
-              <SymbolSearch autoOpen onClose={() => setPhoneSearchOpen(false)}
-                onSelect={(i) => { setSelectedInstrument(i); setPhoneSearchOpen(false); }}
-                currentSymbol={selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel} />
-            </div>
-          ) : (
-            <button type="button" onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(false); setPhoneSearchOpen(true); }}
-              aria-label="Search symbol" title="Search symbol" data-head="search"
-              className="md:hidden shrink-0 h-11 w-9 mr-0.5 flex items-center justify-center text-foreground/90 active:opacity-60">
-              <Search size={19} />
-            </button>
-          ))}
+          {/* PHONE HEADER, right: nothing — the room search had here (its 36px
+              box and 2px margin), left empty so the tab is no wider than it was. */}
+          {!isPane && !phoneSearchOpen && <div data-head="tail" className="md:hidden shrink-0 h-11 w-9 mr-0.5" aria-hidden="true" />}
 
           {/* The old tab strip is retired — the dropdowns above replace it on every
               size. Kept rendered but hidden rather than deleted in the same commit
@@ -17393,9 +17403,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 // had last been. 45 still clears the overlay canvases (30/31) and
                 // the armed-order chips (40), and sits under the nav bar and every
                 // sheet and dialog (50 and up).
-                // 20px matches the desktop pill beside it; on a phone it is a 28px
-                // circle (a thumb target), as the Lemonn chart's is.
-                className="absolute right-[60px] md:right-[65px] w-7 h-7 md:w-5 md:h-5 rounded-full flex items-center justify-center z-[45] transition-opacity hover:opacity-80"
+                // 20px matches the desktop pill beside it. A phone's was a 28px
+                // circle; Martin, 17 Nov 2026: "reduce the size of the circle
+                // with a plus that appears after tap and hold the chart". It is
+                // 20px there too now. What a thumb can hit is not smaller: the
+                // ::before reaches 8px past the circle on every side (36px),
+                // on a phone only.
+                className="absolute right-[60px] md:right-[65px] w-5 h-5 rounded-full flex items-center justify-center z-[45] transition-opacity hover:opacity-80 max-md:before:content-[''] max-md:before:absolute max-md:before:-inset-2"
                 style={{
                   top: `${crosshairInfo.y}px`,
                   transform: 'translateY(-50%)', // Center vertically
@@ -17405,7 +17419,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   color: resolvedTheme === 'light' ? '#0f172a' : '#e2e8f0',
                 }}
               >
-                <Plus size={isPhoneChart() ? 16 : 12} strokeWidth={2.5} />
+                <Plus size={12} strokeWidth={2.5} />
               </button>
             )}
             {slPanelOpen && slActivePos && (

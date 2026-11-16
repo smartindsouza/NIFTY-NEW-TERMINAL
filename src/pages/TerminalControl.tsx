@@ -624,6 +624,18 @@ export default function TerminalControl() {
         </CardContent>
       </Card>
 
+      {/* THE CHART LIBRARY'S NOTICE. The charts are drawn with TradingView's
+          Lightweight Charts, whose licence asks for its notice and a link to
+          tradingview.com on a page of the app. The library can carry them
+          itself, as a mark in the corner of each chart; that mark is switched
+          off (attributionLogo in src/pages/AdvancedChart.tsx — Martin had it
+          removed from the charts on 17 Nov 2026), so they are here instead.
+          This line and that switch go together. */}
+      <p data-credit="charts" className="pt-2 text-center text-[11px] text-muted-foreground">
+        Charts: TradingView Lightweight Charts™ · Copyright (с) 2025 TradingView, Inc. ·{' '}
+        <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">tradingview.com</a>
+      </p>
+
     </div>
   );
 }
