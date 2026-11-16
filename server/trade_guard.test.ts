@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import express from 'express';
 import http from 'node:http';
-import { verdict, splitChange, normaliseRules, GUARD_DEFAULTS, registerTradeGuard, guardEntryBlock, istDate, __test } from './trade_guard';
+import { verdict, splitChange, normaliseRules, GUARD_DEFAULTS, registerTradeGuard, guardEntryBlock, istDate, countEntries, __test } from './trade_guard';
 
 const at = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); return Date.UTC(2026, 10, 11, h, m) - 5.5 * 3600e3; };
 const R = GUARD_DEFAULTS;
@@ -17,6 +17,44 @@ assert.match(verdict(R, at('11:00'), 1, -3000)!, /loss limit/);
 assert.equal(verdict({ ...R, enabled: false }, at('09:16'), 99, -99999), null);
 assert.equal(verdict(R, at('09:20'), 0, 0, true), null, 'ignoreTime lets My Order be armed early');
 assert.equal(verdict(R, at('10:30'), null, null), null, 'unreadable Kite never blocks on count/loss');
+
+// ── which of the day's orders count as entries ──
+{
+  const X = 'NIFTY26N1725300CE', Y = 'NIFTY26N1725300PE';
+  let seq = 0;
+  // an order that filled; `at` is minutes after 10:00, in the broker's own format
+  const o = (side: 'BUY' | 'SELL', sym: string, qty = 65, extra: any = {}) => {
+    const n = ++seq; const at = extra.at ?? n;
+    return { order_id: extra.id ?? `O${n}`, transaction_type: side, tradingsymbol: sym, exchange: extra.exch ?? 'NFO', filled_quantity: extra.filled ?? qty,
+      exchange_update_timestamp: `2026-11-16 10:${String(at).padStart(2, '0')}:00` };
+  };
+  assert.equal(countEntries([], []), 0);
+  assert.equal(countEntries([o('BUY', X), o('SELL', X), o('BUY', X), o('SELL', X)], []), 2, 'two round trips on the long side: two entries, the exits are not');
+  assert.equal(countEntries([o('BUY', X), o('BUY', X), o('SELL', X, 130)], []), 2, 'adding to a trade is an entry, as it always was');
+  assert.equal(countEntries([o('BUY', X), o('SELL', X, 30), o('SELL', X, 35)], []), 1, 'an exit in two parts is still an exit');
+  // the short side — what the old "count the buys" rule got wrong
+  assert.equal(countEntries([o('SELL', X)], []), 1, 'a sell from flat opens a short: an entry the moment it is opened');
+  assert.equal(countEntries([o('SELL', X), o('BUY', X)], []), 1, 'and buying it back is the exit, not a second entry');
+  assert.equal(countEntries([o('SELL', X), o('SELL', Y), o('SELL', X)], []), 3, 'shorts opened side by side all count (the old rule counted none of them)');
+  assert.equal(countEntries([o('BUY', X), o('SELL', X, 130)], []), 2, 'a sell bigger than the long turns it over: the exit and a new short in one order');
+  assert.equal(countEntries([o('SELL', X), o('BUY', X, 130), o('SELL', X)], []), 2, 'and the other way round; the last sell only closes');
+  // what was carried in overnight
+  assert.equal(countEntries([o('SELL', X)], [{ tradingsymbol: X, overnight_quantity: 65, quantity: 0 }]), 0, 'selling a long held from yesterday is an exit');
+  assert.equal(countEntries([o('BUY', X)], [{ tradingsymbol: X, overnight_quantity: -65, quantity: 0 }]), 0, 'covering a short held from yesterday is an exit (the old rule called it an entry)');
+  assert.equal(countEntries([o('SELL', X), o('BUY', X)], [{ tradingsymbol: X, overnight_quantity: 65, quantity: 65 }]), 1, 'out of yesterday\'s long, then a new one');
+  assert.equal(countEntries([o('SELL', X)], [{ tradingsymbol: X, product: 'NRML', overnight_quantity: 30 }, { tradingsymbol: X.toLowerCase(), product: 'MIS', overnight_quantity: 35 }]), 0, 'both products of one contract are one position');
+  assert.equal(countEntries([o('SELL', X)], null), 1, 'positions unreadable: the day is taken to have started flat');
+  // the Telegram auto-trader's orders move the position but are never counted
+  assert.equal(countEntries([o('BUY', X, 65, { id: 'TG1' }), o('SELL', X, 65, { id: 'TG2' }), o('BUY', X)], [], new Set(['TG1', 'TG2'])), 1, 'its exit is not read as a short of his');
+  assert.equal(countEntries([o('BUY', X, 65, { id: 'TG1' }), o('SELL', X)], [], new Set(['TG1'])), 0, 'closing the auto-trade by hand is an exit');
+  // what never counts
+  assert.equal(countEntries([o('BUY', X, 65, { filled: 0 }), o('BUY', 'INFY', 10, { exch: 'NSE' }), o('SELL', 'SENSEX26N1984000CE', 20, { exch: 'BFO' })], []), 1, 'unfilled and equity orders do not; BFO does');
+  // by the time they FILLED, not the time they were placed
+  const resting = [o('SELL', X, 130, { at: 30 }), o('BUY', X, 65, { at: 5 }), o('BUY', X, 65, { at: 7 })];
+  assert.equal(countEntries(resting, []), 2, 'a resting sell that filled last closes the two buys before it');
+  assert.equal(countEntries(resting.map(({ exchange_update_timestamp, ...r }) => r), []), 1, 'with no times the order book\'s own order is used');
+  assert.equal(countEntries([{ ...o('BUY', X), exchange_update_timestamp: new Date('2026-11-16T10:05:00+05:30') }, { ...o('SELL', X), exchange_update_timestamp: new Date('2026-11-16T10:09:00+05:30') }], []), 1, 'times given as Date objects (the broker library converts them)');
+}
 
 // ── normalise ──
 assert.equal(normaliseRules({ startTime: '8:00' }).startTime, '09:15');

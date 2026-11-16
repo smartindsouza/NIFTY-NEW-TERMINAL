@@ -195,6 +195,15 @@ that is held, an armed buy against a short. If the positions cannot be read a
 buy is treated as an entry and a sell is let through. The Telegram auto-trade
 has its own limits and is not touched.
 
+**What counts as one of the day's trades** (`countEntries`): every filled order
+on NFO / BFO that opened or added to a position — a buy from flat or on top of a
+long, a sell from flat or on top of a short, and an order bigger than the
+position it closes (it turns it over). An order that only brings a position back
+towards flat is an exit and is never counted. Each contract is followed through
+the day in the order its orders filled, starting from what was held overnight.
+Orders placed in the Kite app count; the Telegram auto-trade's do not. (Until
+v305 it was "filled buys", which missed a short until it was bought back.)
+
 `npx tsx server/trade_guard.test.ts`, `npx tsx server/triggers.test.ts`.
 
 ## Home: open-interest totals over every strike

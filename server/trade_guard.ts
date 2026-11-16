@@ -32,10 +32,16 @@
 // once, and a change that relaxes it (later start → earlier, more trades, bigger
 // loss limit, guard off) is saved and only takes effect the next trading day.
 //
-// COUNTING: "entries today" are today's filled BUY orders on NFO/BFO from Kite's
-// order book (so trades placed in the Kite app count too), minus the ones the
-// Telegram auto-trader placed. "Day P&L" is the whole account's, using the same
-// formula as the positions banner: (sell value − buy value) + qty × LTP.
+// COUNTING: "entries today" are today's filled orders on NFO/BFO from Kite's
+// order book that OPENED or added to a position — a buy from flat or on top of a
+// long, a sell from flat or on top of a short, and an order that turns a position
+// over (see countEntries) — so trades placed in the Kite app count too, minus the
+// ones the Telegram auto-trader placed. Until 16 Nov 2026 it was simply "filled
+// BUY orders", which is the same thing for a trader who only ever buys options;
+// the ScalpPro screen then put a one-tap Sell at Mkt on the phone, and a short
+// opened with it was not an entry until it was bought back — so shorts opened
+// side by side did not count at all. "Day P&L" is the whole account's, using the
+// same formula as the positions banner: (sell value − buy value) + qty × LTP.
 
 type GuardRules = { enabled: boolean; startTime: string; maxTrades: number; maxLoss: number };
 type Stored = { active: GuardRules; pending: Partial<GuardRules> | null; pendingFrom: string | null };
@@ -107,6 +113,46 @@ function telegramOrderIds(day: string): Set<string> {
   } catch { return new Set(); }
 }
 
+// HOW MANY OF TODAY'S ORDERS OPENED A TRADE. Pure, so it is tested directly.
+// Each contract's position is followed through the day, order by order in the
+// order they FILLED, starting from what was carried in overnight:
+//   • an order that takes the position away from flat, or further the way it
+//     already stands, is an entry (so adding to a trade counts, as it always has);
+//   • an order that only brings it back towards flat is an exit — never counted;
+//   • an order bigger than the position it closes turns it over: an entry.
+// Every filled order moves the position, the Telegram auto-trader's included —
+// leave its buy out and its own exit would read as a short being opened — but
+// its orders (`notHis`) are never counted. If the positions could not be read,
+// every contract is taken to have started the day flat. If any fill has no time
+// on it, the order book's own order (the order they were placed in) is used.
+export function countEntries(orders: any[], net: any[] | null, notHis: Set<string> = new Set()): number {
+  const pos = new Map<string, number>();
+  for (const p of net || []) {
+    const sym = String(p?.tradingsymbol || '').toUpperCase();
+    const q = Number(p?.overnight_quantity) || 0;
+    if (sym && q) pos.set(sym, (pos.get(sym) || 0) + q);
+  }
+  const when = (o: any): number | null => {
+    const t = o?.exchange_update_timestamp ?? o?.exchange_timestamp ?? o?.order_timestamp;
+    const ms = t instanceof Date ? t.getTime() : Date.parse(String(t ?? '').replace(' ', 'T'));
+    return Number.isFinite(ms) ? ms : null;
+  };
+  const fills = (orders || []).map((o, i) => ({ o, i, t: when(o) }))
+    .filter(x => (x.o?.exchange === 'NFO' || x.o?.exchange === 'BFO') && Number(x.o?.filled_quantity) > 0);
+  if (fills.every(x => x.t !== null)) fills.sort((a, b) => (a.t! - b.t!) || (a.i - b.i));
+  let n = 0;
+  for (const { o } of fills) {
+    const sym = String(o.tradingsymbol || '').toUpperCase();
+    const sign = String(o.transaction_type).toUpperCase() === 'SELL' ? -1 : 1;
+    const before = pos.get(sym) || 0;
+    const after = before + sign * (Number(o.filled_quantity) || 0);
+    pos.set(sym, after);
+    const opens = before === 0 || Math.sign(before) === sign || Math.sign(after) === sign;
+    if (opens && !notHis.has(String(o.order_id))) n++;
+  }
+  return n;
+}
+
 // net: the account's net positions as the broker returned them (null when they
 // could not be read) — what tells an armed order that opens from one that exits.
 type Measured = { entries: number | null; dayPnl: number | null; errors: string[]; net: any[] | null };
@@ -134,12 +180,8 @@ async function readBroker(): Promise<Measured> {
   if (!kc || !kc.access_token) errors.push('Zerodha not logged in');
   else {
     const day = istDate(Date.now());
-    try {
-      const orders: any[] = await kc.getOrders();
-      const tg = telegramOrderIds(day);
-      entries = orders.filter(o => o.transaction_type === 'BUY' && (o.exchange === 'NFO' || o.exchange === 'BFO')
-        && Number(o.filled_quantity) > 0 && !tg.has(String(o.order_id))).length;
-    } catch (e: any) { errors.push(`orders: ${e?.message || e}`); }
+    // The positions are read FIRST now: counting the entries needs to know what
+    // each contract started the day with (see countEntries).
     try {
       const pos = await kc.getPositions();
       const net: any[] = (pos && pos.net) || [];
@@ -150,6 +192,10 @@ async function readBroker(): Promise<Measured> {
         return s + ((isFinite(bv) && isFinite(sv)) ? (sv - bv) + (Number(p.quantity) || 0) * ltp * (Number(p.multiplier) || 1) : Number(p.pnl) || 0);
       }, 0));
     } catch (e: any) { errors.push(`positions: ${e?.message || e}`); }
+    try {
+      const orders: any[] = await kc.getOrders();
+      entries = countEntries(orders, netRows, telegramOrderIds(day));
+    } catch (e: any) { errors.push(`orders: ${e?.message || e}`); }
   }
   cache = { at: Date.now(), v: { entries, dayPnl, errors, net: netRows } };
   return cache.v;
