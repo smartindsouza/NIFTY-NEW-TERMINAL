@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect, useLayoutEffect } from "react";
 import { useTodayBias, isRecord as isBiasRecord, istToday as biasIstToday, BIAS_LINES_KEY, useBiasCardHidden } from "../lib/bias";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, Scale, Search, ChartNoAxesCombined, TrendingUp, Star, Bell, ClipboardPen } from "lucide-react";
+import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsRight, ChevronsUp, ChevronsDown, ChevronRight, Scale, Search, ChartNoAxesCombined, TrendingUp, Star, Bell, ClipboardPen } from "lucide-react";
 import MyOrderModal from "../components/MyOrderModal";
 import { TradeGuardButton } from "../components/TradeGuard";
 import { toast } from "sonner";
@@ -5325,7 +5325,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       if (ser) {
         slLinesRef.current.forEach((l: any) => { try { ser.removePriceLine(l.instance); } catch (e) {} });
         slLinesRef.current = [];
-        if (slEntryLineRef.current) { try { ser.removePriceLine(slEntryLineRef.current); } catch (e) {} slEntryLineRef.current = null; }
+        // The ENTRY line stays: it carries the chip row, which now reads
+        // "SL off · TP off" (see RUNNING FREE in the line drawing).
       }
       toast.success(`SL/TP removed — ${pos.symbol} is running free`);
     } catch (e: any) {
@@ -5848,6 +5849,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // happened to land.
   const TICK = 0.05;
   const snapTick = (p: number) => Math.round(p / TICK) * TICK;
+  const CHIP_DRAG_SLOP = 4;   // px a finger must travel before an SL/TP chip follows it
+  const EDGE_IN = 6;          // px from the top/bottom of the pane at which a held SL/TP line stops and the chart starts to slide
 
   // A vertical drag on a chart is also a page-scroll gesture. Without claiming
   // it the browser can take it mid-drag and the line stops following the finger —
@@ -5966,7 +5969,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   //
   // Movement writes straight to the price-line instance — lightweight-charts
   // repaints those itself, so there is no React work per move here either.
-  const exitDragRef = useRef<{ mode: 'sl' | 'smap'; kind: string; grabOffset: number; moved: boolean } | null>(null);
+  const exitDragRef = useRef<{ mode: 'sl' | 'smap'; kind: string; grabOffset: number; moved: boolean; startY?: number } | null>(null);
   exitDragRefForQt.current = exitDragRef;
   // Has the open trade reached its first target? A Telegram-managed trade: the
   // ladder's stage. Any other trade: the trailing engine has booked its half or
@@ -6010,17 +6013,29 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   };
   const startExitLineDrag = () => {
     // Hold the auto-fit where it is for the length of the drag (see THE OPEN
-    // TRADE STAYS ON SCREEN): the range must not move under the finger.
-    tradeFitFrozenRef.current = tradeFitLevels();
-    const move = (ev: PointerEvent) => {
+    // TRADE STAYS ON SCREEN): the range must not move under the finger. What is
+    // held is the range as drawn — its two ends, read back off the pane.
+    tradeFitFrozenRef.current = fittedEdgesNow() || tradeFitLevels();
+    let lastClientY: number | null = null;
+    let edgeLevel: number | null = null;       // the level the edge scroll last added to the frozen fit
+    // Put the held line at the price that is under the finger (clientY).
+    const applyAt = (clientY: number) => {
       const cont = chartContainerRef.current;
       const series = mainSeriesRef.current;
       const d = exitDragRef.current;
       if (!cont || !series || !d) return;
       const rect = cont.getBoundingClientRect();
-      const raw = series.coordinateToPrice(ev.clientY - rect.top + d.grabOffset);
+      // The line stops EDGE_IN px short of the top and bottom of the pane however
+      // far past them the finger goes; past that point it is the chart that
+      // moves (SCROLLING AT THE EDGE, below), with the line held at the edge.
+      let paneH = rect.height;
+      try { paneH = rect.height - (mainChartRef.current?.timeScale().height() || 26); } catch (e) {}
+      const yLine = Math.max(EDGE_IN, Math.min(paneH - EDGE_IN, clientY - rect.top + d.grabOffset));
+      const raw = series.coordinateToPrice(yLine);
       if (raw === null) return;
-      let newPrice = snapTick(raw);
+      // Never below one tick: with the chart sliding at the bottom edge the pane
+      // can run under zero, and a stop at -25 is not a stop.
+      let newPrice = Math.max(TICK, snapTick(raw));
       d.moved = true;
       if (d.mode === 'smap') {
         const ml = spotMapLinesRef.current.find(l => l.kind === d.kind);
@@ -6030,14 +6045,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         const estW = premiumForSpotLocal(newPrice);
         if (estW !== null && crossesEntryWall(d.kind === 'sl' ? 'SL' : 'TARGET', estW)) return;
         ml.price = newPrice;
-        const est = premiumForSpotLocal(newPrice);
-        const label = d.kind === 'sl' ? 'SL' : 'TARGET';
-        try {
-          ml.instance.applyOptions({
-            price: newPrice,
-            title: est !== null ? `${label} ≈ ₹${est.toFixed(2)}` : label,
-          });
-        } catch (e) {}
+        // Price only. The "≈ ₹" estimate is shown beside the chip, which reads
+        // it from the same local estimate every frame (layoutTradeChips).
+        try { ml.instance.applyOptions({ price: newPrice }); } catch (e) {}
         return;
       }
       const sl = slLinesRef.current.find((l: any) => l.kind === d.kind);
@@ -6052,20 +6062,81 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       if (sl.price === newPrice) return;
       sl.price = newPrice;
       const entry = slEntryRef.current;
-      try {
-        if (entry) {
-          const pct = ((newPrice - entry) / entry) * 100;
-          sl.instance.applyOptions({ price: newPrice, title: `${sl.label} ${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%` });
-        } else {
-          sl.instance.applyOptions({ price: newPrice });
-        }
-      } catch (e) {}
+      // The line carries its price only. Its words ("-10.4% · -₹812") live in
+      // sl.title and are shown beside the chip; writing them onto the price line
+      // as well is what printed every label twice after a drag — once by the
+      // chip and once crammed against the axis.
+      try { sl.instance.applyOptions({ price: newPrice }); } catch (e) {}
+      if (entry) { try { const t = exitTitleRef.current?.(sl.label, newPrice); if (t) sl.title = t; } catch (e) {} }
       // Off the traded option's chart these feed the spot exit panel, which is
       // React state — but only while there is no entry, so the live rule's own
       // chart still does zero React work per move.
       if (!entry) setSlLevels(prev => ({ ...prev, [d.kind]: Math.round(newPrice) }));
     };
+    const move = (ev: PointerEvent) => {
+      const d = exitDragRef.current;
+      if (!d) return;
+      // A PRESS IS NOT A DRAG. Any pointermove at all used to count, so the
+      // 2px a thumb wobbles while pressing re-armed the level two ticks away.
+      // The line stays put until the finger has travelled CHIP_DRAG_SLOP px.
+      if (!d.moved && d.startY !== undefined && Math.abs(ev.clientY - d.startY) < CHIP_DRAG_SLOP) return;
+      lastClientY = ev.clientY;
+      applyAt(ev.clientY);
+    };
+    // SCROLLING AT THE EDGE. The fitted range is held still during a drag, and it
+    // is fitted to the trade — so the stop is usually the lowest thing on screen
+    // and the target the highest. Without this a stop could only be moved as far
+    // as the bottom of the pane, lifted, and moved again.
+    // Inside the pane the line simply follows the finger, to the tick. Push the
+    // finger PAST the top or bottom and the line waits at the edge while the
+    // range is let out on that side, a little every EDGE_MS; come back in and it
+    // stops. How fast depends on how far past the edge the finger is: just over
+    // it creeps (EDGE_SLOW of what is on screen per step, about 7% a second),
+    // EDGE_OUT px beyond it runs (EDGE_FAST more).
+    // (The first version started sliding 30px INSIDE the edge. But the fit puts
+    // the stop about 20px from the bottom of a phone's pane to begin with, so
+    // every downward drag began in the slide zone and a 12px move sent the stop
+    // from 127 to 66.)
+    // The slide is done by adding one more level to the frozen fit, so it obeys
+    // the same limit as the fit itself and cannot flatten the candles.
+    const EDGE_OUT = 40, EDGE_SLOW = 0.006, EDGE_FAST = 0.024, EDGE_MS = 80;
+    const edgeTimer = setInterval(() => {
+      const d = exitDragRef.current;
+      const cont = chartContainerRef.current, series = mainSeriesRef.current, chart = mainChartRef.current;
+      if (!d || !d.moved || lastClientY === null || !cont || !series || !chart) return;
+      try {
+        const rect = cont.getBoundingClientRect();
+        const plotH = rect.height - (chart.timeScale().height() || 26);
+        const y = lastClientY - rect.top + d.grabOffset;                    // where the finger wants the line
+        const dir = y < EDGE_IN ? 1 : y > plotH - EDGE_IN ? -1 : 0;        // +1 = towards higher prices
+        if (!dir) return;
+        const depth = Math.max(0, Math.min(1, (dir > 0 ? EDGE_IN - y : y - (plotH - EDGE_IN)) / EDGE_OUT));
+        const ends = fittedEdgesNow();
+        if (!ends) return;
+        const [fitBot, fitTop] = ends;
+        const { mt, mb } = scaleMarginsNow();
+        const inner = Math.max(0.1, 1 - mt - mb);
+        const vis = (fitTop - fitBot) / inner;                              // what the whole pane spans
+        // Letting the fit out by d on one side moves the pane's edge on that side
+        // by d plus that side's margin of the extra — so the step is worked back
+        // from how far the EDGE should move, or the slide would speed up as it went.
+        const want = (EDGE_SLOW + EDGE_FAST * depth * depth) * vis;
+        const d1 = want / (1 + (dir > 0 ? mt : mb) / inner);
+        const next = dir > 0 ? fitTop + d1 : Math.max(TICK, fitBot - d1);
+        if (dir < 0 && next >= fitBot) return;                              // already at one tick
+        // The same limit as the fit: the candles may not be squeezed below a
+        // fifth of the pane (and a little, for the padding the fit allows).
+        const span0 = tradeFitBaseSpanRef.current;
+        if (span0 > 0 && Math.max(fitTop, next) - Math.min(fitBot, next) > span0 * TRADE_FIT_MAX_STRETCH * (1 + 2 * TRADE_FIT_PAD)) return;
+        const base = (tradeFitFrozenRef.current || []).filter((p) => p !== edgeLevel);
+        edgeLevel = next;
+        tradeFitFrozenRef.current = [...base, next];
+        refitForTrade();
+        applyAt(lastClientY);
+      } catch (e) { /* no slide this tick */ }
+    }, EDGE_MS);
     const end = () => {
+      clearInterval(edgeTimer);
       document.removeEventListener('pointermove', move);
       document.removeEventListener('pointerup', end);
       document.removeEventListener('pointercancel', end);
@@ -6250,8 +6321,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // which the jump-to-latest button appears) the chart fits the candles being
   // looked at, as Martin asked, not a trade that is days to the right of them.
   const TRADE_FIT_MAX_STRETCH = 5;
+  const TRADE_FIT_PAD = 0.12;       // of the fitted range, left beyond a trade level that is its highest or lowest point
   const tradeFitFrozenRef = useRef<number[] | null>(null);
   const tradeFitSigRef = useRef('');
+  const tradeFitBaseSpanRef = useRef(0);   // the candles' own range, as the fit last saw it
   const tradeFitLevels = (): number[] => {
     if (tradeFitFrozenRef.current) return tradeFitFrozenRef.current;
     const ser = mainSeriesRef.current;
@@ -6274,6 +6347,30 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   };
   const tradeFitLevelsRef = useRef(tradeFitLevels);
   tradeFitLevelsRef.current = tradeFitLevels;
+  // The two ends of the fitted range AS DRAWN RIGHT NOW, read back off the pane:
+  // the prices at the scale's top and bottom margins. This is what a drag
+  // freezes. Freezing the trade's levels instead (which is what v293 did) would
+  // have the fit pad them again, and the padding is part of what is on screen.
+  const scaleMarginsNow = (): { mt: number; mb: number } => {
+    try {
+      const sm = (mainChartRef.current?.priceScale('right').options() as any)?.scaleMargins;
+      const mt = Number(sm?.top), mb = Number(sm?.bottom);
+      if (Number.isFinite(mt) && Number.isFinite(mb) && mt >= 0 && mb >= 0 && mt + mb < 0.9) return { mt, mb };
+    } catch (e) {}
+    return { mt: 0.2, mb: 0.1 };
+  };
+  const fittedEdgesNow = (): number[] | null => {
+    const series = mainSeriesRef.current, chart = mainChartRef.current, cont = chartContainerRef.current;
+    if (!series || !chart || !cont) return null;
+    try {
+      const plotH = cont.clientHeight - (chart.timeScale().height() || 26);
+      const { mt, mb } = scaleMarginsNow();
+      const top = series.coordinateToPrice(plotH * mt), bot = series.coordinateToPrice(plotH * (1 - mb));
+      if (top === null || bot === null) return null;
+      const t = Number(top), b = Number(bot);
+      return Number.isFinite(t) && Number.isFinite(b) && t > b ? [b, t] : null;
+    } catch (e) { return null; }
+  };
   // The library recomputes the fitted range on data and on scrolling, not when a
   // price line appears or moves, and it has no public "refit" call. Re-applying
   // the current scroll position is a no-op for the time axis that runs the same
@@ -6296,6 +6393,338 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     // Reads refs only; the interval must not be torn down and rebuilt on renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ===== TRADE CHIPS: SL and TP the way the Lemonn app shows them (16 Nov 2026) =====
+  // Martin recorded Lemonn's ScalpPro with a trade open and asked for "the same
+  // concept": the entry line carries Exit and the position with its live P&L,
+  // and SL and TP are small red and green chips, with chevrons above and below,
+  // that you take hold of and drag to the level you want.
+  //
+  // What that replaces here:
+  //  * THE PILLS. Each line had a pill drawn on the canvas ("SL -10.0% · -₹783").
+  //    The same text now sits beside the line's chip, in the DOM.
+  //  * THE GRAB. With Quick Trade on, a press anywhere within 24px of a line,
+  //    along its whole width, took hold of it — so a sideways swipe to scroll the
+  //    chart that happened to start near the stop moved the stop (a 2px wobble
+  //    was enough to re-arm it two ticks away). Only the chip is a handle now.
+  //
+  // What it does NOT change: which levels are armed, the entry wall, where a drop
+  // is sent (pushPremiumRule / pushManagedLevel / the spot map), and the Quick
+  // Trade switch. The chips move only while Quick Trade is on — "Quick Trade off
+  // means no chart gesture changes an order" was Martin's own rule (30 Oct) and
+  // a redesign is not a reason to drop it; with it off, a press on a chip says
+  // so instead of doing nothing.
+  //
+  // WHY THE DOM AND NOT THE CANVAS: these are controls, not labels. Rendered as
+  // siblings OVER the chart (like the armed-order chips below) their presses
+  // never reach the chart at all, so a tap on Exit cannot also be read as a tap
+  // on the chart — which, with Quick Trade on, opens an order ticket.
+  // They are positioned every frame from the lines' own prices, by writing
+  // styles straight to the elements: no React work per frame.
+  type ChipTarget = { mode: 'sl' | 'smap'; kind: string; price: number };
+  const chipEntryRowRef = useRef<HTMLDivElement | null>(null);
+  const chipSlRowRef = useRef<HTMLDivElement | null>(null);
+  const chipTpRowRef = useRef<HTMLDivElement | null>(null);
+  const chipSlTextRef = useRef<HTMLSpanElement | null>(null);
+  const chipTpTextRef = useRef<HTMLSpanElement | null>(null);
+  const chipTpLabelRef = useRef<HTMLSpanElement | null>(null);
+  const chipPnlRef = useRef<HTMLSpanElement | null>(null);
+  const chipSlOffRef = useRef<HTMLButtonElement | null>(null);
+  const chipTpOffRef = useRef<HTMLButtonElement | null>(null);
+  const chipTargetsRef = useRef<{ sl: ChipTarget | null; tp: ChipTarget | null }>({ sl: null, tp: null });
+  // Right edges of the indicator labels the canvas drew on the left this frame
+  // (PDH, SUPPORT, 15M HIGH…). A chip row at the same height starts after them
+  // instead of on top of them.
+  const leftLabelRectsRef = useRef<{ right: number; y: number }[]>([]);
+  // The label text for an exit line lives inside the effect that owns the lines;
+  // a drag needs it too, to keep "-10.4% · -₹812" live under the finger.
+  const exitTitleRef = useRef<null | ((label: string, price: number) => string)>(null);
+  const chipPnlKeyRef = useRef('');
+  const chipFitRef = useRef<{ sl: { key: string; text: string } | null; tp: { key: string; text: string } | null }>({ sl: null, tp: null });
+  const [tradeRowCollapsed, setTradeRowCollapsed] = useState(() => {
+    try { return localStorage.getItem('tradeRowCollapsed') === '1'; } catch (e) { return false; }
+  });
+  const tradeRowCollapsedRef = useRef(tradeRowCollapsed);
+  tradeRowCollapsedRef.current = tradeRowCollapsed;
+  const toggleTradeRow = () => {
+    setTradeRowCollapsed((v) => {
+      const n = !v;
+      try { localStorage.setItem('tradeRowCollapsed', n ? '1' : '0'); } catch (e) {}
+      return n;
+    });
+  };
+  // Exit from the chart takes TWO taps: the first turns the chip into "Confirm
+  // exit" for three seconds, the second sends it. The bar at the top of the page
+  // exits on one tap, but that bar is not where a thumb scrolls a chart.
+  const [exitConfirm, setExitConfirm] = useState(false);
+  const exitConfirmTimerRef = useRef<any>(null);
+  useEffect(() => () => { if (exitConfirmTimerRef.current) clearTimeout(exitConfirmTimerRef.current); }, []);
+  const onExitChip = () => {
+    const pos = slActivePosRef.current;
+    if (!pos?.symbol) return;
+    if (!exitConfirm) {
+      setExitConfirm(true);
+      if (exitConfirmTimerRef.current) clearTimeout(exitConfirmTimerRef.current);
+      exitConfirmTimerRef.current = setTimeout(() => setExitConfirm(false), 3000);
+      return;
+    }
+    if (exitConfirmTimerRef.current) clearTimeout(exitConfirmTimerRef.current);
+    setExitConfirm(false);
+    // The exit itself is NOT done here. The positions bar owns the one exit path
+    // (it asks the server to close the real position, and keeps the card if the
+    // order is refused); this only asks it to run, the way the toolbar's POS
+    // button asks it to sync.
+    try { window.dispatchEvent(new CustomEvent('exit_position_request', { detail: { symbol: pos.symbol } })); } catch (e) {}
+  };
+  // Is this leg of the OPEN trade switched on? The server's switches win when
+  // this pane has them (same rule the line drawing uses); a trade running free
+  // has neither.
+  const tradeLegOn = (leg: 'SL' | 'TARGET'): boolean => {
+    const pos = slActivePosRef.current;
+    if (!pos?.symbol) return false;
+    if (runFreeRef.current === pos.symbol) return false;
+    const pr = premRuleRef.current;
+    const srv = !!(pr && pr.symbol === pos.symbol && typeof pr.slOn === 'boolean');
+    if (leg === 'SL') return srv ? pr!.slOn !== false : tpSlDefaultsRef.current.slOn !== false;
+    return srv ? pr!.tpOn !== false : tpSlDefaultsRef.current.tpOn !== false;
+  };
+  // DISPLAY ONLY: what a level on the spot chart is worth in premium, by delta
+  // from the live premium. premiumForSpotLocal does the same sum for the drag's
+  // entry wall but reads the live premium off the position object, which this
+  // pane does not keep current — so it has always answered "don't know" and the
+  // wall has been left to the server. That is not changed here: this reads the
+  // premium the positions bar keeps fresh, for the text beside the chip and
+  // nothing else. Re-read at most twice a second.
+  const chipLivePremRef = useRef<{ at: number; sym: string; px: number | null }>({ at: 0, sym: '', px: null });
+  const chipSpotEstimate = (sym: string, spotPx: number): number | null => {
+    const m = spotMapRef.current;
+    if (!m || !Number.isFinite(m.delta) || !Number.isFinite(m.spot)) return null;
+    const c = chipLivePremRef.current, now = Date.now();
+    if (c.sym !== sym || now - c.at > 500) {
+      let px: number | null = null;
+      try {
+        const arr = JSON.parse(localStorage.getItem('active_positions') || '[]');
+        const p = Array.isArray(arr) ? arr.find((x: any) => x && x.symbol === sym) : null;
+        const v = Number(p?.currentPrice);
+        if (v > 0) px = v;
+      } catch (e) {}
+      chipLivePremRef.current = { at: now, sym, px };
+    }
+    const base = chipLivePremRef.current.px;
+    return base === null ? null : Math.max(0.05, base + m.delta * (spotPx - m.spot));
+  };
+  const layoutTradeChips = () => {
+    const entryEl = chipEntryRowRef.current, slEl = chipSlRowRef.current, tpEl = chipTpRowRef.current;
+    const hide = (el: HTMLElement | null) => { if (el && el.style.display !== 'none') el.style.display = 'none'; };
+    const show = (el: HTMLElement | null) => { if (el && el.style.display !== 'flex') el.style.display = 'flex'; };
+    const setText = (el: HTMLElement | null, t: string) => { if (el && el.textContent !== t) el.textContent = t; };
+    const ser = mainSeriesRef.current, chart = mainChartRef.current, cont = chartContainerRef.current;
+    const pos = slActivePosRef.current;
+    if (!ser || !chart || !cont || !pos) {
+      hide(entryEl); hide(slEl); hide(tpEl);
+      chipTargetsRef.current = { sl: null, tp: null };
+      return;
+    }
+    let axisW = 0, timeH = 26;
+    try { axisW = chart.priceScale('right').width() || 0; timeH = chart.timeScale().height() || 26; } catch (e) {}
+    const plotW = cont.clientWidth - axisW, plotH = cont.clientHeight - timeH;
+    // A row is shown only while its line is properly inside the plot: half a
+    // chip clipped by the time axis is neither readable nor grabbable.
+    const yOf = (p: number | null | undefined): number | null => {
+      if (p === null || p === undefined || !Number.isFinite(p)) return null;
+      const y = ser.priceToCoordinate(p);
+      return y === null || y < 10 || y > plotH - 10 ? null : (y as number);
+    };
+    const viewingTrade = !!(pos.entryPrice && tradeInstrumentRef.current &&
+      String(instrumentTokenRef.current) === String(tradeInstrumentRef.current.instrument_token));
+    const mg = managedFor(pos.symbol);
+    const drag = exitDragRef.current;
+
+    let sl: ChipTarget | null = null, tp: ChipTarget | null = null;
+    let slText = '', tpText = '';
+    const tpLabel = mg?.tpIndex ? `TP${mg.tpIndex}` : 'TP';
+    if (viewingTrade && slSeriesRef.current === ser) {
+      for (const l of slLinesRef.current) {
+        // The title starts with the word the chip already shows ("SL", "TARGET",
+        // "TP2"); what follows it is the detail.
+        const detail = String(l.title || '').replace(/^\S+\s*/, '');
+        if (l.label === 'SL') { sl = { mode: 'sl', kind: l.kind, price: l.price }; slText = detail; }
+        else { tp = { mode: 'sl', kind: l.kind, price: l.price }; tpText = detail; }
+      }
+    } else if (spotMapSeriesRef.current === ser) {
+      for (const l of spotMapLinesRef.current) {
+        // At rest: the armed premium this index level stands for. Under a finger:
+        // an estimate of the premium at the level being pointed at, so the drag
+        // says what it is about to arm. The exact figure comes from the server
+        // when the finger lifts.
+        const prem = drag && drag.mode === 'smap' && drag.kind === l.kind ? chipSpotEstimate(pos.symbol, l.price) : l.premium;
+        const txt = prem !== null && Number.isFinite(prem) ? `≈ ₹${Number(prem).toFixed(2)}` : '≈ …';
+        if (l.kind === 'sl') { sl = { mode: 'smap', kind: l.kind, price: l.price }; slText = txt; }
+        else { tp = { mode: 'smap', kind: l.kind, price: l.price }; tpText = txt; }
+      }
+    }
+    chipTargetsRef.current = { sl, tp };
+
+    const labels = leftLabelRectsRef.current;
+    const clearOfLabels = (y: number) => {
+      let x = 6;
+      for (const r of labels) if (Math.abs(r.y - y) < 21 && r.right + 6 > x) x = r.right + 6;
+      // The charting library's logo sits in the bottom-left corner of the pane.
+      if (y > plotH - 36 && x < 54) x = 54;
+      return x;
+    };
+    const put = (el: HTMLElement, x: number, y: number) => {
+      const t = `translate(${Math.round(x)}px, ${Math.round(y)}px) translateY(-50%)`;
+      if (el.style.transform !== t) el.style.transform = t;
+    };
+
+    // ----- the entry row -----
+    const entry = viewingTrade ? Number(slEntryRef.current) : NaN;
+    const entryY = viewingTrade ? yOf(slEntryRef.current) : null;
+    let entryX = 6, entryW = 0;
+    if (entryEl) {
+      if (entryY === null) hide(entryEl);
+      else {
+        const collapsed = tradeRowCollapsedRef.current;
+        const long = (pos.side || 'BUY') !== 'SELL';
+        const qty = Number(pos.qty) || 0;
+        // Live P&L at the chart's own last price — this IS the traded contract's
+        // chart, so its last candle is the live premium.
+        const last = Number(lastCandleDataRef.current?.close);
+        // Formatted only when a number behind it changes (or the element is a
+        // fresh one with nothing in it yet), not sixty times a second.
+        const key = `${last}|${qty}|${entry}|${long}`;
+        const pnlEl = chipPnlRef.current;
+        if (key !== chipPnlKeyRef.current || (pnlEl && !pnlEl.textContent)) {
+          chipPnlKeyRef.current = key;
+          const el = pnlEl;
+          if (el) {
+            if (last > 0 && qty > 0 && entry > 0) {
+              const pnl = (long ? last - entry : entry - last) * qty;
+              setText(el, `${pnl >= 0 ? '+' : '-'}₹${Math.abs(Math.round(pnl)).toLocaleString('en-IN')}`);
+              el.style.color = pnl >= 0 ? '#10b981' : '#f43f5e';
+            } else setText(el, '');
+          }
+        }
+        // A leg that is switched off has no line and so no chip of its own: it
+        // is parked here, greyed, so a trade with no stop SAYS it has no stop.
+        const slOff = chipSlOffRef.current, tpOff = chipTpOffRef.current;
+        if (slOff) slOff.style.display = !collapsed && !sl && !tradeLegOn('SL') ? '' : 'none';
+        if (tpOff) tpOff.style.display = !collapsed && !tp && !tradeLegOn('TARGET') ? '' : 'none';
+        show(entryEl);
+        entryX = clearOfLabels(entryY);
+        put(entryEl, entryX, entryY);
+        entryW = entryEl.offsetWidth;
+        const op = drag ? '0.35' : '1';
+        if (entryEl.style.opacity !== op) entryEl.style.opacity = op;
+      }
+    }
+
+    // ----- the SL and TP rows -----
+    // The chip under a finger never hides: while it is held at the edge the
+    // chart is sliding (see SCROLLING AT THE EDGE) and the handle must stay in
+    // the hand. It is pinned just inside the plot instead.
+    const heldY = (t: ChipTarget | null): number | null => {
+      if (!t) return null;
+      const held = !!(drag && drag.mode === t.mode && drag.kind === t.kind);
+      if (!held) return yOf(t.price);
+      const y = ser.priceToCoordinate(t.price);
+      return y === null ? null : Math.max(12, Math.min(plotH - 12, y as number));
+    };
+    const slY = heldY(sl);
+    const tpY = heldY(tp);
+    // Reward to risk from where the two lines are NOW, so it follows a drag. It
+    // rides on the target's text (it was on the ENTRY pill, which is gone).
+    if (sl && tp && sl.mode === 'sl' && entry > 0) {
+      const long = (pos.side || 'BUY') !== 'SELL';
+      const risk = long ? entry - sl.price : sl.price - entry;
+      const reward = long ? tp.price - entry : entry - tp.price;
+      const rr = !(risk > 0) ? 'risk-free' : !(reward > 0) ? '' : `R:R 1:${(reward / risk).toFixed(2)}`;
+      if (rr) tpText = tpText ? `${tpText} · ${rr}` : rr;
+    }
+    // Where the next chip parks when its line is too close to the entry row to
+    // sit under or over it: straight after the row, which is how Lemonn shows SL
+    // and TP before they have been dragged anywhere.
+    let dockX = entryX + entryW + 6;
+    const placed: { x: number; w: number; y: number }[] = [];
+    const row = (which: 'sl' | 'tp', el: HTMLElement | null, textEl: HTMLElement | null, y: number | null, text: string) => {
+      if (!el) return;
+      if (y === null) { hide(el); return; }
+      const docked = entryY !== null && Math.abs(y - entryY) < 32;
+      let x = clearOfLabels(y);
+      if (docked) x = Math.max(x, dockX);
+      // Two chips at nearly the same height: the second goes after the first.
+      for (const o of placed) if (Math.abs(y - o.y) < 40 && x < o.x + o.w + 6) x = o.x + o.w + 6;
+      show(el);
+      // WHAT THE CHIP SAYS BESIDE IT: everything if there is room, else just the
+      // rupees ("-₹954" — what the level is worth is the part that matters), else
+      // nothing. Never a figure cut off half way. Parked after the entry row
+      // there is seldom room for more than the rupees, so it starts there.
+      // Fitting means measuring, so the answer is kept until the words, the
+      // place or the width of the plot change.
+      const rupees = (text.match(/[+-]₹[\d,]+/) || [''])[0];
+      const key = `${text}|${Math.round(x)}|${Math.round(plotW)}|${docked ? 1 : 0}`;
+      const kept = chipFitRef.current[which];
+      let chosen = kept && kept.key === key ? kept.text : null;
+      if (chosen === null) {
+        const tries = docked ? [rupees, ''] : [text, rupees, ''];
+        chosen = '';
+        for (const t of tries) {
+          if (textEl) { setText(textEl, t); textEl.style.display = t ? '' : 'none'; }
+          if (!t || x + el.offsetWidth <= plotW - 2) { chosen = t; break; }
+        }
+        chipFitRef.current[which] = { key, text: chosen };
+      }
+      setText(textEl, chosen);
+      if (textEl) {
+        const disp = chosen ? '' : 'none';
+        if (textEl.style.display !== disp) textEl.style.display = disp;
+      }
+      const w = el.offsetWidth;
+      // Never under the price axis: a chip that cannot be seen cannot be used.
+      x = Math.max(2, Math.min(x, plotW - w - 2));
+      put(el, x, y);
+      placed.push({ x, w, y });
+      if (docked) dockX = x + w + 6;
+    };
+    row('sl', slEl, chipSlTextRef.current, slY, slText);
+    setText(chipTpLabelRef.current, tpLabel);
+    row('tp', tpEl, chipTpTextRef.current, tpY, tpText);
+  };
+  useEffect(() => {
+    if (!slActivePos) return;
+    let raf = 0, stopped = false;
+    const frame = () => {
+      if (stopped) return;
+      try { layoutTradeChips(); } catch (e) {}
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => { stopped = true; cancelAnimationFrame(raf); };
+    // layoutTradeChips reads refs only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slActivePos]);
+  // Taking hold of a chip. The drag itself is the existing one (document
+  // listeners, entry wall, the push on release) — this only starts it from the
+  // chip instead of from anywhere along the line.
+  const startChipDrag = (which: 'sl' | 'tp') => (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const t = chipTargetsRef.current[which];
+    const ser = mainSeriesRef.current, cont = chartContainerRef.current, chart = mainChartRef.current;
+    if (!t || !ser || !cont || !chart || exitDragRef.current) return;
+    if (!quickTradeEnabledRef.current) {
+      try { toast.info('Quick Trade is off', { id: 'chip-needs-qt', description: 'Switch it on (the ⚡ button) to move SL or TP. It turns itself off after a minute.' }); } catch (err) {}
+      return;
+    }
+    const lineY = ser.priceToCoordinate(t.price);
+    if (lineY === null) return;
+    const rect = cont.getBoundingClientRect();
+    exitDragRef.current = { mode: t.mode, kind: t.kind, grabOffset: lineY - (e.clientY - rect.top), moved: false, startY: e.clientY };
+    try { chart.applyOptions({ handleScroll: false, handleScale: false }); } catch (err) {}
+    beginLineDrag(e);
+    startExitLineDrag();
+  };
 
   // Is the CURRENT chart the spot index that the open position is written on?
   const onUnderlyingSpotChart = () => {
@@ -6418,16 +6847,22 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           spotMapLinesRef.current = spotMapLinesRef.current.filter(l => l !== existing); }
         continue;
       }
-      const title = `${w.label} ≈ ₹${w.premium.toFixed(2)}`;
+      // No words on the line itself: "SL ≈ ₹108.45" is shown by the line's chip
+      // row (layoutTradeChips), which reads the premium kept below.
       if (existing) {
+        // The line under a finger belongs to the finger. This runs every second
+        // and wrote the mapped level back onto the line mid-drag, so a drag that
+        // lasted more than a second saw the line jump back and forth.
+        const held = exitDragRef.current;
+        if (held && held.mode === 'smap' && held.kind === w.kind) continue;
         existing.price = w.price; existing.premium = w.premium;
-        try { existing.instance.applyOptions({ price: w.price, title }); } catch (e) {}
+        try { existing.instance.applyOptions({ price: w.price, title: '' }); } catch (e) {}
       } else {
         try {
           const inst = ser.createPriceLine({
             price: w.price, color: w.color, lineWidth: 2,
             lineStyle: 1,                                   // DOTTED: a translated level, not a hard index trigger
-            axisLabelVisible: true, title,
+            axisLabelVisible: true, title: '',
           });
           spotMapLinesRef.current.push({ kind: w.kind, price: w.price, premium: w.premium, instance: inst });
         } catch (e) {}
@@ -6582,42 +7017,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     const rect = chartContainerRef.current.getBoundingClientRect();
     const y = e.clientY - rect.top;
 
-    // SL/Target lines take priority for dragging — but ONLY while Quick Trade is
-    // on. Both the premium lines and their mirrored spot counterparts commit a
-    // real change to the armed exit rule when released, so switching Quick Trade
-    // off makes them read-only: they stay visible and keep updating, they just
-    // cannot be moved by a stray thumb on a chart being scrolled. This is the
-    // same switch that already gates one-tap trigger placement, so "Quick Trade
-    // off" now consistently means "no chart gesture changes an order".
-    // Falls through to normal chart panning when off, rather than swallowing it.
-    const canDragExitLines = quickTradeEnabledRef.current;
-
-    for (const sl of (canDragExitLines ? slLinesRef.current : [])) {
-        const lineY = mainSeriesRef.current.priceToCoordinate(sl.price);
-        // 24px grab zone — draggable with a thumb on mobile, not just a mouse.
-        if (lineY !== null && Math.abs(lineY - y) < 24) {
-            // No draggingLineRef: that ref is read by the chart's own handlers,
-            // including the pointerleave-bound release that was cutting drags short.
-            exitDragRef.current = { mode: 'sl', kind: sl.kind, grabOffset: lineY - y, moved: false };
-            mainChartRef.current.applyOptions({ handleScroll: false, handleScale: false });
-            beginLineDrag(e);
-            startExitLineDrag();
-            return;
-        }
-    }
-
-    // Mirrored spot SL/TP: same 24px thumb zone. Checked AFTER the real premium
-    // lines so that on the option chart those always win.
-    for (const ml of (canDragExitLines ? spotMapLinesRef.current : [])) {
-        const lineY = mainSeriesRef.current.priceToCoordinate(ml.price);
-        if (lineY !== null && Math.abs(lineY - y) < 24) {
-            exitDragRef.current = { mode: 'smap', kind: ml.kind, grabOffset: lineY - y, moved: false };
-            mainChartRef.current.applyOptions({ handleScroll: false, handleScale: false });
-            beginLineDrag(e);
-            startExitLineDrag();
-            return;
-        }
-    }
+    // THE SL / TP LINES ARE NOT GRABBED HERE ANY MORE (16 Nov 2026). A press within
+    // 24px of one, anywhere along its width, used to take hold of it while Quick
+    // Trade was on — so scrolling the chart sideways from a spot near the stop
+    // moved the stop. Each line now has a chip (see TRADE CHIPS) and the chip is
+    // the only handle; it starts the same drag this did, behind the same Quick
+    // Trade switch. A press on the line itself is an ordinary press on the chart.
 
     // R:R edges. Checked before manual lines so a box sitting on top of a drawing
     // still grabs. Entry is checked LAST: it sits between the other two, and when
@@ -7010,11 +7415,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           // title while a finger is down.
           if (!exitDragRef.current) {
             for (const l of slLinesRef.current) {
+              // In the ref only — the chip row shows it. Writing it onto the
+              // price line as well printed it a second time beside the axis.
               const t = exitTitle(l.label, l.price);
-              if (t && t !== l.title) {
-                l.title = t;
-                try { l.instance.applyOptions({ title: t }); } catch (e) {}
-              }
+              if (t && t !== l.title) l.title = t;
             }
           }
           return;
@@ -7040,16 +7444,37 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       // and spot*0.99 and painted an invented +/-1% band that had NOTHING to do with
       // the real exit. Two lines that look authoritative and mean nothing are worse
       // than no lines, so any existing ones are torn down here.
-      if (!viewingTrade || (posNow?.symbol && runFreeRef.current === posNow.symbol)) {
+      const runningFree = !!(viewingTrade && posNow?.symbol && runFreeRef.current === posNow.symbol);
+      if (!viewingTrade || runningFree) {
         if (slLinesRef.current.length) {
           slLinesRef.current.forEach(l => { try { s.removePriceLine(l.instance); } catch (e) {} });
           slLinesRef.current = [];
           slSeriesRef.current = null;
         }
-        if (slEntryLineRef.current) {
-          try { s.removePriceLine(slEntryLineRef.current); } catch (e) {}
-          slEntryLineRef.current = null;
+        if (!runningFree) {
+          if (slEntryLineRef.current) {
+            try { s.removePriceLine(slEntryLineRef.current); } catch (e) {}
+            slEntryLineRef.current = null;
+          }
+          return;
         }
+        // RUNNING FREE, on the traded contract's chart: the stop and target are
+        // gone (above) but the ENTRY stays. It used to go with them, which left
+        // a trade with no SL/TP showing nothing at all on its own chart. The
+        // entry is a fact, not a promise of an exit, and it is where the chip
+        // row sits — Exit, the P&L, and "SL off / TP off" saying in so many
+        // words that nothing is protecting the trade.
+        // slSeriesRef doubles as "the series the entry line lives on" here, so a
+        // rebuilt series gets a fresh line (the old one died with its series).
+        if (!slEntryLineRef.current || slSeriesRef.current !== s) {
+          try {
+            slEntryLineRef.current = s.createPriceLine({
+              price: posNow.entryPrice, color: '#94a3b8', lineWidth: 1, lineStyle: 0,
+              axisLabelVisible: true, title: ''
+            });
+          } catch (e) { slEntryLineRef.current = null; }
+        }
+        slSeriesRef.current = s;
         return;
       }
 
@@ -7213,7 +7638,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             l.price = want;
             const t = exitTitle(l.label, want);
             l.title = t;
-            try { l.instance.applyOptions({ price: want, title: t }); } catch (e) {}
+            try { l.instance.applyOptions({ price: want }); } catch (e) {}
           }
         }
       } catch (e) { /* keep the last known rule */ }
@@ -7252,7 +7677,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           l.price = want;
           const t = exitTitle(l.label, want);
           l.title = t;
-          try { l.instance.applyOptions({ price: want, title: t }); } catch (e) {}
+          try { l.instance.applyOptions({ price: want }); } catch (e) {}
         }
       }
     };
@@ -7261,12 +7686,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     const tick = () => { ensure(); try { ensureSpotMapLines(); } catch (e) {} };
     try { ensureSpotMapLines(); } catch (e) {}
     slEnsureRef.current = ensure;
+    exitTitleRef.current = exitTitle;
     const iv = setInterval(tick, 1000);
     return () => {
       clearInterval(iv);
       clearInterval(ruleSyncIv);
       window.removeEventListener('terminal:rule-changed', onRuleChanged as any);
       slEnsureRef.current = null;
+      exitTitleRef.current = null;
       const s = mainSeriesRef.current;
       slLinesRef.current.forEach(l => { try { s && s.removePriceLine(l.instance); } catch {} });
       slLinesRef.current = [];
@@ -10385,6 +10812,18 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           const lo0 = Number(base.priceRange.minValue), hi0 = Number(base.priceRange.maxValue);
           if (!Number.isFinite(lo0) || !Number.isFinite(hi0)) return base;
           const span = hi0 - lo0;
+          tradeFitBaseSpanRef.current = span;
+          if (tradeFitFrozenRef.current) {
+            // A LINE IS BEING HELD. The levels are then the two ends of the range
+            // as it stood when the finger went down (plus whatever the edge slide
+            // has let out since). They are used exactly as they are — no limit,
+            // no padding — so the range under the finger is the one it pressed
+            // on, to the pixel.
+            let flo = lo0, fhi = hi0;
+            for (const p of levels) { if (p < flo) flo = p; if (p > fhi) fhi = p; }
+            if (flo === lo0 && fhi === hi0) return base;
+            return { ...base, priceRange: { minValue: flo, maxValue: fhi } };
+          }
           const maxSpan = span > 0 ? span * TRADE_FIT_MAX_STRETCH : Infinity;
           const away = (p: number) => (p < lo0 ? lo0 - p : p > hi0 ? p - hi0 : 0);
           let lo = lo0, hi = hi0;
@@ -10394,6 +10833,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             lo = nlo; hi = nhi;
           }
           if (lo === lo0 && hi === hi0) return base;
+          // Room to move. A level that set the edge of the range would sit one
+          // scale-margin from the edge of the pane — about 20px on a phone — and
+          // that is all the space there would be to drag a stop further away
+          // before the chart has to slide. A little more is left beyond it.
+          const pad = (hi - lo) * TRADE_FIT_PAD;
+          if (lo < lo0) lo = Math.max(0, lo - pad);
+          if (hi > hi0) hi = hi + pad;
           return { ...base, priceRange: { minValue: lo, maxValue: hi } };
         } catch (e) { return base; }
       },
@@ -11293,6 +11739,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
         ctx.clearRect(0, 0, cw, ch);
+        // Refilled by the line-label pass further down, when it runs. Emptied
+        // here so labels that are no longer drawn stop holding the trade chips
+        // off the left edge.
+        leftLabelRectsRef.current = [];
 
         // 1. Draw Bollinger Bands fill if active
         // Recompute the bands LIVE so they track the forming candle and advance with new candles,
@@ -12359,6 +12809,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               labels.sort((a, b) => a.y - b.y);
 
               const assignedPositions: {x: number, y: number}[] = [];
+              const leftLabelRects: { right: number; y: number }[] = [];
 
               labels.forEach((label) => {
                  let displayText = label.text;
@@ -12392,6 +12843,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                  
                  const bgX = currentX - totalWidth / 2;
                  const bgY = label.y - totalHeight / 2;
+                 leftLabelRects.push({ right: bgX + totalWidth, y: label.y });
 
                  // Draw the pill background using the label's color
                  ctx.fillStyle = label.color;
@@ -12410,90 +12862,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                  ctx.font = '12px sans-serif';
               });
 
-              // SL / TARGET — centered pill on each line: chart-background fill, outline in the line's colour.
-              // Uses the same collision system as the other labels so it never sits on top of another label.
-              if (slLinesRef.current && slLinesRef.current.length > 0) {
-                 const isDarkPill = document.documentElement.classList.contains('dark');
-                 const pillBg = isDarkPill ? '#0d1117' : '#ffffff';
-                 ctx.textAlign = 'center';
-                 ctx.textBaseline = 'middle';
-                 // sort by y so stacking is stable
-                 // The ENTRY line joins the same pass so it gets a pill on the
-                 // line like SL and TARGET. It had only an axis tag, and that has
-                 // been removed with the others — without this it would be an
-                 // unlabelled grey line.
-                 // Risk to reward from the LIVE line prices, recomputed every frame
-                 // so it follows a drag as it happens. Reward over risk, as 1:x.
-                 const entryRiskReward = (entry: number): string => {
-                   const sl = slLinesRef.current.find((l: any) => l.label === 'SL')?.price;
-                   const tp = slLinesRef.current.find((l: any) => l.label === 'TARGET')?.price;
-                   const long = (slActivePosRef.current?.side || 'BUY') !== 'SELL';
-                   // A switched-off leg has no line, so there is no ratio to show —
-                   // say which side is missing rather than invent one.
-                   if (sl === undefined && tp === undefined) return '';
-                   if (sl === undefined) return ' · no SL';
-                   if (tp === undefined) return ' · no TP';
-                   const risk = long ? entry - sl : sl - entry;
-                   const reward = long ? tp - entry : entry - tp;
-                   // Stop at or beyond entry — after the 70% move to cost, say —
-                   // means nothing is at risk: the ratio would be infinite or
-                   // negative, and neither is useful to read.
-                   if (!(risk > 0)) return ' · risk-free';
-                   if (!(reward > 0)) return ' · R:R —';
-                   return ` · R:R 1:${(reward / risk).toFixed(2)}`;
-                 };
-                 const entryPx = slEntryRef.current;
-                 const withEntry = entryPx
-                   ? [...slLinesRef.current, { kind: 'entry' as const, price: entryPx, label: 'ENTRY', color: '#94a3b8', title: `ENTRY ${entryPx.toFixed(2)}${entryRiskReward(entryPx)}` }]
-                   : [...slLinesRef.current];
-                 const slSorted = withEntry
-                   .map(sl => ({ sl, y: mainSeriesRef.current!.priceToCoordinate(sl.price) }))
-                   .filter(o => o.y !== null && (o.y as number) >= 0 && (o.y as number) <= ch)
-                   .sort((a, b) => (a.y as number) - (b.y as number));
-                 slSorted.forEach(({ sl, y }) => {
-                    const yy = y as number;
-                    // The pill on the LINE now carries the detail — "SL 99.90
-                    // -0.9% · -₹910" — instead of the bare word, with the same
-                    // text removed from the price axis below. Reading the level
-                    // meant looking away from the line to the axis and back.
-                    const kindWord = sl.label || (sl.kind === 'upper' ? 'TARGET' : 'SL');
-                    const txt = sl.title || kindWord;
-                    const lineColor = sl.color || (kindWord === 'SL' ? '#f43f5e' : '#10b981');
-                    ctx.font = 'bold 10px sans-serif';
-                    const tw = ctx.measureText(txt).width;
-
-                    // Left-anchored like every other line label; step RIGHT on collision.
-                    let currentX = leftAnchor(tw + 16);
-                    let collision = true;
-                    let offsetMultiplier = 1;
-                    while (collision) {
-                       collision = assignedPositions.some(pos =>
-                          Math.abs(pos.y - yy) < 20 && Math.abs(pos.x - currentX) < Math.max(120, tw + 30)
-                       );
-                       if (collision) {
-                          currentX = leftAnchor(tw + 16) + offsetMultiplier * 140;
-                          offsetMultiplier++;
-                          if (offsetMultiplier > 8) break;
-                       }
-                    }
-                    assignedPositions.push({ x: currentX, y: yy });
-
-                    const w = tw + 16;
-                    const h = 18;
-                    const x0 = currentX - w / 2;
-                    const y0 = yy - h / 2;
-                    ctx.beginPath();
-                    ctx.roundRect(x0, y0, w, h, h / 2);
-                    ctx.fillStyle = pillBg;
-                    ctx.fill();
-                    ctx.lineWidth = 1.5;
-                    ctx.strokeStyle = lineColor;
-                    ctx.stroke();
-                    ctx.fillStyle = lineColor;
-                    ctx.fillText(txt, currentX, yy);
-                 });
-                 ctx.font = '12px sans-serif';
-              }
+              // The SL / TARGET / ENTRY pills that were drawn here are gone: each
+              // of those lines now has a chip row in the DOM (see TRADE CHIPS),
+              // carrying the same words. What the rows need from this pass is
+              // where the labels above ended up, so a row at the same height
+              // starts after them rather than on top of them.
+              leftLabelRectsRef.current = leftLabelRects;
            }
         }
 
@@ -14342,6 +14716,101 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 ))}
               </div>
             )}
+            {/* TRADE CHIPS (see the block of that name above). Over the chart, not
+                inside its container, for the reason the armed-order chips are:
+                the container takes every press first. z-[41]: above the overlay
+                canvases (30/31) and the armed orders (40), under the "+" (45),
+                the jump button (55) and every sheet and dialog (50 and up).
+                The rows are placed each frame by layoutTradeChips; they start
+                hidden and are shown only once a line gives them somewhere to be.
+                Not tied to chartOverlayOpen as the jump button is: that button
+                floats above the panels and has to step aside, these sit under
+                them. */}
+            {slActivePos && (() => {
+              const sym = String(slActivePos.symbol || '');
+              const name = shortOptionName(sym).replace(/^\S+\s+/, '') || sym;
+              const qty = Number(slActivePos.qty) || 0;
+              const lot = Number((tradeTabInstr as any)?.lot_size) || 0;
+              const lots = lot > 0 && qty % lot === 0 ? qty / lot : 0;
+              const size = lots > 0 ? `${lots} lot${lots === 1 ? '' : 's'}` : `${qty} qty`;
+              const chipRow = 'absolute left-0 top-0 items-center gap-1 whitespace-nowrap';
+              const handle = (which: 'sl' | 'tp') => (
+                <div
+                  data-chip={which}
+                  onPointerDown={startChipDrag(which)}
+                  title={quickTradeEnabled ? `Drag to move the ${which === 'sl' ? 'stop' : 'target'}` : 'Switch Quick Trade on to move this'}
+                  // The padding is the touch target (the chip itself is 20px
+                  // tall); the negative margin stops it pushing the row apart.
+                  className={`pointer-events-auto relative flex flex-col items-center px-2 -mx-2 py-1 -my-1 ${quickTradeEnabled ? 'cursor-ns-resize' : 'cursor-default'}`}
+                  style={{ touchAction: 'none' }}
+                >
+                  <ChevronsUp size={11} strokeWidth={2.5} className={`${which === 'sl' ? 'text-rose-400' : 'text-emerald-400'} ${quickTradeEnabled ? 'opacity-90' : 'opacity-0'}`} />
+                  <span
+                    ref={which === 'tp' ? chipTpLabelRef : undefined}
+                    className={`h-5 min-w-[26px] px-1.5 rounded-[5px] text-[11px] font-bold leading-5 text-center text-white shadow ${which === 'sl' ? 'bg-rose-500' : 'bg-emerald-600'}`}
+                  >
+                    {which === 'sl' ? 'SL' : 'TP'}
+                  </span>
+                  <ChevronsDown size={11} strokeWidth={2.5} className={`${which === 'sl' ? 'text-rose-400' : 'text-emerald-400'} ${quickTradeEnabled ? 'opacity-90' : 'opacity-0'}`} />
+                </div>
+              );
+              const offChip = (which: 'sl' | 'tp') => (
+                <button
+                  type="button"
+                  ref={which === 'sl' ? chipSlOffRef : chipTpOffRef}
+                  data-chip={`${which}-off`}
+                  onClick={() => setIsEditingTpSl(true)}
+                  title={`${which === 'sl' ? 'Stop loss' : 'Target'} is switched off for this trade — tap to open TP & SL`}
+                  className="pointer-events-auto h-[22px] px-1.5 rounded-md border border-dashed border-border bg-background/90 text-[10px] font-semibold leading-none text-muted-foreground"
+                  style={{ display: 'none' }}
+                >
+                  {which === 'sl' ? 'SL off' : 'TP off'}
+                </button>
+              );
+              return (
+                <div className="absolute inset-0 z-[41] pointer-events-none overflow-hidden select-none" data-trade-chips=""
+                  // The chart's own font, not the app's monospace: these sit among the
+                  // chart's labels, and in monospace the entry row alone was 300px wide
+                  // on a 338px plot.
+                  style={{ fontFamily: chartFontFamily(settings.customFontUrl) }}>
+                  <div ref={chipEntryRowRef} data-chip-row="entry" className={`${chipRow} transition-opacity duration-150`} style={{ display: 'none', willChange: 'transform' }}>
+                    {!tradeRowCollapsed && (
+                      <button
+                        type="button"
+                        data-chip="exit"
+                        onClick={onExitChip}
+                        title={exitConfirm ? 'Tap again to exit at market' : `Exit ${sym}`}
+                        className={`pointer-events-auto h-[22px] px-2 rounded-md border text-[11px] font-semibold leading-none transition-colors ${
+                          exitConfirm ? 'bg-rose-500 border-rose-500 text-white' : 'bg-background/90 border-rose-500/60 text-rose-400'}`}
+                      >
+                        {exitConfirm ? 'Confirm exit' : 'Exit'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      data-chip="position"
+                      onClick={toggleTradeRow}
+                      title={tradeRowCollapsed ? 'Show Exit' : 'Tuck Exit away'}
+                      className="pointer-events-auto h-[22px] pl-1.5 pr-1 rounded-md border border-border bg-background/90 text-[11px] leading-none flex items-center gap-1.5"
+                    >
+                      <span className="font-semibold text-sky-500">{name} <span className="font-normal opacity-70">· {size}</span></span>
+                      <span ref={chipPnlRef} className="font-mono font-bold" />
+                      <ChevronRight size={12} className={`text-muted-foreground transition-transform ${tradeRowCollapsed ? '' : 'rotate-180'}`} />
+                    </button>
+                    {offChip('sl')}
+                    {offChip('tp')}
+                  </div>
+                  <div ref={chipSlRowRef} data-chip-row="sl" className={chipRow} style={{ display: 'none', willChange: 'transform' }}>
+                    {handle('sl')}
+                    <span ref={chipSlTextRef} className="h-[18px] px-2 rounded-full border border-rose-500 bg-background/90 text-[10px] font-bold leading-4 text-rose-500" />
+                  </div>
+                  <div ref={chipTpRowRef} data-chip-row="tp" className={chipRow} style={{ display: 'none', willChange: 'transform' }}>
+                    {handle('tp')}
+                    <span ref={chipTpTextRef} className="h-[18px] px-2 rounded-full border border-emerald-500 bg-background/90 text-[10px] font-bold leading-4 text-emerald-500" />
+                  </div>
+                </div>
+              );
+            })()}
             {showJumpToLatest && !chartOverlayOpen && (
               <button
                 onClick={() => {

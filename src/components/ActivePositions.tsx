@@ -442,6 +442,24 @@ export function ActivePositions() {
     return () => window.removeEventListener('sync_positions_request', onReq);
   });
 
+  // The chart's Exit chip (on the entry line of an open trade) asks for an exit
+  // the same way: this component owns the ONE exit path — the server closes the
+  // real position and the card stays if the order is refused — so the chart
+  // sends the symbol here instead of placing anything itself. No dependency
+  // list, like the sync listener above: it must always see the current
+  // positions and the current handler.
+  useEffect(() => {
+    const onExitReq = (ev: Event) => {
+      const sym = (ev as CustomEvent)?.detail?.symbol;
+      if (!sym) return;
+      const pos = positions.find((p) => p.symbol === sym);
+      if (pos) { handleExitPosition(pos); return; }
+      toast.error(`${sym} is not in the open positions here`, { description: 'Nothing was sent. Sync positions and check Zerodha.' });
+    };
+    window.addEventListener('exit_position_request', onExitReq);
+    return () => window.removeEventListener('exit_position_request', onExitReq);
+  });
+
   // Live ticks between polls. PASSIVE ONLY — this never calls subscribeToTicks,
   // because the socket carries ONE subscribed symbol at a time and subscribing from
   // here would silently steal the chart's feed. So we use option ticks that are

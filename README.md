@@ -194,8 +194,37 @@ the axis, the jump-to-latest button or a reload hands it back.
 While a trade is open and the latest candle is on screen, the fit also keeps the
 trade in view: the entry, the armed SL and TP on the traded option's chart, and
 their mirrors on the spot chart. A level that would stretch the range past five
-times the candles' own is left out (it would flatten the candles), and the range
-holds still while a line is being dragged.
+times the candles' own is left out (it would flatten the candles), a little room
+is left beyond the stop and the target so they can be dragged further out, and
+the range holds still while a line is being dragged.
 On phones (under 768px wide) both axes are drawn at 10px, the price axis is 52px
 wide, and tick labels drop ".00" — sizes measured off the Lemonn app. Desktop text
 is unchanged. The indicators list closes on a tap anywhere on the chart.
+
+## Chart: the open trade's chips (Exit, P&L, SL, TP)
+
+`src/pages/AdvancedChart.tsx` ("TRADE CHIPS"). With a trade open, its own chart
+shows it the way the Lemonn app does:
+
+- **On the entry line:** `Exit`, then the position with its live P&L
+  (`25200 CE · 1 lot  -₹24`). Tap the position to tuck Exit away, tap again to
+  bring it back. Exit takes **two taps** (`Exit` → `Confirm exit` for 3 seconds)
+  and goes through the positions bar's own exit, so there is one exit path.
+- **On the stop and the target:** a red `SL` and a green `TP` chip (`TP1`… on a
+  Telegram ladder), with what the level is worth beside it
+  (`-10.0% · -₹920`, and `R:R 1:2.00` on the target). When a line is too close to
+  the entry line to fit under it, its chip parks straight after the entry row.
+- **Moving a level:** drag its chip. Only the chip is a handle — a press on the
+  line itself is an ordinary press on the chart. Chips move **only while Quick
+  Trade is on** (they then show chevrons); with it off a press says so. Inside
+  the pane the line follows the finger to the tick; push past the top or bottom
+  edge and the chart slides that way until the finger comes back.
+- **A leg that is switched off** shows as a grey `SL off` / `TP off` beside the
+  position (tap: opens TP & SL). A trade running free shows both, and keeps its
+  entry line.
+- On the **spot chart** the mirrored lines carry the same chips, with the premium
+  they stand for (`≈ ₹127.50`).
+
+Nothing here changes which levels are armed, the entry wall, or where a drop is
+sent; it replaces the on-line pills and the old "grab the line anywhere" drag.
+

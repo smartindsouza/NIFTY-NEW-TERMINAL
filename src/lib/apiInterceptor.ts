@@ -36,6 +36,14 @@ const LOCAL_ONLY_ENDPOINTS = new Set([
   '/api/family/status',
   // Golden-zone Swap-Sweep watch card: local SQLite only.
   '/api/golden-sweep/status',
+  // The SL/TP lines mirrored on the spot chart: Black-Scholes on the two latest
+  // ticks the server already holds in memory, plus a lookup in the instrument
+  // master (which the server refreshes once every 24h — the same reason
+  // /api/contract-info is exempt below). No broker call per request. Polled
+  // every 4 s while a trade is open, and twice more when a mirrored line is
+  // dropped — which was enough to set the warning off on every drag on the
+  // spot chart.
+  '/api/premium-spot-map',
   // Price-age measurement: a clock ping each minute and a summary every 30 s.
   '/api/diag/time',
   '/api/diag/latency/client',
