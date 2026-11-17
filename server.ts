@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import axios from 'axios';
+import { placeExitToFill, type ExitResult } from "./server/exit_order";
 import { createServer as createViteServer } from "vite";
 import { WebSocketServer } from 'ws';
 import * as http from 'http';
@@ -347,39 +348,31 @@ function getTodayAccessToken(): string | null {
   } catch { return null; }
 }
 
-// Places a LIMIT exit order on Kite (used by the auto-exit watcher).
-// SELL to close a long, BUY to cover a short. Priced at live ±0.5% (tick-rounded) so it fills fast.
-async function placeKiteLimitExit(opts: { exchange: string; tradingsymbol: string; qty: number; product: string; side: string; }): Promise<{ ok: boolean; orderId?: string; error?: string }> {
-  try {
-    const kc = getKiteClient();
-    // @ts-ignore
-    if (!kc || !kc.access_token) return { ok: false, error: 'No active Kite session — cannot place exit order' };
-    const fullSymbol = `${opts.exchange}:${opts.tradingsymbol}`;
-    let basePrice = 0;
-    try {
-      const q = await kc.getQuote([fullSymbol]);
-      basePrice = q?.[fullSymbol]?.last_price || 0;
-    } catch {}
-    if (!basePrice || basePrice <= 0) return { ok: false, error: 'Could not fetch live price for exit' };
-    const isBuy = String(opts.side).toUpperCase() === 'BUY';
-    const buffer = isBuy ? 1.005 : 0.995;
-    const price = parseFloat((Math.round((basePrice * buffer) / 0.05) * 0.05).toFixed(2));
-    const payload: any = {
-      exchange: opts.exchange,
-      tradingsymbol: opts.tradingsymbol,
-      transaction_type: opts.side,
-      quantity: opts.qty,
-      product: opts.product || 'MIS',
-      order_type: 'LIMIT',
-      price,
-      validity: 'DAY',
-    };
-    const resp = await kc.placeOrder('regular', payload);
-    const orderId = typeof resp === 'string' ? resp : (resp as any).order_id;
-    return { ok: true, orderId };
-  } catch (e: any) {
-    return { ok: false, error: e?.message || String(e) };
-  }
+// Places the exit order and FOLLOWS IT UNTIL IT IS FILLED (server/exit_order.ts
+// has the why: on 17 Nov an exit sat unfilled above a falling market and nothing
+// looked at it again). SELL to close a long, BUY to cover a short.
+async function placeKiteLimitExit(opts: { exchange: string; tradingsymbol: string; qty: number; product: string; side: string; }): Promise<ExitResult> {
+  const kc = getKiteClient();
+  // @ts-ignore
+  if (!kc || !kc.access_token) return { ok: false, error: 'No active Kite session — cannot place exit order' };
+  return placeExitToFill(opts, { kc, log: (line) => console.log(line) });
+}
+
+// ONE EXIT AT A TIME PER CONTRACT, AND EACH READS THE POSITION AFRESH. An exit
+// reads what is open and then sells exactly that. Two of them at once — a
+// second tap, or his Exit arriving while a target's half is being booked — would
+// each read the same open quantity and each sell it, and the second sale is a
+// short he never asked for. So they queue: the later one waits for the earlier
+// one's order to be filled (or given up on), then reads the position as it is
+// then — usually nothing, and it says "already closed" and sends nothing.
+const exitQueue = new Map<string, Promise<unknown>>();
+function withExitLock<T>(tradingsymbol: string, run: () => Promise<T>): Promise<T> {
+  const before = exitQueue.get(tradingsymbol) || Promise.resolve();
+  const mine = before.catch(() => {}).then(run);
+  const tail = mine.catch(() => {});
+  exitQueue.set(tradingsymbol, tail);
+  tail.then(() => { if (exitQueue.get(tradingsymbol) === tail) exitQueue.delete(tradingsymbol); });
+  return mine;
 }
 
 // Closes the ACTUAL open position for a symbol: reads its real product, quantity and
@@ -572,7 +565,10 @@ async function reconcileJournalWithBroker(force = false): Promise<{ closed: numb
   return { closed, checked: open.length };
 }
 
-async function closePositionBySymbol(tradingsymbol: string, reason: string = 'MANUAL'): Promise<{ ok: boolean; orderId?: string; error?: string; alreadyClosed?: boolean }> {
+function closePositionBySymbol(tradingsymbol: string, reason: string = 'MANUAL'): Promise<{ ok: boolean; orderId?: string; error?: string; alreadyClosed?: boolean }> {
+  return withExitLock(tradingsymbol, () => closePositionBySymbolNow(tradingsymbol, reason));
+}
+async function closePositionBySymbolNow(tradingsymbol: string, reason: string): Promise<{ ok: boolean; orderId?: string; error?: string; alreadyClosed?: boolean }> {
   try {
     const kc = getKiteClient();
     // @ts-ignore
@@ -663,9 +659,12 @@ async function firePremiumExit(tradingsymbol: string, reason: string): Promise<v
 // Idempotence lives in the trail state: tp1Done is set and PERSISTED before the
 // order goes out, so a restart or a racing poll cannot book the half twice.
 const partialExitBusy = new Set<string>();
-async function closePartialBySymbol(tradingsymbol: string, qty: number, reason: string): Promise<{ ok: boolean; error?: string }> {
-  if (partialExitBusy.has(tradingsymbol)) return { ok: false, error: 'partial exit already in flight' };
+function closePartialBySymbol(tradingsymbol: string, qty: number, reason: string): Promise<{ ok: boolean; error?: string }> {
+  if (partialExitBusy.has(tradingsymbol)) return Promise.resolve({ ok: false, error: 'partial exit already in flight' });
   partialExitBusy.add(tradingsymbol);
+  return withExitLock(tradingsymbol, () => closePartialBySymbolNow(tradingsymbol, qty, reason));
+}
+async function closePartialBySymbolNow(tradingsymbol: string, qty: number, reason: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const kc = getKiteClient();
     // @ts-ignore

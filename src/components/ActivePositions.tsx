@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { X, RefreshCw, Sparkles, TrendingUp, TrendingDown, Shield, ChevronDown, LineChart } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -50,67 +50,11 @@ export function ActivePositions() {
     setLocation('/advanced-chart');
   };
 
-  // ===== Auto-exit (server-side stoploss/target watcher) state =====
-  const [autoExitOpenId, setAutoExitOpenId] = useState<string | null>(null);
-  const [exitRules, setExitRules] = useState<any[]>([]);
-  const [rulesArmed, setRulesArmed] = useState<boolean>(true);
-  const [savingRule, setSavingRule] = useState(false);
-  const [form, setForm] = useState<{ spotLower: string; spotUpper: string; spotMode: 'TOUCH' | 'CLOSE'; rsiLower: string; rsiUpper: string; timeframe: string }>({ spotLower: '', spotUpper: '', spotMode: 'TOUCH', rsiLower: '', rsiUpper: '', timeframe: '5' });
-
-  useEffect(() => {
-    let active = true;
-    const fetchRules = async () => {
-      try {
-        const res = await fetch('/api/exit-rules');
-        if (!res.ok) return;
-        const data = await res.json();
-        if (active && data.success) { setExitRules(data.rules || []); setRulesArmed(!!data.armed); }
-      } catch {}
-    };
-    fetchRules();
-    const id = setInterval(fetchRules, 10000);
-    return () => { active = false; clearInterval(id); };
-  }, []);
-
-  const armAutoExit = async (pos: ActiveTrade) => {
-    const spotLower = parseFloat(form.spotLower) || null;
-    const spotUpper = parseFloat(form.spotUpper) || null;
-    const rsiLower = parseFloat(form.rsiLower) || null;
-    const rsiUpper = parseFloat(form.rsiUpper) || null;
-    if (!spotLower && !spotUpper && !rsiLower && !rsiUpper) {
-      toast.error('Set at least one level (spot or RSI) before arming.');
-      return;
-    }
-    setSavingRule(true);
-    try {
-      const res = await fetch('/api/exit-rules', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tradingsymbol: pos.symbol, exchange: 'NFO', qty: pos.qty, product: pos.product || 'MIS',
-          positionSide: pos.side, spotLower, spotUpper, spotMode: form.spotMode,
-          rsiLower, rsiUpper, timeframe: form.timeframe
-        })
-      });
-      const data = await res.json();
-      if (data.success) {
-        toast.success(data.armed ? 'Auto-exit armed on the Zerodha watcher.' : 'Saved — but no active Kite session. Log in today to arm it.');
-        setAutoExitOpenId(null);
-      } else {
-        toast.error(data.error || 'Could not arm auto-exit.');
-      }
-    } catch {
-      toast.error('Network error arming auto-exit.');
-    } finally { setSavingRule(false); }
-  };
-
-  const cancelAutoExit = async (ruleId: number) => {
-    try {
-      await fetch(`/api/exit-rules/${ruleId}`, { method: 'DELETE' });
-      setExitRules(rs => rs.filter(r => r.id !== ruleId));
-      toast.success('Auto-exit cancelled.');
-    } catch { toast.error('Could not cancel auto-exit.'); }
-  };
+  // THE CARD'S OWN STATE WENT WITH THE CARD (17 Nov 2026): the Auto-Exit form
+  // (levels on the spot or its RSI, set and cancelled from the card) and its
+  // ten-second read of /api/exit-rules, and whether the card was open. The
+  // rules themselves are untouched on the server; the chart still reads them
+  // for the stop it draws on the index chart, and cancels that one from there.
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
   const [lastPrices, setLastPrices] = useState<Record<string, { price: number; dir: "up" | "down" | "flat" }>>({});
   const lastPricesRef = useRef<Record<string, { price: number; dir: "up" | "down" | "flat" }>>({});
@@ -138,18 +82,6 @@ export function ActivePositions() {
   const [netPnl, setNetPnl] = useState<number | null>(null); // day net P&L: realized today + live unrealized
   const [pollError, setPollError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
-  // Collapsed = the header strip only: count, net P&L, a chevron. The full card
-  // with every position and its EXIT button opens on tap. Persisted, because a
-  // BTST holder does not want to re-collapse it every morning. Not hidden
-  // outright: the strip keeps the position count and P&L in view, so a trade
-  // cannot be forgotten just because its card is out of the way.
-  const [collapsed, setCollapsed] = useState<boolean>(() => {
-    // Collapsed by DEFAULT: absent means collapsed, and only an explicit 'false'
-    // (the user opened it) expands. The previous version defaulted open, which
-    // made a BTST holder collapse it again after every restart.
-    try { return localStorage.getItem('activePositionsCollapsed') !== 'false'; } catch (e) { return true; }
-  });
-  useEffect(() => { try { localStorage.setItem('activePositionsCollapsed', String(collapsed)); } catch (e) {} }, [collapsed]);
 
   // Fetch active positions from localStorage
   const loadPositions = () => {
@@ -453,7 +385,16 @@ export function ActivePositions() {
       const sym = (ev as CustomEvent)?.detail?.symbol;
       if (!sym) return;
       const pos = positions.find((p) => p.symbol === sym);
-      if (pos) { handleExitPosition(pos); return; }
+      // EXIT ON THE CHART CLOSES EVERYTHING THAT IS OPEN (17 Nov 2026). Martin:
+      // "I want it exit all positions when I tap on exit in the chart." The
+      // one asked for goes first, then every other open position, each through
+      // the same one exit path (the server reads the real position and closes
+      // exactly that). Practice positions are left to their own cards' rules.
+      if (pos) {
+        handleExitPosition(pos);
+        positions.filter((p) => p.id !== pos.id && !p.testMode === !pos.testMode).forEach((p) => handleExitPosition(p));
+        return;
+      }
       toast.error(`${sym} is not in the open positions here`, { description: 'Nothing was sent. Sync positions and check Zerodha.' });
     };
     window.addEventListener('exit_position_request', onExitReq);
@@ -540,7 +481,9 @@ export function ActivePositions() {
       if (alreadyClosed) {
         toast.success(`${pos.symbol} was already closed — cleared it.`, { id: toastId });
       } else {
-        toast.success(`Exit order placed for ${pos.symbol}`, {
+        // "Exited", not "order placed": the server answers only once the broker
+        // has filled it (server/exit_order.ts), or says in words that it has not.
+        toast.success(`Exited ${pos.symbol}`, {
           id: toastId,
           description: `Closing at ~₹${finalPrice.toFixed(2)}. Realized P&L: ${pnl >= 0 ? "+" : ""}${formattedPnl}`
         });
@@ -613,282 +556,42 @@ export function ActivePositions() {
     );
   }
 
+  // ONE LINE: THE OVERALL P&L (17 Nov 2026). Martin, with a picture of the card
+  // open above ScalpPro: "Remove the positions card that shows every detail and
+  // exit button. The exit button already exists in the chart.  Also show only
+  // the overall P&L in one single line at the top."
+  // What was here: a strip (the count, the day's P&L, Exit, a chevron) that
+  // opened a card per position — side, symbol, time of entry, quantity, average,
+  // the live price, its own P&L, Set Auto-Exit and 1-Click Exit. All of that is
+  // on the chart now, on the trade's own line, with its Exit; on a phone the
+  // card took a third of the screen from the two charts a trade is worked from.
+  // WHAT THIS COMPONENT STILL DOES IS EVERYTHING ELSE, and that is why it is
+  // still mounted when it draws so little: it is what reads the positions from
+  // Zerodha, notices one taken or closed outside the app, and places the exit
+  // order when the chart's Exit or ScalpPro's asks for one (exit_position_request).
+  // The line is there only while a position is open, as the strip was — so a
+  // trade still cannot be forgotten with nothing on screen to say so.
+  // The figure is the day's net (what is booked plus what is open), Zerodha's
+  // own, as the strip showed. Until that has been read once — and for a practice
+  // position, which Zerodha knows nothing of — it is what the open positions
+  // come to at their last prices.
+  const openPnl = positions.reduce((sum, pos) => {
+    const ltp = (lastPrices[pos.id] || { price: pos.entryPrice }).price;
+    const computed = pos.side === "BUY" ? (ltp - pos.entryPrice) * pos.qty : (pos.entryPrice - ltp) * pos.qty;
+    const live = (!pos.testMode && typeof pos.pnlBase === 'number' && typeof pos.qtySigned === 'number' && ltp > 0)
+      ? pos.pnlBase + pos.qtySigned * ltp : null;
+    return sum + (live !== null ? live : (!pos.testMode && typeof pos.kitePnl === 'number') ? pos.kitePnl : computed);
+  }, 0);
+  const overall = netPnl !== null ? netPnl : openPnl;
   return (
     <div
-        /* Flush with the chart below it. The card kept rounded corners and side
-           borders while the chart page went full-bleed, so it read as inset —
-           the "off centre" look. On desktop it squares off and drops its side
-           borders; mobile keeps the card shape, where nothing is full-bleed. */
-        className="w-full mb-1 border border-emerald-500/20 md:border-x-0 md:rounded-none bg-emerald-950/10 rounded-xl overflow-hidden backdrop-blur-sm transition-all duration-300 animate-in slide-in-from-top-4">
-      {/* Ribbon Header — the whole row is the collapse toggle */}
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => setCollapsed(c => !c)}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCollapsed(c => !c); } }}
-        title={collapsed ? 'Show positions' : 'Hide positions'}
-        className={`px-3 sm:px-4 py-1 bg-emerald-500/5 flex flex-nowrap items-center justify-between gap-2 cursor-pointer select-none hover:bg-emerald-500/10 transition-colors ${collapsed ? '' : 'border-b border-emerald-500/15'}`}
-      >
-        {/* One line at every width. The label shortens on a phone rather than
-            wrapping, and the pulsing dot and sparkle are dropped there — they
-            were decoration competing for the room the P&L needs. */}
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="hidden sm:flex h-2 w-2 relative shrink-0">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-          </span>
-          <span className="text-xs uppercase font-bold text-emerald-400 tracking-wider flex items-center gap-1.5 font-sans whitespace-nowrap truncate">
-            <span className="sm:hidden">Positions ({positions.length})</span>
-            <span className="hidden sm:inline">Active Option Positions ({positions.length})</span>
-            <Sparkles className="w-3.5 h-3.5 animate-pulse text-primary hidden sm:inline shrink-0" />
-          </span>
-        </div>
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-          {netPnl !== null && (
-            <div className="flex items-center gap-1.5 whitespace-nowrap">
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-sans hidden sm:inline">Net P&amp;L (today)</span>
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-sans sm:hidden">P&amp;L</span>
-              <span className={`text-sm font-bold font-mono ${netPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {netPnl >= 0 ? '+' : ''}{new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(netPnl)}
-              </span>
-            </div>
-          )}
-          {!collapsed && (
-            <div className="text-[10px] text-emerald-400/60 font-mono hidden sm:block">
-              Click "Exit" to place instant reversing MARKET order
-            </div>
-          )}
-          {/* Exit stays reachable while collapsed. stopPropagation so it cannot
-              be swallowed by the row's collapse toggle, and it only appears when
-              there is exactly one position — with several, which to exit is a
-              real choice and the card must be opened to make it. */}
-          {collapsed && positions.length === 1 && !onChartPage && (
-            <button
-              onClick={(e) => { e.stopPropagation(); openChartFor(positions[0]); }}
-              title={`Open ${positions[0].symbol} chart`} aria-label="Open chart"
-              className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded-md border border-primary/30 bg-primary/10 hover:bg-primary/20 font-semibold text-primary text-[10px] transition-all"
-            >
-              <LineChart className="w-3 h-3" />Chart
-            </button>
-          )}
-          {collapsed && positions.length === 1 && (
-            <button
-              onClick={(e) => { e.stopPropagation(); handleExitPosition(positions[0]); }}
-              disabled={exitingIds.has(positions[0].id)}
-              title={`Exit ${positions[0].symbol}`}
-              className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded-md border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500 hover:text-black font-semibold text-rose-400 text-[10px] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {exitingIds.has(positions[0].id)
-                ? <RefreshCw className="w-3 h-3 animate-spin" />
-                : <><X className="w-3 h-3" />Exit</>}
-            </button>
-          )}
-          <ChevronDown className={`w-4 h-4 text-emerald-400/70 transition-transform shrink-0 ${collapsed ? '' : 'rotate-180'}`} />
-        </div>
-      </div>
-
-      {/* Grid of Active Positions — hidden while collapsed */}
-      {!collapsed && (
-      <div className="divide-y divide-emerald-500/10 bg-card/65">
-        {positions.map((pos) => {
-          const ltpInfo = lastPrices[pos.id] || { price: pos.entryPrice, dir: "flat" };
-          const ltp = ltpInfo.price;
-          const dir = ltpInfo.dir;
-
-          // P&L: for real positions, use Zerodha's own number (matches the Kite app exactly);
-          // computed fallback for test-mode or before the first poll lands
-          const computedPnl = pos.side === "BUY"
-            ? (ltp - pos.entryPrice) * pos.qty
-            : (pos.entryPrice - ltp) * pos.qty;
-          // Preference order: Zerodha's own formula evaluated against the freshest
-          // tick (updates continuously and matches the Kite app), then Zerodha's
-          // last polled figure, then the local estimate for test cards.
-          const livePnl = (!pos.testMode && typeof pos.pnlBase === 'number' && typeof pos.qtySigned === 'number' && ltp > 0)
-            ? pos.pnlBase + pos.qtySigned * ltp
-            : null;
-          const pnl = livePnl !== null
-            ? livePnl
-            : (!pos.testMode && typeof pos.kitePnl === 'number') ? pos.kitePnl : computedPnl;
-          const isProfit = pnl >= 0;
-
-          // Fancy class for pricing flashes
-          const textFlashClass = 
-            dir === "up" 
-              ? "text-emerald-400 font-bold bg-emerald-950/20 px-1 rounded transition-all duration-200"
-              : dir === "down"
-              ? "text-rose-400 font-bold bg-rose-950/20 px-1 rounded transition-all duration-200"
-              : "text-foreground font-semibold font-mono";
-
-          const rule = exitRules.find((r:any) => r.tradingsymbol === pos.symbol && r.status === 'ACTIVE');
-          const isAutoOpen = autoExitOpenId === pos.id;
-          return (
-            <div key={pos.id}>
-            <div 
-              className="flex flex-wrap items-center justify-between gap-3 p-2 md:px-4 md:py-2 hover:bg-emerald-500/[0.02] transition-colors"
-            >
-              {/* Left Column: Symbol & Side Tags */}
-              <div className="flex items-center gap-3">
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md tracking-wider uppercase font-mono shrink-0 ${
-                  pos.side === "BUY" 
-                    ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30" 
-                    : "bg-rose-500/15 text-rose-400 border border-rose-500/30"
-                }`}>
-                  {pos.side} LONG
-                </span>
-
-                <div className="flex flex-col">
-                  <span className="text-sm font-bold text-foreground font-mono leading-tight">
-                    {pos.symbol}
-                  </span>
-                  <span className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1 font-mono">
-                    Entered {new Date(pos.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })} 
-                  </span>
-                </div>
-              </div>
-
-              {/* Middle Metrics: Qty, Entry, LTP, P&L */}
-              <div className="flex items-center gap-x-6 md:gap-x-10 flex-wrap">
-                {/* Qty */}
-                <div className="flex flex-col items-center md:items-start min-w-[70px]">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Quantity</span>
-                  <span className="text-xs font-semibold text-foreground mt-0.5 font-mono">{pos.qty} Qty</span>
-                </div>
-
-                {/* Entry Price */}
-                <div className="flex flex-col items-center md:items-start min-w-[80px]">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Avg Entry</span>
-                  <span className="text-xs font-semibold text-foreground/90 mt-0.5 font-mono">₹{pos.entryPrice.toFixed(2)}</span>
-                </div>
-
-                {/* Last Traded Price (LTP) */}
-                <div className="flex flex-col items-center md:items-start min-w-[80px]">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Live LTP</span>
-                  <span className={`text-xs mt-0.5 font-mono flex items-center gap-1 ${textFlashClass}`}>
-                    ₹{ltp.toFixed(2)}
-                    {dir === "up" && <TrendingUp className="w-3 h-3 text-emerald-400 shrink-0" />}
-                    {dir === "down" && <TrendingDown className="w-3 h-3 text-rose-400 shrink-0" />}
-                  </span>
-                </div>
-
-                {/* Current Profit / Loss */}
-                <div className="flex flex-col items-center md:items-end min-w-[100px]">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Unrealized P&L</span>
-                  <span className={`text-sm font-extrabold mt-0.5 font-mono flex items-center ${
-                    isProfit ? "text-emerald-400" : "text-rose-400"
-                  }`}>
-                    {isProfit ? "+" : ""}
-                    {new Intl.NumberFormat("en-IN", {
-                      style: "currency",
-                      currency: "INR"
-                    }).format(pnl)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Right: Chart + Auto-Exit + Quick Exit */}
-              <div className="flex items-center gap-2">
-                {!onChartPage && (
-                  <button onClick={() => openChartFor(pos)} title={`Open ${pos.symbol} chart`} aria-label="Open chart"
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 text-xs font-semibold transition-all duration-200 select-none">
-                    <LineChart className="w-3.5 h-3.5" /> Chart
-                  </button>
-                )}
-                <button
-                  onClick={() => { setAutoExitOpenId(isAutoOpen ? null : pos.id); setForm({ spotLower: rule?.spot_lower ? String(rule.spot_lower) : '', spotUpper: rule?.spot_upper ? String(rule.spot_upper) : '', spotMode: (rule?.spot_mode === 'CLOSE' ? 'CLOSE' : 'TOUCH'), rsiLower: rule?.rsi_lower ? String(rule.rsi_lower) : '', rsiUpper: rule?.rsi_upper ? String(rule.rsi_upper) : '', timeframe: rule?.timeframe ? String(rule.timeframe) : '5' }); }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all duration-200 select-none ${rule ? 'border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20' : 'border-primary/30 bg-primary/10 text-primary hover:bg-primary/20'}`}
-                >
-                  <Shield className="w-3.5 h-3.5" />
-                  {rule ? 'Auto-Exit ON' : 'Set Auto-Exit'}
-                </button>
-                <button
-                  onClick={() => handleExitPosition(pos)}
-                  disabled={exitingIds.has(pos.id)}
-                  className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500 hover:text-black font-semibold text-rose-400 text-xs transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed select-none "
-                >
-                  {exitingIds.has(pos.id) ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      Exiting...
-                    </>
-                  ) : (
-                    <>
-                      <X className="w-3.5 h-3.5 font-bold" />
-                      1-Click Exit
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {/* Active auto-exit rule banner */}
-            {rule && !isAutoOpen && (
-              <div className="px-4 py-2 bg-amber-950/20 border-t border-amber-500/15 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
-                <span className="text-amber-300/90 flex items-center gap-1.5">
-                  <Shield className="w-3 h-3" />
-                  Auto-exit armed:
-                  {rule.spot_lower ? ` spot ≤ ${rule.spot_lower}` : ''}
-                  {rule.spot_upper ? ` · spot ≥ ${rule.spot_upper}` : ''}
-                  {(rule.spot_lower || rule.spot_upper) ? ` (${rule.spot_mode === 'CLOSE' ? 'on close' : 'touch'})` : ''}
-                  {rule.rsi_lower ? ` · RSI ≤ ${rule.rsi_lower}` : ''}
-                  {rule.rsi_upper ? ` · RSI ≥ ${rule.rsi_upper}` : ''}
-                  {` · ${rule.timeframe}m`}
-                </span>
-                <span className="flex items-center gap-2">
-                  {!rulesArmed && <span className="text-rose-400">⚠ no Kite session — log in to arm</span>}
-                  <button onClick={() => cancelAutoExit(rule.id)} className="px-2 py-0.5 rounded border border-rose-500/40 text-rose-300 hover:bg-rose-500/20">Cancel</button>
-                </span>
-              </div>
-            )}
-
-            {/* Auto-exit setup form */}
-            {isAutoOpen && (
-              <div className="px-4 py-3 bg-background/40 border-t border-primary/15 space-y-3">
-                <div className="text-[11px] text-muted-foreground">
-                  Exits the <span className="text-foreground font-semibold">entire</span> position on Zerodha when any level is hit. Spot levels watch the NIFTY index; RSI is checked on candle close. Leave a field blank to ignore it.
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  <label className="flex flex-col gap-1 text-[10px] text-muted-foreground uppercase font-semibold">
-                    Spot lower
-                    <input type="number" value={form.spotLower} onChange={(e)=>setForm(f=>({...f, spotLower:e.target.value}))} placeholder="e.g. 23100" className="bg-card border border-0 rounded px-2 h-8 text-xs text-foreground font-mono focus:outline-none focus:border-primary" />
-                  </label>
-                  <label className="flex flex-col gap-1 text-[10px] text-muted-foreground uppercase font-semibold">
-                    Spot upper
-                    <input type="number" value={form.spotUpper} onChange={(e)=>setForm(f=>({...f, spotUpper:e.target.value}))} placeholder="e.g. 23300" className="bg-card border border-0 rounded px-2 h-8 text-xs text-foreground font-mono focus:outline-none focus:border-primary" />
-                  </label>
-                  <label className="flex flex-col gap-1 text-[10px] text-muted-foreground uppercase font-semibold">
-                    Spot trigger
-                    <div className="grid grid-cols-2 gap-1 bg-card/40 p-0.5 rounded border border-0 h-8">
-                      <button type="button" onClick={()=>setForm(f=>({...f, spotMode:'TOUCH'}))} className={`rounded text-[10px] font-bold ${form.spotMode==='TOUCH'?'bg-primary/20 text-primary':'text-muted-foreground'}`}>Touch</button>
-                      <button type="button" onClick={()=>setForm(f=>({...f, spotMode:'CLOSE'}))} className={`rounded text-[10px] font-bold ${form.spotMode==='CLOSE'?'bg-primary/20 text-primary':'text-muted-foreground'}`}>On Close</button>
-                    </div>
-                  </label>
-                  <label className="flex flex-col gap-1 text-[10px] text-muted-foreground uppercase font-semibold">
-                    RSI lower
-                    <input type="number" value={form.rsiLower} onChange={(e)=>setForm(f=>({...f, rsiLower:e.target.value}))} placeholder="e.g. 40" className="bg-card border border-0 rounded px-2 h-8 text-xs text-foreground font-mono focus:outline-none focus:border-primary" />
-                  </label>
-                  <label className="flex flex-col gap-1 text-[10px] text-muted-foreground uppercase font-semibold">
-                    RSI upper
-                    <input type="number" value={form.rsiUpper} onChange={(e)=>setForm(f=>({...f, rsiUpper:e.target.value}))} placeholder="e.g. 60" className="bg-card border border-0 rounded px-2 h-8 text-xs text-foreground font-mono focus:outline-none focus:border-primary" />
-                  </label>
-                  <label className="flex flex-col gap-1 text-[10px] text-muted-foreground uppercase font-semibold">
-                    Timeframe (RSI / close)
-                    <select value={form.timeframe} onChange={(e)=>setForm(f=>({...f, timeframe:e.target.value}))} className="bg-card border border-0 rounded px-2 h-8 text-xs text-foreground font-mono focus:outline-none focus:border-primary">
-                      <option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="10">10m</option><option value="15">15m</option>
-                    </select>
-                  </label>
-                </div>
-                <div className="flex items-center justify-end gap-2 pt-1">
-                  {rule && <button onClick={()=>cancelAutoExit(rule.id)} className="px-3 py-1.5 rounded-lg border border-rose-500/40 text-rose-300 text-xs hover:bg-rose-500/20">Remove</button>}
-                  <button onClick={()=>setAutoExitOpenId(null)} className="px-3 py-1.5 rounded-lg border border-0 text-muted-foreground text-xs hover:text-foreground">Close</button>
-                  <button onClick={()=>armAutoExit(pos)} disabled={savingRule} className="px-4 py-1.5 rounded-lg bg-primary text-primary-foreground font-semibold text-xs hover:opacity-90 disabled:opacity-50">{savingRule ? 'Arming…' : (rule ? 'Update Auto-Exit' : 'Arm Auto-Exit')}</button>
-                </div>
-              </div>
-            )}
-            </div>
-          );
-        })}
-      </div>
-      )}
+      data-positions-line=""
+      className="w-full mb-1 px-3 sm:px-4 py-1 flex items-center justify-between gap-3 border border-emerald-500/20 md:border-x-0 md:rounded-none rounded-xl bg-emerald-500/5 select-none"
+    >
+      <span className="text-xs font-semibold text-foreground/65 whitespace-nowrap">Overall P&amp;L</span>
+      <span data-positions-pnl="" className={`text-sm font-bold font-mono whitespace-nowrap ${overall >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+        {overall >= 0 ? '+' : ''}{new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(overall)}
+      </span>
     </div>
   );
 }

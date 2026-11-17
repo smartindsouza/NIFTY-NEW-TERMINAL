@@ -313,7 +313,9 @@ export function ChartWorkspace() {
   // (the effect under this). Later would be too late for both: the index chart
   // would open on the plain names as they stood, and what the copy then wrote
   // would be sent to the other devices as changes made here.
-  useState(() => { try { adoptSpotHalfCopy(window.localStorage, isDesktop); } catch (e) { /* storage closed */ } return 0; });
+  // Never on a phone, even one held sideways (which is wide enough to be shown
+  // the two halves): a copy found there is from another day it was sideways.
+  useState(() => { try { adoptSpotHalfCopy(window.localStorage, isDesktop && !/iPhone|Android/i.test(navigator.userAgent)); } catch (e) { /* storage closed */ } return 0; });
   useEffect(() => {
     let last = Date.now();
     const touched = () => { last = Date.now(); };

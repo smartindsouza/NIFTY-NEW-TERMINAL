@@ -632,6 +632,37 @@ whatever was on for NIFTY was drawn over an option's premium too.
 - Session breaks — a style with its own editor, not a plain switch — are kept
   the same way: an option chart's start from their defaults, which are off.
 
+## Exit: the order is followed until it is filled (v319)
+
+`server/exit_order.ts` (tests: `npx tsx server/exit_order.test.ts`), used by every
+exit the server places — the chart's Exit, ScalpPro's, a stop or a target.
+On 17 Nov at 9:35 AM an Exit sent one sell as a limit order half a percent under
+the last price, and never looked at it again; the premium was falling faster
+than that, so the order rested unfilled while the app said "exit placed".
+
+- The exit is a limit order **3% through the last price** (a floor under the
+  bid — it fills at the bid), then **read every 600 ms and re-priced** towards
+  the market while it is still open; eight looks, about ten seconds at most.
+- It is reported as done **only when the broker says it is filled**. If it is
+  not, the answer says so and the position stays shown as open.
+- **A second Exit never sends a second order**: exits for one contract run one
+  at a time, each reading the position afresh (the second finds it closed), and
+  an earlier exit order still resting for exactly what is open is taken up and
+  followed instead of a new one being placed.
+- If the broker refuses a re-price, the order is cancelled and, once the broker
+  confirms it is off, what was left of it is sent again.
+- **Exit on the chart closes every open position** (he asked: "exit all
+  positions when I tap on exit in the chart").
+
+## The positions banner is one line: the overall P&L (v319)
+
+`src/components/ActivePositions.tsx`. The card with each position's details,
+Set Auto-Exit and 1-Click Exit is gone, with the strip's count, Exit and chevron:
+one line, "Overall P&L" and the day's net figure, shown while a position is
+open. The component still does everything else it did — reads positions,
+notices one taken or closed outside the app, and places the exit the chart asks
+for. Exit is on the chart's trade line and on ScalpPro's bar.
+
 ## Chart: the index chart's indicators are the same on every device (v318)
 
 `src/lib/indicatorSync.ts` (the whole of it, with its tests in
