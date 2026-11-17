@@ -25,6 +25,7 @@ import MarketContext from "../components/MarketContext";
 import BounceConviction from "../components/BounceConviction";
 import { DownloadCloud, Globe, ListPlus } from 'lucide-react';
 import { createPortal } from 'react-dom';
+import { setChartBusy, halfCopyStorageName } from '../lib/indicatorSync';
 import { Instrument } from "../hooks/useSymbolSearch";
 import { 
   createChart, 
@@ -1236,6 +1237,31 @@ const indGet = (key: string, opt: boolean): string | null => {
   } catch (e) { return opt && key !== 'sessionBreaks' ? 'false' : null; }
 };
 const indSet = (key: string, opt: boolean, value: string) => { try { localStorage.setItem(opt ? IND_OPT(key) : key, value); } catch (e) {} };
+
+// THE STORAGE A CHART SAVES ITS SETTINGS TO (17 Nov 2026). Inside the chart
+// component `localStorage` is one of these, not the browser's own — the same
+// thing for every chart but one: THE DESKTOP'S OPTION HALF, WHICH DOES NOT
+// WRITE THE NAMES IT KEEPS IN ITS OWN COPY.
+// Each of some fifty settings (a colour, a width, a period, the stars…) is saved
+// by its own small effect under one plain name, by whichever chart holds it. On
+// the desktop two charts hold each of them — the index half and the option
+// half, which keep their own indicators — so the option half's value was
+// written over the index chart's under the same name, and each half kept a copy
+// of its own to put back. Since the index chart's indicators are shared between
+// devices (lib/indicatorSync, THE DESKTOP'S TWO HALVES) a plain name must mean
+// the index chart and nothing else: the option half writing there would be sent
+// to his phone as a change to the index chart. Its values are safe in its own
+// copy ("paneIndicators:option"), which is where it reads them back from.
+// Done here, once, and not in each of the fifty effects: an effect added later
+// would have had to remember. `own` is the list of names to leave alone, filled
+// in where the copy's list is (paneInd); null for every other chart.
+// Reads are never held back, and neither is any other name.
+type ChartStore = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+const chartStore = (own: { current: Set<string> } | null): ChartStore => ({
+  getItem: (k) => window.localStorage.getItem(k),
+  setItem: (k, v) => { if (!own || !own.current.has(k)) window.localStorage.setItem(k, v); },
+  removeItem: (k) => { if (!own || !own.current.has(k)) window.localStorage.removeItem(k); },
+});
 
 // THE FACE A CHART DRAWS ITS FIGURES IN. Not the page's: a canvas is told its
 // font by name. `chartFontFamily` is the face the charts were in until 17 Nov
@@ -4134,6 +4160,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const isSpotPane = paneRole === 'spot';
   const isOptionPane = paneRole === 'option';
   const isPane = paneRole === 'spot' || paneRole === 'option';
+  // See THE STORAGE A CHART SAVES ITS SETTINGS TO, above indGet's neighbours:
+  // from here to the end of this component `localStorage` is this, on purpose.
+  const halfOwnNames = useRef<Set<string>>(new Set());
+  const localStorage = useMemo(() => chartStore(paneRole === 'option' && !scalp ? halfOwnNames : null), []);
   // WHICH SET OF INDICATOR SWITCHES THIS CHART READS (see THE OPTION CHART HAS ITS
   // OWN INDICATOR SWITCHES). An option pane is an option chart from the start.
   // The single chart of the phone's chart page is whichever its tab says, which
@@ -5938,6 +5968,19 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // were on when it opened, so the next opening sorts by what is on then. See
   // rowOrder.
   useEffect(() => { if (!isIndicatorsOpen && scalpMenu !== 'indicators') indOnAtOpen.current = null; }, [isIndicatorsOpen, scalpMenu]);
+  // "IN THE MIDDLE OF SOMETHING", for the sharing of indicators between devices
+  // (lib/indicatorSync): a change made on another device has this chart built
+  // afresh, and that must not happen with a list or a sheet open on it, or a
+  // drawing half made. Nor while there is something on it that a rebuild would
+  // take away, because it lives in this chart and nowhere else: a Long / Short
+  // Position box (it is a plan he may be watching price come to — the lines
+  // and drawings are saved and come back, the box is not), and Quick Trade
+  // while its minute runs (it starts off on every load). The change is in
+  // storage either way, and is on the chart the next time it is built.
+  // Said under a name of this chart's own, and unsaid when the chart goes.
+  const busyId = useRef(`chart-${Math.random().toString(36).slice(2)}`).current;
+  const chartBusy = chartOverlayOpen || !!drawArm || !!rrArm || !!rrBox || quickTradeEnabled;
+  useEffect(() => { setChartBusy(busyId, chartBusy); return () => setChartBusy(busyId, false); }, [chartBusy, busyId]);
 
   const logicalRangeRef = useRef<any>(null);
   // Bar count at the moment the visible range was last captured. Needed to tell
@@ -10438,12 +10481,22 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     rsiOversoldColor: [rsiOversoldColor, setRsiOversoldColor],
   };
   const paneIndKey = `paneIndicators:${paneRole}`;
+  // THE OPTION HALF ALONE KEEPS A COPY NOW (17 Nov 2026). The index half kept
+  // one too, and put it back over the plain names on every load — which, once
+  // the index chart's indicators were shared between devices, undid whatever
+  // had just arrived from the phone and sent the old value back to it. The
+  // index half is the plain names: what the phone's chart and the single chart
+  // read, and what is shared. Its old copy is dealt with once, before the
+  // charts are drawn (adoptSpotHalfCopy in lib/indicatorSync). And the option
+  // half no longer writes those names — the list just below is the list its
+  // `localStorage` leaves alone.
+  if (isOptionPane && !scalp && halfOwnNames.current.size === 0) { for (const k in paneInd) halfOwnNames.current.add(halfCopyStorageName(k)); }
   // Not on the phone's ScalpPro screen: its two charts are the phone's one chart
   // shown twice, so they follow the indicators chosen on the chart page as they
   // are now — a snapshot of their own would go stale the first time he changed
   // one there, with no list on this screen to change it back.
   useLayoutEffect(() => {
-    if (!isPane || scalp) return;
+    if (!isOptionPane || scalp) return;
     try {
       const raw = localStorage.getItem(paneIndKey);
       const saved = raw ? JSON.parse(raw) : null;
@@ -10460,7 +10513,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   }, []);
   const paneIndRunsRef = useRef(0);
   useEffect(() => {
-    if (!isPane || scalp) return;
+    if (!isOptionPane || scalp) return;
     // Skip the very first run: it still sees the values from before the
     // snapshot above was applied, and would write them over it.
     if (paneIndRunsRef.current++ === 0) return;

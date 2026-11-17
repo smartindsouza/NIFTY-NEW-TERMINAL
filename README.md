@@ -632,6 +632,72 @@ whatever was on for NIFTY was drawn over an option's premium too.
 - Session breaks — a style with its own editor, not a plain switch — are kept
   the same way: an option chart's start from their defaults, which are off.
 
+## Chart: the index chart's indicators are the same on every device (v318)
+
+`src/lib/indicatorSync.ts` (the whole of it, with its tests in
+`indicatorSync.test.ts`), started by `src/pages/ChartWorkspace.tsx`. Martin,
+16 Nov 2026: "Anywhere I change or add an indicator to the spot chart should
+sync in all devices". Every indicator's switch and settings were values in the
+browser's own storage, so the phone and the desktop each had their own.
+
+- **What is shared:** the index chart's switches, each indicator's settings
+  (colours, widths, periods, levels), the three alert switches in the same list
+  and the stars — the names in `SWITCH_KEYS` and `SETTING_KEYS`.
+- **What is not, on purpose:** an option chart's switches (the `opt:` names —
+  he asked for the spot chart); the SL & TP defaults (they shape orders); what
+  belongs to one screen (the RSI pane's height, the bias card's ×); a device's
+  own bookkeeping (`indicatorLinesThin`).
+- **Each value is shared on its own, newest change wins** — never a device's
+  whole set at once. Nothing was sent when this shipped: a device's values are
+  taken as read the first time it runs, and only what is changed afterwards
+  travels. So two devices that differed stay different in whatever has not been
+  touched since; the first change to a value makes it the same everywhere.
+- **Where it is kept:** one small document, `chart_indicators`, in the server's
+  existing settings store (`/api/settings/:key` — nothing on the server changed):
+  `{ name: { v: value, at: time } }`.
+- **A change here** is noticed by looking — the values are compared every two
+  seconds with what was there before — because they are saved from some eighty
+  places. It is on the server within about two seconds.
+- **A change elsewhere** is read when the chart page opens, when the app comes
+  back to the front, and every twenty seconds. It is written to storage at once;
+  the index chart is then **built afresh** to show it (that is how a chart reads
+  its settings), but only at a quiet moment: nothing touched for four seconds,
+  no list, sheet or dialog open on any chart, no drawing half made, no Long /
+  Short Position box on a chart (the box is not saved, so a rebuild would take
+  it away), Quick Trade's minute not running, the app in front. Only the index
+  chart is rebuilt — on ScalpPro and on the desktop the option's chart is left
+  alone; on the phone's chart page the option tab that was open is still the
+  one shown. Lines and drawings are saved and come back with the chart; its
+  zoom and scroll start again, as when the page is opened.
+- **Two devices saving in the same instant:** each writes the whole document, so
+  the second write can leave the first one's change out. The device that still
+  holds the newer value sees that on its next read and puts it back (`mend`).
+
+**The desktop's two halves.** Each half keeps its own indicators. They used to
+save every setting under the same plain names, each keeping a copy of its own
+(`paneIndicators:spot` / `:option`) to put back on load — which wrote the copy
+over the plain names. With sharing that had two faults, both found by running
+it: a value that had just arrived from the phone was overwritten by the index
+half's copy and sent back as a change (the phone's RSI, turned off, came back
+on); and where the halves differed in a setting, the plain name flipped between
+the two on every load. So now **the index half is the plain names** and keeps no
+copy — it is the same chart as the phone's — and **the option half never writes
+the plain names it keeps in its own copy** (inside `AdvancedChart` the name
+`localStorage` is a small object, `chartStore`, that holds those writes back for
+that half only). The index half's old copy is put into the plain names once, on
+the first load of this version on a desktop, and removed
+(`adoptSpotHalfCopy`); nothing is sent by that.
+
+**Switching it off without a deploy.** The value `true` under
+`chart_indicators_off` in the same settings store stops the sharing on every
+device within twenty seconds — nothing sent, taken or rebuilt; each device keeps
+its own storage as it is — and removing it starts it again, when whatever was
+changed meanwhile is sent. It exists because the app is not deployed during
+market hours:
+`curl -X PUT -H 'Content-Type: application/json' -d '{"value":true}' <app>/api/settings/chart_indicators_off`
+
+Run: `npx tsx src/lib/indicatorSync.test.ts`.
+
 ## Chart: the indicators that are on are at the top of the list (v317)
 
 He asked for "the selected/used indicators" to be moved to the top of the list.

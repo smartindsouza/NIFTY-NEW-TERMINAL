@@ -1,7 +1,17 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { AdvancedChart, type ScalpAt, type ScalpShared } from './AdvancedChart';
 import { useBiasCardHidden } from '../lib/bias';
+import { startIndicatorSync, indicatorEpoch, onIndicatorEpoch, anyChartBusy, adoptSpotHalfCopy } from '../lib/indicatorSync';
+
+// THE INDEX CHART IS PUT ON THE PAGE AGAIN WHEN ITS INDICATORS CHANGE ELSEWHERE.
+// The number this returns goes up each time a switch or a setting has arrived
+// from another device (see lib/indicatorSync). The index chart is keyed by it,
+// so it is built afresh and reads its switches and settings as it does when
+// the page is opened. Only the index chart: an option's chart has switches of
+// its own, which are not shared, and on ScalpPro it is the chart a trade is
+// worked from.
+const useIndicatorEpoch = () => useSyncExternalStore(onIndicatorEpoch, indicatorEpoch, indicatorEpoch);
 
 /**
  * Desktop chart workspace: spot on the LEFT, option charts on the RIGHT.
@@ -97,6 +107,7 @@ const isOptionLike = (i: any) => !!i && /\d(CE|PE)$/.test(String(i.tradingsymbol
 const SCALP_FONT = "'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
 
 function ScalpScreen({ onClose }: { onClose: () => void }) {
+  const indEpoch = useIndicatorEpoch();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   // How much of the height the spot chart has. Kept on this phone.
@@ -221,7 +232,7 @@ function ScalpScreen({ onClose }: { onClose: () => void }) {
             not under this screen) — dragged all the way down, the handle stops
             there. */}
         <div data-scalp-pane="spot" className="overflow-hidden" style={{ flex: `${frac} 1 0%`, minHeight: 58 }}>
-          <AdvancedChart key="scalp-spot" paneRole="spot" split scalp scalpAt={at} onScalpAt={setAt} scalpShared={shared} />
+          <AdvancedChart key={`scalp-spot-${indEpoch}`} paneRole="spot" split scalp scalpAt={at} onScalpAt={setAt} scalpShared={shared} />
         </div>
         {/* The strip between the charts is Lemonn's, off Martin's screenshot: 16pt
             of the page's own background with a 42 x 4pt bar in it, and no lines
@@ -288,9 +299,32 @@ export function ChartWorkspace() {
   // The bias card's × hides it; Indicators → NIFTY Bias card brings it back.
   // Above the phone early-return below: hooks must run on every render.
   const [biasCardHidden] = useBiasCardHidden();
+  // INDICATORS SHARED BETWEEN DEVICES run for as long as the chart page is up,
+  // on a phone, on ScalpPro and on the desktop alike. What arrives from another
+  // device is written to this one's storage at once; the chart is only built
+  // afresh to show it at a quiet moment — nothing touched for four seconds, no
+  // sheet or list open on any chart, the app in front. (A chart rebuilt under
+  // a finger, or with its indicators list open, would be worse than a chart
+  // four seconds late.)
+  const indEpoch = useIndicatorEpoch();
+  // The desktop's index half used to keep a copy of its own indicators; that
+  // copy is dealt with here, once, AS THIS IS DRAWN — before the charts below
+  // read their settings and before the sharing takes its first look at them
+  // (the effect under this). Later would be too late for both: the index chart
+  // would open on the plain names as they stood, and what the copy then wrote
+  // would be sent to the other devices as changes made here.
+  useState(() => { try { adoptSpotHalfCopy(window.localStorage, isDesktop); } catch (e) { /* storage closed */ } return 0; });
+  useEffect(() => {
+    let last = Date.now();
+    const touched = () => { last = Date.now(); };
+    const evs = ['pointerdown', 'pointermove', 'touchstart', 'touchmove', 'keydown', 'wheel'] as const;
+    evs.forEach((e) => window.addEventListener(e, touched, { capture: true, passive: true }));
+    const stop = startIndicatorSync(() => Date.now() - last > 4000 && !anyChartBusy() && !document.hidden);
+    return () => { stop(); evs.forEach((e) => window.removeEventListener(e, touched, { capture: true } as any)); };
+  }, []);
   // Phone and tablet: the original component, unchanged and unaware of panes —
   // or, while ScalpPro is open, the two-chart screen in its place.
-  if (!isDesktop) return scalp ? <ScalpScreen onClose={closeScalp} /> : <AdvancedChart />;
+  if (!isDesktop) return scalp ? <ScalpScreen onClose={closeScalp} /> : <AdvancedChart key={`one-${indEpoch}`} />;
 
   const focusedTab = (() => { try { return new URLSearchParams(window.location.search).has('optToken'); } catch (e) { return false; } })();
   const split = hasOption && !spotHidden;     // both halves on screen
@@ -311,9 +345,11 @@ export function ChartWorkspace() {
     <div className="flex flex-1 w-full min-h-0 min-w-0">
       {/* LEFT — spot only. Keyed so it is never remounted when the right pane
           appears or disappears: a remount would rebuild the chart, drop the
-          drawings and re-run every query. */}
+          drawings and re-run every query. The one thing that does rebuild it is
+          its indicators changing on another device (indEpoch, above) — and
+          then only at a quiet moment, never with a position box on it. */}
       <div className={`${hasOption && spotHidden ? 'hidden' : split ? 'w-1/2 border-r border-white/10' : 'w-full'} h-full min-w-0 min-h-0`}>
-        <AdvancedChart key="pane-spot" paneRole="spot" split={split} onClosePane={() => setSpotHidden(true)} />
+        <AdvancedChart key={`pane-spot-${indEpoch}`} paneRole="spot" split={split} onClosePane={() => setSpotHidden(true)} />
       </div>
 
       {/* RIGHT — option charts in the tab strip they already use. Mounted only
