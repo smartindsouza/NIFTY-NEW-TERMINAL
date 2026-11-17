@@ -1234,36 +1234,45 @@ function ScalpClip({ on, children }: { on: boolean; children: React.ReactNode })
   return on ? <div data-layout="chart-clip" className="flex-1 min-h-0 overflow-hidden flex flex-col">{children}</div> : <>{children}</>;
 }
 
-// AN OPTION CHART HAS NO INDICATORS (17 Nov 2026). Martin: "Indicators are
-// still applied to option charts. I want them All removed by default. Only
-// spot should keep the indicators".
-// The history, because this is the second go at it. Every indicator's switch
-// was once a single value in the browser, read by the index chart and the
-// option chart alike, so breaker blocks, zones and volume switched on for
-// NIFTY were drawn over a premium chart too, where levels worked out for an
-// index mean little. He asked (16 Nov) for them to be removed from the option
-// chart "by default", and v309 read that as "until he switches one on there":
-// an option chart got a set of switches of its own, saved under "opt:" + name,
-// all off to begin with. That is how they came back. The Indicators list on an
-// option chart showed that second set, every row off — which looks exactly
-// like his indicators having gone missing — and switched on there, they were
-// on for every option chart, ScalpPro's lower one included. (A new browser on
-// the live app shows an option chart bare; his was not, so the switches were
-// on in his phone's storage.)
-// So there is no second set. Asked for an option chart, every switch answers
-// "off" whatever is stored, and nothing is stored for one; the list is not
-// offered on an option chart at all (the Indicators button, ScalpPro's menu);
-// and a switch that is somehow on while an option is on screen is put off
-// again (see NOTHING IS ON, ON AN OPTION CHART). What was saved under "opt:"
-// is left where it is and never read.
-// (indGet answers an index chart exactly what localStorage.getItem did, so each
-// switch's own reading of its default there is untouched.)
+// AN OPTION CHART'S INDICATOR SWITCHES ARE ITS OWN, AND WERE ALL CLEARED ONCE
+// (17 Nov 2026). The third go at it, so the history is told here.
+//  1. Every indicator's switch was a single value in the browser, read by the
+//     index chart and the option chart alike, so breaker blocks, zones and
+//     volume switched on for NIFTY were drawn over a premium chart too, where
+//     levels worked out for an index mean little. Martin, 16 Nov: "Remove all
+//     indicators in the option premium chart by default." v309 kept each
+//     switch twice: under its old name for an index chart (so nothing he had
+//     set there changed), and under "opt:" + the name for an option chart,
+//     where one that has never been set reads as off whatever its default is
+//     on the index. The list is the same on both; a switch flipped on an
+//     option chart is the option charts'.
+//  2. 17 Nov, 10:46 AM: "Indicators are still applied to option charts. I want
+//     them All removed by default. Only spot should keep the indicators". They
+//     were on in his phone's storage: the list on an option chart is that
+//     second set, and what is switched on there is on for every option chart,
+//     ScalpPro's lower one included. v321 took the message for "an option
+//     chart has no indicators, ever" — every switch read as off there, and the
+//     list taken away.
+//  3. 1:07 PM: "I wanted the indicator option for option charts. I just wanted
+//     all the indicators cleared by default". The option kept, what was on
+//     cleared; not the option removed.
+// So the second set is as in (1) again — its own switches and its own list on
+// the option tab, on ScalpPro's lower chart and on the desktop's option half —
+// and whatever was switched on in it is cleared ONCE on each device
+// (optionIndicatorsClearedOnce, below). From then on an option chart shows
+// what he switches on for option charts, and nothing else.
+// (indGet answers what localStorage.getItem did, so each switch's own reading of
+// its default is untouched: on an option chart it is simply never "not set".)
+const IND_OPT = (key: string) => `opt:${key}`;
 const indGet = (key: string, opt: boolean): string | null => {
-  // Session breaks are a small object, not a yes / no: null means its own defaults, which are off.
-  if (opt) return key === 'sessionBreaks' ? null : 'false';
-  try { return localStorage.getItem(key); } catch (e) { return null; }
+  try {
+    if (!opt) return localStorage.getItem(key);
+    const v = localStorage.getItem(IND_OPT(key));
+    // Session breaks are a small object, not a yes / no: not set means its own defaults, which are off.
+    return v !== null ? v : key === 'sessionBreaks' ? null : 'false';
+  } catch (e) { return opt && key !== 'sessionBreaks' ? 'false' : null; }
 };
-const indSet = (key: string, opt: boolean, value: string) => { if (opt) return; try { localStorage.setItem(key, value); } catch (e) {} };
+const indSet = (key: string, opt: boolean, value: string) => { try { localStorage.setItem(opt ? IND_OPT(key) : key, value); } catch (e) {} };
 
 // THE STORAGE A CHART SAVES ITS SETTINGS TO (17 Nov 2026). Inside the chart
 // component `localStorage` is one of these, not the browser's own — the same
@@ -1353,6 +1362,40 @@ const manropeReady = () => { try { return !!(document as any).fonts?.check?.("10
     }
     localStorage.setItem('indicatorLinesThin', '1');
   } catch (e) { /* private mode or a full store: the new defaults still apply to a fresh device */ }
+})();
+
+// EVERY OPTION CHART STARTS CLEAR, ONCE (17 Nov 2026; see AN OPTION CHART'S
+// INDICATOR SWITCHES ARE ITS OWN). Whatever was switched on for option charts
+// on this device — which on his phone was most of the list, without his having
+// meant it — is put off, one time, before any chart reads a switch. A switch
+// that is not set reads as off on an option chart, so the saved ones are simply
+// removed. The desktop's option half also keeps its switches in a copy of its
+// own, which it puts back as it loads: they are put off there too. Nothing of
+// the index chart's is touched, and no setting (a colour, a period) of either.
+// After this the switches are his again: what he turns on for option charts
+// stays on.
+(function optionIndicatorsClearedOnce() {
+  try {
+    if (typeof localStorage === 'undefined' || localStorage.getItem('optIndicatorsCleared') === '1') return;
+    const mine: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && /^opt:(show[A-Z]\w*|sessionBreaks)$/.test(key)) mine.push(key);
+    }
+    for (const key of mine) localStorage.removeItem(key);
+    const raw = localStorage.getItem('paneIndicators:option');
+    if (raw !== null) {
+      try {
+        const snap = JSON.parse(raw);
+        if (snap && typeof snap === 'object') {
+          for (const k in snap) if (/^show[A-Z]/.test(k) && snap[k] === true) snap[k] = false;
+          if (snap.sessionBreak && typeof snap.sessionBreak === 'object') snap.sessionBreak = { ...snap.sessionBreak, on: false };
+          localStorage.setItem('paneIndicators:option', JSON.stringify(snap));
+        }
+      } catch (e) { /* not a copy this version wrote: left as it is */ }
+    }
+    localStorage.setItem('optIndicatorsCleared', '1');
+  } catch (e) { /* private mode or a full store: tried again next time */ }
 })();
 
 // COMPACT AXES ON PHONES (16 Nov 2026). Martin put this chart beside the Lemonn
@@ -9867,8 +9910,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const instrumentToken = selectedInstrument ? String(selectedInstrument.instrument_token) : indexToken;
   const instrumentTokenRef = useRef(instrumentToken);
   instrumentTokenRef.current = instrumentToken;
-  // An option is on this chart, not the index. (No indicator is drawn on one:
-  // see AN OPTION CHART HAS NO INDICATORS.)
+  // An option is on this chart, not the index. (Its indicator switches are a
+  // set of their own: see AN OPTION CHART'S INDICATOR SWITCHES ARE ITS OWN.)
   const isOptionView = !!selectedInstrument && (indexToken === null || instrumentToken !== indexToken);
   // WHOSE OPTIONS THE CARDS UNDER THE CHART ARE ABOUT (see ChartCards): the index
   // on screen, or the index an option on screen belongs to — read off its
@@ -9883,15 +9926,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     return isReferenceChart ? null : indexLabel;
   })();
 
-  // THE CHART'S KIND, AND ITS SWITCHES WHEN THE KIND CHANGES (see AN OPTION CHART
-  // HAS NO INDICATORS). On the phone's chart page one chart is the index or the
-  // option according to its tab, so when the tab changes every indicator switch
-  // is read again for what is now on screen. Each is read exactly as it is when
-  // the chart first opens: on the index, the saved value or else its own
-  // default; on an option, off. The switches then save themselves, as they
-  // always have, for the kind the ref now holds — which for an option is
-  // nowhere, so the index chart's saved switches are as he left them when he
-  // comes back to its tab.
+  // THE CHART'S KIND, AND ITS SWITCHES WHEN THE KIND CHANGES (see AN OPTION
+  // CHART'S INDICATOR SWITCHES ARE ITS OWN). On the phone's chart page one chart
+  // is the index or the option according to its tab, so when the tab changes
+  // every indicator switch is read again from the set that belongs to what is
+  // now on screen. Each is read exactly as it is when the chart first opens: the
+  // saved value, else its own default on an index chart, else off. The switches
+  // then save themselves, as they always have, under the kind the ref now holds
+  // — and until this has run they still hold, and save under, the old kind's.
   const optKindNow = isOptionPane || (!isSpotPane && isOptionView);
   useEffect(() => {
     if (optKindRef.current === optKindNow) return;
@@ -9923,26 +9965,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         && Number.isFinite(v.thickness) && Number.isFinite(v.lineStyle) ? { ...SB_DEFAULTS, ...v } : SB_DEFAULTS);
     } catch (e) { setSessionBreak(SB_DEFAULTS); }
   }, [optKindNow]);
-  // NOTHING IS ON, ON AN OPTION CHART (see AN OPTION CHART HAS NO INDICATORS).
-  // The switches above are read as off for an option chart, there is no list on
-  // one to switch them from, and the desktop's option half no longer puts them
-  // back from the copy it keeps. This is for whatever way in is not thought of
-  // here, or is added later: a switch that is on while an option is the chart
-  // is put off, and the list is shut if the tab changed under it.
-  const anyIndicatorOn = showPdhPdl || showOpeningRange || showConfSignals || showPinBars || showSwapSweep || showGiftDiv || showBos
-    || showStructure || showOrderBlocks || showInstLevels || showBreakers || showFvg || showDsZones || showSnR || showOiBars || showRsi
-    || showHLevels || showFiftyPercentLevels || showVolume || showBB || !!sessionBreak.on;
-  useEffect(() => {
-    if (!optKindNow) return;
-    setIsIndicatorsOpen(false);
-    if (!anyIndicatorOn) return;
-    setShowPdhPdl(false); setShowOpeningRange(false); setShowConfSignals(false); setShowPinBars(false); setShowSwapSweep(false);
-    setShowGiftDiv(false); setShowBos(false); setShowStructure(false); setShowOrderBlocks(false); setShowInstLevels(false);
-    setShowBreakers(false); setShowFvg(false); setShowDsZones(false); setShowSnR(false); setShowOiBars(false); setShowRsi(false);
-    setShowHLevels(false); setShowFiftyPercentLevels(false); setShowVolume(false); setShowBB(false);
-    setSessionBreak((sb) => (sb.on ? { ...sb, on: false } : sb));
-  }, [optKindNow, anyIndicatorOn]);
-
   // SWAP-SWEEP, 5-MIN + 15-MIN AGREEMENT ONLY. A mark (and an alert) exists only when
   // the 15-minute chart AND the 5-minute chart both show the pattern, same direction,
   // the 5-minute one inside that 15-minute C3. Both timeframes are fetched here,
@@ -10497,10 +10519,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // usual global keys (the phone reads those), so each half kept a snapshot of
   // its own and restored it when it loaded — otherwise the option half's choices
   // would overwrite the index half's after a reload, and vice versa. (Only the
-  // option half keeps one now, and it has no indicators to show with them: see
-  // THE OPTION HALF ALONE KEEPS A COPY NOW, and AN OPTION CHART HAS NO
-  // INDICATORS. The list stays because it is also the list of names that half
-  // must not write.)
+  // option half keeps one now: see THE OPTION HALF ALONE KEEPS A COPY NOW.)
   const paneInd: Record<string, [any, (v: any) => void]> = {
     showPdhPdl: [showPdhPdl, setShowPdhPdl], showOpeningRange: [showOpeningRange, setShowOpeningRange],
     showConfSignals: [showConfSignals, setShowConfSignals], structDays: [structDays, setStructDays],
@@ -10552,13 +10571,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     try {
       const raw = localStorage.getItem(paneIndKey);
       const saved = raw ? JSON.parse(raw) : null;
-      // Everything but the switches. An option chart has no indicator on (AN
-      // OPTION CHART HAS NO INDICATORS), and this copy holds them as they were
-      // saved before that was so: put back, they would be drawn for a moment
-      // before being put off again. The copy is saved again just below with
-      // them off, so this matters on the first load after the change only.
-      const isSwitch = (k: string) => /^show[A-Z]/.test(k) || k === 'sessionBreak';
-      if (saved && typeof saved === 'object') { for (const k in paneInd) if (k in saved && !isSwitch(k)) paneInd[k][1](saved[k]); }
+      if (saved && typeof saved === 'object') { for (const k in paneInd) if (k in saved) paneInd[k][1](saved[k]); }
       else {
         // First load on this device: start this half's own copy from the
         // current settings, so a half that is never touched still keeps them
@@ -15747,7 +15760,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             {/* THE MENU BUTTON, top right, as Lemonn's is: a 33pt square with 6pt
                 corners, 16pt in from the edge, centred on the two lines. */}
             <button type="button" data-scalp="menu" aria-label="Chart menu" title="Range, indicators, drawings, settings"
-              onClick={() => { setIndexMenuOpen(false); setScalpMenu(optKindNow ? 'range' : 'indicators'); }}
+              onClick={() => { setIndexMenuOpen(false); setScalpMenu('indicators'); }}
               className="absolute right-4 top-[17px] h-[33px] w-[33px] rounded-[6px] border border-foreground/20 bg-foreground/[0.04] flex items-center justify-center text-foreground/85 active:bg-foreground/10">
               <ListPlus size={18} strokeWidth={1.9} />
             </button>
@@ -15812,9 +15825,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             <div className="absolute inset-x-0 bottom-0 top-[37.5%] flex overflow-hidden rounded-t-[18px] border-t border-foreground/15 bg-card" onPointerDown={(e) => e.stopPropagation()}>
               <div data-menu-rail="" className="shrink-0 box-content w-[79.2px] overflow-y-auto border-r border-foreground/10 px-[8.4px] pt-[16px] pb-[calc(1rem+env(safe-area-inset-bottom))] flex flex-col gap-[9.3px]">
                 {([['range', 'Range', <CalendarRange size={20} key="i" />], ['indicators', 'Indicators', <ChartNoAxesCombined size={20} key="i" />],
-                   ['drawings', 'Drawings', <PencilRuler size={20} key="i" />], ['settings', 'Settings', <Settings size={20} key="i" />]] as const)
-                  // The option's chart has no indicators, so its menu has no Indicators.
-                  .filter(([k]) => !(optKindNow && k === 'indicators')).map(([k, label, icon]) => (
+                   ['drawings', 'Drawings', <PencilRuler size={20} key="i" />], ['settings', 'Settings', <Settings size={20} key="i" />]] as const).map(([k, label, icon]) => (
                   <button key={k} type="button" data-menu-tile={k} aria-pressed={scalpMenu === k} onClick={() => setScalpMenu(k)}
                     className={`shrink-0 h-[78.8px] rounded-[8px] flex flex-col items-center justify-center gap-3 text-[12px] leading-none font-medium ${scalpMenu === k
                       ? 'bg-[#dfe9ff] text-[#1d3f8f] dark:bg-[#0f1f3d] dark:text-foreground' : 'border border-foreground/15 text-foreground/85 active:bg-foreground/10'}`}>
@@ -16301,7 +16312,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               <option value="43200">1M</option>
             </select>
           </div>
-          <div className={`flex rounded-md shrink-0 md:order-3 max-md:order-3 max-md:flex-1 max-md:justify-center ${optKindNow ? 'md:hidden' : ''}`}>
+          <div className="flex rounded-md shrink-0 md:order-3 max-md:order-3 max-md:flex-1 max-md:justify-center">
             <div className="relative max-md:w-full" ref={indicatorsRef}>
               <button
                 data-bar="indicators"
@@ -16313,14 +16324,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   // then reached this button and opened it again. A click within
                   // half a second of that close is the same tap, and is let go.
                   if (Date.now() - indClosedAtRef.current < 500) { indClosedAtRef.current = 0; return; }
-                  // An option chart has no indicators (see AN OPTION CHART HAS NO
-                  // INDICATORS): the button keeps its place in the row of five, dimmed,
-                  // and says where they are instead of opening an empty list.
-                  if (optKindNow) { toast.info(`Indicators are on the ${indexLabel} chart`, { id: 'ind-on-index' }); return; }
                   pageToTop(); setRangeOpen(false); setPhoneSettingsOpen(false); setIsIndicatorsOpen(!isIndicatorsOpen);
                 }}
-                data-off={optKindNow ? '' : undefined}
-                className={`${optKindNow ? 'opacity-40 ' : ''}flex items-center justify-center gap-1.5 h-9 w-9 text-sm font-medium rounded-md transition-colors max-md:h-10 max-md:w-full max-md:flex-col max-md:gap-0.5 max-md:!bg-transparent ${isIndicatorsOpen ? 'bg-primary/20 text-primary md:bg-background/50' : 'bg-muted/40 md:bg-transparent text-muted-foreground hover:bg-background/50 hover:text-foreground max-md:text-foreground/90'}`}
+                className={`flex items-center justify-center gap-1.5 h-9 w-9 text-sm font-medium rounded-md transition-colors max-md:h-10 max-md:w-full max-md:flex-col max-md:gap-0.5 max-md:!bg-transparent ${isIndicatorsOpen ? 'bg-primary/20 text-primary md:bg-background/50' : 'bg-muted/40 md:bg-transparent text-muted-foreground hover:bg-background/50 hover:text-foreground max-md:text-foreground/90'}`}
               >
                 {/* Trend line over bars — the icon Martin picked for Indicators. */}
                 <ChartNoAxesCombined size={18} />
@@ -16343,11 +16349,23 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               )}
               {(isIndicatorsOpen || !!menuTo('indicators')) && (
                 <MenuPortal to={menuTo('indicators')}>
+                {/* AN OPTION CHART'S LIST HOLDS ONLY WHAT CAN BE DRAWN ON ONE (17 Nov 2026).
+                    The rule was already here for two rows (BOS-CHoCH, OI Bars): a switch left
+                    visible invites turning on something that can never draw. It is now every
+                    such row. Previous Day High/Low, 15 min High-Low, the zones, Fair Value
+                    Gaps, pin bars, GIFT Divergence, Support-Resistance, Bollinger Bands and
+                    H Levels are drawn on an index chart only (each is held back where it is
+                    drawn), so on an option chart their rows are not shown. Neither are the
+                    rows that are not of the option charts' own set at all — the three
+                    alerts and the two bias rows are the index chart's, and switching one
+                    in an option chart's list switched it there. What is left is what an
+                    option chart can show: Institutional Levels, Breaker Blocks & Liquidity,
+                    Swap-Sweep, Session Breaks, Volume and RSI. */}
                 <div data-ind-list="" className={menuTo('indicators') ? 'scalp-menu-list' : 'fixed md:absolute inset-x-0 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem))] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto md:overflow-hidden bg-card border-y border-white/10 md:border-0 rounded-none md:rounded-md py-1.5 z-[45] shadow-2xl flex flex-col'}>
                   <div className="order-0 px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase">Available Indicators</div>
                   
                   {/* Previous Day High/Low */}
-                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('PreviousDayHighLow', showPdhPdl)}`}>
+                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('PreviousDayHighLow', showPdhPdl)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -16384,7 +16402,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   </div>
 
                   {/* 15m Opening Range (first-15-min high/low lines) */}
-                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('15minHighLow', showOpeningRange)}`}>
+                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('15minHighLow', showOpeningRange)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -16506,7 +16524,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   </div>
 
                   {/* Directional Zones (ported TradingView indicator; replaced Order Blocks) */}
-                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('DirectionalZones', showOrderBlocks)}`}>
+                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('DirectionalZones', showOrderBlocks)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -16581,7 +16599,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   </div>
 
                   {/* Fair Value Gaps */}
-                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('FairValueGaps', showFvg)}`}>
+                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('FairValueGaps', showFvg)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -16614,7 +16632,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   </div>
 
                   {/* Demand / Supply Zones */}
-                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('DemandSupplyZones', showDsZones)}`}>
+                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('DemandSupplyZones', showDsZones)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -16647,7 +16665,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   </div>
 
                   {/* Level Touch Alerts */}
-                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('LevelTouchAlerts', levelAlertsOn)}`}>
+                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('LevelTouchAlerts', levelAlertsOn)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -16680,7 +16698,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   </div>
 
                   {/* Zone Tap Alerts — the ported Pine script's own alert */}
-                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('ZoneTapAlerts', zoneTapAlertsOn)}`}>
+                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('ZoneTapAlerts', zoneTapAlertsOn)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -16713,7 +16731,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   </div>
 
                   {/* Breakout Authenticity Alerts */}
-                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BreakoutFakeouts', breakoutAlertsOn)}`}>
+                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BreakoutFakeouts', breakoutAlertsOn)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -16743,7 +16761,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     >
                       <Star size={14} fill={isFav('BreakoutFakeouts') ? 'currentColor' : 'none'} />
                     </button>
-                  </div>                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('ReversalPinBars', showPinBars)}`}>
+                  </div>                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('ReversalPinBars', showPinBars)}`}>
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
                         <button
                           onClick={(e) => { e.stopPropagation(); setShowPinBars(!showPinBars); }}
@@ -16807,7 +16825,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       ))}
                     </div>
                   )}
-                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('GiftDivergence', showGiftDiv)}`}>
+                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('GiftDivergence', showGiftDiv)}`}>
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
                         <button
                           onClick={(e) => { e.stopPropagation(); setShowGiftDiv(!showGiftDiv); }}
@@ -16828,7 +16846,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       <Star size={14} fill={isFav('GiftDivergence') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
-                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BiasLevels', showBiasLevels)}`}>
+                  {/* THE TWO BIAS ROWS ARE THE INDEX CHART'S ONLY (17 Nov 2026). Today's bias
+                      levels are drawn on the NIFTY 50 chart and nowhere else, and the bias
+                      card is NIFTY's; neither is a switch of the option charts' own set. In
+                      an option chart's list they stood lit when everything of the option
+                      chart's had been cleared — and switching one there switched it for the
+                      index chart. They are not shown in that list. */}
+                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BiasLevels', showBiasLevels)}`}>
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
                         <button
                           onClick={(e) => { e.stopPropagation(); setShowBiasLevels(!showBiasLevels); }}
@@ -16849,7 +16873,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       <Star size={14} fill={isFav('BiasLevels') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
-                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BiasCard', !biasCardHidden)}`}>
+                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BiasCard', !biasCardHidden)}`}>
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
                         <button
                           onClick={(e) => { e.stopPropagation(); setBiasCardHidden(!biasCardHidden); }}
@@ -16940,7 +16964,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       <Star size={14} fill={isFav('Volume') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
-                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('SupportResistanceLines', showSnR)}`}>
+                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('SupportResistanceLines', showSnR)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -17055,7 +17079,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   </div>
 
                   {/* Bollinger Bands */}
-                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BollingerBands', showBB)}`}>
+                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BollingerBands', showBB)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -17092,7 +17116,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   </div>
 
                   {/* H Levels */}
-                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('HLevels', showHLevels)}`}>
+                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('HLevels', showHLevels)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">

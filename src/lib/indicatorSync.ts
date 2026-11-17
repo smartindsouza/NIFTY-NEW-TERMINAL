@@ -7,10 +7,7 @@
 // WHAT IS SHARED is listed below: the index chart's switches, each indicator's
 // settings (colours, widths, periods, levels), the three alert switches that
 // sit in the same list, and the stars. NOT shared, on purpose:
-//   - anything of an option chart's — he asked for the spot chart, and an
-//     option chart has no indicators at all (AdvancedChart, AN OPTION CHART HAS
-//     NO INDICATORS). The "opt:" names a browser may still hold from the days
-//     it had switches of its own are not in the list, so are never sent;
+//   - an option chart's switches ("opt:" + name) — he asked for the spot chart;
 //   - the SL & TP defaults that sit in the list as a gear — they shape orders,
 //     and a setting that shapes an order is changed where it is changed;
 //   - what is a matter of one screen: the RSI pane's height, the bias card's ×;
@@ -283,8 +280,8 @@ export function keepBefore(store: KV, before: Record<string, string | null>, cha
 // So now: the INDEX half keeps no copy — it is the plain names, the same chart
 // as the phone's and the single chart's; and the OPTION half never writes the
 // plain names it keeps in its own copy (AdvancedChart gives that half a
-// `localStorage` of its own that leaves those names alone). The option half
-// has no switches of its own at all: an option chart draws no indicator.
+// `localStorage` of its own that leaves those names alone). The option half's
+// switches were already under "opt:" names.
 
 /** A setting whose name in a half's own copy is not its storage name. */
 const HALF_COPY_NAME: Record<string, string> = {
