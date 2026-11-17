@@ -649,6 +649,15 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Chart: the bias lines are named Bias and Invalidation (v337)
+
+Martin: "change Bias trigger/High and Invalidation/Low to just Bias and
+Invalidation." The trigger is usually the opening range's high or low and the
+invalidation the other, so each price carried two names on the axis. The
+trigger's line is named **Bias**, and an opening-range line at the trigger's or
+the invalidation's price is not drawn. An opening-range line at a price of its
+own still is (OR high / OR low).
+
 ## Chart: support and resistance are S and R in a ring (v336)
 
 Martin: "change the RESISTANCE and SUPPORT text to just R and S inside a

@@ -10892,10 +10892,18 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         // Thin and solid, like every indicator line (16 Nov 2026). The trigger
         // and the invalidation were told apart by solid against dashed; they are
         // different colours and each carries its name on the axis.
-        { price: L.trigger, color: trig, lineWidth: 1, lineStyle: 0, title: 'Bias trigger' },
+        // JUST "Bias" AND "Invalidation" (17 Nov 2026). Martin: "change Bias
+        // trigger/High and Invalidation/Low to just Bias and Invalidation."
+        // The trigger is very often the opening range's high or low and the
+        // invalidation the other, so each line stood twice at one price with
+        // two names on the axis (Bias trigger over OR high, Invalidation over
+        // OR low). The trigger is named Bias, and an opening-range line that
+        // is at the trigger's or the invalidation's price is not drawn.
+        { price: L.trigger, color: trig, lineWidth: 1, lineStyle: 0, title: 'Bias' },
         { price: L.invalidation, color: inval, lineWidth: 1, lineStyle: 0, title: 'Invalidation' },
-        { price: L.or_high, color: faint, lineWidth: 1, lineStyle: 0, title: 'OR high' },
-        { price: L.or_low, color: faint, lineWidth: 1, lineStyle: 0, title: 'OR low' },
+        ...[{ price: L.or_high, title: 'OR high' }, { price: L.or_low, title: 'OR low' }]
+          .filter((o) => ![L.trigger, L.invalidation].some((p) => typeof p === 'number' && typeof o.price === 'number' && Math.abs(p - o.price) < 0.05))
+          .map((o) => ({ ...o, color: faint, lineWidth: 1, lineStyle: 0 })),
       ];
       const ok = out.filter((x) => typeof x.price === 'number' && Number.isFinite(x.price) && x.price > 0);
       if (!onOpt) return ok;
