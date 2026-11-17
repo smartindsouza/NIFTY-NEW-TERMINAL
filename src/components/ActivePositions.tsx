@@ -489,6 +489,21 @@ export function ActivePositions() {
         });
       }
 
+      // AFTER AN EXIT, SCALPPRO CLOSES AND THE CHART PAGE IS BACK ON THE INDEX
+      // (17 Nov 2026). Martin: "Once I click exit close the scalp pro screen and
+      // go back to the nifty chart on the main chart screen". Done the way the
+      // screen's own back arrow does it: the option on screen is let go, and the
+      // close is announced so the bottom bar hears it too. Only for an exit he
+      // tapped — a stop or a target closing the trade does not come this way —
+      // and only once the exit has really happened (this line is not reached
+      // if the order was refused or is still unfilled).
+      try {
+        if (!pos.testMode && sessionStorage.getItem('scalpPro') === '1') {
+          sessionStorage.removeItem('selectedInstrument');
+          window.dispatchEvent(new CustomEvent('terminal:scalp', { detail: false }));
+        }
+      } catch (e) { /* the exit itself is done; the screen is left as it is */ }
+
       // Mark the symbol as just-exited BEFORE clearing the card, so the 3s poll
       // cannot re-adopt it while the closing order is still working.
       recentlyExitedRef.current.set(pos.symbol, Date.now());

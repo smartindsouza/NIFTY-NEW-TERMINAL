@@ -1227,6 +1227,25 @@ function MenuPortal({ to, children }: { to: HTMLElement | null; children: React.
   return to ? createPortal(children, to) : <>{children}</>;
 }
 
+// ON SCALPPRO A CHART STOPS SQUEEZING AT A POINT AND IS COVERED INSTEAD (17 Nov
+// 2026). Martin, with a recording of Lemonn's two charts and the handle between
+// them: "After certain point the chart doesn't squeeze when minimizing it like
+// shown in the video. Do the same in my scalp pro screen as well."
+// What Lemonn does, frame by frame: as the handle is dragged the chart gets
+// shorter and its price scale closes up — down to a height of about 192pt
+// (its plot and its time axis). Past that the chart is not made any smaller:
+// the edge of its pane comes up over it, first over the time axis, then over
+// the lowest prices, until only the two lines of name and price are left. The
+// chart keeps its top; what is hidden is its foot.
+// Here a chart filled whatever its pane gave it, so near the end it was a strip
+// a few points tall with its whole range crushed into it. Now its box has that
+// minimum, and it sits inside a box of the pane's real height that cuts it off.
+// The Buy / Sell bar is under that box, not in it, so it is never cut.
+const SCALP_CHART_MIN = 192;
+function ScalpClip({ on, children }: { on: boolean; children: React.ReactNode }) {
+  return on ? <div data-layout="chart-clip" className="flex-1 min-h-0 overflow-hidden flex flex-col">{children}</div> : <>{children}</>;
+}
+
 const IND_OPT = (key: string) => `opt:${key}`;
 const indGet = (key: string, opt: boolean): string | null => {
   try {
@@ -5494,6 +5513,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     return false;
   });
   const indicatorsRef = useRef<HTMLDivElement>(null);
+  const indClosedAtRef = useRef(0);   // when the layer behind the indicators list last closed it (see the Indicators button)
 
   useEffect(() => {
     try {
@@ -6798,6 +6818,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const tradeFitFrozenRef = useRef<number[] | null>(null);
   const tradeFitSigRef = useRef('');
   const tradeFitBaseSpanRef = useRef(0);   // the candles' own range, as the fit last saw it
+  const fitLogRef = useRef<any[]>([]);       // TEMPORARY: the last fits that widened the range (see FINDING THE PRICE SCALE'S BLINK)
   const tradeFitLevels = (): number[] => {
     if (tradeFitFrozenRef.current) return tradeFitFrozenRef.current;
     const ser = mainSeriesRef.current;
@@ -6864,6 +6885,66 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     }, 400);
     return () => clearInterval(iv);
     // Reads refs only; the interval must not be torn down and rebuilt on renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ===== TEMPORARY — FINDING THE PRICE SCALE'S BLINK (17 Nov 2026) =====
+  // Martin sent a recording of ScalpPro's index chart: about four times a
+  // second, on each tick, the price scale is drawn ONE frame wider (its bottom
+  // ~50 points lower), the frame after that the labels and zones are drawn where
+  // that wider scale would put them, and then all is back. It does not happen
+  // on the test copy, nor on the live app in a test browser with his indicators
+  // on, at the live tick rate — so it is something in the state of the app on
+  // his phone, and guessing at it from here would be guessing.
+  // So the chart looks at itself: every 20 seconds, for two and a half seconds,
+  // it reads on each frame how many points of price a fixed height of the pane
+  // spans. A span that jumps by more than 8% and is back within three frames,
+  // three times or more, is that blink — and what the fit was doing at the time
+  // is written under "diag_chart_blink" in the settings store (at most three
+  // times a visit), where it can be read without asking him for anything.
+  // Reads only; nothing on the chart is changed by it.
+  // TO BE REMOVED once the cause is found — this, fitLogRef and the two lines
+  // in the candle series' autoscaleInfoProvider that write to it.
+  useEffect(() => {
+    let raf = 0, stopped = false, sent = 0;
+    const look = () => {
+      const ser = mainSeriesRef.current, cont = chartContainerRef.current, chart = mainChartRef.current;
+      if (stopped || sent >= 3 || !ser || !cont || !chart || document.hidden || cont.clientHeight < 120) return;
+      const h = cont.clientHeight;
+      const seq: number[] = [];
+      const t0 = performance.now();
+      const step = () => {
+        if (stopped) return;
+        let v = NaN;
+        try { v = Math.round((Number(ser.coordinateToPrice(10)) - Number(ser.coordinateToPrice(h - 50))) * 100) / 100; } catch (e) {}
+        seq.push(v);
+        if (performance.now() - t0 < 2500) { raf = requestAnimationFrame(step); return; }
+        let blinks = 0, steady = NaN, blip = NaN;
+        for (let i = 1; i < seq.length - 3; i++) {
+          const was = seq[i - 1], now = seq[i];
+          if (!(was > 0) || !(now > 0) || Math.abs(now - was) <= was * 0.08) continue;
+          if ([1, 2, 3].some((k) => Math.abs(seq[i + k] - was) < was * 0.02)) { blinks++; steady = was; blip = now; i += 3; }
+        }
+        if (blinks < 3) return;
+        sent++;
+        let lr: any = null, opts: any = null;
+        try { const r = chart.timeScale().getVisibleLogicalRange(); lr = r ? [Math.round(Number(r.from) * 10) / 10, Math.round(Number(r.to) * 10) / 10] : null; } catch (e) {}
+        try { const o: any = chart.priceScale('right').options(); opts = { auto: o?.autoScale, mode: o?.mode, margins: o?.scaleMargins }; } catch (e) {}
+        const report = {
+          at: Date.now(), role: paneRole || 'one', scalp: !!scalp, tf: timeframe, ua: String(navigator.userAgent).slice(0, 90),
+          frames: seq.length, blinks, steady, blip, spans: seq.slice(0, 45),
+          fit: fitLogRef.current.slice(-10), frozen: tradeFitFrozenRef.current, levels: (() => { try { return tradeFitLevels(); } catch (e) { return 'err'; } })(),
+          sl: slLinesRef.current.length, smap: spotMapLinesRef.current.length, pos: !!slActivePosRef.current, drag: !!exitDragRef.current,
+          bars: chartDataRef.current?.candles?.length || 0, lr, opts, h, w: cont.clientWidth,
+        };
+        try { fetch('/api/settings/diag_chart_blink', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: report }), keepalive: true }).catch(() => {}); } catch (e) {}
+      };
+      raf = requestAnimationFrame(step);
+    };
+    const first = setTimeout(look, 8000);
+    const iv = setInterval(look, 20000);
+    return () => { stopped = true; clearTimeout(first); clearInterval(iv); cancelAnimationFrame(raf); };
+    // Reads refs only; one watcher for the life of the chart.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -12230,6 +12311,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             let flo = lo0, fhi = hi0;
             for (const p of levels) { if (p < flo) flo = p; if (p > fhi) fhi = p; }
             if (flo === lo0 && fhi === hi0) return base;
+            try { const L = fitLogRef.current; L.push({ t: Math.round(performance.now()), b: [lo0, hi0], o: [flo, fhi], n: levels.length, f: 1 }); if (L.length > 16) L.shift(); } catch (e) {}
             return { ...base, priceRange: { minValue: flo, maxValue: fhi } };
           }
           const maxSpan = span > 0 ? span * TRADE_FIT_MAX_STRETCH : Infinity;
@@ -12248,6 +12330,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           const pad = (hi - lo) * TRADE_FIT_PAD;
           if (lo < lo0) lo = Math.max(0, lo - pad);
           if (hi > hi0) hi = hi + pad;
+          try { const L = fitLogRef.current; L.push({ t: Math.round(performance.now()), b: [lo0, hi0], o: [lo, hi], n: levels.length, f: 0 }); if (L.length > 16) L.shift(); } catch (e) {}
           return { ...base, priceRange: { minValue: lo, maxValue: hi } };
         } catch (e) { return base; }
       },
@@ -15149,6 +15232,37 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // scaled to the line's (a bought option is paid for in full, so it scales
   // with its price). A level on the index buys at whatever the option is then.
   const atReqBuy = atOn && !atOnSpot && atLevel !== null && scalpReqNow.buy !== null && scalpReq.px > 0 ? scalpReqNow.buy * (atLevel / scalpReq.px) : scalpReqNow.buy;
+  // "Req" UNDER BUY FOLLOWS THE PREMIUM (17 Nov 2026). Martin: "the req margin
+  // does not update live as the premium Price changes". The broker is asked
+  // what one lot needs every 30 seconds (see WHAT EACH BUTTON NEEDS) and the
+  // figure stood still in between, while the price above it moved four times a
+  // second. What a BUY of an option needs is its premium — price times
+  // quantity — so between two answers the broker's figure is scaled by how far
+  // the price has moved since it was asked, the same way the At Price line's
+  // figure already is. Written straight to the element four times a second,
+  // like the price in the header: the bar is not drawn again for it.
+  // WHAT A SELL NEEDS IS NOT SCALED. It is margin, not premium, and does not
+  // move in step with the price; it stays the broker's own figure.
+  const scalpReqBuyLive = (): number | null => {
+    const base = scalpReqNow.buy;
+    if (base === null) return null;
+    const live = Number(lastCandleDataRef.current?.close) || 0;
+    return scalpReq.px > 0 && live > 0 ? base * (live / scalpReq.px) : base;
+  };
+  const reqBuyRef = useRef<HTMLSpanElement | null>(null);
+  const reqBuyText = () => (!atOn && scalpPos && scalpPos.side === 'SELL' ? '' : `Req: ${scalpRs(atOn ? atReqBuy : scalpReqBuyLive())}`);
+  const reqBuyTextRef = useRef(reqBuyText);
+  reqBuyTextRef.current = reqBuyText;
+  useEffect(() => {
+    if (!scalpBarOn) return;
+    const iv = setInterval(() => {
+      const el = reqBuyRef.current;
+      if (!el) return;
+      const t = reqBuyTextRef.current();
+      if (el.textContent !== t) el.textContent = t;
+    }, 250);
+    return () => clearInterval(iv);
+  }, [scalpBarOn]);
   const scalpArm = async (side: 'BUY' | 'SELL') => {
     if (scalpBusyRef.current || Date.now() - scalpLastAtRef.current < 1200) return;
     const a = scalpAt, c = scalpInfo;
@@ -16148,7 +16262,16 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             <div className="relative max-md:w-full" ref={indicatorsRef}>
               <button
                 data-bar="indicators"
-                onClick={() => { pageToTop(); setRangeOpen(false); setPhoneSettingsOpen(false); setIsIndicatorsOpen(!isIndicatorsOpen); }}
+                onClick={() => {
+                  // A SECOND TAP ON THE BUTTON HIDES THE LIST (17 Nov 2026; Martin: "The
+                  // indicators button when tapped once again does not hide the list").
+                  // On a phone the finger's press lands on the see-through layer
+                  // behind the list, which closes it — and the click that follows
+                  // then reached this button and opened it again. A click within
+                  // half a second of that close is the same tap, and is let go.
+                  if (Date.now() - indClosedAtRef.current < 500) { indClosedAtRef.current = 0; return; }
+                  pageToTop(); setRangeOpen(false); setPhoneSettingsOpen(false); setIsIndicatorsOpen(!isIndicatorsOpen);
+                }}
                 className={`flex items-center justify-center gap-1.5 h-9 w-9 text-sm font-medium rounded-md transition-colors max-md:h-10 max-md:w-full max-md:flex-col max-md:gap-0.5 max-md:!bg-transparent ${isIndicatorsOpen ? 'bg-primary/20 text-primary md:bg-background/50' : 'bg-muted/40 md:bg-transparent text-muted-foreground hover:bg-background/50 hover:text-foreground max-md:text-foreground/90'}`}
               >
                 {/* Trend line over bars — the icon Martin picked for Indicators. */}
@@ -16167,7 +16290,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   there, and a click outside should still reach what it hit). */}
               {isIndicatorsOpen && (
                 <div className="fixed inset-0 z-[44] md:hidden" aria-hidden="true"
-                  onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setIsIndicatorsOpen(false); }}
+                  onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); indClosedAtRef.current = Date.now(); setIsIndicatorsOpen(false); }}
                   onClick={(e) => { e.preventDefault(); e.stopPropagation(); }} />
               )}
               {(isIndicatorsOpen || !!menuTo('indicators')) && (
@@ -17170,7 +17293,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               the buttons that sit over it — the interval, the "i" — are placed
               from its edges, so with no height they came out over the name above
               and the Buy / Sell bar below. Cut off at the chart's own box. */}
-          <div data-layout="chart" className={`relative max-md:isolate max-md:z-[1] flex-grow flex w-full bg-card rounded-none min-h-0 md:min-h-[450px] ${scalp ? 'overflow-hidden' : ''}`} onMouseLeave={() => setCrosshairInfo(null)}>
+          <ScalpClip on={scalp}>
+          <div data-layout="chart" style={scalp ? { minHeight: SCALP_CHART_MIN } : undefined} className={`relative max-md:isolate max-md:z-[1] flex-grow flex w-full bg-card rounded-none min-h-0 md:min-h-[450px] ${scalp ? 'overflow-hidden' : ''}`} onMouseLeave={() => setCrosshairInfo(null)}>
             {/* Leverage meter — why the premium is moving more (or less) than the
                 index right now. Display only: pointer-events-none, so it can never
                 block a drag, a crosshair, or a level being placed. */}
@@ -17976,6 +18100,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               </div>
             )}
           </div>
+          </ScalpClip>
           {/* Divider between chart and RSI: visual border + drag to resize the RSI pane */}
           {showRsi && !scalp && (
             <div
@@ -18127,7 +18252,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               {/* The middle column is as wide as the stepper above it (8 + 32 +
                   44 + 32 + 8), so each "Req" is centred under its own button. */}
               <div className="flex items-start mt-[5.5px] text-[10px] leading-[12px] font-extrabold text-muted-foreground">
-                <span data-scalp="req-buy" className="flex-1 min-w-0 text-center whitespace-nowrap">{!atOn && scalpPos && scalpPos.side === 'SELL' ? '' : `Req: ${scalpRs(atOn ? atReqBuy : scalpReqNow.buy)}`}</span>
+                <span ref={reqBuyRef} data-scalp="req-buy" className="flex-1 min-w-0 text-center whitespace-nowrap">{reqBuyText()}</span>
                 <span data-scalp="funds" className="shrink-0 w-[124px] -mt-[0.5px] text-center whitespace-nowrap text-[8px] leading-[10px] font-semibold text-foreground/80">Funds: {scalpRs(availBalance)}</span>
                 <span data-scalp="req-sell" className="flex-1 min-w-0 text-center whitespace-nowrap">{!atOn && scalpPos && scalpPos.side !== 'SELL' ? '' : `Req: ${scalpRs(scalpReqNow.sell)}`}</span>
               </div>

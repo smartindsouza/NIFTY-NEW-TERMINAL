@@ -654,6 +654,34 @@ than that, so the order rested unfilled while the app said "exit placed".
 - **Exit on the chart closes every open position** (he asked: "exit all
   positions when I tap on exit in the chart").
 
+## After an Exit ScalpPro closes; Indicators closes on a second tap; ScalpPro's charts and Req (v320)
+
+- An exit he tapped, once the broker has filled it, closes the ScalpPro screen
+  and leaves the chart page on the index — the same thing the screen's back
+  arrow does (`ActivePositions.tsx`). A stop or a target closing the trade does
+  not move the screen.
+- On a phone the press of a second tap on the Indicators button landed on the
+  see-through layer behind the list, which closed it, and the click that
+  followed opened it again. That click is now let go (`indClosedAtRef`).
+- **ScalpPro: a chart stops squeezing at 192pt and is covered instead** (off a
+  recording of Lemonn's). Dragging the handle makes a chart shorter down to
+  192pt — its plot and time axis; past that the pane's edge comes up over the
+  chart's foot, until only the name and price are left. The chart box has that
+  minimum and sits in a box of the pane's real height that cuts it off
+  (`ScalpClip`, `SCALP_CHART_MIN`); the Buy / Sell bar is below that box and is
+  never cut.
+- **ScalpPro: "Req" under Buy follows the premium.** The broker is still asked
+  what one lot needs every 30 seconds; between two answers the figure is scaled
+  by how far the price has moved, four times a second. What a Sell needs is
+  margin, not premium, and stays the broker's own figure.
+- **Temporary: the chart checks itself for a blink.** On his phone ScalpPro's
+  index chart is drawn one frame wider on every tick; it does not happen on the
+  test copy or on the live app in a test browser. Every 20 seconds the chart
+  reads its own price scale for 2.5 seconds, and if it sees that blink it
+  writes what the fit was doing under `diag_chart_blink` in the settings store
+  (`GET /api/settings/diag_chart_blink`). To be removed once the cause is found
+  (FINDING THE PRICE SCALE'S BLINK in `AdvancedChart.tsx`).
+
 ## The positions banner is one line: the overall P&L (v319)
 
 `src/components/ActivePositions.tsx`. The card with each position's details,
