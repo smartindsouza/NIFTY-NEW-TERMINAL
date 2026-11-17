@@ -440,7 +440,12 @@ section which scrolls down to show the things shown in the screenshot."
   - **Your Positions** — today's P&L (`/api/positions-live`, the banner's own
     figure); a tap opens the Trade Journal. No order history, as he said.
   - **Open Interest (OI)** — put and call open interest of every strike of the
-    expiry, a red | green bar split at their share, and the put : call ratio.
+    expiry, a bar split at their share, and the put : call ratio. **Calls are
+    red and puts are green, as on Home** (v317; he asked for the call OI "in red
+    like in the homepage"): each total is in its own colour and so is its end of
+    the bar. Lemonn's card has the colours the other way round, and this one did
+    until then — the same totals were red on one page and green on the next.
+    The sides did not move: puts on the left, calls on the right.
   - **Daily Performance** — the low and high of the latest session of the chart
     on screen, with a bolt where the last price stands between them. On an
     option's chart it is the option's own day. Read off the chart's candles: no
@@ -626,6 +631,21 @@ whatever was on for NIFTY was drawn over an option's premium too.
 - The index chart's own switches and defaults are exactly what they were.
 - Session breaks — a style with its own editor, not a plain switch — are kept
   the same way: an option chart's start from their defaults, which are off.
+
+## Chart: the indicators that are on are at the top of the list (v317)
+
+He asked for "the selected/used indicators" to be moved to the top of the list.
+The order, in every place the list is shown (the chart page, each half of the
+desktop, ScalpPro's menu), is: on and starred, on, starred, the rest — each
+group in the list's own order. So what is in use is always at the top, and a
+star lifts a row within its own group, not above the ones that are on.
+
+**The order is the one the list opened with.** An earlier version moved a row the
+moment it was switched, which reshuffled the list under the finger mid-tap; that
+is why only a star moved a row for a while. A row switched while the list is
+open stays where it is, and has moved the next time the list is opened
+(`rowOrder` and `indOnAtOpen` in `src/pages/AdvancedChart.tsx`). A star still
+moves its row at once, within its group — that is what a star is tapped for.
 
 ## ScalpPro: each chart's menu (v316)
 

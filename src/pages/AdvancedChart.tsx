@@ -4515,17 +4515,32 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const structDaysRef = useRef(structDays);   // the canvas loop is built once
   structDaysRef.current = structDays;
 
-  // Favourite indicators. Favourites sort above everything, then active, then
-  // the rest — so a starred indicator stays put whether it is on or off.
+  // Favourite indicators (the stars). Where a star puts a row in the list is
+  // told at rowOrder, just below.
   const [favIndicators, setFavIndicators] = useState<string[]>(() => {
     try { const v = JSON.parse(localStorage.getItem('favIndicators') || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
   });
   useEffect(() => { try { localStorage.setItem('favIndicators', JSON.stringify(favIndicators)); } catch (e) {} }, [favIndicators]);
   const isFav = (id: string) => favIndicators.includes(id);
   const toggleFav = (id: string) => setFavIndicators(f => f.includes(id) ? f.filter(x => x !== id) : [...f, id]);
-  // Only a FAVOURITE floats to the top now. Switching an indicator on used to
-  // move it as well, which reshuffled the list under the finger mid-tap.
-  const rowOrder = (id: string, _active?: boolean) => isFav(id) ? 'order-0' : 'order-2';
+  // THE INDICATORS THAT ARE ON STAND AT THE TOP OF THE LIST (17 Nov 2026).
+  // Martin: "Also move the selected/used indicators to the top of the list".
+  // The order is: on and starred, on, starred, the rest — what is in use is
+  // always at the top, and a star still lifts a row within its own group.
+  // THE ORDER IS THE ONE THE LIST OPENED WITH. An earlier version moved a row
+  // the moment it was switched, which reshuffled the list under the finger
+  // mid-tap; that is why, until now, only a star moved a row. So a row switched
+  // while the list is open stays where it is, and has moved the next time the
+  // list is opened. `indOnAtOpen` is that picture of what was on: filled in by
+  // the first drawing of an open list, and thrown away when the list closes
+  // (the effect beside the ScalpPro menu's state, which is the other place the
+  // list is shown).
+  const indOnAtOpen = useRef<Record<string, boolean> | null>(null);
+  const rowOrder = (id: string, active?: boolean) => {
+    const seen = (indOnAtOpen.current ||= {});
+    if (!(id in seen)) seen[id] = !!active;
+    return seen[id] ? (isFav(id) ? 'order-0' : 'order-1') : (isFav(id) ? 'order-2' : 'order-3');
+  };
 
   const [showStructure, setShowStructure] = useState(() => {
     try { const v = indGet('showStructure', optKindRef.current); return v === null ? true : v === 'true'; } catch (e) { return true; }
@@ -5919,6 +5934,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     isEditingOpeningRange || isEditingStruct || isEditingFvg || isEditingDsZones ||
     isEditingLevelAlerts || isEditingZoneTapAlerts || isEditingBreakoutAlerts || isEditingVolume;
   useEffect(() => { if (anySettingsOpen) setScalpMenu(null); }, [anySettingsOpen]);
+  // The indicators list is closed (both places it is shown): forget which rows
+  // were on when it opened, so the next opening sorts by what is on then. See
+  // rowOrder.
+  useEffect(() => { if (!isIndicatorsOpen && scalpMenu !== 'indicators') indOnAtOpen.current = null; }, [isIndicatorsOpen, scalpMenu]);
 
   const logicalRangeRef = useRef<any>(null);
   // Bar count at the moment the visible range was last captured. Needed to tell

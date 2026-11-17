@@ -190,16 +190,27 @@ export function ChartCards({ chainSymbol, getDay, onOpenOption, onOpenPositions 
           <div data-card="oi" className="mt-3 rounded-[8px] bg-foreground/[0.08] px-4 pt-[16px] pb-[15.67px]">
             <div className="flex justify-between text-[12px] leading-4 font-semibold text-foreground/65"><span>Total Put OI</span><span>Total Call OI</span></div>
             <div className="mt-1 flex justify-between text-[12px] leading-4 font-semibold text-foreground/95">
-              <span data-oi="put">{oi ? oi.put.toLocaleString('en-IN') : '—'}</span><span data-oi="call">{oi ? oi.call.toLocaleString('en-IN') : '—'}</span>
+              <span data-oi="put" style={{ color: oi ? OI_GREEN : undefined }}>{oi ? oi.put.toLocaleString('en-IN') : '—'}</span>
+              <span data-oi="call" style={{ color: oi ? RED : undefined }}>{oi ? oi.call.toLocaleString('en-IN') : '—'}</span>
             </div>
-            {/* Red for puts, green for calls, the knob where one ends and the other
-                begins. Lemonn's own bar stood at exactly half with a ratio of
-                0.94; this one is drawn to the figures, which is the same picture
-                near 1 and says something away from it. */}
+            {/* CALLS ARE RED AND PUTS ARE GREEN, AS ON HOME (17 Nov 2026). Martin:
+                "Show the CE Open Interest in red like in the homepage." Lemonn's
+                card, which this one was measured from, has them the other way
+                round — red for puts, green for calls — and so did this until
+                then: the same two totals were red on one page of the app and
+                green on the next. Home's is the convention he reads the chain
+                by (calls written overhead, puts written underneath), so it is
+                the one both pages now use: each figure is in its own colour,
+                and so is its end of the bar. The sides did not move — puts on
+                the left, calls on the right, as the labels above them say.
+                The knob is where one ends and the other begins. Lemonn's own
+                bar stood at exactly half with a ratio of 0.94; this one is
+                drawn to the figures, which is the same picture near 1 and says
+                something away from it. */}
             <div className="relative mt-[7.67px] h-[8.33px]">
               <div className="absolute inset-0 rounded-full overflow-hidden flex">
-                <div style={{ width: `${(oi ? oi.put / (oi.put + oi.call) : 0.5) * 100}%`, background: RED }} />
-                <div className="flex-1" style={{ background: OI_GREEN }} />
+                <div data-oi="put-bar" style={{ width: `${(oi ? oi.put / (oi.put + oi.call) : 0.5) * 100}%`, background: OI_GREEN }} />
+                <div data-oi="call-bar" className="flex-1" style={{ background: RED }} />
               </div>
               <div data-oi="knob" className="absolute top-1/2 h-[16.33px] w-[3.33px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground dark:bg-white" style={{ left: `${(oi ? oi.put / (oi.put + oi.call) : 0.5) * 100}%` }} />
             </div>
