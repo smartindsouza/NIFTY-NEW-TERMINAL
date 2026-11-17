@@ -649,6 +649,21 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## News filters are the pill-and-chips bar; TP & SL leaves the Indicators list (v346)
+
+- **News** (`src/components/ChipBar.tsx`). Martin, with a picture ("NIFTY 50 ⇕ |
+  Bullish Bearish Volatile …"): "change the news categories and the filter
+  button to exactly this design shown in the screenshot". The "Filters:" label
+  is a pill ("Category ⇕" / "Sentiment ⇕") that switches what the chips pick
+  by: the six categories as before, or Bullish / Bearish / Neutral. Measured
+  off his picture: pill 34 tall with a white edge, a 1pt line, chips 32 tall
+  (chosen white with black words, the rest a #373737 edge), 12px. The futures
+  heatmap uses the same bar.
+- **TP & SL.** Martin: "Also remove the TP & SL setting from the indicators
+  list". The row is gone. The sheet opens from Settings → SL & TP on the phone,
+  as before, and on the desktop from a new SL & TP button on the tool bar (the
+  row was the desktop's only way to it).
+
 ## News: no "Why this matters for NIFTY" box on the cards (v345)
 
 Martin, with a picture of a card: "Remove the why this matters for nifty part

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
+import { ChipBar } from '../components/ChipBar';
 
 type NewsCategory = 'All' | 'India Market' | 'Global Macro' | 'Geopolitical' | 'Sector' | 'NIFTY Companies';
 
@@ -32,8 +33,18 @@ interface NewsItem {
   link: string;
 }
 
+type NewsSentiment = 'Bullish' | 'Bearish' | 'Neutral';
+const SENTIMENT_CHIPS: readonly NewsSentiment[] = ['Bullish', 'Bearish', 'Neutral'];
+
 export function News() {
   const [activeFilter, setActiveFilter] = useState<NewsCategory>('All');
+  // THE PILL SWITCHES WHAT THE CHIPS PICK BY (17 Nov 2026), as "Index ⇕" /
+  // "Sector ⇕" does on the futures heatmap in Martin's recording: Category (All,
+  // India Market, Global Macro, Geopolitical, Sector, NIFTY Companies — as
+  // before) or Sentiment (Bullish, Bearish, Neutral — the three a card can
+  // carry). The "Filters:" label it replaces was not a control at all.
+  const [filterBy, setFilterBy] = useState<'Category' | 'Sentiment'>('Category');
+  const [sentiment, setSentiment] = useState<NewsSentiment>('Bullish');
 
   const { data: newsQueryData, isLoading, error, refetch, isRefetching } = useQuery<{
     news: NewsItem[];
@@ -73,10 +84,12 @@ export function News() {
 
   const filteredNews = news
     ? news.filter((item) => {
+        if (filterBy === 'Sentiment') return item.sentiment === sentiment.toLowerCase();
         if (activeFilter === 'All') return true;
         return item.category === activeFilter;
       })
     : [];
+  const chosen = filterBy === 'Sentiment' ? sentiment : activeFilter;
 
   return (
     <div className="p-4 md:p-8 pb-32 max-w-[1600px] w-full mx-auto animate-in fade-in zoom-in-95 duration-500">
@@ -107,30 +120,15 @@ export function News() {
         </button>
       </div>
 
-      {/* Category Navigation Ribbon */}
-      <div className="flex flex-wrap items-center gap-1.5 pb-6 border-b border-0 mb-8">
-        <div className="flex items-center gap-1.5 text-muted-foreground mr-2 text-xs">
-          <SlidersHorizontal className="w-3.5 h-3.5" />
-          <span>Filters:</span>
-        </div>
-        {filterTabs.map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveFilter(tab)}
-            className={cn(
-              "px-3 py-1.5 text-xs rounded font-medium border cursor-pointer transition-all duration-200",
-              activeFilter === tab
-                ? tab === 'India Market'
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "bg-white text-black border-white"
-                : tab === 'India Market'
-                  ? "bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20"
-                  : "bg-card text-muted-foreground border-0 hover:border-0 hover:text-foreground/90"
-            )}
-          >
-            {tab}
-          </button>
-        ))}
+      {/* The filters: Martin's pill-and-chips bar (components/ChipBar.tsx). */}
+      <div className="mb-6">
+        {filterBy === 'Category' ? (
+          <ChipBar name="news" toggleLabel="Category" onToggle={() => setFilterBy('Sentiment')}
+            chips={filterTabs} active={activeFilter} onPick={(c) => setActiveFilter(c)} />
+        ) : (
+          <ChipBar name="news" toggleLabel="Sentiment" onToggle={() => setFilterBy('Category')}
+            chips={SENTIMENT_CHIPS} active={sentiment} onPick={(c) => setSentiment(c)} />
+        )}
       </div>
 
       {/* Main Content Area */}
@@ -167,7 +165,7 @@ export function News() {
           <div className="text-center p-16 border border-dashed border-0 rounded-xl bg-white/[0.01]">
             <SlidersHorizontal className="w-8 h-8 text-muted-foreground mx-auto mb-3 opacity-40" />
             <p className="text-foreground/80 font-medium text-sm">
-              No news items fell under the &apos;{activeFilter}&apos; category today.
+              No news items fell under &apos;{chosen}&apos; today.
             </p>
             <p className="text-xs text-muted-foreground mt-1">
               Refine your filter selection, or use the refresh icon above to fetch recently published events.

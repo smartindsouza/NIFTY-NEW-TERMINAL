@@ -17094,23 +17094,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     </button>
                   </div>
 
-                  {/* TP & SL — settings only; there is nothing to draw, so no toggle. */}
-                  <div className="order-3 flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group">
-                    <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 text-left flex-grow">
-                      <div className="w-4" />
-                      {/* The percentages were printed here as well as inside the
-                          editor. They are settings, so they belong behind the
-                          gear like every other row's. */}
-                      <span>TP &amp; SL</span>
-                    </div>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setIsEditingTpSl(true); setIsIndicatorsOpen(false); }}
-                      className="text-muted-foreground hover:text-foreground p-1 hover:bg-slate-700 rounded transition-colors"
-                      title="TP & SL Default Levels"
-                    >
-                      <Settings size={14} />
-                    </button>
-                  </div>
+                  {/* NO TP & SL ROW HERE (17 Nov 2026). Martin: "Also remove the TP & SL
+                      setting from the indicators list". It was a row with a gear and
+                      nothing to draw. The sheet opens from Settings (SL & TP) on the
+                      phone and from its own button on the desktop's tool bar. */}
 
                   {/* Fair Value Gaps */}
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('FairValueGaps', showFvg)}`}>
@@ -17729,11 +17716,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
              <Zap size={18} className={quickTradeEnabled ? 'text-primary' : 'text-muted-foreground'} />
           </div>
           )}
-            <button type="button" data-settings="tpsl"
+            {/* SL & TP: a row in the phone's Settings, as before; on the desktop
+                (17 Nov 2026) a button on the tool bar, since the Indicators list's
+                TP & SL row it was reached by there is gone. Once, in the split. */}
+            <button type="button" data-settings="tpsl" title="SL & TP" aria-label="SL & TP"
               onClick={() => { setPhoneSettingsOpen(false); setIsEditingTpSl(true); }}
-              className={`${isReferenceChart || isPane ? 'hidden' : 'md:hidden flex'} h-11 w-full items-center justify-start gap-3 px-2.5 rounded-md text-muted-foreground`}>
+              className={`${isReferenceChart ? 'hidden' : isPane ? `hidden md:flex ${sharedHidden} md:order-2 h-9 w-9 shrink-0 justify-center bg-muted/40 hover:text-foreground` : 'md:hidden flex h-11 w-full justify-start gap-3 px-2.5'} items-center rounded-md text-muted-foreground`}>
               <SlidersHorizontal size={17} />
-              <span className="text-left text-[13px] font-medium text-foreground">SL &amp; TP</span>
+              <span className={`${isPane ? 'hidden' : ''} text-left text-[13px] font-medium text-foreground`}>SL &amp; TP</span>
             </button>
             {/* THE PHONE HAS NO RELOAD ROW (17 Nov 2026). Martin: "Remove the
                 reload option from settings once it's added" — "it" being the
