@@ -233,7 +233,7 @@ function TradeGuardSheet({ st, onSaved, onClose }: { st: Status | null; onSaved:
             )}
           </div>
           <div className="text-[11px] text-muted-foreground leading-relaxed">
-            Only new entries you place (order ticket, Quick Trade, ScalpPro, waiting orders) are blocked — never an exit, SL, TP or Exit All. Telegram auto-trades keep their own limits. Stricter changes apply now; relaxed ones start the next trading day.
+            Only new entries you place (order ticket, Quick Trade, ScalperX, waiting orders) are blocked — never an exit, SL, TP or Exit All. Telegram auto-trades keep their own limits. Stricter changes apply now; relaxed ones start the next trading day.
             {pendingText && <div className="mt-1 text-amber-400">Waiting for {st?.pendingFrom}: {pendingText}.</div>}
           </div>
         </div>

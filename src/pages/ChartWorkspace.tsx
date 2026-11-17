@@ -253,7 +253,11 @@ function ScalpScreen({ onClose }: { onClose: () => void }) {
         <div data-scalp="tab" className="relative ml-[11px] h-[37px] px-[17px] flex items-center rounded-t-[13px] border border-b-0 border-foreground/15 bg-card text-[12px] font-[650] text-foreground">
           <span className="absolute -left-[10px] bottom-0 h-[10px] w-[10px]" aria-hidden="true" style={{ background: 'radial-gradient(circle at 0 0, transparent 9.5px, var(--card) 10px)' }} />
           <span className="absolute -right-[10px] bottom-0 h-[10px] w-[10px]" aria-hidden="true" style={{ background: 'radial-gradient(circle at 100% 0, transparent 9.5px, var(--card) 10px)' }} />
-          ScalpPro
+          {/* SCALPERX (17 Nov 2026). Martin: "Also change the ScalpPro name to
+              ScaperX everywhere in my app", and asked which he meant, ScalperX. The
+              name on the screen is changed wherever it is shown; the code's own
+              names for it (scalp, ScalpScreen, openInScalpPro) are not. */}
+          ScalperX
         </div>
       </div>
       <div ref={bodyRef} className="flex flex-col flex-1 min-h-0">

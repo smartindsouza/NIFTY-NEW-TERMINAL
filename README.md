@@ -649,6 +649,14 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## ScalpPro is called ScalperX (v341)
+
+Martin: "Also change the ScalpPro name to ScaperX everywhere in my app" — asked
+which he meant, ScalperX. Changed wherever the name shows: the button under the
+phone chart, the screen's tab, the message "Move SL / TP in ScalperX", and the
+Trade guard sheet's note. The code's own names for it (`scalp`, `ScalpScreen`,
+`openInScalpPro`, `terminal:scalp`) and this README's history are unchanged.
+
 ## Chart: the bias is a button on the index chart, with Lemonn's sheet (v340)
 
 `src/components/BiasCheck.tsx`. Martin, with two pictures of Lemonn's ScalpPro:

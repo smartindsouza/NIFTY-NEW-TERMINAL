@@ -7397,7 +7397,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       // A phone has no ⚡ button to point at (see THE PHONE HAS NO QUICK TRADE
       // BUTTON), so there the press names the screen where the chips do move.
       try {
-        if (isPhoneChart()) toast.info('Move SL / TP in ScalpPro', { id: 'chip-needs-qt' });
+        if (isPhoneChart()) toast.info('Move SL / TP in ScalperX', { id: 'chip-needs-qt' });
         else toast.info('Quick Trade is off', { id: 'chip-needs-qt', description: 'Switch it on (the ⚡ button) to move SL or TP. It turns itself off after a minute.' });
       } catch (err) {}
       return;
@@ -17793,7 +17793,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             </button>
             <button type="button" data-bar="scalp" onClick={openScalp}
               className="flex-1 h-10 rounded-lg bg-foreground text-background text-[13px] font-semibold flex items-center justify-center gap-2 active:opacity-80">
-              <CandlestickChart size={15} /> ScalpPro
+              <CandlestickChart size={15} /> ScalperX
             </button>
           </div>
         )}
