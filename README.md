@@ -649,6 +649,15 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Chart (phone): the row of five has Lemonn's icons (v338)
+
+`src/components/BarIcons.tsx`. Martin, with a picture of Lemonn's row: "Use the
+same icons for my app as well." Range is a dotted frame over a measured line,
+Indicators a script *fx*, Drawings a pencil leaving a line, Settings a cog with
+a solid hub; Interval shows the interval, as before. Lemonn's icons are its own
+drawings, so these are drawn here to the same idea. ScalpPro's menu uses the
+same four, and the desktop's Indicators and Drawings buttons too.
+
 ## Chart: the bias lines are named Bias and Invalidation (v337)
 
 Martin: "change Bias trigger/High and Invalidation/Low to just Bias and

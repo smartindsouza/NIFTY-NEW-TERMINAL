@@ -22,6 +22,7 @@ import { computeBreakersAndGrabs, normaliseBlSettings, BL_DEFAULTS, type BlResul
 import { format } from "date-fns";
 import { SymbolSearch } from "../components/SymbolSearch";
 import { PullRefresh } from "../components/PullRefresh";
+import { RangeIcon, IndicatorsIcon, DrawingsIcon, SettingsIcon } from "../components/BarIcons";
 import MarketContext from "../components/MarketContext";
 import BounceConviction from "../components/BounceConviction";
 import { DownloadCloud, Globe, ListPlus } from 'lucide-react';
@@ -16290,8 +16291,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); }} />
             <div className="absolute inset-x-0 bottom-0 top-[37.5%] flex overflow-hidden rounded-t-[18px] border-t border-foreground/15 bg-card" onPointerDown={(e) => e.stopPropagation()}>
               <div data-menu-rail="" className="shrink-0 box-content w-[79.2px] overflow-y-auto border-r border-foreground/10 px-[8.4px] pt-[16px] pb-[calc(1rem+env(safe-area-inset-bottom))] flex flex-col gap-[9.3px]">
-                {([['range', 'Range', <CalendarRange size={20} key="i" />], ['indicators', 'Indicators', <ChartNoAxesCombined size={20} key="i" />],
-                   ['drawings', 'Drawings', <PencilRuler size={20} key="i" />], ['settings', 'Settings', <Settings size={20} key="i" />]] as const).map(([k, label, icon]) => (
+                {([['range', 'Range', <RangeIcon size={20} key="i" />], ['indicators', 'Indicators', <IndicatorsIcon size={20} key="i" />],
+                   ['drawings', 'Drawings', <DrawingsIcon size={20} key="i" />], ['settings', 'Settings', <SettingsIcon size={20} key="i" />]] as const).map(([k, label, icon]) => (
                   <button key={k} type="button" data-menu-tile={k} aria-pressed={scalpMenu === k} onClick={() => setScalpMenu(k)}
                     className={`shrink-0 h-[78.8px] rounded-[8px] flex flex-col items-center justify-center gap-3 text-[12px] leading-none font-medium ${scalpMenu === k
                       ? 'bg-[#dfe9ff] text-[#1d3f8f] dark:bg-[#0f1f3d] dark:text-foreground' : 'border border-foreground/15 text-foreground/85 active:bg-foreground/10'}`}>
@@ -16634,7 +16635,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               <button type="button" data-bar="range" title="How much of the chart is on screen"
                 onClick={() => { pageToTop(); setPhoneSettingsOpen(false); setRangeOpen(o => !o); }}
                 className={`h-10 w-full flex flex-col items-center justify-center gap-0.5 rounded-md ${rangeOpen ? 'text-primary' : 'text-foreground/90'}`}>
-                {rangeChoice ? <span className="h-[18px] text-[15px] leading-[18px] font-semibold">{rangeChoice === 'ALL' ? 'All' : rangeChoice}</span> : <CalendarRange size={18} />}
+                {rangeChoice ? <span className="h-[18px] text-[15px] leading-[18px] font-semibold">{rangeChoice === 'ALL' ? 'All' : rangeChoice}</span> : <RangeIcon size={18} />}
                 <span className="text-[10px] leading-none font-medium text-muted-foreground">Range</span>
               </button>
               {rangeOpen && (
@@ -16695,7 +16696,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               className={`flex items-center justify-center h-9 w-9 rounded-md transition-colors max-md:h-10 max-md:w-full max-md:flex-col max-md:gap-0.5 max-md:!bg-transparent ${
                 (rrArm || drawArm) ? 'bg-primary/25 text-primary' : (rrBox || (split && peerRrBox)) ? 'bg-emerald-500/15 text-emerald-300' : 'bg-muted/40 text-muted-foreground hover:text-foreground max-md:text-foreground/90'}`}
             >
-              <PencilRuler size={17} />
+              <DrawingsIcon size={18} />
               <span className="md:hidden text-[10px] leading-none font-medium text-muted-foreground">Drawings</span>
             </button>
             {(rrMenuOpen || !!menuTo('drawings')) && (() => {
@@ -16800,8 +16801,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 }}
                 className={`flex items-center justify-center gap-1.5 h-9 w-9 text-sm font-medium rounded-md transition-colors max-md:h-10 max-md:w-full max-md:flex-col max-md:gap-0.5 max-md:!bg-transparent ${isIndicatorsOpen ? 'bg-primary/20 text-primary md:bg-background/50' : 'bg-muted/40 md:bg-transparent text-muted-foreground hover:bg-background/50 hover:text-foreground max-md:text-foreground/90'}`}
               >
-                {/* Trend line over bars — the icon Martin picked for Indicators. */}
-                <ChartNoAxesCombined size={18} />
+                {/* Lemonn's fx (see BarIcons.tsx); it was a trend line over bars. */}
+                <IndicatorsIcon size={18} />
                 <span className="md:hidden text-[10px] leading-none font-medium text-muted-foreground">Indicators</span>
               </button>
               {/* A TAP ON THE CHART CLOSES THE LIST (16 Nov 2026). The list already
@@ -17639,7 +17640,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               <button type="button" data-bar="settings" title="Settings"
                 onClick={() => { pageToTop(); setRangeOpen(false); setRrMenuOpen(false); setIsIndicatorsOpen(false); setPhoneSettingsOpen(o => !o); }}
                 className={`h-10 w-full flex flex-col items-center justify-center gap-0.5 rounded-md ${phoneSettingsOpen ? 'text-primary' : 'text-foreground/90'}`}>
-                <Settings size={18} />
+                <SettingsIcon size={18} />
                 <span className="text-[10px] leading-none font-medium text-muted-foreground">Settings</span>
               </button>
             </div>
