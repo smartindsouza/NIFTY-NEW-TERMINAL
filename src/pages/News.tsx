@@ -12,8 +12,7 @@ import {
   SlidersHorizontal,
   RefreshCw,
   AlertTriangle,
-  Flame,
-  Info
+  Flame
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
@@ -254,20 +253,10 @@ export function News() {
                 </h3>
               </div>
 
-              {/* Rationale Divider Box (WHY THIS MATTERS FOR NIFTY) */}
-              <div className="p-3.5 bg-white/[0.02] border border-0 rounded-lg flex items-start gap-2.5 text-xs">
-                <div className="p-1 rounded bg-slate-400/10 text-foreground/80 shrink-0 mt-0.5">
-                  <Info className="w-3.5 h-3.5" />
-                </div>
-                <div>
-                  <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-0.5">
-                    Why this matters for NIFTY
-                  </div>
-                  <p className="text-foreground/80 font-normal leading-relaxed">
-                    {item.whyItMatters}
-                  </p>
-                </div>
-              </div>
+              {/* No "Why this matters for NIFTY" box (17 Nov 2026). Martin: "Remove
+                  the why this matters for nifty part for every news card to make
+                  them compact". The server still sends whyItMatters; the card no
+                  longer shows it. */}
 
               {/* Footer: timestamp bottom-LEFT, the outbound link as an icon only
                   bottom-RIGHT. The whole card is already clickable, so the icon is

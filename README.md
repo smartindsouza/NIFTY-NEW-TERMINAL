@@ -649,6 +649,13 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## News: no "Why this matters for NIFTY" box on the cards (v345)
+
+Martin, with a picture of a card: "Remove the why this matters for nifty part
+for every news card to make them compact". Each card is now its tags, the
+headline and the time with the link — 182 px tall for the first card at phone
+size. The server still sends `whyItMatters`; only the card stopped showing it.
+
 ## Home page: Open Interest, Trend Summary and Supporting Evidence are gone (v344)
 
 Martin, with pictures of the three: "Remove these 3 cards from the homepage".
