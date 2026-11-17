@@ -649,6 +649,39 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Trade guard's sheet, a tap outside, and ScalpPro that does not scroll (v325)
+
+Martin, 17 Nov 2026, with two pictures from his phone.
+
+- **Trade guard: Save is always in sight** (`src/components/TradeGuard.tsx`).
+  "Can't find the save button". On a phone the shield is a row of the chart's
+  Settings list and its sheet was drawn inside that list, which sits under the
+  app's bottom bar and the Option Chain | ScalpPro buttons — so the foot of the
+  sheet, with Cancel and Save, was behind them. The sheet is drawn on the page
+  itself now, above those bars; only the rules scroll, Cancel and Save stay put.
+- **The two numbers are typed as text.** "Unable to change the Max trade per
+  day": the box read "05". A number field holding a number shows 0 when rubbed
+  out, and the next digit went after it. Digits only now, nothing in front.
+  What saving does is unchanged: a stricter rule applies at once, a looser one
+  from the next trading day.
+- **A tap outside closes what is behind it too.** "whenever i tap on any part
+  of the chart, any list or setting that was open has to disappear" — with the
+  guard's sheet open, a tap outside closed the sheet and left the Settings list
+  it was opened from. The list (the phone's Settings, ScalpPro's menu) closes
+  with the sheet, however the sheet is closed. The line editor and the H Levels
+  box, the two settings boxes a tap outside did not close, close on one too.
+- **ScalpPro does not scroll** (`ScalpScreen` in `src/pages/ChartWorkspace.tsx`).
+  "sometimes the scalp pro screen moves up making the top heading hidden.
+  Disable screen vertical scrolling in the scalp pro screen". The screen is
+  sized to fill the window, but for a moment it can be taller than it (the
+  positions line appears above it when a trade opens), a finger on the heading
+  or the Buy / Sell bar then moved the page, and because the screen's top was
+  measured in the window, a page that had moved made the screen that much
+  taller and so stayed moved. While the screen is up the page cannot scroll or
+  bounce and is put back at its top if found moved; a finger on the screen is
+  not the browser's to scroll with (the charts read their own touches, a list
+  in a menu is a scroller of its own); and the top is measured on the page.
+
 ## Chart: an option chart's indicators are its own, and were all cleared once (v324)
 
 `src/pages/AdvancedChart.tsx` (`indGet` / `indSet`, "opt:" keys,

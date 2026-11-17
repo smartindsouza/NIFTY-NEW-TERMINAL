@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { Shield, ShieldAlert, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -83,7 +84,10 @@ export function useTradeGuard() {
 // today's count (or Off) at the end of the row, red while entries are blocked.
 // No more words than that: he wants the app as bare as Lemonn's. On a desktop
 // (md and up) it is the same square button as before.
-export function TradeGuardButton({ className, label }: { className?: string; label?: boolean }) {
+// `onClosed`: the sheet was opened from a list (the phone's Settings, ScalpPro's
+// menu) and has just been closed, however it was closed — the list it came
+// from closes with it (see A TAP OUTSIDE CLOSES WHAT IS BEHIND IT TOO, below).
+export function TradeGuardButton({ className, label, onClosed }: { className?: string; label?: boolean; onClosed?: () => void }) {
   const [st, setSt] = useTradeGuard();
   const [open, setOpen] = useState(false);
   const on = !!st?.rules.enabled;
@@ -105,7 +109,7 @@ export function TradeGuardButton({ className, label }: { className?: string; lab
           </>
         )}
       </button>
-      {open && <TradeGuardSheet st={st} onSaved={setSt} onClose={() => setOpen(false)} />}
+      {open && <TradeGuardSheet st={st} onSaved={setSt} onClose={() => { setOpen(false); try { onClosed?.(); } catch (e) {} }} />}
     </>
   );
 }
@@ -113,6 +117,14 @@ export function TradeGuardButton({ className, label }: { className?: string; lab
 function TradeGuardSheet({ st, onSaved, onClose }: { st: Status | null; onSaved: (s: Status) => void; onClose: () => void }) {
   const r = st?.rules;
   const [f, setF] = useState<Rules>(r || { enabled: true, startTime: '10:00', maxTrades: 4, maxLoss: 3000 });
+  // THE TWO NUMBERS ARE TYPED AS TEXT (17 Nov 2026). Martin, trying to make 4
+  // into 5: "Unable to change the Max trade per day" — the box read "05". They
+  // were number fields holding a number: rubbed out, the number was 0, the box
+  // showed "0", and the 5 typed next went after it. They hold what was typed
+  // now — digits only, nothing in front — and it is made a number when saved.
+  const [maxTradesText, setMaxTradesText] = useState(String(f.maxTrades));
+  const [maxLossText, setMaxLossText] = useState(String(f.maxLoss));
+  const digits = (v: string, len: number) => v.replace(/[^0-9]/g, '').replace(/^0+(?=\d)/, '').slice(0, len);
   const [busy, setBusy] = useState(false);
   // Structure SL (server/reversal_watch.ts): its own switch, applies at once —
   // turning it off is never a way around the guard, it only stops the auto-exit.
@@ -129,9 +141,12 @@ function TradeGuardSheet({ st, onSaved, onClose }: { st: Status | null; onSaved:
   const toggleSsl = (on: boolean) => { setSsl(on); saveSsl({ structureSl: on }, on ? 'Structure SL on for new trades' : 'Structure SL off — alerts only for new trades', () => setSsl(!on)); };
   const pickTf = (tf: 5 | 15) => { const was = sslTf; setSslTf(tf); saveSsl({ timeframe: tf }, `Structure SL uses ${tf}-min swings for new trades`, () => setSslTf(was)); };
   const save = async () => {
+    const maxTrades = parseInt(maxTradesText, 10), maxLoss = parseInt(maxLossText, 10);
+    if (!(maxTrades >= 1 && maxTrades <= 50)) { toast.error('Max trades a day: 1 to 50'); return; }
+    if (!(maxLoss >= 100)) { toast.error('Loss limit: ₹100 or more'); return; }
     setBusy(true);
     try {
-      const res = await fetch('/api/guard/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(f) });
+      const res = await fetch('/api/guard/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...f, maxTrades, maxLoss }) });
       const j = await res.json();
       if (!j?.success) throw new Error(j?.error || 'Could not save');
       onSaved(j); toast.success(j.note || 'Saved'); onClose();
@@ -145,14 +160,30 @@ function TradeGuardSheet({ st, onSaved, onClose }: { st: Status | null; onSaved:
   const pendingText = st?.pending && Object.keys(st.pending).length
     ? Object.entries(st.pending).map(([k, v]) => k === 'enabled' ? 'guard off' : k === 'startTime' ? `start ${v}` : k === 'maxTrades' ? `${v} trades` : `loss limit ₹${Number(v).toLocaleString('en-IN')}`).join(', ')
     : null;
-  return (
-    <div className="fixed inset-0 z-[120] flex items-end sm:items-center justify-center bg-black/50" onClick={onClose}>
-      <div className="w-full sm:max-w-[400px] bg-card border border-border rounded-t-2xl sm:rounded-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+  // THE SHEET IS ON TOP OF EVERYTHING, AND ITS SAVE BUTTON IS ALWAYS IN SIGHT
+  // (17 Nov 2026). Martin, with a picture of it on his phone: "Can't find the
+  // save button". On a phone the shield is a row of the chart's Settings list,
+  // and the sheet was drawn inside that list — which sits UNDER the app's
+  // bottom bar and the Option Chain | ScalpPro buttons. So the foot of the
+  // sheet, where Cancel and Save are, was behind them, and since Save was the
+  // last thing in the part that scrolls, scrolling could not bring it out.
+  // It is drawn on the page itself now, above those bars; only the rules
+  // scroll, and the row with Cancel and Save stays put under them, clear of the
+  // home indicator.
+  // A TAP OUTSIDE CLOSES WHAT IS BEHIND IT TOO. "whenever i tap on any part of
+  // the chart, any list or setting that was open has to disappear. For example
+  // when the trade guard settings are open and I tap on the chart outside, the
+  // trade guard disappears but the settings list still keeps open." The list
+  // the sheet was opened from is closed when the sheet is (onClosed), so one
+  // tap leaves the chart with nothing over it.
+  return createPortal(
+    <div data-guard-sheet="" className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/50" onClick={onClose}>
+      <div className="w-full sm:max-w-[400px] bg-card border border-border rounded-t-2xl sm:rounded-2xl max-h-[88dvh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2 font-semibold"><Shield size={18} className="text-emerald-400" /> Trade guard</div>
           <button onClick={onClose} className="p-1 text-muted-foreground hover:text-foreground"><X size={20} /></button>
         </div>
-        <div className="px-4 py-3 space-y-4">
+        <div data-guard-rules="" className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-3 space-y-4">
           {st?.blocked && <div className="rounded-lg bg-rose-500/15 text-rose-300 text-sm px-3 py-2">{st.reason}</div>}
           {st && r?.enabled && (
             <div className="space-y-3">
@@ -178,11 +209,11 @@ function TradeGuardSheet({ st, onSaved, onClose }: { st: Status | null; onSaved:
             </label>
             <label className="flex items-center justify-between text-sm gap-3">
               <span>Max trades a day</span>
-              <input type="number" min={1} max={50} value={f.maxTrades} onChange={(e) => setF({ ...f, maxTrades: Number(e.target.value) })} className="w-20 h-9 px-2 rounded-md bg-background border border-border font-mono text-sm" />
+              <input data-guard="max-trades" type="text" inputMode="numeric" pattern="[0-9]*" autoComplete="off" value={maxTradesText} onChange={(e) => setMaxTradesText(digits(e.target.value, 2))} onFocus={(e) => e.target.select()} className="w-20 h-9 px-2 rounded-md bg-background border border-border font-mono text-sm" />
             </label>
             <label className="flex items-center justify-between text-sm gap-3">
               <span>Stop for the day at a loss of ₹</span>
-              <input type="number" min={100} step={500} value={f.maxLoss} onChange={(e) => setF({ ...f, maxLoss: Number(e.target.value) })} className="w-24 h-9 px-2 rounded-md bg-background border border-border font-mono text-sm" />
+              <input data-guard="max-loss" type="text" inputMode="numeric" pattern="[0-9]*" autoComplete="off" value={maxLossText} onChange={(e) => setMaxLossText(digits(e.target.value, 7))} onFocus={(e) => e.target.select()} className="w-24 h-9 px-2 rounded-md bg-background border border-border font-mono text-sm" />
             </label>
           </div>
           <div className="border-t border-border pt-3">
@@ -206,11 +237,12 @@ function TradeGuardSheet({ st, onSaved, onClose }: { st: Status | null; onSaved:
             {pendingText && <div className="mt-1 text-amber-400">Waiting for {st?.pendingFrom}: {pendingText}.</div>}
           </div>
         </div>
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-border">
+        <div data-guard-foot="" className="shrink-0 flex justify-end gap-2 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-border">
           <button onClick={onClose} className="px-3 h-9 rounded-md bg-muted text-sm">Cancel</button>
-          <button onClick={save} disabled={busy} className="px-4 h-9 rounded-md bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-50">Save</button>
+          <button data-guard="save" onClick={save} disabled={busy} className="px-4 h-9 rounded-md bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-50">Save</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -134,7 +134,12 @@ function ScalpScreen({ onClose }: { onClose: () => void }) {
     const fit = () => {
       const el = rootRef.current;
       if (!el) return;
-      const t = Math.max(0, Math.round(el.getBoundingClientRect().top));
+      // Where the screen starts ON THE PAGE, not in the window: measured in
+      // the window, a page that had slid up 25px made the screen 25px taller,
+      // which is exactly what kept it slid up (see THE SCREEN DOES NOT SCROLL).
+      const slid = window.scrollY || 0;
+      if (slid > 0) { try { window.scrollTo(0, 0); } catch (e) {} }
+      const t = Math.max(0, Math.round(el.getBoundingClientRect().top + (window.scrollY || 0)));
       setTop((prev) => (prev === t ? prev : t));
     };
     fit();
@@ -142,6 +147,34 @@ function ScalpScreen({ onClose }: { onClose: () => void }) {
     window.addEventListener('resize', fit);
     window.addEventListener('orientationchange', fit);
     return () => { clearInterval(iv); window.removeEventListener('resize', fit); window.removeEventListener('orientationchange', fit); };
+  }, []);
+
+  // THE SCREEN DOES NOT SCROLL (17 Nov 2026). Martin, with a picture of it
+  // slid up under the clock: "sometimes the scalp pro screen moves up making
+  // the top heading hidden. Disable screen vertical scrolling in the scalp pro
+  // screen". The chart page is a page that scrolls (its cards are under the
+  // chart), and this screen stands in for it, sized to fill the window exactly
+  // — so there should be nothing to scroll. But for a moment there can be: a
+  // trade opens and the positions line pushes the screen down before it is
+  // measured again. A finger on the heading or on the Buy / Sell bar then moved
+  // the page, and the measuring kept it moved (see `fit`, above). Three things,
+  // each enough on most phones and none of them on all:
+  //   - the page itself cannot scroll while this screen is up, and is put back
+  //     at its top when the screen opens and whenever it is found moved;
+  //   - a finger on this screen is not the browser's to scroll with
+  //     (touch-action, on the root): the charts read their own touches, and a
+  //     list inside a menu still scrolls, being a scroller of its own;
+  //   - nothing bounces at the ends (overscroll-behavior).
+  useLayoutEffect(() => {
+    const html = document.documentElement, body = document.body;
+    const was = { ho: html.style.overflow, bo: body.style.overflow, hb: html.style.overscrollBehavior, bb: body.style.overscrollBehavior };
+    try { window.scrollTo(0, 0); } catch (e) {}
+    html.style.overflow = 'hidden'; body.style.overflow = 'hidden';
+    html.style.overscrollBehavior = 'none'; body.style.overscrollBehavior = 'none';
+    return () => {
+      html.style.overflow = was.ho; body.style.overflow = was.bo;
+      html.style.overscrollBehavior = was.hb; body.style.overscrollBehavior = was.bb;
+    };
   }, []);
 
   // AN OPTION TO SHOW. The lower chart takes the option that was last on screen
@@ -203,7 +236,7 @@ function ScalpScreen({ onClose }: { onClose: () => void }) {
     // on its ScalpPro. The Buy / Sell bar keeps clear of the home indicator
     // itself.
     <div ref={rootRef} data-scalp-screen="" className="flex flex-col w-full min-h-0 bg-background"
-      style={{ height: top === null ? '80dvh' : `calc(100dvh - ${top}px)`, fontFamily: SCALP_FONT }}>
+      style={{ height: top === null ? '80dvh' : `calc(100dvh - ${top}px)`, fontFamily: SCALP_FONT, touchAction: 'none' }}>
       {/* THE TOP ROW IS LEMONN'S (16 Nov 2026). Martin, with a picture of theirs:
           "add this design on the top and instead of All -211 text show the scalp
           pro text" — and of the button beside their tab, "No need of add more

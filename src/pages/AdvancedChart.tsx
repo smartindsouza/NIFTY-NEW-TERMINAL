@@ -882,8 +882,12 @@ function LineEditorModal({
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-card border border-0 rounded-lg w-full max-w-[400px] overflow-visible flex flex-col animate-in zoom-in-95 duration-200 relative">
+    // A TAP OUTSIDE CLOSES IT, as it closes every other settings box here (17 Nov
+    // 2026; Martin: "whenever i tap on any part of the chart, any list or setting
+    // that was open has to disappear"). This one and the H Levels box were the
+    // two that stayed until their own Cancel was found. Closing is Cancel.
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="bg-card border border-0 rounded-lg w-full max-w-[400px] overflow-visible flex flex-col animate-in zoom-in-95 duration-200 relative" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b border-0">
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-medium text-foreground">Horizontal line</h2>
@@ -3281,8 +3285,9 @@ function HLevelsEditorModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-transparent p-4 animate-in fade-in duration-250">
-      <div className="bg-card border border-0 rounded-lg w-full max-w-[420px] overflow-visible flex flex-col animate-in zoom-in-95 duration-200">
+    // A tap outside closes it (see the line editor's box: the same rule).
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-transparent p-4 animate-in fade-in duration-250" onClick={onClose}>
+      <div className="bg-card border border-0 rounded-lg w-full max-w-[420px] overflow-visible flex flex-col animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b border-0">
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-medium text-foreground">H Levels Settings</h2>
@@ -17224,7 +17229,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           {/* Trade guard (11 Nov 2026): one shield per screen — on the single chart,
               or on the spot pane in split view, never twice. */}
           {!isReferenceChart && paneRole !== 'option' && (
-            <TradeGuardButton className="md:order-2 max-md:h-11 max-md:w-full max-md:justify-start max-md:gap-3 max-md:px-2.5 max-md:!bg-transparent" label />
+            <TradeGuardButton className="md:order-2 max-md:h-11 max-md:w-full max-md:justify-start max-md:gap-3 max-md:px-2.5 max-md:!bg-transparent" label
+              onClosed={() => { setPhoneSettingsOpen(false); setScalpMenu(null); }} />
           )}
           {(
           <div className={`ml-auto md:ml-0 ${isReferenceChart || scalp ? 'hidden' : isPane ? 'flex' : 'max-md:hidden flex'} ${sharedHidden} items-center justify-center gap-2 h-9 w-9 shrink-0 md:order-2 cursor-pointer rounded-md border border-0 transition-colors ${quickTradeEnabled ? "bg-primary/20" : "bg-muted/40"}`} onClick={() => toggleQuickTrade()} title="Quick Trade — switches itself off 1 minute after it is turned on">
