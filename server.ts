@@ -21,7 +21,7 @@ import { createTrailState, onPremiumTick, onSpotClose5m, onSpotClose1m, type Tra
 import { fetchLatestFlow, fetchHistoryMirror, explain as explainFlow, type FlowDay } from './server/institutional_flow';
 import { getGammaBlast } from './server/gamma_blast';
 import { getPremiumPulse, getPremiumPulseBias } from './server/premium_pulse';
-import { getFiiData, getCashFiiDii } from './server/fii_service';
+import { getFiiData, getCashFiiDii, warmFiiData } from './server/fii_service';
 import { registerGapScorecard, toISTString } from './server/gap_scorecard';
 import { registerCalendar, isNseHoliday as calIsNseHoliday, holidayName } from './server/calendar_service';
 import { registerMarketSnapshot } from './server/market_snapshot';
@@ -4202,6 +4202,9 @@ setInterval(() => {
     catch (e: any) { res.status(500).json({ unavailable: true, error: e?.message || String(e) }); }
   });
 
+  // Kept by the service and read again behind the answer (see THE PARTICIPANT OI
+  // FIGURES ARE KEPT in server/fii_service.ts); read once now, as the server starts.
+  warmFiiData();
   app.get('/api/fii-dii', async (req, res) => {
     const fiiData = await getFiiData();
     res.json(fiiData);
@@ -4617,6 +4620,16 @@ setInterval(() => {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
+    // THE BUILD'S OWN FILES ARE KEPT BY THE PHONE (17 Nov 2026), part of making
+    // the first open quicker. Everything was sent "max-age=0", so on every open
+    // the phone asked again for the app's code, its styles and each page's piece
+    // — a round trip each (0.4-0.5 s from here to the live app) — before
+    // anything could run. The files under /assets are named by their contents
+    // (index-DEMmAcpL.js): a new build gives new names, so a file once fetched
+    // can be kept for good ("immutable"). The page itself (index.html), which
+    // names them, is still asked for every time, so a deploy is picked up as
+    // before. A name that is not there falls through as it always did.
+    app.use('/assets', express.static(path.join(distPath, 'assets'), { immutable: true, maxAge: '365d' }));
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));

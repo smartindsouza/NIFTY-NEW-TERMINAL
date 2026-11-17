@@ -11174,7 +11174,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       if (!res.ok) throw new Error("Network error");
       return res.json();
     },
-    refetchInterval: () => document.visibilityState === 'visible' ? 10 * 1000 : false,
+    // Every 5 minutes, not 10 seconds (17 Nov 2026): NSE's end-of-day file,
+    // which the server now keeps (server/fii_service.ts).
+    refetchInterval: () => document.visibilityState === 'visible' ? 5 * 60 * 1000 : false,
   });
 
   const oiHistoryRef = useRef<{ current: any, prev: any }>({ current: null, prev: null });

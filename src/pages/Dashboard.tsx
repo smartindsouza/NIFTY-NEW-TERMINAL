@@ -46,7 +46,9 @@ export function Dashboard() {
     refetchInterval: 15000,
     staleTime: 8000
   });
-  const { data: fiiDiiData } = useQuery({ queryKey: ['fii-dii'], queryFn: async () => (await axios.get('/api/fii-dii')).data, refetchInterval: 10000 });
+  // Every 5 minutes, not 10 seconds: the figures are NSE's end-of-day file
+  // (see THE HOME PAGE DOES NOT WAIT FOR FII / DII, below).
+  const { data: fiiDiiData } = useQuery({ queryKey: ['fii-dii'], queryFn: async () => (await axios.get('/api/fii-dii')).data, refetchInterval: 5 * 60_000, staleTime: 60_000 });
 
   const alertedRef = useRef<Set<string>>(new Set());
   const alertedDateRef = useRef<string>('');
@@ -215,7 +217,17 @@ export function Dashboard() {
     
   }, [chain]);
 
-  if (!chain || !analytics || !taData || !fiiDiiData) {
+  // THE HOME PAGE DOES NOT WAIT FOR FII / DII (17 Nov 2026). Martin: "The app
+  // when opened for the first time takes a lot of time to load. Especially the
+  // homepage." It showed these grey blocks until all four reads were in, and the
+  // FII / DII one took 7 seconds (the server read NSE's archive afresh each time
+  // — now kept; see server/fii_service.ts): timed on the live app, the page's
+  // content came 9 to 10 seconds after opening, 7.5 to 8 on a second open. The
+  // page is drawn as soon as the chain, the analytics and the chart's figures
+  // are in. FII / DII only ever went into computeMasterSignal, which reads
+  // fiiDiiData?.bias — a field /api/fii-dii does not send — so the decision is
+  // the same with it or without it, now as before.
+  if (!chain || !analytics || !taData) {
     return (
       <div className="p-8 space-y-6">
         <Skeleton className="h-12 w-64 bg-card/50 backdrop-blur-md rounded-xl" />

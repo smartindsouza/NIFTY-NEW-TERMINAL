@@ -1,6 +1,51 @@
 import axios from 'axios';
 
+// THE PARTICIPANT OI FIGURES ARE KEPT, NOT FETCHED ON EVERY ASK (17 Nov 2026).
+// Martin: "The app when opened for the first time takes a lot of time to load.
+// Especially the homepage." The home page waited for /api/fii-dii before it drew
+// anything, and every ask of it read NSE's archive afresh — a file per weekday,
+// up to 12 days back, one after another: 6.7 and 7.1 seconds when timed on the
+// live app. The home page asked again every 10 seconds, and the chart page too.
+// The file is published once a day, after the close. So the last good read is
+// kept and handed out at once; past 30 minutes old it is read again BEHIND the
+// answer (the asker still gets the kept one), and asks that arrive while a read
+// is under way share it. A read that fails never replaces a good one — the good
+// one is kept and the read is tried again two minutes later. With nothing good
+// yet, a failure is kept for those two minutes, so NSE is not asked on every
+// call while it refuses. The server reads it once as it starts (warmFiiData),
+// so even the first ask after a deploy seldom waits.
+const FII_FRESH_MS = 30 * 60 * 1000;
+const FII_RETRY_MS = 2 * 60 * 1000;
+let fiiKept: { data: any; at: number; ok: boolean } | null = null;
+let fiiReading: Promise<any> | null = null;
+
+function readFiiAgain(): Promise<any> {
+  if (!fiiReading) {
+    fiiReading = readFiiFromNse().then((d) => {
+      const ok = d?.status === 'SUCCESS';
+      if (ok || !fiiKept?.ok) fiiKept = { data: d, at: Date.now(), ok };
+      else fiiKept = { ...fiiKept, at: Date.now() - FII_FRESH_MS + FII_RETRY_MS };
+      return fiiKept.data;
+    }).finally(() => { fiiReading = null; });
+  }
+  return fiiReading;
+}
+
 export async function getFiiData() {
+  const k = fiiKept;
+  if (k) {
+    const age = Date.now() - k.at;
+    const fresh = age < (k.ok ? FII_FRESH_MS : FII_RETRY_MS);
+    if (!fresh) void readFiiAgain().catch(() => {});
+    if (k.ok || fresh) return k.data;
+  }
+  return readFiiAgain();
+}
+
+/** Read the figures once as the server starts, so the first ask finds them kept. */
+export function warmFiiData() { void readFiiAgain().catch(() => {}); }
+
+async function readFiiFromNse() {
   try {
     // Helper to format date as DDMMYYYY
     const formatDate = (date: Date) => {

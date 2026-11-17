@@ -36,14 +36,26 @@ window.addEventListener('unhandledrejection', (e) => {
 
 // Register progressive service worker for offline shell caching and installation hooks
 if ('serviceWorker' in navigator) {
+  // Read as the page starts, before the worker is even asked for: whether a
+  // worker was serving this page when it loaded (see NOT WHEN THERE WAS NO
+  // WORKER BEFORE, below). Read any later, a fast first install could already
+  // have taken the page over.
+  const hadWorker = !!navigator.serviceWorker.controller;
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js')
       .then((reg) => {
         console.log('[PWA SW] Active and registered with scope:', reg.scope);
         // If a new worker takes control mid-session, reload once so the running
         // page and the active worker/build are always in sync.
+        // NOT WHEN THERE WAS NO WORKER BEFORE (17 Nov 2026). On a first open the
+        // worker installs and takes the page over — and this reloaded it, so the
+        // whole app loaded twice (timed on the live app: every read made again
+        // three seconds in). A page no worker had is already running the build
+        // the worker serves; there is nothing to swap. A worker replacing another
+        // still reloads, as before.
         let refreshing = false;
         navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (!hadWorker) return;
           if (refreshing) return;
           refreshing = true;
           window.location.reload();

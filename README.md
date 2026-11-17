@@ -649,6 +649,29 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## The home page opens without waiting for FII / DII (v343)
+
+Martin: "The app when opened for the first time takes a lot of time to load.
+Especially the homepage." Timed on the live app (phone size, read-only): the
+home page's grey placeholders stayed 9-10 s on a first open and 7.5-8 s on a
+second. Three causes, three fixes:
+
+- **FII / DII.** The home page drew nothing until `/api/fii-dii` answered, and
+  that read NSE's archive afresh on every call (6.7-7.1 s), every 10 s. The
+  server now keeps the last good read (`server/fii_service.ts`): handed out at
+  once, read again behind the answer past 30 minutes, shared by asks that
+  arrive together, a failure never replacing a good read, warmed as the server
+  starts. The home page no longer waits for it at all (it only ever went into
+  the decision as `fiiDiiData?.bias`, a field the endpoint does not send, so the
+  decision is unchanged), and the home page and chart ask every 5 minutes.
+- **The app loaded twice on a first open.** The service worker, installing,
+  took the page over and `main.tsx` reloaded on that. It now reloads only when
+  a worker replaces another.
+- **Code asked for again on every open.** Everything was sent `max-age=0`. The
+  build's files under `/assets` are named by their contents, so they are now
+  sent `max-age=31536000, immutable`; `index.html` (which names them) and
+  `sw.js` are still asked for each time, so deploys are picked up as before.
+
 ## Chart (phone): the bias button sits over the price figures (v342)
 
 Martin, with a picture of the button 16pt in from the edge: "In the chart
