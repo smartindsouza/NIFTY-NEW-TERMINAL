@@ -1206,18 +1206,6 @@ const SCALP_NAME_LINE: React.CSSProperties = {
   backgroundSize: '100% 0.5px', backgroundPosition: '0 15.6px',
 };
 
-// THE OPTION CHART HAS ITS OWN INDICATOR SWITCHES, ALL OFF UNTIL HE TURNS ONE ON
-// (17 Nov 2026). Martin: "Remove all indicators in the option premium chart by
-// default." Every indicator's switch was one value in the browser, read by the
-// index chart and the option chart alike — so breaker blocks, liquidity grabs,
-// zones and volume switched on for NIFTY were drawn over a premium chart too,
-// where levels worked out for an index mean little. Each switch is now kept
-// twice: under its old name for an index chart (so nothing he has set there
-// changes), and under "opt:" + the name for an option chart, where one that has
-// never been set reads as off whatever its default is on the index. The list is
-// the same on both; a switch flipped on the option chart is the option chart's.
-// (indGet answers what localStorage.getItem did, so each switch's own reading of
-// its default is untouched: on an option chart it is simply never "not set".)
 // Draws its children inside `to` when there is one, and where they are written
 // when there is not. It is how a list that belongs to the chart's tool bar is
 // shown in the ScalpPro menu instead (see THE SCALPPRO MENU): the list stays
@@ -1246,16 +1234,36 @@ function ScalpClip({ on, children }: { on: boolean; children: React.ReactNode })
   return on ? <div data-layout="chart-clip" className="flex-1 min-h-0 overflow-hidden flex flex-col">{children}</div> : <>{children}</>;
 }
 
-const IND_OPT = (key: string) => `opt:${key}`;
+// AN OPTION CHART HAS NO INDICATORS (17 Nov 2026). Martin: "Indicators are
+// still applied to option charts. I want them All removed by default. Only
+// spot should keep the indicators".
+// The history, because this is the second go at it. Every indicator's switch
+// was once a single value in the browser, read by the index chart and the
+// option chart alike, so breaker blocks, zones and volume switched on for
+// NIFTY were drawn over a premium chart too, where levels worked out for an
+// index mean little. He asked (16 Nov) for them to be removed from the option
+// chart "by default", and v309 read that as "until he switches one on there":
+// an option chart got a set of switches of its own, saved under "opt:" + name,
+// all off to begin with. That is how they came back. The Indicators list on an
+// option chart showed that second set, every row off — which looks exactly
+// like his indicators having gone missing — and switched on there, they were
+// on for every option chart, ScalpPro's lower one included. (A new browser on
+// the live app shows an option chart bare; his was not, so the switches were
+// on in his phone's storage.)
+// So there is no second set. Asked for an option chart, every switch answers
+// "off" whatever is stored, and nothing is stored for one; the list is not
+// offered on an option chart at all (the Indicators button, ScalpPro's menu);
+// and a switch that is somehow on while an option is on screen is put off
+// again (see NOTHING IS ON, ON AN OPTION CHART). What was saved under "opt:"
+// is left where it is and never read.
+// (indGet answers an index chart exactly what localStorage.getItem did, so each
+// switch's own reading of its default there is untouched.)
 const indGet = (key: string, opt: boolean): string | null => {
-  try {
-    if (!opt) return localStorage.getItem(key);
-    const v = localStorage.getItem(IND_OPT(key));
-    // Session breaks are a small object, not a yes / no: not set means its own defaults, which are off.
-    return v !== null ? v : key === 'sessionBreaks' ? null : 'false';
-  } catch (e) { return opt && key !== 'sessionBreaks' ? 'false' : null; }
+  // Session breaks are a small object, not a yes / no: null means its own defaults, which are off.
+  if (opt) return key === 'sessionBreaks' ? null : 'false';
+  try { return localStorage.getItem(key); } catch (e) { return null; }
 };
-const indSet = (key: string, opt: boolean, value: string) => { try { localStorage.setItem(opt ? IND_OPT(key) : key, value); } catch (e) {} };
+const indSet = (key: string, opt: boolean, value: string) => { if (opt) return; try { localStorage.setItem(key, value); } catch (e) {} };
 
 // THE STORAGE A CHART SAVES ITS SETTINGS TO (17 Nov 2026). Inside the chart
 // component `localStorage` is one of these, not the browser's own — the same
@@ -9920,8 +9928,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const instrumentToken = selectedInstrument ? String(selectedInstrument.instrument_token) : indexToken;
   const instrumentTokenRef = useRef(instrumentToken);
   instrumentTokenRef.current = instrumentToken;
-  // On the traded OPTION's chart only RSI stays on; index overlays (BB, S&R,
-  // PDH/PDL, levels, OI bars, opening range, D/S zones, FVG) are hidden there.
+  // An option is on this chart, not the index. (No indicator is drawn on one:
+  // see AN OPTION CHART HAS NO INDICATORS.)
   const isOptionView = !!selectedInstrument && (indexToken === null || instrumentToken !== indexToken);
   // WHOSE OPTIONS THE CARDS UNDER THE CHART ARE ABOUT (see ChartCards): the index
   // on screen, or the index an option on screen belongs to — read off its
@@ -9936,14 +9944,15 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     return isReferenceChart ? null : indexLabel;
   })();
 
-  // THE CHART'S KIND, AND ITS SWITCHES WHEN THE KIND CHANGES (see THE OPTION CHART
-  // HAS ITS OWN INDICATOR SWITCHES). On the phone's chart page one chart is the
-  // index or the option according to its tab, so when the tab changes every
-  // indicator switch is read again from the set that belongs to what is now on
-  // screen. Each is read exactly as it is when the chart first opens: the saved
-  // value, else its own default on an index chart, else off. The switches then
-  // save themselves, as they always have, under the kind the ref now holds —
-  // and until this has run they still hold, and save under, the old kind's.
+  // THE CHART'S KIND, AND ITS SWITCHES WHEN THE KIND CHANGES (see AN OPTION CHART
+  // HAS NO INDICATORS). On the phone's chart page one chart is the index or the
+  // option according to its tab, so when the tab changes every indicator switch
+  // is read again for what is now on screen. Each is read exactly as it is when
+  // the chart first opens: on the index, the saved value or else its own
+  // default; on an option, off. The switches then save themselves, as they
+  // always have, for the kind the ref now holds — which for an option is
+  // nowhere, so the index chart's saved switches are as he left them when he
+  // comes back to its tab.
   const optKindNow = isOptionPane || (!isSpotPane && isOptionView);
   useEffect(() => {
     if (optKindRef.current === optKindNow) return;
@@ -9975,6 +9984,25 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         && Number.isFinite(v.thickness) && Number.isFinite(v.lineStyle) ? { ...SB_DEFAULTS, ...v } : SB_DEFAULTS);
     } catch (e) { setSessionBreak(SB_DEFAULTS); }
   }, [optKindNow]);
+  // NOTHING IS ON, ON AN OPTION CHART (see AN OPTION CHART HAS NO INDICATORS).
+  // The switches above are read as off for an option chart, there is no list on
+  // one to switch them from, and the desktop's option half no longer puts them
+  // back from the copy it keeps. This is for whatever way in is not thought of
+  // here, or is added later: a switch that is on while an option is the chart
+  // is put off, and the list is shut if the tab changed under it.
+  const anyIndicatorOn = showPdhPdl || showOpeningRange || showConfSignals || showPinBars || showSwapSweep || showGiftDiv || showBos
+    || showStructure || showOrderBlocks || showInstLevels || showBreakers || showFvg || showDsZones || showSnR || showOiBars || showRsi
+    || showHLevels || showFiftyPercentLevels || showVolume || showBB || !!sessionBreak.on;
+  useEffect(() => {
+    if (!optKindNow) return;
+    setIsIndicatorsOpen(false);
+    if (!anyIndicatorOn) return;
+    setShowPdhPdl(false); setShowOpeningRange(false); setShowConfSignals(false); setShowPinBars(false); setShowSwapSweep(false);
+    setShowGiftDiv(false); setShowBos(false); setShowStructure(false); setShowOrderBlocks(false); setShowInstLevels(false);
+    setShowBreakers(false); setShowFvg(false); setShowDsZones(false); setShowSnR(false); setShowOiBars(false); setShowRsi(false);
+    setShowHLevels(false); setShowFiftyPercentLevels(false); setShowVolume(false); setShowBB(false);
+    setSessionBreak((sb) => (sb.on ? { ...sb, on: false } : sb));
+  }, [optKindNow, anyIndicatorOn]);
 
   // SWAP-SWEEP, 5-MIN + 15-MIN AGREEMENT ONLY. A mark (and an alert) exists only when
   // the 15-minute chart AND the 5-minute chart both show the pattern, same direction,
@@ -10527,9 +10555,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     drawArm: [drawArm, setDrawArm],
   };
   // Each half's own indicator settings. The settings are also saved under their
-  // usual global keys (the phone reads those), so each half keeps a snapshot of
-  // its own and restores it when it loads — otherwise the option half's choices
-  // would overwrite the index half's after a reload, and vice versa.
+  // usual global keys (the phone reads those), so each half kept a snapshot of
+  // its own and restored it when it loaded — otherwise the option half's choices
+  // would overwrite the index half's after a reload, and vice versa. (Only the
+  // option half keeps one now, and it has no indicators to show with them: see
+  // THE OPTION HALF ALONE KEEPS A COPY NOW, and AN OPTION CHART HAS NO
+  // INDICATORS. The list stays because it is also the list of names that half
+  // must not write.)
   const paneInd: Record<string, [any, (v: any) => void]> = {
     showPdhPdl: [showPdhPdl, setShowPdhPdl], showOpeningRange: [showOpeningRange, setShowOpeningRange],
     showConfSignals: [showConfSignals, setShowConfSignals], structDays: [structDays, setStructDays],
@@ -10581,7 +10613,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     try {
       const raw = localStorage.getItem(paneIndKey);
       const saved = raw ? JSON.parse(raw) : null;
-      if (saved && typeof saved === 'object') { for (const k in paneInd) if (k in saved) paneInd[k][1](saved[k]); }
+      // Everything but the switches. An option chart has no indicator on (AN
+      // OPTION CHART HAS NO INDICATORS), and this copy holds them as they were
+      // saved before that was so: put back, they would be drawn for a moment
+      // before being put off again. The copy is saved again just below with
+      // them off, so this matters on the first load after the change only.
+      const isSwitch = (k: string) => /^show[A-Z]/.test(k) || k === 'sessionBreak';
+      if (saved && typeof saved === 'object') { for (const k in paneInd) if (k in saved && !isSwitch(k)) paneInd[k][1](saved[k]); }
       else {
         // First load on this device: start this half's own copy from the
         // current settings, so a half that is never touched still keeps them
@@ -14945,7 +14983,26 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       }).then(r => (r.ok ? r.json() : null)).then(m => (m && Number.isFinite(Number(m.total)) ? Number(m.total) : null)).catch(() => null);
       Promise.all([one('BUY'), one('SELL')]).then(([buy, sell]) => {
         if (dead) return;
-        setScalpReq(prev => ({ sym: scalpSym, buy: buy ?? (prev.sym === scalpSym ? prev.buy : null), sell: sell ?? (prev.sym === scalpSym ? prev.sell : null), px: buy !== null ? px : (prev.sym === scalpSym ? prev.px : 0) }));
+        // THE PRICE THE BUY FIGURE IS FOR. It is what "Req" is scaled from as the
+        // premium moves (see "Req" UNDER BUY FOLLOWS THE PREMIUM). In v320 it was
+        // the chart's last price at the moment of asking — the price sent. That
+        // is not the price the figure is for: the server asks about a MARKET
+        // order, which the broker prices at its own last price whatever is
+        // sent. And the chart's last price is not always this contract's when
+        // the ask goes out, 400 ms after the contract is known: with its
+        // candles not in yet it is nothing (the figure then stood still for
+        // thirty seconds — seen on the live app's first check of v320), and it
+        // can still be the candle of what was on this chart before (run here
+        // with the option's candles held back five seconds: the price sent was
+        // the index's, 25,268). Scaled from a price like that, a real figure
+        // would be wrong by the ratio of the two until the next ask.
+        // What a bought option needs IS its premium, so the price the broker's
+        // figure is for is the figure divided by the lot — the broker's own
+        // price, exactly. For anything that is not an option the figure is a
+        // margin, not a price times a quantity, so there the price sent is kept.
+        const isOpt = /^(CE|PE)$/i.test(String(scalpInfo?.instrument_type || '')) || /\d(CE|PE)$/.test(scalpSym);
+        const buyPx = buy === null ? 0 : (isOpt && scalpLot > 0 ? buy / scalpLot : px);
+        setScalpReq(prev => ({ sym: scalpSym, buy: buy ?? (prev.sym === scalpSym ? prev.buy : null), sell: sell ?? (prev.sym === scalpSym ? prev.sell : null), px: buy !== null ? buyPx : (prev.sym === scalpSym ? prev.px : 0) }));
       });
     };
     const first = setTimeout(ask, 400);
@@ -15706,7 +15763,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             {/* THE MENU BUTTON, top right, as Lemonn's is: a 33pt square with 6pt
                 corners, 16pt in from the edge, centred on the two lines. */}
             <button type="button" data-scalp="menu" aria-label="Chart menu" title="Range, indicators, drawings, settings"
-              onClick={() => { setIndexMenuOpen(false); setScalpMenu('indicators'); }}
+              onClick={() => { setIndexMenuOpen(false); setScalpMenu(optKindNow ? 'range' : 'indicators'); }}
               className="absolute right-4 top-[17px] h-[33px] w-[33px] rounded-[6px] border border-foreground/20 bg-foreground/[0.04] flex items-center justify-center text-foreground/85 active:bg-foreground/10">
               <ListPlus size={18} strokeWidth={1.9} />
             </button>
@@ -15771,7 +15828,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             <div className="absolute inset-x-0 bottom-0 top-[37.5%] flex overflow-hidden rounded-t-[18px] border-t border-foreground/15 bg-card" onPointerDown={(e) => e.stopPropagation()}>
               <div data-menu-rail="" className="shrink-0 box-content w-[79.2px] overflow-y-auto border-r border-foreground/10 px-[8.4px] pt-[16px] pb-[calc(1rem+env(safe-area-inset-bottom))] flex flex-col gap-[9.3px]">
                 {([['range', 'Range', <CalendarRange size={20} key="i" />], ['indicators', 'Indicators', <ChartNoAxesCombined size={20} key="i" />],
-                   ['drawings', 'Drawings', <PencilRuler size={20} key="i" />], ['settings', 'Settings', <Settings size={20} key="i" />]] as const).map(([k, label, icon]) => (
+                   ['drawings', 'Drawings', <PencilRuler size={20} key="i" />], ['settings', 'Settings', <Settings size={20} key="i" />]] as const)
+                  // The option's chart has no indicators, so its menu has no Indicators.
+                  .filter(([k]) => !(optKindNow && k === 'indicators')).map(([k, label, icon]) => (
                   <button key={k} type="button" data-menu-tile={k} aria-pressed={scalpMenu === k} onClick={() => setScalpMenu(k)}
                     className={`shrink-0 h-[78.8px] rounded-[8px] flex flex-col items-center justify-center gap-3 text-[12px] leading-none font-medium ${scalpMenu === k
                       ? 'bg-[#dfe9ff] text-[#1d3f8f] dark:bg-[#0f1f3d] dark:text-foreground' : 'border border-foreground/15 text-foreground/85 active:bg-foreground/10'}`}>
@@ -16258,7 +16317,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               <option value="43200">1M</option>
             </select>
           </div>
-          <div className="flex rounded-md shrink-0 md:order-3 max-md:order-3 max-md:flex-1 max-md:justify-center">
+          <div className={`flex rounded-md shrink-0 md:order-3 max-md:order-3 max-md:flex-1 max-md:justify-center ${optKindNow ? 'md:hidden' : ''}`}>
             <div className="relative max-md:w-full" ref={indicatorsRef}>
               <button
                 data-bar="indicators"
@@ -16270,9 +16329,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   // then reached this button and opened it again. A click within
                   // half a second of that close is the same tap, and is let go.
                   if (Date.now() - indClosedAtRef.current < 500) { indClosedAtRef.current = 0; return; }
+                  // An option chart has no indicators (see AN OPTION CHART HAS NO
+                  // INDICATORS): the button keeps its place in the row of five, dimmed,
+                  // and says where they are instead of opening an empty list.
+                  if (optKindNow) { toast.info(`Indicators are on the ${indexLabel} chart`, { id: 'ind-on-index' }); return; }
                   pageToTop(); setRangeOpen(false); setPhoneSettingsOpen(false); setIsIndicatorsOpen(!isIndicatorsOpen);
                 }}
-                className={`flex items-center justify-center gap-1.5 h-9 w-9 text-sm font-medium rounded-md transition-colors max-md:h-10 max-md:w-full max-md:flex-col max-md:gap-0.5 max-md:!bg-transparent ${isIndicatorsOpen ? 'bg-primary/20 text-primary md:bg-background/50' : 'bg-muted/40 md:bg-transparent text-muted-foreground hover:bg-background/50 hover:text-foreground max-md:text-foreground/90'}`}
+                data-off={optKindNow ? '' : undefined}
+                className={`${optKindNow ? 'opacity-40 ' : ''}flex items-center justify-center gap-1.5 h-9 w-9 text-sm font-medium rounded-md transition-colors max-md:h-10 max-md:w-full max-md:flex-col max-md:gap-0.5 max-md:!bg-transparent ${isIndicatorsOpen ? 'bg-primary/20 text-primary md:bg-background/50' : 'bg-muted/40 md:bg-transparent text-muted-foreground hover:bg-background/50 hover:text-foreground max-md:text-foreground/90'}`}
               >
                 {/* Trend line over bars — the icon Martin picked for Indicators. */}
                 <ChartNoAxesCombined size={18} />

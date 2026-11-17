@@ -614,23 +614,49 @@ shows it the way the Lemonn app does:
 Nothing here changes which levels are armed, the entry wall, or where a drop is
 sent; it replaces the on-line pills and the old "grab the line anywhere" drag.
 
-## Chart: an option chart has its own indicator switches, all off to begin with
+## Chart: an option chart has no indicators (v321)
 
-`src/pages/AdvancedChart.tsx` (`indGet` / `indSet`, "opt:" keys). Martin, 16 Nov
-2026: "Remove all indicators in the option premium chart by default." The
-twenty-one switches in the Indicators list (15 min High-Low, BOS-CHoCH, Fair
-Value Gaps, Volume, RSI and the rest) used to be one set for every chart, so
-whatever was on for NIFTY was drawn over an option's premium too.
+`src/pages/AdvancedChart.tsx` (`indGet` / `indSet`, "AN OPTION CHART HAS NO
+INDICATORS"). Martin, 17 Nov 2026: "Indicators are still applied to option
+charts. I want them All removed by default. Only spot should keep the
+indicators".
 
-- An **option chart** — the chart page's option tab and ScalpPro's lower chart —
-  keeps its own set, saved under `opt:` + the switch's name, and every one
-  starts **off**: candles and nothing else, no RSI pane.
-- Switch one on there and it is on for option charts only, and stays on. The
-  index chart's switches are untouched by anything done on an option chart, and
-  the other way round.
-- The index chart's own switches and defaults are exactly what they were.
-- Session breaks — a style with its own editor, not a plain switch — are kept
-  the same way: an option chart's start from their defaults, which are off.
+- An **option chart** — the chart page's option tab, ScalpPro's lower chart and
+  the desktop's option half — draws candles and nothing else: no overlay, no
+  volume, no RSI pane. Not a default that can be changed there: there is no
+  switch for it.
+- The **Indicators list is the index chart's only.** On the option tab the
+  Indicators button is dimmed and says where they are
+  (`Indicators are on the NIFTY 50 chart`); ScalpPro's option-chart menu opens
+  on Range and has no Indicators tile; the desktop's option half has no
+  Indicators button.
+- The index chart's own switches, settings and stars are exactly what they
+  were, and coming back to its tab shows them as he left them.
+
+Why it was not already so: v309 (16 Nov, "Remove all indicators in the option
+premium chart by default") gave an option chart a second set of switches, saved
+under `opt:` + the name and all off to begin with. The list on an option chart
+showed that second set — every row off, which reads as "my indicators have
+gone" — and whatever was switched on there was on for every option chart from
+then on. That set is gone: for an option chart every switch reads as off
+whatever is stored, and nothing is stored. The old `opt:` values are left in
+the browser and never read. The desktop's option half still keeps its own copy
+of the settings (`paneIndicators:option`, so that it never writes the index
+chart's names), but its switches are no longer put back from it.
+
+## ScalpPro: "Req" under Buy is scaled from the broker's own price (v321)
+
+`src/pages/AdvancedChart.tsx` ("THE PRICE THE BUY FIGURE IS FOR"). From v320 the
+figure under Buy follows the premium between the broker's answers: the answer
+is scaled by how far the price has moved since it was asked. v320 took "the
+price it was asked at" to be the chart's last price at that moment. That is not
+always this contract's price — 400 ms after ScalpPro opens it can be nothing
+(the figure then stood still for thirty seconds) or still the candle of what
+was on that chart before — and it is never the price the broker used: the
+server asks about a market order, which the broker prices at its own last
+price. For an option the price the figure is for is now the figure divided by
+the lot. Anything that is not an option keeps the price sent, because what it
+needs is a margin, not a price times a quantity.
 
 ## Exit: the order is followed until it is filled (v319)
 
@@ -702,8 +728,7 @@ browser's own storage, so the phone and the desktop each had their own.
 - **What is shared:** the index chart's switches, each indicator's settings
   (colours, widths, periods, levels), the three alert switches in the same list
   and the stars — the names in `SWITCH_KEYS` and `SETTING_KEYS`.
-- **What is not, on purpose:** an option chart's switches (the `opt:` names —
-  he asked for the spot chart); the SL & TP defaults (they shape orders); what
+- **What is not, on purpose:** the SL & TP defaults (they shape orders); what
   belongs to one screen (the RSI pane's height, the bias card's ×); a device's
   own bookkeeping (`indicatorLinesThin`).
 - **Each value is shared on its own, newest change wins** — never a device's
