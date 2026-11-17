@@ -649,6 +649,16 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Chart (phone): the bias button sits over the price figures (v342)
+
+Martin, with a picture of the button 16pt in from the edge: "In the chart
+screen move the bias card icon a little to wards the left and make it sit
+directly over the strike price. It looks a little off. The scalperX screen icon
+does not require any changes". It is centred over the price axis's figures,
+40.7pt in from the screen's edge (measured on his picture; the axis keeps to the
+right edge on any width), 8pt left of where it was; the market clock moves with
+it. ScalperX's button is unchanged.
+
 ## ScalpPro is called ScalperX (v341)
 
 Martin: "Also change the ScalpPro name to ScaperX everywhere in my app" — asked

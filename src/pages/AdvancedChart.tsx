@@ -17809,11 +17809,20 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 <span ref={headPriceRef} data-head="price" className="text-[22px] leading-7 font-bold tracking-tight text-foreground tabular-nums">—</span>
                 <span ref={headChangeRef} data-head="change" className="text-[11px] font-semibold tabular-nums" />
               </div>
-              <div className={`shrink-0 [&>span]:!text-xs ${!isOptionView ? 'mr-[43px]' : ''}`}><IstSessionClock /></div>
+              <div className={`shrink-0 [&>span]:!text-xs ${!isOptionView ? 'mr-[51px]' : ''}`}><IstSessionClock /></div>
               {/* THE BIAS BUTTON on the index chart (BiasCheck.tsx): Lemonn's
-                  33pt square, 16pt in from the screen's edge (the page has 4 of
-                  its own), centred on this line so the line keeps its height. */}
-              {!isOptionView && <BiasButton className="absolute right-3 top-1/2 -translate-y-1/2 h-[33px] w-[33px]" />}
+                  33pt square, centred on this line so the line keeps its height.
+                  ABOVE THE PRICES (17 Nov 2026). Martin, with a picture of it
+                  16pt in from the edge: "move the bias card icon a little to
+                  wards the left and make it sit directly over the strike
+                  price. It looks a little off." It is centred over the price
+                  axis's figures, whose middle is 40.7pt in from the screen's
+                  edge (measured on his picture, and the same on any width: the
+                  axis keeps to the right edge) — 24.2pt from the edge to the
+                  button's, of which the page's own margin is 4. ScalperX's is
+                  where it was ("The scalperX screen icon does not require any
+                  changes"). */}
+              {!isOptionView && <BiasButton className="absolute right-[20.2px] top-1/2 -translate-y-1/2 h-[33px] w-[33px]" />}
             </div>
           )}
 
