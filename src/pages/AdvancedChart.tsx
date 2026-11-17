@@ -21,6 +21,7 @@ import { computeInstitutionalLevels, ilColors, normaliseIlSettings, IL_DEFAULTS,
 import { computeBreakersAndGrabs, normaliseBlSettings, BL_DEFAULTS, type BlResult, type BlSettings } from "../indicators/breakerLiquidity";
 import { format } from "date-fns";
 import { SymbolSearch } from "../components/SymbolSearch";
+import { PullRefresh } from "../components/PullRefresh";
 import MarketContext from "../components/MarketContext";
 import BounceConviction from "../components/BounceConviction";
 import { DownloadCloud, Globe, ListPlus } from 'lucide-react';
@@ -15764,6 +15765,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // now opacity alone (page-fade-in, in index.css), which places nothing.
   return (
     <>
+    {/* PULL DOWN TO REFRESH takes the place of Settings > Reload on the phone
+        (see PullRefresh.tsx) and does what that row did: the chart is asked
+        to reload, then the app is loaded afresh. */}
+    <PullRefresh rootRef={pageRootRef} enabled={!isPane && !scalp}
+      onRefresh={() => {
+        try { window.dispatchEvent(new CustomEvent('chart_reload')); } catch (e) {}
+        setTimeout(() => { try { window.location.reload(); } catch (e) {} }, 350);
+      }} />
     <div ref={pageRootRef} data-layout="page" className={`${scalp ? 'px-0' : 'px-1'} pt-0 pb-0 md:px-0 md:py-0 page-fade-in max-w-none w-full mx-auto flex flex-col ${scalp ? 'h-full' : 'h-[calc(100dvh-max(env(safe-area-inset-top),12px)-env(safe-area-inset-bottom)-4rem-50px)]'} md:h-full md:min-h-0 max-md:overflow-hidden md:overflow-visible relative`}>
       
       {/* Tap anywhere outside to dismiss. The panel is a floating readout, not a
@@ -17673,7 +17682,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               <SlidersHorizontal size={17} />
               <span className="text-left text-[13px] font-medium text-foreground">SL &amp; TP</span>
             </button>
-            <button
+            {/* THE PHONE HAS NO RELOAD ROW (17 Nov 2026). Martin: "Remove the
+                reload option from settings once it's added" — "it" being the
+                pull down to refresh (PullRefresh.tsx), which does what this
+                did there. The desktop's halves keep their button. */}
+            {isPane && (<button
               onClick={() => {
                 setTbReloading(true);
                 if (isPane) {
@@ -17693,7 +17706,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             >
               <RefreshCw size={18} className={tbReloading ? 'animate-spin' : ''} />
               <span className="md:hidden text-left text-[13px] font-medium text-foreground">Reload</span>
-            </button>
+            </button>)}
 
             {/* Sync positions MOVED TO THE JOURNAL (17 Nov 2026). Martin: "Move the
                 refresh positions button to the journal screen beside the wallet

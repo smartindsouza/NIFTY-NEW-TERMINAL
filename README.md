@@ -649,6 +649,23 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Chart (phone): pull down to refresh; Reload is gone from Settings (v334)
+
+`src/components/PullRefresh.tsx`. Martin, with a picture of Lemonn's spinner:
+"enable the pull down to refresh chart in the main chart screen instead of
+taping reload in the settings. Remove the reload option from settings once
+it's added."
+
+- With the page at its top, a drag down that begins anywhere but on a chart
+  (the header, the price, the row of five) brings a round arrow down from the
+  top at half the finger's pace. Past 56px (112px of finger) it turns solid;
+  letting go there does what Reload did: the chart reloads and the app is
+  loaded afresh. Short of it, nothing happens.
+- A drag begun **on the chart** still moves the chart. A field, a list that
+  scrolls by itself, a sheet, or a page that is scrolled down, start no pull.
+- Settings (phone) no longer has **Reload**. The desktop's halves and ScalpPro
+  keep their refresh buttons.
+
 ## Search no longer sets off the "high frequency" warning (v333)
 
 Martin, after v332: "I get a error warning when I search and add options to
