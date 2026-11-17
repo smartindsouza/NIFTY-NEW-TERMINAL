@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { AdvancedChart, type ScalpAt, type ScalpShared } from './AdvancedChart';
-import { useBiasCardHidden } from '../lib/bias';
 import { startIndicatorSync, indicatorEpoch, onIndicatorEpoch, anyChartBusy, adoptSpotHalfCopy } from '../lib/indicatorSync';
 
 // THE INDEX CHART IS PUT ON THE PAGE AGAIN WHEN ITS INDICATORS CHANGE ELSEWHERE.
@@ -329,9 +328,6 @@ export function ChartWorkspace() {
     try { window.dispatchEvent(new CustomEvent('terminal:scalp', { detail: false })); } catch (e) { setScalp(false); }
   };
 
-  // The bias card's × hides it; Indicators → NIFTY Bias card brings it back.
-  // Above the phone early-return below: hooks must run on every render.
-  const [biasCardHidden] = useBiasCardHidden();
   // INDICATORS SHARED BETWEEN DEVICES run for as long as the chart page is up,
   // on a phone, on ScalpPro and on the desktop alike. What arrives from another
   // device is written to this one's storage at once; the chart is only built
@@ -361,7 +357,6 @@ export function ChartWorkspace() {
   // or, while ScalpPro is open, the two-chart screen in its place.
   if (!isDesktop) return scalp ? <ScalpScreen onClose={closeScalp} /> : <AdvancedChart key={`one-${indEpoch}`} />;
 
-  const focusedTab = (() => { try { return new URLSearchParams(window.location.search).has('optToken'); } catch (e) { return false; } })();
   const split = hasOption && !spotHidden;     // both halves on screen
   // Height chain, desktop. main is a fixed-height flex COLUMN; this wrapper must
   // be a flex-1 CHILD of it (not h-full — a percentage that also overflowed by
@@ -396,26 +391,8 @@ export function ChartWorkspace() {
         </div>
       )}
     </div>
-    {/* "Check bias" card (public/bias-panel.js): ONE card under both panes, so
-        the two charts keep identical heights. Starts collapsed to its headline. */}
-    {/* Not in a single-contract window (Strike Click tab, ?optToken=): that tab is
-        about one option, and the bias card reads the index. */}
-    {!focusedTab && !biasCardHidden && (
-    <>
-    {/* relative z + its own background: expanded, it sits ON TOP of the RSI pane
-        (the chart keeps a 450px floor, so the panes cannot shrink further).
-        pr-20 keeps the "Check bias" button clear of the floating Diag button.
-        z-[32], not z-[25]: the chart's two overlay canvases (level lines and their
-        pills, the R:R box) are z-30 and z-[31] and span the whole chart box, which
-        on a short window runs under this card because of that 450px floor. At 25
-        the card sat BELOW them, so 15M LOW / RED INNER / SUPPORT were drawn straight
-        across its text. Kept under z-40 so the chart's own buttons and every
-        dialog still open over it. */}
-    <div data-layout="below-charts" className="relative z-[32] bg-background shrink-0 pl-2 pr-20 py-1.5 border-t border-white/10 max-h-[40vh] overflow-y-auto">
-      <bias-panel compact="" />
-    </div>
-    </>
-    )}
+    {/* The "Check bias" card that stood under both panes is the bias button on
+        the index half's tool bar now (BiasCheck.tsx), 17 Nov 2026. */}
     </div>
   );
 }

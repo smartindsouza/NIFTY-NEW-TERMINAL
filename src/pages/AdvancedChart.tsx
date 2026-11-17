@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect, useLayoutEffect } from "react";
-import { useTodayBias, isRecord as isBiasRecord, istToday as biasIstToday, BIAS_LINES_KEY, useBiasCardHidden } from "../lib/bias";
+import { useTodayBias, isRecord as isBiasRecord, istToday as biasIstToday, BIAS_LINES_KEY } from "../lib/bias";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/react-query";
 import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, SlidersHorizontal, RefreshCw, Cpu, ChevronsUp, ChevronsDown, ChevronRight, Copy, Trash2, Search, PencilRuler, Minus, Slash, RectangleHorizontal, AlignJustify, TrendingDown, Type as TypeIcon, Move as MoveIcon, ArrowLeft, CalendarRange, ChartNoAxesCombined, TrendingUp, Star, Bell, Link2, CandlestickChart, GripVertical, RotateCw } from "lucide-react";
 import { navigate } from "wouter/use-browser-location";
@@ -23,6 +23,7 @@ import { format } from "date-fns";
 import { SymbolSearch } from "../components/SymbolSearch";
 import { PullRefresh } from "../components/PullRefresh";
 import { RangeIcon, IndicatorsIcon, DrawingsIcon, SettingsIcon } from "../components/BarIcons";
+import { BiasButton } from "../components/BiasCheck";
 import MarketContext from "../components/MarketContext";
 import BounceConviction from "../components/BounceConviction";
 import { DownloadCloud, Globe, ListPlus } from 'lucide-react';
@@ -10871,8 +10872,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // card, so no extra polling. The chart's series is rebuilt on every timeframe
   // or instrument change, so a light 1.5 s check redraws onto the current one.
   const { data: biasToday } = useTodayBias();
-  // The "Check bias" card under the chart: hidden by its × or from this menu.
-  const [biasCardHidden, setBiasCardHidden] = useBiasCardHidden();
   const [showBiasLevels, setShowBiasLevels] = useState<boolean>(() => {
     try { return indGet(BIAS_LINES_KEY, optKindRef.current) !== 'false'; } catch (e) { return !optKindRef.current; }
   });
@@ -16230,6 +16229,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               className="absolute right-4 top-[17px] h-[33px] w-[33px] rounded-[6px] border border-foreground/20 bg-foreground/[0.04] flex items-center justify-center text-foreground/85 active:bg-foreground/10">
               <ListPlus size={18} strokeWidth={1.9} />
             </button>
+            {/* THE BIAS BUTTON, on the index's chart only, where Lemonn has its
+                chart-line button: the same 33pt square, 8pt left of the menu's
+                (BiasCheck.tsx). */}
+            {isSpotPane && <BiasButton className="absolute right-[57px] top-[17px] h-[33px] w-[33px]" />}
             {/* THE NAMES OPEN THE OPTION CHAIN (17 Nov 2026). Martin: "When I tap
                 on the nifty 50 text or the Option Strike price (NIFTY17NOV25450)
                 text in the scaler pro screen it should open the option chart.
@@ -17382,27 +17385,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       <Star size={14} fill={isFav('BiasLevels') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
-                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BiasCard', !biasCardHidden)}`}>
-                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setBiasCardHidden(!biasCardHidden); }}
-                          aria-label="Toggle the NIFTY Bias card"
-                          className="w-4 flex items-center justify-center shrink-0"
-                        >
-                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${(!biasCardHidden) ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{(!biasCardHidden) && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
-                        </button>
-                        <span className="truncate select-none" title="The NIFTY Bias card with the Check bias button, under the chart. Its × hides it; this brings it back.">NIFTY Bias card</span>
-                      </div>
-                    <span className="p-1 w-[22px] shrink-0" aria-hidden="true" />
-                    <button
-                      onClick={(e) => { e.stopPropagation(); toggleFav('BiasCard'); }}
-                      title={isFav('BiasCard') ? 'Remove from favourites' : 'Mark as favourite'}
-                      aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('BiasCard') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
-                    >
-                      <Star size={14} fill={isFav('BiasCard') ? 'currentColor' : 'none'} />
-                    </button>
-                  </div>
+                  {/* The NIFTY Bias card's row is gone (17 Nov 2026): the card is now
+                      the bias button on the index chart (see BiasCheck.tsx). */}
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('SessionBreaks', sessionBreak.on)}`}>
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
                         <button
@@ -17729,6 +17713,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           ) : null}
           {/* Trade guard (11 Nov 2026): one shield per screen — on the single chart,
               or on the spot pane in split view, never twice. */}
+          {/* The bias button on the desktop's index half (BiasCheck.tsx), before
+              the shield. Not on a phone: there it is on the price line. */}
+          {isSpotPane && !scalp && !isFocusedChart && <BiasButton className="hidden md:flex md:order-2 h-9 w-9 shrink-0" />}
           {!isReferenceChart && paneRole !== 'option' && (
             <TradeGuardButton className="md:order-2 max-md:h-11 max-md:w-full max-md:justify-start max-md:gap-3 max-md:px-2.5 max-md:!bg-transparent" label
               onClosed={() => { setPhoneSettingsOpen(false); setScalpMenu(null); }} />
@@ -17817,12 +17804,16 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               Lemonn has them, and the clock that used to sit beside the title.
               The two spans are filled in by a timer (see THE PRICE IN THE HEADER). */}
           {!isPane && !isFocusedChart && (
-            <div data-layout="price" className="md:hidden shrink-0 flex items-end justify-between gap-3 px-2.5 pt-1.5 pb-1.5 bg-card">
+            <div data-layout="price" className="relative md:hidden shrink-0 flex items-end justify-between gap-3 px-2.5 pt-1.5 pb-1.5 bg-card">
               <div className="min-w-0 flex items-baseline gap-2 whitespace-nowrap">
                 <span ref={headPriceRef} data-head="price" className="text-[22px] leading-7 font-bold tracking-tight text-foreground tabular-nums">—</span>
                 <span ref={headChangeRef} data-head="change" className="text-[11px] font-semibold tabular-nums" />
               </div>
-              <div className="shrink-0 [&>span]:!text-xs"><IstSessionClock /></div>
+              <div className={`shrink-0 [&>span]:!text-xs ${!isOptionView ? 'mr-[43px]' : ''}`}><IstSessionClock /></div>
+              {/* THE BIAS BUTTON on the index chart (BiasCheck.tsx): Lemonn's
+                  33pt square, 16pt in from the screen's edge (the page has 4 of
+                  its own), centred on this line so the line keeps its height. */}
+              {!isOptionView && <BiasButton className="absolute right-3 top-1/2 -translate-y-1/2 h-[33px] w-[33px]" />}
             </div>
           )}
 
@@ -19436,17 +19427,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           is gone too, and both charts are that much taller.) */}
       {isOptionView && !scalp && <div ref={underBarRef} data-layout="under-bar" className="md:hidden shrink-0" aria-hidden="true" />}
 
-      {/* "Check bias" card (public/bias-panel.js) under the chart, phone layout
-          only — on desktop the workspace puts one card under BOTH panes, so the
-          two charts stay the same height. Index charts only; starts collapsed to
-          its headline row so the chart keeps its room, and scrolls inside itself
-          when expanded. The bottom margin clears the fixed toolbar, as the
-          option-reality strip does. */}
-      {!isPane && !isOptionView && !isFocusedChart && !biasCardHidden && (
-        <div className="shrink-0 px-1 pt-1 max-h-[42vh] overflow-y-auto">
-          <bias-panel compact="" />
-        </div>
-      )}
+      {/* The "Check bias" card that stood here, under the index chart, is the
+          bias button on the chart now (BiasCheck.tsx; see the price line). */}
       {/* THE ROOM THE ROW OF FIVE STANDS IN (phone): see THE ROW OF FIVE IS PART OF
           THE PAGE NOW. Last in the page, exactly as tall as the row. */}
       {!isPane && !scalp && <div data-layout="row-space" className="md:hidden shrink-0 h-[var(--chart-row-h,3.25rem)]" aria-hidden="true" />}

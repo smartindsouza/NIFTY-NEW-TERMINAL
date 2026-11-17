@@ -649,6 +649,37 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Chart: the bias is a button on the index chart, with Lemonn's sheet (v340)
+
+`src/components/BiasCheck.tsx`. Martin, with two pictures of Lemonn's ScalpPro:
+"Remove the nifty bias card indicator for the indicator list and add it on the
+spot chart like shown in the screenshot. Once loaded the bias should appear as
+shown in the 2nd screenshot. Add the button to both spot charts in the charts
+screen as well as the scalper pro screen exactly as shown in the 1st
+screenshot".
+
+- **The button** (Lemonn's chart-line square, 33pt, dark navy going lighter to
+  the right, blue-grey edge) is on every index chart: at the right end of the
+  phone chart's price line, 8pt left of ScalpPro's menu button on its index
+  chart, and before the shield on the desktop's index half. Not on an option's
+  chart, as the card was not.
+- **A tap** does what the card's Check bias did: a fresh read from the server
+  (`POST /api/bias/run`, 10-20 s; the last read at once if it is under a
+  minute old or no new candle has closed). The button turns while it reads.
+- **The sheet** comes up when the read is in: the bias (green, red, or blue for
+  neutral) with its confidence and time, NIFTY 50 and its change at that
+  moment, the read's lines as points, its closing "not a trade signal" line in
+  the disclaimer's box, and Okay. Measured off Lemonn's: sizes, colours, the
+  glow and edge, and its SemiBold text; set against the same words, every line
+  is within half a point of Lemonn's. Lemonn's "Analyzed by Dash" line is left
+  out. On a desktop it is a box in the middle.
+- **A failed read** says why in a message; today's earlier read is shown if
+  there is one.
+- **Gone:** the Check bias card under the chart (phone) and under both halves
+  (desktop), its × and the hide flag, the Indicators row "NIFTY Bias card", and
+  the script that loaded the card (`public/bias-panel.js` stays in the repo,
+  unloaded). "Today's Bias Levels" (the lines on the chart) is unchanged.
+
 ## Chart: S and R sit in the middle of their rings (v339)
 
 Martin, of v336 on his iPhone: "The R and S are not perfectly centered inside
