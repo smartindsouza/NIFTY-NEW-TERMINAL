@@ -249,4 +249,4 @@ body[data-search-open] [data-sonner-toaster] { display: none !important; }
 /* The bias sheet comes up from the foot of the screen, as Lemonn's does (see
    BiasCheck.tsx). On a desktop it is a box in the middle and simply appears. */
 @keyframes bias-sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
-@media (max-width: 767px) { .bias-sheet { animation: bias-sheet-up 220ms cubic-bezier(0.2, 0.8, 0.2, 1); } }
+@media (max-width: 767px) { .bias-sheet, .heatmap-sheet { animation: bias-sheet-up 220ms cubic-bezier(0.2, 0.8, 0.2, 1); } }

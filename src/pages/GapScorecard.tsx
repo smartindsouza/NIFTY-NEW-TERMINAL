@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useLocation, Link } from 'wouter';
+import { Link } from 'wouter';
 import { cn } from '@/lib/utils';
 import { Compass, RefreshCw, AlertTriangle, Gauge, Trash2, Plus, ExternalLink, FlaskConical } from 'lucide-react';
 
@@ -34,7 +34,6 @@ const fmtRaw = (k: string, raw: any): string => {
 };
 
 export default function GapScorecard() {
-  const [, navigate] = useLocation();
   const [evDate, setEvDate] = useState('');
   const [evLabel, setEvLabel] = useState('');
   const [evType, setEvType] = useState('');
@@ -102,7 +101,9 @@ export default function GapScorecard() {
       localStorage.setItem('gap_staged_reco', JSON.stringify({ ...reco, stagedAt: Date.now() }));
       navigator.clipboard?.writeText(reco.tradingsymbol).catch(() => {});
     } catch (e) {}
-    navigate('/option-chain');
+    // The Option Chain screen is retired (17 Nov 2026); the chain is the sheet
+    // every screen can open (OptionChainSheet).
+    try { window.dispatchEvent(new CustomEvent('terminal:option-chain')); } catch (e) {}
   };
 
   return (

@@ -6514,6 +6514,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const manualLinesRef = useRef<any[]>([]);
   const pdhPdlLinesRef = useRef<{ pdh: any; pdl: any } | null>(null);
   const isHoveringButtonRef = useRef(false);
+  // The long press's lines, kept by the app after the lift when the library
+  // cannot keep them itself (past the newest bar; see "THE LINES STAY WITH THE +").
+  const crossHeldRef = useRef<{ logical: number; y: number } | null>(null);
   // grabOffset is the gap between the finger and the line's actual position at
   // the moment it was grabbed. Without it the line teleports so its centre sits
   // under the finger the instant you touch it — with a 24px grab zone that is a
@@ -13219,6 +13222,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     // Until when what a long press brought up is left on screen after the finger
     // lifts (see WHAT A LONG PRESS BRINGS UP GOES AWAY AGAIN, below).
     let crossHoldUntil = 0;
+    // The bar under the long press's crosshair: its time (none past the newest
+    // bar) and its place on the time scale, to put the lines back after the lift.
+    let crossTime: any = null;
+    let crossLogical: number | null = null;
 
     mainChart.subscribeCrosshairMove(param => {
       if (!param.sourceEvent) return;
@@ -13244,6 +13251,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           if (price !== null) {
             setCrosshairInfo({ x: param.point.x, y: param.point.y, price });
           }
+          crossTime = param.time ?? null;
+          crossLogical = typeof param.logical === 'number' ? param.logical : null;
 
           if (param.time) {
             const dataPoint = getCrosshairDataPoint(mainSeries, param);
@@ -13306,10 +13315,35 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       try { mainChart.clearCrosshairPosition(); } catch (e) {}
       try { rsiChart.clearCrosshairPosition(); } catch (e) {}
       if (ohlcPanel) ohlcPanel.style.display = 'none';
+      crossHeldRef.current = null;
       setRsiHoverValue(null);
       setCrosshairInfo(null);
     };
-    const onCrossTouchEnd = () => { crossHoldUntil = Date.now() + 3500; clearTimeout(crossAwayTimer); crossAwayTimer = setTimeout(() => { crossHoldUntil = 0; crossAway(); }, 3500); };
+    // THE LINES STAY WITH THE + (17 Nov 2026). Martin: "On the chart when I
+    // tap and hold, the horizontal & vertical lines disappear as soon as I lift
+    // my finger, but the plus button remains for a few seconds. I want the
+    // lines to remain for a few seconds along with the plus button". The
+    // library takes its crosshair down as the finger lifts (trackingMode,
+    // above — and it has to: kept up by the library, the next long press was
+    // spent ending it). So once the library has handled the lift (the timeout
+    // runs after this touch's listeners, the library's among them), the app
+    // puts the same crosshair back where it was — the library's own lines and
+    // axis labels, at the same price and the same bar — and crossAway takes it
+    // down with the + and the O H L C line. Past the newest bar there is no
+    // bar time to hand back to the library, so there the overlay draws the two
+    // lines itself, in the library's style, until crossAway.
+    const keepCrossUp = (held: { price: number; y: number }) => {
+      if (mainChartRef.current !== mainChart || !crossHoldUntil) return;
+      if (crossTime !== null) {
+        try { mainChart.setCrosshairPosition(held.price, crossTime, mainSeries); return; } catch (e) {}
+      }
+      if (crossLogical !== null) crossHeldRef.current = { logical: crossLogical, y: held.y };
+    };
+    const onCrossTouchEnd = () => {
+      crossHoldUntil = Date.now() + 3500; clearTimeout(crossAwayTimer); crossAwayTimer = setTimeout(() => { crossHoldUntil = 0; crossAway(); }, 3500);
+      const held = crosshairInfoRef.current;
+      if (held) setTimeout(() => keepCrossUp(held), 0);
+    };
     const onCrossTouchStart = () => { clearTimeout(crossAwayTimer); if (crossHoldUntil) { crossHoldUntil = 0; crossAway(); } };
     if (crossHost) {
       crossHost.addEventListener('touchend', onCrossTouchEnd, { capture: true, passive: true });
@@ -14983,6 +15017,31 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             const priceScaleWidth = mainChartRef.current.priceScale('right').width() || 60;
             const x = cw - priceScaleWidth;
 
+            // The long press's lines kept past the newest bar after the lift
+            // (see THE LINES STAY WITH THE +): the library's crosshair look —
+            // 1px, 6 on 6 off, and the grey it shows on this chart (#9598A1
+            // as it comes out on screen here: three quarters strong; checked
+            // pixel by pixel against the library's own line) — at its bar and
+            // the finger's height.
+            const kept = crossHeldRef.current;
+            if (kept && !(isHoveringButtonRef && isHoveringButtonRef.current)) {
+              const kx = mainChartRef.current.timeScale().logicalToCoordinate(kept.logical as any);
+              const plotBottomK = Math.max(0, ch - (mainChartRef.current.timeScale().height() || 26));
+              ctx.save();
+              ctx.beginPath();
+              ctx.strokeStyle = 'rgba(149, 152, 161, 0.75)';
+              ctx.lineWidth = 1;
+              ctx.setLineDash([6, 6]);
+              ctx.moveTo(0, Math.round(kept.y) + 0.5);
+              ctx.lineTo(x, Math.round(kept.y) + 0.5);
+              if (kx !== null && kx >= 0 && kx <= x) {
+                ctx.moveTo(Math.round(kx) + 0.5, 0);
+                ctx.lineTo(Math.round(kx) + 0.5, plotBottomK);
+              }
+              ctx.stroke();
+              ctx.restore();
+            }
+
             if (isHoveringButtonRef && isHoveringButtonRef.current) {
               ctx.beginPath();
               ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)'; // matched lightweight charts
@@ -16177,7 +16236,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   ? (resolvedTheme === 'light' ? 'bg-emerald-600/15 text-emerald-700' : 'bg-emerald-500/20 text-emerald-400')
                   : (resolvedTheme === 'light' ? 'bg-rose-600/15 text-rose-700' : 'bg-rose-500/20 text-rose-400')
               } ${liveSig.fresh ? '' : 'opacity-60'}`}
-              title={`Live Signal screen: index fired ${liveSig.dir} on the latest candle and the ${liveSig.kind === 'CALL' ? 'CE' : 'PE'} 5-min RSI${liveSig.rsi != null ? ` (${liveSig.rsi})` : ''} is above 40.${liveSig.fresh ? '' : ' This signal is not recent.'}`}
+              title={`Live signal: index fired ${liveSig.dir} on the latest candle and the ${liveSig.kind === 'CALL' ? 'CE' : 'PE'} 5-min RSI${liveSig.rsi != null ? ` (${liveSig.rsi})` : ''} is above 40.${liveSig.fresh ? '' : ' This signal is not recent.'}`}
             >
               SIGNAL: {liveSig.kind}{liveSig.time ? ` · ${liveSig.time}` : ''}
             </span>
@@ -17779,7 +17838,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         {barRowShown && (
           <div ref={setFixedRow} data-bar-row="scalp" data-scrolled={pageScrolled ? '1' : '0'}
             className={`md:hidden fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] left-0 right-0 z-40 bg-card px-3 pt-[3px] pb-1.5 flex items-center gap-2 border-t ${pageScrolled ? 'border-border' : 'border-transparent'} box-content h-10`}>
-            <button type="button" data-bar="chain" onClick={() => { try { window.dispatchEvent(new CustomEvent('terminal:option-chain')); } catch (e) { navigate('/option-chain'); } }}
+            <button type="button" data-bar="chain" onClick={() => { try { window.dispatchEvent(new CustomEvent('terminal:option-chain')); } catch (e) {} }}
               className="flex-1 h-10 rounded-lg border border-border text-[13px] font-semibold text-foreground flex items-center justify-center gap-2 active:bg-foreground/10">
               <Link2 size={15} /> Option Chain
             </button>

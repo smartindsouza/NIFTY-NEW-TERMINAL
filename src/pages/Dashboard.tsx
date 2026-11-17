@@ -9,6 +9,7 @@ import { motion } from 'motion/react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { notificationService } from '../lib/notificationService';
 import { TodaysBiasCard } from '../components/TodaysBiasCard';
+import { FuturesHeatmap } from '../components/FuturesHeatmap';
 
 export function Dashboard() {
   const [timeframe, setTimeframe] = useState(() => {
@@ -439,6 +440,9 @@ export function Dashboard() {
         </div>
       </div>
 
+      {/* Martin, with a recording of one: "I want this exact futures heat map
+          in my homepage below at the end". */}
+      <FuturesHeatmap />
     </div>
   );
 }

@@ -4,7 +4,7 @@
  */
 
 import { lazy, Suspense, useState, useEffect } from 'react';
-import { Route, Switch, useLocation } from 'wouter';
+import { Redirect, Route, Switch, useLocation } from 'wouter';
 import { OptionChainHost } from './components/OptionChainSheet';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Header } from './components/Header';
@@ -20,7 +20,6 @@ import { useUserSettings, useResolvedTheme } from './hooks/useUserSettings';
 
 // Lazy load all terminal pages & tabs to maximize performance & reduce bundle size
 const Dashboard = lazy(() => import('./pages/Dashboard').then(module => ({ default: module.Dashboard })));
-const OptionChain = lazy(() => import('./pages/OptionChain').then(module => ({ default: module.OptionChain })));
 const KiteLogin = lazy(() => import('./pages/KiteLogin').then(module => ({ default: module.KiteLogin })));
 // Separate from /fii-dii, which is the F&O participant OI page. This one is the
 // CASH-market rupee flow — different dataset, different question.
@@ -33,9 +32,6 @@ const AdvancedChart = lazy(() => import('./pages/ChartWorkspace').then(module =>
 
 // New diagnostic lazy performance tabs / auxiliary pages
 const Backtesting = lazy(() => import('./pages/Backtesting'));
-const Reports = lazy(() => import('./pages/Reports'));
-const AiAnalysis = lazy(() => import('./pages/AiAnalysis'));
-const HistoricalAnalytics = lazy(() => import('./pages/HistoricalAnalytics'));
 const TerminalControl = lazy(() => import('./pages/TerminalControl'));
 const Notifications = lazy(() => import('./pages/Notifications'));
 const TradeJournal = lazy(() => import('./pages/TradeJournal'));
@@ -43,9 +39,6 @@ const GapRisk = lazy(() => import('./pages/GapRisk'));
 const GapScorecard = lazy(() => import('./pages/GapScorecard'));
 const HLevels = lazy(() => import('./pages/HLevels'));
 const RsiBacktest = lazy(() => import('./pages/RsiBacktest'));
-const LiveSignal = lazy(() => import('./pages/LiveSignal'));
-const SignalAlerts = lazy(() => import('./pages/SignalAlerts'));
-const OptionValue = lazy(() => import('./pages/OptionValue'));
 const GammaBlast = lazy(() => import('./pages/GammaBlast'));
 const PremiumPulse = lazy(() => import('./pages/PremiumPulse'));
 const Research = lazy(() => import('./pages/Research'));
@@ -209,7 +202,6 @@ export default function App() {
           <Suspense fallback={<TerminalLoader />}>
             <Switch>
               <Route path="/" component={Dashboard} />
-              <Route path="/option-chain" component={OptionChain} />
               <Route path="/kite-login" component={KiteLogin} />
               {/* /fii-dii kept as a redirect target only: the old F&O positioning
                   page is retired, so any saved link or stale bundle lands on its
@@ -219,9 +211,6 @@ export default function App() {
               <Route path="/news" component={News} />
               <Route path="/advanced-chart" component={AdvancedChart} />
               <Route path="/backtesting" component={Backtesting} />
-              <Route path="/reports" component={Reports} />
-              <Route path="/ai-analysis" component={AiAnalysis} />
-              <Route path="/historical-analytics" component={HistoricalAnalytics} />
               <Route path="/terminal-control" component={TerminalControl} />
               <Route path="/notifications" component={Notifications} />
               {/* /journal and /journal/analysis are ONE route on purpose: the
@@ -234,14 +223,21 @@ export default function App() {
               <Route path="/gap-scorecard" component={GapScorecard} />
               <Route path="/h-levels" component={HLevels} />
               <Route path="/rsi-backtest" component={RsiBacktest} />
-              <Route path="/live-signal" component={LiveSignal} />
-              <Route path="/signal-alerts" component={SignalAlerts} />
-              <Route path="/option-value" component={OptionValue} />
               <Route path="/gamma-blast" component={GammaBlast} />
               <Route path="/premium-pulse" component={PremiumPulse} />
               <Route path="/research" component={Research} />
               <Route path="/telegram-signals" component={TelegramSignals} />
               <Route path="/expiry-skew" component={ExpirySkew} />
+              {/* Retired screens (17 Nov 2026, see RETIRED SCREENS in Header.tsx):
+                  a saved link or a stale bundle lands on the home page rather
+                  than on "404". */}
+              <Route path="/option-chain"><Redirect to="/" /></Route>
+              <Route path="/reports"><Redirect to="/" /></Route>
+              <Route path="/ai-analysis"><Redirect to="/" /></Route>
+              <Route path="/historical-analytics"><Redirect to="/" /></Route>
+              <Route path="/live-signal"><Redirect to="/" /></Route>
+              <Route path="/signal-alerts"><Redirect to="/" /></Route>
+              <Route path="/option-value"><Redirect to="/" /></Route>
               <Route>
                  <div className="p-8 text-center text-muted-foreground animate-pulse">404 - Not Found</div>
               </Route>

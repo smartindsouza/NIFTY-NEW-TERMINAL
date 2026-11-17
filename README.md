@@ -649,6 +649,42 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Home ends with a futures heatmap; a long press's lines stay with the +; seven screens retired (v347)
+
+- **Futures heatmap** (`src/components/FuturesHeatmap.tsx`, `server/futures_heatmap.ts`,
+  `GET /api/futures-heatmap?expiry=YYYY-MM-DD`). Martin, with a screen recording of one:
+  "I want this exact futures heat map in my homepage below at the end". At the end of
+  the home page: "Futures Heatmap", the pill-and-chips bar (Index ⇕: Nifty 50, Sensex,
+  Nifty Bank, Nifty Financial Services, Nifty Midcap 50, Nifty 100, Nifty 500; Sector ⇕:
+  Auto, Banks, Metals, Finance, IT, Pharma, FMCG, Energy, Oil & Gas, Realty, Media, PSU
+  Banks, Pvt Banks, Healthcare, Consumer Durables), the expiry pill (a sheet of the
+  expiries) and Price ⇕, then the chosen stocks' futures — three a row on a phone, edge
+  to edge, highest change first: the stock, its change on the day, its price, in six
+  shades (2% and more, 1 to 2, 0 to 1, and the same below nought). Price ⇕ turns it to
+  OI: the change in open interest since the previous day's close and the build-up (long
+  build-up, short covering, short build-up, long unwinding). Members: NSE's index lists
+  (`archives.nseindia.com/content/indices/ind_*list.csv`, kept a day); the Sensex's 30
+  are written out in the server file (BSE rejigs in June and December). Futures:
+  Zerodha's NFO contract list. Prices: one Zerodha quote of every stock future of the
+  expiry, kept 5 s; the page asks every 5 s while the market is open, every minute
+  otherwise. Previous OI: NSE's F&O bhavcopy for the last trading day before the
+  session, read out of its zip with zlib. Every size and colour is measured off the
+  recording (3 pixels a point); the bar is ChipBar with `look="heatmap"`.
+- **Long press.** Martin: "On the chart when I tap and hold, the horizontal & vertical
+  lines disappear as soon as I lift my finger, but the plus button remains for a few
+  seconds. I want the lines to remain for a few seconds along with the plus button".
+  After the lift the app puts the library's crosshair back where it was (same price,
+  same bar, same axis labels); it goes with the + and the O H L C line 3.5 s later, or
+  at once on the next touch. Past the newest bar, where there is no bar time to hand
+  the library, the chart's overlay draws the two lines in the same look.
+- **Retired screens.** Martin, with the More sheet's icons crossed out in red: "Remove
+  all these screens marked in red from the app" — Live Signal, Option Chain, Reports,
+  AI Pilot, Signal Alerts, Index History, Option Value. Gone from the More sheet and
+  the desktop rail, their pages deleted; a saved link to one opens the home page. The
+  option chain the chart opens is the sheet and stays (Gap Scorecard's "Stage order →
+  Option Chain" now opens it). The chart's SIGNAL badge and the server's endpoints are
+  unchanged.
+
 ## News filters are the pill-and-chips bar; TP & SL leaves the Indicators list (v346)
 
 - **News** (`src/components/ChipBar.tsx`). Martin, with a picture ("NIFTY 50 ⇕ |

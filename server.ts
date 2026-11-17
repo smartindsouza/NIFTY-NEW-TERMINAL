@@ -22,6 +22,7 @@ import { fetchLatestFlow, fetchHistoryMirror, explain as explainFlow, type FlowD
 import { getGammaBlast } from './server/gamma_blast';
 import { getPremiumPulse, getPremiumPulseBias } from './server/premium_pulse';
 import { getFiiData, getCashFiiDii, warmFiiData } from './server/fii_service';
+import { getFuturesHeatmap, warmHeatmapMembers } from './server/futures_heatmap';
 import { registerGapScorecard, toISTString } from './server/gap_scorecard';
 import { registerCalendar, isNseHoliday as calIsNseHoliday, holidayName } from './server/calendar_service';
 import { registerMarketSnapshot } from './server/market_snapshot';
@@ -4205,6 +4206,18 @@ setInterval(() => {
   // Kept by the service and read again behind the answer (see THE PARTICIPANT OI
   // FIGURES ARE KEPT in server/fii_service.ts); read once now, as the server starts.
   warmFiiData();
+  // The home page's futures heatmap (server/futures_heatmap.ts): every stock
+  // future of an expiry, with the day's change and OI change, and which index
+  // and sector chips each belongs to. Kept 5 s; the member lists are read now.
+  warmHeatmapMembers();
+  app.get('/api/futures-heatmap', async (req, res) => {
+    try {
+      const exp = typeof req.query.expiry === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.expiry) ? req.query.expiry : undefined;
+      res.json(await getFuturesHeatmap(exp));
+    } catch (e: any) {
+      res.json({ ok: false, error: e?.message || 'Futures heatmap unavailable', expiries: [], expiry: null, index: [], sector: [], rows: [], asOf: Date.now(), oiBase: null });
+    }
+  });
   app.get('/api/fii-dii', async (req, res) => {
     const fiiData = await getFiiData();
     res.json(fiiData);

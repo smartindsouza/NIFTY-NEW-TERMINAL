@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'wouter';
-import { Send, Home, List, TrendingUp, Newspaper, Activity, LogIn, CheckCircle2, BarChart2, PlayCircle, FileText, Sparkles, LineChart, Settings2, Bell, BellRing, Menu, BookOpen, Gauge, FlaskConical, Radio, Layers, Zap, Wind, ArrowUpDown, RotateCcw, GripVertical, Check, Cpu, Compass, Landmark, Scale } from 'lucide-react';
+import { Send, Home, Newspaper, Activity, LogIn, CheckCircle2, BarChart2, PlayCircle, LineChart, Settings2, Bell, Menu, BookOpen, Gauge, FlaskConical, Layers, Zap, Wind, ArrowUpDown, RotateCcw, GripVertical, Check, Cpu, Compass, Landmark, Scale } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -88,16 +88,18 @@ export function Header() {
     }
   }, [location, news]);
 
+  // RETIRED SCREENS (17 Nov 2026). Martin, with the More sheet's icons crossed
+  // out in red: "Remove all these screens marked in red from the app" — Live
+  // Signal, Option Chain, Reports, AI Pilot, Signal Alerts, Index History and
+  // Option Value. Their pages are gone and a saved link to one lands on the
+  // home page (App.tsx). The option chain the chart opens is the sheet
+  // (OptionChainSheet), not that page, and stays.
   const links = [
     { href: '/', label: 'Dashboard', icon: Home },
     { href: '/advanced-chart', label: 'Advanced Chart', icon: LineChart },
-    { href: '/option-chain', label: 'Option Chain', icon: List },
     { href: '/institutional-flow', label: 'Institutional Flow', icon: Landmark },
     { href: '/news', label: 'News & Alerts', icon: Newspaper },
     { href: '/backtesting', label: 'Backtesting', icon: PlayCircle },
-    { href: '/reports', label: 'Reports', icon: FileText },
-    { href: '/ai-analysis', label: 'AI Pilot', icon: Sparkles },
-    { href: '/historical-analytics', label: 'Index History', icon: TrendingUp },
     { href: '/terminal-control', label: 'Control', icon: Settings2 },
     { href: '/notifications', label: 'Notifications', icon: Bell },
     { href: '/journal', label: 'Trade Journal', icon: BookOpen },
@@ -105,9 +107,6 @@ export function Header() {
     { href: '/gap-scorecard', label: 'Gap Scorecard', icon: Compass },
     { href: '/h-levels', label: 'H Levels', icon: Layers },
     { href: '/rsi-backtest', label: 'RSI Backtest', icon: FlaskConical },
-    { href: '/live-signal', label: 'Live Signal', icon: Radio },
-    { href: '/signal-alerts', label: 'Signal Alerts', icon: BellRing },
-    { href: '/option-value', label: 'Option Value', icon: Layers },
     { href: '/gamma-blast', label: 'Gamma Blast', icon: Zap },
     { href: '/premium-pulse', label: 'Premium Pulse', icon: Wind },
     { href: '/research', label: 'Research', icon: Activity },

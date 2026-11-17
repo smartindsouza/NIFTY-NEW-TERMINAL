@@ -64,6 +64,9 @@ const SERVER_CACHED_ENDPOINTS = new Map<string, string>([
   // the contract list the server holds in memory (fetched from Zerodha once a
   // day), so typing asks the broker nothing and cannot earn a 429.
   ['/api/instruments/search', 'answered from the in-memory contract list (one broker fetch a day) in server/kite_service.ts'],
+  // The home page's futures heatmap asks every 5 seconds while the market is
+  // open; the server answers from one quote of every stock future kept 5 s.
+  ['/api/futures-heatmap', '5s shared cache + shared in-flight promise in server/futures_heatmap.ts'],
   ['/api/positions-live', '1.5s shared cache + shared in-flight promise in server.ts'],
   ['/api/leverage', '55s per-symbol cache + shared in-flight promise in server/leverage.ts'],
   // /api/ta is hit by SEVERAL legitimate one-shot and slow queries (main chart,
