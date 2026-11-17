@@ -627,6 +627,34 @@ whatever was on for NIFTY was drawn over an option's premium too.
 - Session breaks — a style with its own editor, not a plain switch — are kept
   the same way: an option chart's start from their defaults, which are off.
 
+## ScalpPro: each chart's menu (v316)
+
+On ScalpPro a chart has no tool bar — the header and the row of five belong to
+the chart page. Each of its two charts has a button at the top right of its
+name instead (Lemonn's ≡+), which opens a sheet over the lower 62% of the
+screen: a rail of four tiles down the left — **Range, Indicators, Drawings,
+Settings** — and the open tile's rows beside it. (Lemonn's rail also has Zing
+and Templates; Martin asked for these four.) It opens on Indicators. Sizes are
+measured off his picture of Lemonn's: the sheet from 37.5% down, a 96pt rail,
+79 x 79pt tiles 9pt apart, rows 33.5pt tall and 12.6pt apart.
+
+- Each chart has its own menu and what is done in it is done to that chart:
+  the option chart's indicators are the option chart's (all off until one is
+  turned on), the index chart's are the index chart's.
+- **The rows are the chart page's own lists, not copies.** The indicators list,
+  the drawing tools and the settings rows are the same elements the chart
+  page's tool bar opens, drawn inside the sheet (`MenuPortal` in
+  `src/pages/AdvancedChart.tsx`) and given Lemonn's look by `.scalp-menu-list`
+  and `.scalp-menu-rows` in `src/index.css`. A switch added to one is in the
+  other. Only Range is written out again.
+- A range or a drawing tool, once picked, puts the sheet away (the next taps
+  are the drawing's). An indicator's switch leaves it up. An indicator's gear
+  puts it away and opens that indicator's settings over the chart, as on the
+  chart page. A tap on the dimmed chart closes it.
+- Settings has what applies to one chart there: Trade guard (index chart),
+  Reload, Sync positions, and Trailing SL on the option chart while a trade is
+  open. There is no Quick Trade switch — ScalpPro has no Quick Trade.
+
 ## Charts carry no TradingView mark
 
 The charts are drawn with TradingView's Lightweight Charts. The library puts its

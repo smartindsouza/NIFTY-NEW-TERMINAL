@@ -220,3 +220,24 @@
 [data-sonner-toast][data-removed='true'] {
   pointer-events: none !important;
 }
+
+/* THE SCALPPRO MENU'S ROWS (see THE SCALPPRO MENU in AdvancedChart.tsx). The
+   lists shown in that sheet are the chart page's own — the indicators list,
+   the drawing tools, the settings rows — drawn inside it, so they arrive with
+   the look of a drop-down: plain rows, a caption of their own. Here they are
+   given Lemonn's: each row a box of its own, 33.5pt at least, 10pt corners, a
+   hairline round it, 12.6pt apart; the caption goes (the sheet names the tile). */
+.scalp-menu-list { display: flex; flex-direction: column; gap: 12.6px; }
+.scalp-menu-list > div:first-child { display: none; }
+.scalp-menu-list > div,
+.scalp-menu-rows > button {
+  min-height: 33.5px;
+  border: 1px solid color-mix(in srgb, var(--foreground) 15%, transparent);
+  border-radius: 10px;
+}
+/* An indicator's row is its name's line (20px) and the padding round it: 5.75
+   above and below makes Lemonn's 33.5 with the hairline. */
+.scalp-menu-list > div > div:first-child { padding-top: 5.75px; padding-bottom: 5.75px; }
+.scalp-menu-rows { display: flex; flex-direction: column; gap: 12.6px; }
+.scalp-menu-rows > div:first-child { display: none; }
+.scalp-menu-rows > button { height: 33.5px !important; padding-top: 0 !important; padding-bottom: 0 !important; font-size: 14px; }

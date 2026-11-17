@@ -23,7 +23,8 @@ import { format } from "date-fns";
 import { SymbolSearch } from "../components/SymbolSearch";
 import MarketContext from "../components/MarketContext";
 import BounceConviction from "../components/BounceConviction";
-import { DownloadCloud, Globe } from 'lucide-react';
+import { DownloadCloud, Globe, ListPlus } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { Instrument } from "../hooks/useSymbolSearch";
 import { 
   createChart, 
@@ -1216,6 +1217,15 @@ const SCALP_NAME_LINE: React.CSSProperties = {
 // the same on both; a switch flipped on the option chart is the option chart's.
 // (indGet answers what localStorage.getItem did, so each switch's own reading of
 // its default is untouched: on an option chart it is simply never "not set".)
+// Draws its children inside `to` when there is one, and where they are written
+// when there is not. It is how a list that belongs to the chart's tool bar is
+// shown in the ScalpPro menu instead (see THE SCALPPRO MENU): the list stays
+// where it is in this file, with everything it reads and sets, and only where
+// it lands on the screen changes.
+function MenuPortal({ to, children }: { to: HTMLElement | null; children: React.ReactNode }) {
+  return to ? createPortal(children, to) : <>{children}</>;
+}
+
 const IND_OPT = (key: string) => `opt:${key}`;
 const indGet = (key: string, opt: boolean): string | null => {
   try {
@@ -5638,6 +5648,24 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const [rangeOpen, setRangeOpen] = useState(false);
   const [rangeChoice, setRangeChoice] = useState<string | null>(null);
   const lemonSheetOpen = rangeOpen || phoneSettingsOpen;
+  // THE SCALPPRO MENU (17 Nov 2026). On the ScalpPro screen a chart has no tool
+  // bar — its header and the row of five are the chart page's. Martin asked for
+  // Lemonn's way in: a button at the top right of each of the two charts that
+  // opens a sheet with a rail of tiles down its left (Lemonn's are Range, Zing,
+  // Indicators, Drawings, Templates, Settings; he asked for four of them — no
+  // Zing, no Templates) and the tile's contents beside it. Each chart has its
+  // own menu, and what is done in it is done to that chart.
+  // THE CONTENTS ARE THE CHART PAGE'S OWN, NOT COPIES. The indicators list (some
+  // 800 lines, twenty-one switches and their settings), the drawing tools and
+  // the settings rows are the same elements the chart page's tool bar opens,
+  // drawn inside the menu through MenuPortal — so a switch added to one is in
+  // the other, and nothing can drift. Only Range is written out again (five
+  // rows that call applyRange). `scalpMenu` is the tile that is open; `menuBody`
+  // is the box in the sheet they are drawn into, held in state so that the
+  // lists are drawn once it exists.
+  const [scalpMenu, setScalpMenu] = useState<null | 'range' | 'indicators' | 'drawings' | 'settings'>(null);
+  const [menuBody, setMenuBody] = useState<HTMLDivElement | null>(null);
+  const menuTo = (k: 'indicators' | 'drawings' | 'settings') => (scalp && scalpMenu === k ? menuBody : null);
   const drawGeomRef = useRef<Map<number, DrawGeom>>(new Map());
   const drawAnchorEls = useRef<(HTMLDivElement | null)[]>([]);
   const drawMoveEl = useRef<HTMLDivElement | null>(null);
@@ -5878,8 +5906,19 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     isEditingDz || isEditingTpSl || isEditingRsi || isEditingHLevels ||
     isEditingOpeningRange || isEditingStruct || isEditingFvg || isEditingDsZones ||
     isEditingLevelAlerts || isEditingZoneTapAlerts || isEditingBreakoutAlerts || isEditingVolume ||
-    !!drawTextEdit || lemonSheetOpen
+    !!drawTextEdit || lemonSheetOpen || !!scalpMenu
   );
+  // AN INDICATOR'S SETTINGS PUT THE SCALPPRO MENU AWAY. They are a sheet over
+  // the foot of the chart, made to be used with the chart in view — what is
+  // changed in them is drawn at once. From the chart page's list the list
+  // closes as they open; from the menu, the menu does. (Found by tapping a gear
+  // in the menu: the settings opened and could not be seen for the dimmed
+  // screen.)
+  const anySettingsOpen = isEditingPdhPdl || isEditingSnR || isEditingBB || isEditingOiBars ||
+    isEditingDz || isEditingTpSl || isEditingRsi || isEditingHLevels ||
+    isEditingOpeningRange || isEditingStruct || isEditingFvg || isEditingDsZones ||
+    isEditingLevelAlerts || isEditingZoneTapAlerts || isEditingBreakoutAlerts || isEditingVolume;
+  useEffect(() => { if (anySettingsOpen) setScalpMenu(null); }, [anySettingsOpen]);
 
   const logicalRangeRef = useRef<any>(null);
   // Bar count at the moment the visible range was last captured. Needed to tell
@@ -14538,6 +14577,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   useEffect(() => { setRangeChoice(null); }, [timeframe, instrumentToken]);
   const applyRange = (key: '1D' | '2D' | '5D' | '1M' | 'ALL') => {
     setRangeOpen(false);
+    setScalpMenu(null);
     const chart = mainChartRef.current, ser = mainSeriesRef.current;
     if (!chart || !ser) return;
     try {
@@ -15477,6 +15517,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             be changed. */}
         {scalp && (
           <div data-scalp-head={paneRole} className="relative shrink-0 px-[15px] pt-[13.5px] pb-2 bg-card" onPointerDown={(e) => e.stopPropagation()}>
+            {/* THE MENU BUTTON, top right, as Lemonn's is: a 33pt square with 6pt
+                corners, 16pt in from the edge, centred on the two lines. */}
+            <button type="button" data-scalp="menu" aria-label="Chart menu" title="Range, indicators, drawings, settings"
+              onClick={() => { setIndexMenuOpen(false); setScalpMenu('indicators'); }}
+              className="absolute right-4 top-[17px] h-[33px] w-[33px] rounded-[6px] border border-foreground/20 bg-foreground/[0.04] flex items-center justify-center text-foreground/85 active:bg-foreground/10">
+              <ListPlus size={18} strokeWidth={1.9} />
+            </button>
             <div className="flex items-center gap-1 h-[18px] text-[12px] leading-[18px] font-[650] text-foreground">
               {isSpotPane ? (
                 <button type="button" data-scalp="index" onClick={() => setIndexMenuOpen(o => !o)} className="flex items-center gap-[3px]">
@@ -15518,6 +15565,53 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             )}
           </div>
         )}
+        {/* THE SCALPPRO MENU'S SHEET. Measured off Martin's picture of Lemonn's
+            (430pt wide): it covers the screen from 37.5% down, over the Buy /
+            Sell bar, with the chart dimmed above it; a 96pt rail of 79 x 79pt
+            tiles (8pt corners, 9pt apart, the open one filled blue), a hairline,
+            then the tile's name (16px, 31pt down) and its rows from 74.5pt down.
+            The rail's box is the tiles' width plus 8.4pt each side, its hairline
+            outside that. It is drawn on the page's body, not in this chart's box: the two
+            charts and the bar below are each a box of their own, and a sheet
+            inside one of them would be under the others. It is numbered 58:
+            over everything on the ScalpPro screen, and under whatever a row of
+            it can open — an indicator's settings (60 and 70), a dialog (100),
+            the trade guard (120). */}
+        {scalp && scalpMenu && createPortal(
+          <div data-scalp-menu={paneRole || ''} className="md:hidden fixed inset-0 z-[58] text-foreground">
+            <div className="absolute inset-0 bg-black/60" aria-hidden="true"
+              onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setScalpMenu(null); }}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); }} />
+            <div className="absolute inset-x-0 bottom-0 top-[37.5%] flex overflow-hidden rounded-t-[18px] border-t border-foreground/15 bg-card" onPointerDown={(e) => e.stopPropagation()}>
+              <div data-menu-rail="" className="shrink-0 box-content w-[79.2px] overflow-y-auto border-r border-foreground/10 px-[8.4px] pt-[16px] pb-[calc(1rem+env(safe-area-inset-bottom))] flex flex-col gap-[9.3px]">
+                {([['range', 'Range', <CalendarRange size={20} key="i" />], ['indicators', 'Indicators', <ChartNoAxesCombined size={20} key="i" />],
+                   ['drawings', 'Drawings', <PencilRuler size={20} key="i" />], ['settings', 'Settings', <Settings size={20} key="i" />]] as const).map(([k, label, icon]) => (
+                  <button key={k} type="button" data-menu-tile={k} aria-pressed={scalpMenu === k} onClick={() => setScalpMenu(k)}
+                    className={`shrink-0 h-[78.8px] rounded-[8px] flex flex-col items-center justify-center gap-3 text-[12px] leading-none font-medium ${scalpMenu === k
+                      ? 'bg-[#dfe9ff] text-[#1d3f8f] dark:bg-[#0f1f3d] dark:text-foreground' : 'border border-foreground/15 text-foreground/85 active:bg-foreground/10'}`}>
+                    {icon}<span>{label}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="flex-1 min-w-0 h-full flex flex-col">
+                <div data-menu-title="" className="shrink-0 h-[73.5px] pl-3 pr-[13px] pt-[18.5px] text-[16px] leading-6 font-semibold">
+                  {scalpMenu === 'range' ? 'Range' : scalpMenu === 'indicators' ? 'Indicators' : scalpMenu === 'drawings' ? 'Drawings' : 'Settings'}
+                </div>
+                <div ref={setMenuBody} data-menu-body={scalpMenu} className="flex-1 min-h-0 overflow-y-auto pl-3 pr-[12.5px] pb-[calc(1rem+env(safe-area-inset-bottom))]">
+                  {scalpMenu === 'range' && (
+                    <div className="scalp-menu-rows">
+                      {([['1D', '1D'], ['2D', '2D'], ['5D', '5D'], ['1M', '1M'], ['ALL', 'All']] as const).map(([k, label]) => (
+                        <button key={k} type="button" data-range-pick={k} onClick={() => { setRangeChoice(k); applyRange(k); }}
+                          className={`w-full flex items-center justify-between px-3.5 text-left text-[14px] font-medium ${rangeChoice === k ? 'text-primary' : ''}`}>
+                          <span>{label}</span>{rangeChoice === k && <Check size={15} />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>, document.body)}
         <div data-layout="head" className={`items-center max-md:items-end max-md:h-11 gap-2 px-0 pb-0 shrink-0 border-b border-white/10 bg-background md:px-2 ${isFocusedChart || scalp ? 'hidden' : 'flex'}`}>
           {/* The option pane hides the header, so without this the spot pane would
               be exactly one header taller and the two chart boxes would never line
@@ -15892,9 +15986,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               <PencilRuler size={17} />
               <span className="md:hidden text-[10px] leading-none font-medium text-muted-foreground">Drawings</span>
             </button>
-            {rrMenuOpen && (() => {
+            {(rrMenuOpen || !!menuTo('drawings')) && (() => {
               const pick = (k: DrawingType | 'hline' | 'long' | 'short') => {
                 setRrMenuOpen(false);
+                setScalpMenu(null);
                 // One tool at a time: arming one puts the other down.
                 if (k === 'long' || k === 'short') { setDrawArm(null); setRrArm(k); }
                 else { setRrArm(null); setDrawArm(k); }
@@ -15914,12 +16009,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 // the button — the tool bar is at the top of the chart there, and the
                 // old two-item menu opened upwards, off the top of the page; seven
                 // rows would have left only the last of them on screen.
-                <div data-draw-sheet="" className="fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem))] md:bottom-auto md:top-full md:mt-2 md:right-0 z-[90] md:w-60 bg-card border border-white/10 rounded-xl md:rounded-lg shadow-2xl md:shadow-xl overflow-hidden">
+                <MenuPortal to={menuTo('drawings')}>
+                <div data-draw-sheet="" className={menuTo('drawings') ? 'scalp-menu-rows' : 'fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem))] md:bottom-auto md:top-full md:mt-2 md:right-0 z-[90] md:w-60 bg-card border border-white/10 rounded-xl md:rounded-lg shadow-2xl md:shadow-xl overflow-hidden'}>
                   <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Drawing Tools</div>
                   {(rrBox || (split && peerRrBox)) && (
                     // Split view: one sheet for both charts, so it clears a box on either of them.
                     <button data-draw-pick="rr-clear" className={`${row} text-rose-400`}
-                      onClick={() => { setRrBox(null); setRrArm(null); setRrMenuOpen(false); if (split) paneCmd('rr-clear'); }}>
+                      onClick={() => { setRrBox(null); setRrArm(null); setRrMenuOpen(false); setScalpMenu(null); if (split) paneCmd('rr-clear'); }}>
                       <Trash2 size={16} /> Remove the position box
                     </button>
                   )}
@@ -15946,6 +16042,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     />
                   </div>
                 </div>
+                </MenuPortal>
               );
             })()}
           </div>
@@ -16001,8 +16098,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setIsIndicatorsOpen(false); }}
                   onClick={(e) => { e.preventDefault(); e.stopPropagation(); }} />
               )}
-              {isIndicatorsOpen && (
-                <div className="fixed md:absolute inset-x-0 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem))] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto md:overflow-hidden bg-card border-y border-white/10 md:border-0 rounded-none md:rounded-md py-1.5 z-[45] shadow-2xl flex flex-col">
+              {(isIndicatorsOpen || !!menuTo('indicators')) && (
+                <MenuPortal to={menuTo('indicators')}>
+                <div data-ind-list="" className={menuTo('indicators') ? 'scalp-menu-list' : 'fixed md:absolute inset-x-0 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem))] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto md:overflow-hidden bg-card border-y border-white/10 md:border-0 rounded-none md:rounded-md py-1.5 z-[45] shadow-2xl flex flex-col'}>
                   <div className="order-0 px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase">Available Indicators</div>
                   
                   {/* Previous Day High/Low */}
@@ -16792,6 +16890,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       rather than something drawn on the chart. It never belonged in
                       a list of indicators. */}
                 </div>
+                </MenuPortal>
               )}
             </div>
           </div>
@@ -16822,8 +16921,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             <div className="md:hidden fixed inset-0 z-[88]" aria-hidden="true"
               onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setPhoneSettingsOpen(false); }} />
           )}
+          <MenuPortal to={menuTo('settings')}>
           <div data-settings-sheet={phoneSettingsOpen ? 'open' : 'closed'}
-            className={`${phoneSettingsOpen && !isPane
+            className={menuTo('settings') ? 'scalp-menu-rows flex flex-col items-stretch' : `${phoneSettingsOpen && !isPane
               ? 'max-md:flex max-md:fixed max-md:inset-x-2 max-md:bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem))] max-md:z-[90] max-md:flex-col max-md:items-stretch max-md:gap-0 max-md:max-w-none max-md:overflow-visible max-md:rounded-xl max-md:border max-md:border-white/10 max-md:bg-card max-md:p-1.5 max-md:shadow-2xl'
               : isPane ? 'flex' : 'max-md:hidden flex'} items-center gap-2 flex-none max-w-[45%] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents md:min-w-0 md:basis-auto pr-1`}>
           {/* Trailing TP, beside Quick Trade. Distinct icon and colour so the two
@@ -16860,7 +16960,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             <TradeGuardButton className="md:order-2 max-md:h-11 max-md:w-full max-md:justify-start max-md:gap-3 max-md:px-2.5 max-md:!bg-transparent" label />
           )}
           {(
-          <div className={`ml-auto md:ml-0 ${isReferenceChart ? 'hidden' : isPane ? 'flex' : 'max-md:hidden flex'} ${sharedHidden} items-center justify-center gap-2 h-9 w-9 shrink-0 md:order-2 cursor-pointer rounded-md border border-0 transition-colors ${quickTradeEnabled ? "bg-primary/20" : "bg-muted/40"}`} onClick={() => toggleQuickTrade()} title="Quick Trade — switches itself off 1 minute after it is turned on">
+          <div className={`ml-auto md:ml-0 ${isReferenceChart || scalp ? 'hidden' : isPane ? 'flex' : 'max-md:hidden flex'} ${sharedHidden} items-center justify-center gap-2 h-9 w-9 shrink-0 md:order-2 cursor-pointer rounded-md border border-0 transition-colors ${quickTradeEnabled ? "bg-primary/20" : "bg-muted/40"}`} onClick={() => toggleQuickTrade()} title="Quick Trade — switches itself off 1 minute after it is turned on">
              {/* Icon on both platforms now; the desktop label and toggle are gone.
                  Colour carries the state, as it already did on mobile. */}
              <Zap size={18} className={quickTradeEnabled ? 'text-primary' : 'text-muted-foreground'} />
@@ -16902,7 +17002,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 tinted green, which is what carries the meaning now that the text
                 label is gone. */}
             <button
-              onClick={() => { setPhoneSettingsOpen(false); try { window.dispatchEvent(new CustomEvent('sync_positions_request')); } catch (e) {} }}
+              onClick={() => { setPhoneSettingsOpen(false); setScalpMenu(null); try { window.dispatchEvent(new CustomEvent('sync_positions_request')); } catch (e) {} }}
               /* Icon only, and on BOTH platforms. The "Sync" text made this the
                  widest control in a bar that already scrolls on a phone, so it sat
                  off the right edge — the label cost more than it explained, given
@@ -16923,6 +17023,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           )}
 
           </div>
+          </MenuPortal>
         </div>
         {/* OPTION CHAIN | SCALPPRO, as Lemonn's chart screen ends (phone): fixed
             above the app's bottom bar while the page scrolls under them. Until
