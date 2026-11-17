@@ -42,6 +42,7 @@ import { useMarginPreview, getMarginDiagnostics, patchMarginDiagnostics } from "
 import { getWsDiagnostics, subscribeToTicks, addWsMessageListener } from "../hooks/useWebSocket";
 import { useProfiler } from "../hooks/useProfiler";
 import { computeMasterSignal, getCandleOiSentiment } from "../../lib/decisionEngine";
+import { impliedVol, bsPrice, yearsToExpiry } from "../lib/optionGreeks";
 
 // (A previous global canvas patch rounded every candle/volume bar's corners.
 // Removed per user request — candles and volume bars now render in the
@@ -1273,8 +1274,10 @@ const indGet = (key: string, opt: boolean): string | null => {
     if (!opt) return localStorage.getItem(key);
     const v = localStorage.getItem(IND_OPT(key));
     // Session breaks are a small object, not a yes / no: not set means its own defaults, which are off.
-    return v !== null ? v : key === 'sessionBreaks' ? null : 'false';
-  } catch (e) { return opt && key !== 'sessionBreaks' ? 'false' : null; }
+    // "Show BOS" is BOS-CHoCH's own setting (its gear), not a switch of the list:
+    // not set, it is on, as on the index chart (see BOS IS A SETTING, below).
+    return v !== null ? v : (key === 'sessionBreaks' || key === 'showBos') ? null : 'false';
+  } catch (e) { return opt && key !== 'sessionBreaks' && key !== 'showBos' ? 'false' : null; }
 };
 const indSet = (key: string, opt: boolean, value: string) => { try { localStorage.setItem(opt ? IND_OPT(key) : key, value); } catch (e) {} };
 
@@ -1399,6 +1402,27 @@ const manropeReady = () => { try { return !!(document as any).fonts?.check?.("10
       } catch (e) { /* not a copy this version wrote: left as it is */ }
     }
     localStorage.setItem('optIndicatorsCleared', '1');
+  } catch (e) { /* private mode or a full store: tried again next time */ }
+})();
+
+// BOS IS A SETTING, NOT A SWITCH (17 Nov 2026). The clearing above put every
+// opt:show… name off, and with them showBos — which is not a row of the list
+// but BOS-CHoCH's own setting (its gear: draw BOS beside CHoCH), on by default.
+// Once BOS-CHoCH could be drawn on an option chart (EVERY ROW ON AN OPTION CHART
+// TOO), it would have drawn CHoCH alone there. Put back on, once, on each
+// device, in both the places the clearing put it off.
+(function optionBosBackOnce() {
+  try {
+    if (typeof localStorage === 'undefined' || localStorage.getItem('optBosBack') === '1') return;
+    localStorage.setItem('opt:showBos', 'true');
+    const raw = localStorage.getItem('paneIndicators:option');
+    if (raw !== null) {
+      try {
+        const snap = JSON.parse(raw);
+        if (snap && typeof snap === 'object' && snap.showBos === false) { snap.showBos = true; localStorage.setItem('paneIndicators:option', JSON.stringify(snap)); }
+      } catch (e) { /* not a copy this version wrote: left as it is */ }
+    }
+    localStorage.setItem('optBosBack', '1');
   } catch (e) { /* private mode or a full store: tried again next time */ }
 })();
 
@@ -4750,7 +4774,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     try { localStorage.setItem('dsZoneOpacity', dsZoneOpacity); } catch(e) {}
   }, [dsZoneOpacity]);
   const [levelAlertsOn, setLevelAlertsOn] = useState(() => {
-    try { return localStorage.getItem('levelAlertsOn') === 'true'; } catch(e) {}
+    try { return indGet('levelAlertsOn', optKindRef.current) === 'true'; } catch(e) {}
     return false;
   });
   // RSI pane scale range (persisted). Empty = full 0–100. The library offers no
@@ -4774,7 +4798,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // touches computeDirectionalZones — that function passed its TradingView
   // parity test and stays frozen.
   const [zoneTapAlertsOn, setZoneTapAlertsOn] = useState(() => {
-    try { return localStorage.getItem('zoneTapAlertsOn') === 'true'; } catch(e) {}
+    try { return indGet('zoneTapAlertsOn', optKindRef.current) === 'true'; } catch(e) {}
     return false;
   });
   const zoneTapAlertsOnRef = useRef(zoneTapAlertsOn);
@@ -4794,13 +4818,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const [breakoutInfo, setBreakoutInfo] = useState<any>(null);
   const lastBreakoutBarRef = useRef<number>(0);
   const [breakoutAlertsOn, setBreakoutAlertsOn] = useState(() => {
-    try { return localStorage.getItem('breakoutAlertsOn') === 'true'; } catch(e) {}
+    try { return indGet('breakoutAlertsOn', optKindRef.current) === 'true'; } catch(e) {}
     return false;
   });
   const breakoutAlertsOnRef = useRef(breakoutAlertsOn);
   useEffect(() => {
     breakoutAlertsOnRef.current = breakoutAlertsOn;
-    try { localStorage.setItem('breakoutAlertsOn', String(breakoutAlertsOn)); } catch(e) {}
+    indSet('breakoutAlertsOn', optKindRef.current, String(breakoutAlertsOn));
     if (breakoutAlertsOn && typeof Notification !== 'undefined' && Notification.permission === 'default') {
       try { Notification.requestPermission(); } catch(e) {}
     }
@@ -4949,14 +4973,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   }, [showConfSignals]);
 
   useEffect(() => {
-    try { localStorage.setItem('zoneTapAlertsOn', String(zoneTapAlertsOn)); } catch(e) {}
+    indSet('zoneTapAlertsOn', optKindRef.current, String(zoneTapAlertsOn));
     if (zoneTapAlertsOn && typeof Notification !== 'undefined' && Notification.permission === 'default') {
       try { Notification.requestPermission(); } catch(e) {}
     }
   }, [zoneTapAlertsOn]);
 
   useEffect(() => {
-    try { localStorage.setItem('levelAlertsOn', String(levelAlertsOn)); } catch(e) {}
+    indSet('levelAlertsOn', optKindRef.current, String(levelAlertsOn));
     // Ask for browser-notification permission the moment alerts are enabled, so
     // OS popups work even when this tab is in the background.
     if (levelAlertsOn && typeof Notification !== 'undefined' && Notification.permission === 'default') {
@@ -9940,6 +9964,17 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // then save themselves, as they always have, under the kind the ref now holds
   // — and until this has run they still hold, and save under, the old kind's.
   const optKindNow = isOptionPane || (!isSpotPane && isOptionView);
+  // THE OPTION'S OWN INDEX, when it is one of the three this terminal trades:
+  // the broker's name for it, or the start of the symbol (NIFTY26N17…,
+  // BANKNIFTY26NOV…) — never SENSEX50's or FINNIFTY's. Read by INDEX LEVELS ON
+  // AN OPTION CHART and GIFT Divergence.
+  const optUnder: 'NIFTY' | 'BANKNIFTY' | 'SENSEX' | null = (() => {
+    if (!isOptionView || !selectedInstrument) return null;
+    const n = String((selectedInstrument as any).name || '').toUpperCase();
+    if (n === 'NIFTY' || n === 'BANKNIFTY' || n === 'SENSEX') return n as 'NIFTY' | 'BANKNIFTY' | 'SENSEX';
+    const m = /^(BANKNIFTY|NIFTY|SENSEX)\d{2}(?:[A-Z]{3}|[1-9OND]\d{2})\d/.exec(String(selectedInstrument.tradingsymbol || '').toUpperCase());
+    return m ? (m[1] as 'NIFTY' | 'BANKNIFTY' | 'SENSEX') : null;
+  })();
   useEffect(() => {
     if (optKindRef.current === optKindNow) return;
     optKindRef.current = optKindNow;
@@ -9964,6 +9999,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     setShowFiftyPercentLevels(on('showFiftyPercentLevels', false));
     setShowVolume(on('showVolume', true));
     setShowBB(on('showBB', false));
+    // Of the same list, an option chart's own since 17 Nov 2026 (EVERY ROW ON AN OPTION CHART TOO).
+    setShowBiasLevels(on(BIAS_LINES_KEY, true));
+    setLevelAlertsOn(on('levelAlertsOn', false));
+    setZoneTapAlertsOn(on('zoneTapAlertsOn', false));
+    setBreakoutAlertsOn(on('breakoutAlertsOn', false));
     try {
       const v = JSON.parse(indGet('sessionBreaks', optKindNow) || 'null');
       setSessionBreak(v && typeof v.on === 'boolean' && typeof v.color === 'string' && Number.isFinite(v.opacity)
@@ -9976,7 +10016,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // whatever timeframe the chart is showing, so the answer never depends on the view.
   // Closed candles only. Index charts only; the option pane and GIFT are excluded.
   const ssConfOn = showSwapSweep && ssMode === 'combined' && !!indexToken && !isReferenceChart && paneRole !== 'option';
-  const gdOn = showGiftDiv && underlying === 'NIFTY' && !!indexToken && paneRole !== 'option';
+  // On a NIFTY option's chart too (EVERY ROW ON AN OPTION CHART TOO): the same
+  // signals, from NIFTY's candles, marked on the option's — and announced only
+  // by the index chart (the alert below skips an option chart).
+  const gdOn = showGiftDiv && underlying === 'NIFTY' && !!indexToken && (isOptionView ? optUnder === 'NIFTY' : paneRole !== 'option');
   const ssFetch = (tf: number) => async () => {
     const r = await fetch(`/api/ta?timeframe=${tf}&token=${indexToken}&symbol=${encodeURIComponent(indexLabel)}`);
     if (!r.ok) throw new Error('swap-sweep candles');
@@ -10064,7 +10107,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // Alert ONCE per signal, remembered across reloads; only a signal whose candle
   // closed in the last 10 minutes alerts, so a reload never replays the day.
   useEffect(() => {
-    if (!gdOn) return;
+    if (!gdOn || isOptionView) return;
     let seen: string[] = [];
     try { const v = JSON.parse(localStorage.getItem('giftDivAlerted') || '[]'); if (Array.isArray(v)) seen = v; } catch (e) {}
     const nowS = Math.floor(Date.now() / 1000);
@@ -10086,7 +10129,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       }
     }
     if (changed) { try { localStorage.setItem('giftDivAlerted', JSON.stringify(seen.slice(-300))); } catch (e) {} }
-  }, [giftDiv, gdOn]);
+  }, [giftDiv, gdOn, isOptionView]);
   // Read inside the chart effect's click handler, which is created once per chart
   // rebuild — a ref keeps it correct even if the view changes without a rebuild.
   // PDH/PDL and S&R are intraday levels: the previous day's extremes and the
@@ -10132,6 +10175,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
   const isOptionViewRef = useRef(isOptionView);
   isOptionViewRef.current = isOptionView;
+  const optNameRef = useRef('');
+  optNameRef.current = isOptionView && selectedInstrument ? shortOptionName(String(selectedInstrument.tradingsymbol || '')) : '';
   // Same reason as isOptionViewRef: the spot-mirror helpers are defined far above
   // this line and read the label at call time.
   const indexLabelRef = useRef(indexLabel);
@@ -10243,6 +10288,28 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       .catch(() => { if (!cancelled) setContractExpiry({ symbol: sym, expiry: null }); });
     return () => { cancelled = true; };
   }, [selectedInstrument?.tradingsymbol, isOptionView]);
+
+  // What INDEX LEVELS ON AN OPTION CHART needs to know of the contract: its
+  // strike, side and expiry, and its index. The expiry is the broker's (above),
+  // else the one the instrument came with.
+  const optFacts = (() => {
+    if (!optUnder || !selectedInstrument) return null;
+    const ts = String(selectedInstrument.tradingsymbol || '').toUpperCase();
+    const m = /^(?:BANKNIFTY|NIFTY|SENSEX)\d{2}(?:[A-Z]{3}|[1-9OND]\d{2})(\d+(?:\.\d+)?)(CE|PE)$/.exec(ts);
+    const k = Number((selectedInstrument as any).strike);
+    const strike = k > 0 ? k : (m ? Number(m[1]) : 0);
+    const side = m ? m[2] : (/PE$/.test(ts) ? 'PE' : 'CE');
+    const exp = contractExpiry?.symbol === selectedInstrument.tradingsymbol && contractExpiry?.expiry ? String(contractExpiry.expiry) : String((selectedInstrument as any).expiry || '');
+    return strike > 0 && /^\d{4}-\d{2}-\d{2}/.test(exp) ? { under: optUnder, strike, isCall: side === 'CE', expiry: exp.slice(0, 10) } : null;
+  })();
+  const optFactsRef = useRef(optFacts);
+  optFactsRef.current = optFacts;
+  // The index futures' pressure reading, turned to say what it means for THIS
+  // chart: as it is on an index or a call, the other way round on a put (buying
+  // in the futures is selling in a put). Read by the pin bars and the breakout check.
+  const optSign = () => (optFactsRef.current && !optFactsRef.current.isCall ? -1 : 1);
+  // The option's index, live, from its ticks (see the message listener below).
+  const underSpotRef = useRef<{ under: string; price: number; at: number } | null>(null);
 
   // SWITCHING INDEX USED TO STALL. The chart caches every combination it has
   // fetched (staleTime and gcTime are Infinity), so going BACK to an index was
@@ -10652,14 +10719,17 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // The "Check bias" card under the chart: hidden by its × or from this menu.
   const [biasCardHidden, setBiasCardHidden] = useBiasCardHidden();
   const [showBiasLevels, setShowBiasLevels] = useState<boolean>(() => {
-    try { return localStorage.getItem(BIAS_LINES_KEY) !== 'false'; } catch (e) { return true; }
+    try { return indGet(BIAS_LINES_KEY, optKindRef.current) !== 'false'; } catch (e) { return !optKindRef.current; }
   });
-  useEffect(() => { try { localStorage.setItem(BIAS_LINES_KEY, String(showBiasLevels)); } catch (e) {} }, [showBiasLevels]);
+  useEffect(() => { indSet(BIAS_LINES_KEY, optKindRef.current, String(showBiasLevels)); }, [showBiasLevels]);
   const biasLinesRef = useRef<{ series: any; lines: any[]; sig: string }>({ series: null, lines: [], sig: '' });
   useEffect(() => {
     const specs = () => {
       const rec = isBiasRecord(biasToday) && biasToday.date === biasIstToday() && biasToday.status === 'ok' && biasToday.bias ? biasToday : null;
-      if (!showBiasLevels || !rec || String(instrumentToken) !== '256265') return [];
+      // NIFTY's bias: on NIFTY's chart, or on a NIFTY option's at its premium
+      // for each level (INDEX LEVELS ON AN OPTION CHART).
+      const onOpt = isOptionViewRef.current;
+      if (!showBiasLevels || !rec || (onOpt ? optFactsRef.current?.under !== 'NIFTY' : String(instrumentToken) !== '256265')) return [];
       const L = rec.levels || {};
       const up = '#10b981', down = '#f43f5e', amber = '#f59e0b', faint = 'rgba(148,163,184,0.55)';
       const trig = rec.bias === 'bullish' ? up : rec.bias === 'bearish' ? down : amber;
@@ -10673,7 +10743,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         { price: L.or_high, color: faint, lineWidth: 1, lineStyle: 0, title: 'OR high' },
         { price: L.or_low, color: faint, lineWidth: 1, lineStyle: 0, title: 'OR low' },
       ];
-      return out.filter((x) => typeof x.price === 'number' && Number.isFinite(x.price) && x.price > 0);
+      const ok = out.filter((x) => typeof x.price === 'number' && Number.isFinite(x.price) && x.price > 0);
+      if (!onOpt) return ok;
+      return ok.map((x) => { const p = idxToPremRef.current(x.price); return p === null ? null : { ...x, price: p, title: `${x.title} ${Math.round(x.price)}` }; })
+        .filter((x): x is NonNullable<typeof x> => x !== null);
     };
     const sync = () => {
       const s = mainSeriesRef.current;
@@ -10729,11 +10802,23 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     ? taInfo.candles[taInfo.candles.length - 1].close 
     : undefined;
 
+  // An option chart reads its INDEX's chain, and only while an indicator that
+  // needs it is on — Support-Resistance Lines and OI Bars, or the index's price
+  // for H Levels and Bias Levels (INDEX LEVELS ON AN OPTION CHART). Otherwise it
+  // reads none, as before: the whole chain every 10 s shares the proxy the orders
+  // use. The key is the index chart's own, so in ScalpPro the two charts share
+  // one copy.
+  const oiSymbol = !isOptionView ? currentSymbol
+    : optUnder === 'NIFTY' ? 'NIFTY 50' : optUnder === 'BANKNIFTY' ? 'NIFTY BANK' : optUnder === 'SENSEX' ? 'SENSEX' : '';
+  const oiOnOption = isOptionView && !!oiSymbol && (showSnR || showOiBars || showHLevels || showBiasLevels);
+  const oiOnOptionRef = useRef(oiOnOption);
+  oiOnOptionRef.current = oiOnOption;
   const { data: oiData } = useQuery({
-    queryKey: ["oi-data", currentSymbol],
+    queryKey: ["oi-data", oiSymbol],
     queryFn: async () => {
-      const spotParam = lastSpotValue ? `&spot=${lastSpotValue}` : "";
-      const res = await fetch(`/api/option-chain?symbol=${encodeURIComponent(currentSymbol)}${spotParam}`);
+      // The spot hint is the index's price; an option chart's last close is a premium.
+      const spotParam = !isOptionView && lastSpotValue ? `&spot=${lastSpotValue}` : "";
+      const res = await fetch(`/api/option-chain?symbol=${encodeURIComponent(oiSymbol)}${spotParam}`);
       if (!res.ok) throw new Error("Network error");
       return res.json();
     },
@@ -10745,11 +10830,71 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     // OI is an INDEX study and is never drawn on an option chart, so there is no
     // reason to keep pulling the whole chain every 10s while one is open — that
     // traffic shares the same proxy the orders use.
-    enabled: !isOptionView,
-    refetchInterval: () => (!isOptionViewRef.current && document.visibilityState === 'visible') ? 10 * 1000 : false,
+    enabled: !isOptionView || oiOnOption,
+    refetchInterval: () => ((!isOptionViewRef.current || oiOnOptionRef.current) && document.visibilityState === 'visible') ? 10 * 1000 : false,
     staleTime: 30000,
     gcTime: 10 * 60000,
   });
+  const oiSpotRef = useRef<{ symbol: string; spot: number } | null>(null);
+  oiSpotRef.current = oiData && Number((oiData as any).spot) > 0 ? { symbol: oiSymbol, spot: Number((oiData as any).spot) } : null;
+
+  // ===== INDEX LEVELS ON AN OPTION CHART (17 Nov 2026) =====
+  // Martin: "Why doesn’t the indicators list in the option chart in scalper pro
+  // screen show all the indicators. Fix it." Most of the list is worked out from
+  // a chart's own candles and simply runs on the option's (EVERY ROW ON AN OPTION
+  // CHART TOO, at the list). Four are the index's own levels: Support-Resistance
+  // Lines and OI Bars (its option chain), H Levels (typed by him), Bias Levels. A
+  // level of the index has no place on a premium's scale as it stands, so on an
+  // option chart each is drawn where THIS option would trade with the index at
+  // that level, now: the option's implied volatility is backed out of its own
+  // live price at the index's live price and held while the index alone moves to
+  // the level (Black-Scholes, the model the Option Chain's Greeks use,
+  // src/lib/optionGreeks.ts). At the index's own price it gives the option's own
+  // price back. It is not fixed — volatility moves and time passes, so a level
+  // drifts a little through the day — and is worked out again every second. Each
+  // keeps the index level in its label (RES 25500), so none reads as the
+  // option's own, and none is announced: the index chart announces its own
+  // levels, and a touch of a line that drifts is not a touch. The same
+  // translation the other way round already draws an option's SL and TP on the
+  // index chart (/api/premium-spot-map).
+  // The index's price: its tick (the server sends every client NIFTY's, and Bank
+  // Nifty's and SENSEX's while their chain is read), else ScalpPro's index chart's
+  // own last price when it is this index, else the chain's.
+  const underSpotNow = (): number => {
+    const f = optFactsRef.current;
+    if (!f) return 0;
+    const t = underSpotRef.current;
+    if (t && t.under === f.under && Date.now() - t.at < 60000) return t.price;
+    const sh: any = scalpShared?.current;
+    const tok = f.under === 'NIFTY' ? '256265' : f.under === 'BANKNIFTY' ? '260105' : '';
+    if (sh && Number(sh.spotNow) > 0 && (tok ? String(sh.spotToken) === tok : /SENSEX/i.test(String(sh.spotName || '')))) return Number(sh.spotNow);
+    const o = oiSpotRef.current;
+    const want = f.under === 'NIFTY' ? 'NIFTY 50' : f.under === 'BANKNIFTY' ? 'NIFTY BANK' : 'SENSEX';
+    if (o && o.symbol === want) return o.spot;
+    return t && t.under === f.under ? t.price : 0;     // the last tick, however old: the market is shut
+  };
+  const idxVolRef = useRef<{ at: number; key: string; vol: number | null; years: number } | null>(null);
+  /** This option's price with the index at `level`, now; null when it cannot be said (no prices, or a price that implies no volatility). */
+  const idxToPrem = (level: number): number | null => {
+    const f = optFactsRef.current;
+    if (!f || !(level > 0)) return null;
+    const now = Date.now();
+    const key = `${f.strike}|${f.isCall}|${f.expiry}`;
+    let c = idxVolRef.current;
+    if (!c || c.key !== key || now - c.at > 1000) {
+      const S = underSpotNow();
+      const cs = chartDataRef.current?.candles;
+      const P = Number(lastCandleDataRef.current?.close) || Number(cs && cs.length ? cs[cs.length - 1].close : 0) || 0;
+      const years = yearsToExpiry(f.expiry, now);
+      c = { at: now, key, years, vol: S > 0 && P > 0 && years > 0 ? impliedVol(S, f.strike, years, P, f.isCall) : null };
+      idxVolRef.current = c;
+    }
+    if (!c.vol) return null;
+    const p = bsPrice(level, f.strike, c.years, c.vol, f.isCall);
+    return Number.isFinite(p) ? Math.max(0.05, Math.round(p * 20) / 20) : null;
+  };
+  const idxToPremRef = useRef(idxToPrem);
+  idxToPremRef.current = idxToPrem;
 
   const { data: pulseBias } = useQuery({
     queryKey: ["premium-pulse-bias"],
@@ -10911,9 +11056,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   }, [oiData]);
 
   const decision = useMemo(() => {
-     if (!localAnalytics || (!liveTa && !taInfo)) return null;
+     // An option chart reads its index's chain now (INDEX LEVELS ON AN OPTION
+     // CHART); the master signal is still the index chart's, as it was.
+     if (isOptionView || !localAnalytics || (!liveTa && !taInfo)) return null;
      return computeMasterSignal(localAnalytics, liveTa || taInfo, fiiDiiData);
-  }, [localAnalytics, liveTa, taInfo, fiiDiiData]);
+  }, [localAnalytics, liveTa, taInfo, fiiDiiData, isOptionView]);
 
   const [lastTickMessage, setLastTickMessage] = useState<string>('');
   const lastTickAtRef = useRef(0); // ms timestamp of the last live tick (to know when ticks are fresh)
@@ -10963,6 +11110,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           && String(msg.token) === String(instrumentTokenRef.current)) {
         isOptionTick = true;
         msg = { ...msg, type: 'tick', symbol: currentSymbol, candle: { close: msg.ltp } };
+      }
+
+      // The option's own index, live, for INDEX LEVELS ON AN OPTION CHART.
+      if (msg && msg.type === 'tick' && optFactsRef.current) {
+        const u = optFactsRef.current.under;
+        const want = u === 'NIFTY' ? 'NSE:NIFTY 50' : u === 'BANKNIFTY' ? 'NSE:NIFTY BANK' : 'BSE:SENSEX';
+        const px = Number(msg.price ?? msg.candle?.close);
+        if (msg.symbol === want && px > 0) underSpotRef.current = { under: u, price: px, at: Date.now() };
       }
 
       const normalize = (s: string) => s.replace(/^(NSE:|BSE:|NFO:)/, '').trim();
@@ -11580,8 +11735,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     }
     // A level that is not drawn must not announce touches either — otherwise an
     // hourly chart would alert on lines the user cannot see.
-    if (showPdhPdl && intradayLevelsAllowed) { add('pdh', 'PDH', pdhPdlData?.pdh); add('pdl', 'PDL', pdhPdlData?.pdl); }
-    if (showSnR && intradayLevelsAllowed) {
+    // pdhPrice / pdlPrice: the names pdhPdlData has. This read .pdh and .pdl,
+    // which it never had, so PDH and PDL were never announced (nor used by the
+    // breakout check below) — found 17 Nov 2026 making these an option chart's too.
+    if (showPdhPdl && intradayLevelsAllowed) { add('pdh', 'PDH', pdhPdlData?.pdhPrice); add('pdl', 'PDL', pdhPdlData?.pdlPrice); }
+    // The index's support and resistance: on an option chart they are drawn at
+    // an estimated premium (INDEX LEVELS ON AN OPTION CHART) and not announced.
+    if (showSnR && intradayLevelsAllowed && !isOptionView) {
       add('sup', 'Support', localAnalytics?.supportZone?.strikePrice);
       add('res', 'Resistance', localAnalytics?.resistanceZone?.strikePrice);
     }
@@ -11596,7 +11756,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         add('orl', '15m Low', orAlert.low);
       }
     }
-    if (showDsZones && !isOptionView) {
+    if (showDsZones) {
       const dz = (taInfo as any)?.dsZones;
       (dz?.demand || []).forEach((z: any, i: number) => add(`dz${i}`, 'Demand zone', z.top));
       (dz?.supply || []).forEach((z: any, i: number) => add(`sz${i}`, 'Supply zone', z.bottom));
@@ -11612,7 +11772,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       if (last && last.key === `ml${ln.id}`) (last as any).always = true;
     }
     alertLevelsRef.current = L;
-  }, [hLevels, showHLevels, showFiftyPercentLevels, pdhPdlData, showPdhPdl, localAnalytics, showSnR, taInfo, showOpeningRange, showDsZones, intradayLevelsAllowed, isReferenceChart, manualLineIds]);
+  }, [hLevels, showHLevels, showFiftyPercentLevels, pdhPdlData, showPdhPdl, localAnalytics, showSnR, taInfo, showOpeningRange, showDsZones, intradayLevelsAllowed, isReferenceChart, manualLineIds, isOptionView]);
 
   // Fire one alert: OS notification (works from background tabs) + beep. No in-app
   // toast — see fireBreakoutAlert: on a phone these cards cover the chart they are
@@ -11636,14 +11796,19 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // The second matters even during the session: a mid-morning reload should not
   // re-announce something that happened before it.
   const MAX_ALERT_BAR_AGE_MS = 6 * 60 * 1000;
-  const marketAlertsAllowed = (barTimeSec?: number) => {
-    // Option charts announce nothing. These alerts are all about INDEX structure —
-    // support and resistance touches, breakouts, divergences, zone taps — and on a
-    // premium chart the same levels are noise: a decaying contract drifts through
-    // them all day for reasons that have nothing to do with the level. Gating here
-    // rather than at each producer means every one of them is covered, including
-    // any added later.
-    if (isOptionViewRef.current) return false;
+  const marketAlertsAllowed = (barTimeSec?: number, optionOk = false) => {
+    // Option charts announce nothing of their own accord. These alerts were all
+    // about INDEX structure — support and resistance touches, breakouts,
+    // divergences, zone taps — and on a premium chart the same levels are noise: a
+    // decaying contract drifts through them all day for reasons that have nothing
+    // to do with the level. Gating here rather than at each producer means every
+    // one of them is covered, including any added later.
+    // THE EXCEPTION (17 Nov 2026, EVERY ROW ON AN OPTION CHART TOO): the three
+    // alerts that are rows of the Indicators list — Level Touch, Zone Tap and
+    // Breakout-Fakeouts — are an option chart's own switches now, off until he
+    // turns one on there, and then they judge the option's own levels, zones and
+    // candles. Those three pass optionOk; nothing else does.
+    if (isOptionViewRef.current && !optionOk) return false;
     const nowSec = Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current;
     if (!isMarketOpen(nowSec)) return false;
     if (typeof barTimeSec === 'number' && Number.isFinite(barTimeSec)) {
@@ -11651,6 +11816,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     }
     return true;
   };
+
+  // Whose alert it is, on an option chart: "NIFTY 25400 CE · PDH touched" — the
+  // index chart's say nothing, as before.
+  const alertWho = () => (isOptionViewRef.current && optNameRef.current ? `${optNameRef.current} · ` : '');
 
   const TRAY_TTL_MS = 25000;
   const trayNotify = (title: string, body: string, tag: string) => {
@@ -11662,8 +11831,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   };
 
   const fireLevelAlert = (label: string, price: number, spot: number, dirUp: boolean) => {
-    if (!marketAlertsAllowed()) return;
-    const title = `${label} touched`;
+    if (!marketAlertsAllowed(undefined, true)) return;
+    const title = `${alertWho()}${label} touched`;
     const body = `Price ${spot.toFixed(2)} crossed ${dirUp ? 'up through' : 'down through'} ${label} (${price})`;
     trayNotify(title, body, `lvl-${label}-${price}`);
     try {
@@ -11715,8 +11884,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // him) + bell-list entry + a tone, and deliberately NO in-app toast, which on
   // a phone covers the chart it is describing.
   const fireZoneTapAlert = (z: { top: number; bottom: number }) => {
-    if (!marketAlertsAllowed()) return;
-    const title = 'Zone tapped';
+    if (!marketAlertsAllowed(undefined, true)) return;
+    const title = `${alertWho()}Zone tapped`;
     const body = `Price tapped a Directional Zone (${z.bottom.toFixed(2)} - ${z.top.toFixed(2)}) on ${timeframe}`;
     trayNotify(title, body, `dztap-${z.top}-${z.bottom}`);
     try { notificationService.add('divergence', title, body, { ephemeral: true }); } catch(e) {}
@@ -11794,11 +11963,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
   // Fire a breakout-authenticity alert (distinct sound from level-touch).
   const fireBreakoutAlert = (r: any) => {
-    if (!marketAlertsAllowed(r?.barTime ?? lastBreakoutBarRef.current)) return;
+    if (!marketAlertsAllowed(r?.barTime ?? lastBreakoutBarRef.current, true)) return;
     const dirWord = r.direction === 'up' ? 'break UP' : 'break DOWN';
-    const title = r.verdict === 'FAKEOUT_RISK'
+    const title = alertWho() + (r.verdict === 'FAKEOUT_RISK'
       ? `⚠️ Fakeout risk: ${r.level}`
-      : `Breakout ${r.verdict === 'STRONG' ? '✓ strong' : 'moderate'}: ${r.level}`;
+      : `Breakout ${r.verdict === 'STRONG' ? '✓ strong' : 'moderate'}: ${r.level}`);
     const body = `${dirWord} @ ${r.price} · score ${r.score}/100 · ${r.reasons.slice(0, 3).join(', ')}`;
     trayNotify(title, body, `brk-${r.level}-${r.brokeAt}`);
     // NO in-app toast. This alert already reaches Martin three other ways — the
@@ -11841,7 +12010,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     const res = evaluateBreakout(
       candles.map((c: any) => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume })),
       levels,
-      { pressure: deltaRef.current ? deltaRef.current.pressure : null }
+      { pressure: deltaRef.current ? deltaRef.current.pressure * optSign() : null }
     );
     lastBreakoutBarRef.current = lastBar.time;
     if (res) {
@@ -11864,10 +12033,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     for (let i = 0; i < active.length - 1; i++) levels.push(Math.round((active[i] + active[i + 1]) / 2));
     if (pdhPdlData?.pdhPrice) levels.push(pdhPdlData.pdhPrice);
     if (pdhPdlData?.pdlPrice) levels.push(pdhPdlData.pdlPrice);
-    if (localAnalytics?.supportZone?.strikePrice) levels.push(localAnalytics.supportZone.strikePrice);
-    if (localAnalytics?.resistanceZone?.strikePrice) levels.push(localAnalytics.resistanceZone.strikePrice);
+    // (The index's support and resistance, as before on an index chart only:
+    // an option chart reads its index's chain now, but these are index prices.)
+    if (!isOptionView && localAnalytics?.supportZone?.strikePrice) levels.push(localAnalytics.supportZone.strikePrice);
+    if (!isOptionView && localAnalytics?.resistanceZone?.strikePrice) levels.push(localAnalytics.resistanceZone.strikePrice);
     chartLevelsRef.current = levels.filter(v => typeof v === 'number' && v > 0);
-  }, [hLevels, pdhPdlData, localAnalytics]);
+  }, [hLevels, pdhPdlData, localAnalytics, isOptionView]);
 
   const bbData = useMemo(() => {
     if (!chartData || !chartData.candles || !showBB) return [];
@@ -12465,7 +12636,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           }
 
           // Check PDH/PDL click
-          if (showPdhPdl && intradayLevelsAllowed && !isOptionView && pdhPrice !== null && pdlPrice !== null) {
+          if (showPdhPdl && intradayLevelsAllowed && pdhPrice !== null && pdlPrice !== null) {
             const pdhY = mainSeries.priceToCoordinate(pdhPrice);
             if (pdhY !== null && Math.abs(pdhY - y) < 10) {
               setIsEditingPdhPdl(true);
@@ -12640,7 +12811,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     bbUpperSeriesRef.current = null;
     bbMiddleSeriesRef.current = null;
     bbLowerSeriesRef.current = null;
-    if (showBB && !isOptionView && bbData && bbData.length > 0) {
+    if (showBB && bbData && bbData.length > 0) {
       const upperSeries = mainChart.addSeries(LineSeries, {
         color: hexToRgba(bbColor, 0.75),
         lineWidth: 1,
@@ -13431,7 +13602,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         }
 
         const liveBB = bbDataRef.current;
-        if (showBB && !isOptionView && liveBB && liveBB.length > 0) {
+        if (showBB && liveBB && liveBB.length > 0) {
           ctx.beginPath();
           let first = true;
           
@@ -13498,9 +13669,23 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           const nowMs = Date.now();
           const glowBlur = 8 + 6 * (0.5 + 0.5 * Math.sin(nowMs / 350)); // gentle pulse 8–14px
 
-          optionRows.forEach((row: any) => {
-              const y = mainSeriesRef.current!.priceToCoordinate(row.strike);
+          // On an option chart a strike's bar stands at this option's price for
+          // the index at that strike (INDEX LEVELS ON AN OPTION CHART). Far from
+          // the money those prices bunch together — a call's near nothing below
+          // its strike — so a bar that would sit on one already drawn is left
+          // out, the strikes nearest the index drawn first.
+          const onOpt = isOptionViewRef.current;
+          const placed: number[] = [];
+          const rowsInOrder = onOpt && glowSpot > 0 ? [...optionRows].sort((a: any, b: any) => Math.abs(a.strike - glowSpot) - Math.abs(b.strike - glowSpot)) : optionRows;
+          rowsInOrder.forEach((row: any) => {
+              const at = onOpt ? idxToPremRef.current(row.strike) : row.strike;
+              if (at === null) return;
+              const y = mainSeriesRef.current!.priceToCoordinate(at);
               if (y === null || y < 0 || y > ch) return;
+              if (onOpt) {
+                if (placed.some((py) => Math.abs(py - y) < oiBarThickness)) return;
+                placed.push(y);
+              }
               
               const callWidth = (row.call_oi / maxOI) * maxBarWidth;
               const putWidth = (row.put_oi / maxOI) * maxBarWidth;
@@ -13638,7 +13823,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               const dz = (taInfo as any)?.dsZones;
               // Fair Value Gaps — recomputed only when a candle CLOSES (sig on
               // closed-candle counts); the forming candle can FILL a zone live.
-              if (showFvg && !isOptionView && mainSeriesRef.current) {
+              if (showFvg && mainSeriesRef.current) {
                 const baseC = chartDataRef.current?.candles || [];
                 const arc = liveClosedCandlesRef.current;
                 const lastT = baseC.length ? baseC[baseC.length - 1].time : 0;
@@ -13872,10 +14057,47 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 } catch (e) { /* an indicator must never break the frame */ }
               }
 
+              // GIFT DIVERGENCE ON AN OPTION CHART: the same signals as marks on this
+              // option's candle of that time. NIFTY's swing line has no place on a
+              // premium's scale and is left out; the mark points the way the signal
+              // says THIS option should go — a bullish divergence up on a call,
+              // down on a put.
+              if (showGiftDivRef.current && isOptionView && optFactsRef.current && mainSeriesRef.current) {
+                try {
+                  const tfG = parseInt(String(timeframe), 10) || 0;
+                  const list = tfG === 5 ? giftDivRef.current[5] : tfG === 15 ? giftDivRef.current[15] : [];
+                  if (list.length) {
+                    const byTime = new Map<number, any>();
+                    for (const c of [...(chartDataRef.current?.candles || []), ...liveClosedCandlesRef.current]) byTime.set(toUnixSeconds(c.time), c);
+                    const upC = settingsRef.current.candleUpColor, dnC = settingsRef.current.candleDownColor;
+                    const isCall = optFactsRef.current.isCall;
+                    ctx.save();
+                    ctx.font = `bold 9px ${drawFontRef.current}`;
+                    ctx.textAlign = 'center';
+                    for (const d of list) {
+                      const c = byTime.get(Number(d.time));
+                      if (!c) continue;
+                      const x = mainChartRef.current?.timeScale()?.timeToCoordinate(d.time as any);
+                      if (x === null || x === undefined || x < 0 || x > textAlignX) continue;
+                      const up = (d.kind === 'bull') === isCall;
+                      const y = mainSeriesRef.current.priceToCoordinate(up ? c.low : c.high);
+                      if (y === null) continue;
+                      const near = up ? y + 6 : y - 6, far = up ? y + 13 : y - 13;
+                      // the tip toward the candle: up from under its low, down from over its high
+                      ctx.fillStyle = up ? upC : dnC;
+                      ctx.beginPath(); ctx.moveTo(x, near); ctx.lineTo(x - 5, far); ctx.lineTo(x + 5, far); ctx.closePath(); ctx.fill();
+                      ctx.textBaseline = up ? 'top' : 'bottom';
+                      ctx.fillText('GIFT Div', x, up ? far + 2 : far - 2);
+                    }
+                    ctx.restore();
+                  }
+                } catch (e) { /* an indicator must never break the frame */ }
+              }
+
               // Reversal pins: recomputed only when a candle closes (or the series
-              // is rebuilt), exactly like BOS-CHoCH. Index charts only — the levels
-              // are index levels.
-              if (showPinBarsRef.current && !isOptionView && mainSeriesRef.current) {
+              // is rebuilt), exactly like BOS-CHoCH. On an option chart, against the
+              // option's own levels (the alert list is the chart's own).
+              if (showPinBarsRef.current && mainSeriesRef.current) {
                 const baseP = chartDataRef.current?.candles || [];
                 const lastBT = baseP.length ? baseP[baseP.length - 1].time : 0;
                 const sinceP = liveClosedCandlesRef.current.filter((k: any) => k.time > lastBT);
@@ -13887,7 +14109,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   // closed before the app was open have no reading and stay unmarked
                   // as strong, rather than guessed at.
                   if (newest && sigP !== pinSigRef.current && !pinPressureRef.current.has(newest.time) && deltaRef.current) {
-                    pinPressureRef.current.set(newest.time, Number(deltaRef.current.pressure) || 0);
+                    pinPressureRef.current.set(newest.time, (Number(deltaRef.current.pressure) || 0) * optSign());
                   }
                   pinSigRef.current = sigP;
                   pinSeriesRef.current = mainSeriesRef.current;
@@ -13914,7 +14136,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 }
               }
 
-              if (showStructure && !isOptionView && mainSeriesRef.current) {
+              if (showStructure && mainSeriesRef.current) {
                 const baseC = chartDataRef.current?.candles || [];
                 const arc = liveClosedCandlesRef.current;
                 const lastT = baseC.length ? baseC[baseC.length - 1].time : 0;
@@ -13963,7 +14185,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 }
               }
 
-              if (showOrderBlocks && !isOptionView && mainSeriesRef.current) {
+              if (showOrderBlocks && mainSeriesRef.current) {
                 const baseC = chartDataRef.current?.candles || [];
                 const liveZ = lastCandleDataRef.current;
                 // The INSTRUMENT belongs in this key. Without it, switching index kept the
@@ -14304,7 +14526,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               // Derived once per recompute (keyed on the zones block's own signature),
               // then each gap is drawn with its zone's horizontal extent so the two
               // read as one unit: amber fill plus a thin outline to tell it apart.
-              if (showOrderBlocks && dzFvgRef.current.on && !isOptionView && mainSeriesRef.current) {
+              if (showOrderBlocks && dzFvgRef.current.on && mainSeriesRef.current) {
                 try {
                   const zonesNow = obZonesRef.current || [];
                   const key = `${obSigRef.current}|${zonesNow.length}`;
@@ -14339,7 +14561,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 } catch (e) { /* a display extra must never break the frame */ }
               }
 
-              if (showDsZones && !isOptionView && dz && mainSeriesRef.current) {
+              if (showDsZones && dz && mainSeriesRef.current) {
                 const pct = Math.min(100, Math.max(1, parseFloat(dsZoneOpacity) || 8)) / 100;
                 const drawZone = (z: any, rgb: string, labelColor: string, label: string) => {
                   const yTop = mainSeriesRef.current.priceToCoordinate(z.top);
@@ -14359,20 +14581,27 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               }
 
               const snrDash = snrStyle === 1 ? [5, 5] : snrStyle === 2 ? [2, 4] : [];
-              if (showSnR && intradayLevelsAllowed && !isOptionView && localAnalytics?.supportZone?.strikePrice) {
-                 const y = mainSeriesRef.current.priceToCoordinate(localAnalytics.supportZone.strikePrice);
-                 if (y !== null) linesToDraw.push({ text: `SUP`, y, color: supportColor, dash: snrDash, lineWidth: snrWidth });
+              // On an option chart the index's support and resistance are drawn
+              // where this option would trade with the index there, and say which
+              // index level they are (INDEX LEVELS ON AN OPTION CHART).
+              if (showSnR && intradayLevelsAllowed && localAnalytics?.supportZone?.strikePrice) {
+                 const k = localAnalytics.supportZone.strikePrice;
+                 const at = isOptionView ? idxToPremRef.current(k) : k;
+                 const y = at === null ? null : mainSeriesRef.current.priceToCoordinate(at);
+                 if (y !== null) linesToDraw.push({ text: isOptionView ? `SUP ${k}` : `SUP`, y, color: supportColor, dash: snrDash, lineWidth: snrWidth });
               }
-              if (showSnR && intradayLevelsAllowed && !isOptionView && localAnalytics?.resistanceZone?.strikePrice) {
-                 const y = mainSeriesRef.current.priceToCoordinate(localAnalytics.resistanceZone.strikePrice);
-                 if (y !== null) linesToDraw.push({ text: `RES`, y, color: resistanceColor, dash: snrDash, lineWidth: snrWidth });
+              if (showSnR && intradayLevelsAllowed && localAnalytics?.resistanceZone?.strikePrice) {
+                 const k = localAnalytics.resistanceZone.strikePrice;
+                 const at = isOptionView ? idxToPremRef.current(k) : k;
+                 const y = at === null ? null : mainSeriesRef.current.priceToCoordinate(at);
+                 if (y !== null) linesToDraw.push({ text: isOptionView ? `RES ${k}` : `RES`, y, color: resistanceColor, dash: snrDash, lineWidth: snrWidth });
               }
               const pdhPdlDash = pdhPdlStyle === 1 ? [5, 5] : pdhPdlStyle === 2 ? [2, 4] : [];
-              if (showPdhPdl && intradayLevelsAllowed && !isOptionView && pdhPrice !== null) {
+              if (showPdhPdl && intradayLevelsAllowed && pdhPrice !== null) {
                  const y = mainSeriesRef.current.priceToCoordinate(pdhPrice);
                  if (y !== null) linesToDraw.push({ text: `PDH ${pdhPrice}`, y, color: pdhColor, dash: pdhPdlDash, lineWidth: pdhPdlWidth });
               }
-              if (showPdhPdl && intradayLevelsAllowed && !isOptionView && pdlPrice !== null) {
+              if (showPdhPdl && intradayLevelsAllowed && pdlPrice !== null) {
                  const y = mainSeriesRef.current.priceToCoordinate(pdlPrice);
                  if (y !== null) linesToDraw.push({ text: `PDL ${pdlPrice}`, y, color: pdlColor, dash: pdhPdlDash, lineWidth: pdhPdlWidth });
               }
@@ -14391,7 +14620,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 // so between the close and the next 09:30 (when the new range is
                 // published) nothing is drawn, rather than yesterday's lingering.
                 const orIsCurrent = !!or && (!or.date || or.date === new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10));
-                if (showOpeningRange && !isOptionView && !isReferenceChart && or && orIsCurrent && marketIsOpenRef.current) {
+                if (showOpeningRange && !isReferenceChart && or && orIsCurrent && marketIsOpenRef.current) {
                   if (typeof or.high === 'number') {
                     const y = mainSeriesRef.current.priceToCoordinate(or.high);
                     if (y !== null) linesToDraw.push({ text: `15M HIGH`, y, color: orHighColor, dash: [], lineWidth: 1 });
@@ -14403,26 +14632,32 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 }
               }
               // Drawn only while H Levels itself is on — the 50% lines are part of it.
-              if (showHLevels && showFiftyPercentLevels && !isOptionView && !isReferenceChart && hLevels) {
+              // H levels are an index's, the chart's own index's (hLevels follows
+              // `underlying`): on an option chart they are drawn at the option's
+              // price for each, and only for an option of that index.
+              const hOnOpt = isOptionView && !!optFactsRef.current && optFactsRef.current.under === underlyingRef.current;
+              if (showHLevels && showFiftyPercentLevels && (!isOptionView || hOnOpt) && !isReferenceChart && hLevels) {
                  const activeLevels = hLevels.filter(v => v > 0).sort((a, b) => b - a);
                  for (let i = 0; i < activeLevels.length - 1; i++) {
                    const midPoint = Math.round((activeLevels[i] + activeLevels[i+1]) / 2);
-                   const y = mainSeriesRef.current.priceToCoordinate(midPoint);
+                   const at = isOptionView ? idxToPremRef.current(midPoint) : midPoint;
+                   const y = at === null ? null : mainSeriesRef.current.priceToCoordinate(at);
                    if (y !== null) {
-                     linesToDraw.push({ text: `50% LEVEL`, y, color: fiftyPercentColor, dash: [], lineWidth: 1 });
+                     linesToDraw.push({ text: isOptionView ? `50% LEVEL ${midPoint}` : `50% LEVEL`, y, color: fiftyPercentColor, dash: [], lineWidth: 1 });
                    }
                  }
               }
 
               // H Levels — drawn here (line + pill) so RED OUTER / RED INNER / TRAP UPPER / TRAP LOWER / GREEN OUTER / GREEN INNER text shows on the chart
-              if (showHLevels && !isOptionView && !isReferenceChart && hLevels) {
+              if (showHLevels && (!isOptionView || hOnOpt) && !isReferenceChart && hLevels) {
                  const hColors = ['#ef4444', '#ef4444', '#fbbf24', '#fbbf24', '#22c55e', '#22c55e'];
                  const hTexts = ['RED OUTER', 'RED INNER', 'TRAP UPPER', 'TRAP LOWER', 'GREEN INNER', 'GREEN OUTER'];
                  const hDash = hLevelsStyle === 1 ? [5, 5] : hLevelsStyle === 2 ? [2, 4] : [];
                  hLevels.forEach((lvl, idx) => {
                    if (lvl && lvl > 0) {
-                     const y = mainSeriesRef.current.priceToCoordinate(lvl);
-                     if (y !== null) linesToDraw.push({ text: hTexts[idx], y, color: hColors[idx], dash: hDash, lineWidth: hLevelsWidth });
+                     const at = isOptionView ? idxToPremRef.current(lvl) : lvl;
+                     const y = at === null ? null : mainSeriesRef.current.priceToCoordinate(at);
+                     if (y !== null) linesToDraw.push({ text: isOptionView ? `${hTexts[idx]} ${lvl}` : hTexts[idx], y, color: hColors[idx], dash: hDash, lineWidth: hLevelsWidth });
                    }
                  });
               }
@@ -16391,23 +16626,29 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               )}
               {(isIndicatorsOpen || !!menuTo('indicators')) && (
                 <MenuPortal to={menuTo('indicators')}>
-                {/* AN OPTION CHART'S LIST HOLDS ONLY WHAT CAN BE DRAWN ON ONE (17 Nov 2026).
-                    The rule was already here for two rows (BOS-CHoCH, OI Bars): a switch left
-                    visible invites turning on something that can never draw. It is now every
-                    such row. Previous Day High/Low, 15 min High-Low, the zones, Fair Value
-                    Gaps, pin bars, GIFT Divergence, Support-Resistance, Bollinger Bands and
-                    H Levels are drawn on an index chart only (each is held back where it is
-                    drawn), so on an option chart their rows are not shown. Neither are the
-                    rows that are not of the option charts' own set at all — the three
-                    alerts and the two bias rows are the index chart's, and switching one
-                    in an option chart's list switched it there. What is left is what an
-                    option chart can show: Institutional Levels, Breaker Blocks & Liquidity,
-                    Swap-Sweep, Session Breaks, Volume and RSI. */}
+                {/* EVERY ROW ON AN OPTION CHART TOO (17 Nov 2026). Martin: "Why doesn’t the
+                    indicators list in the option chart in scalper pro screen show all the
+                    indicators. Fix it." The list showed six rows there (v324); the others
+                    were held back where they are drawn, as index studies. Each now draws on
+                    an option chart:
+                    - worked out from the chart's own candles, they run on the option's:
+                      Previous Day High/Low, 15 min High-Low, BOS-CHoCH, Directional Zones,
+                      Fair Value Gaps, Demand/Supply Zones, Reversal Pin Bars, Bollinger Bands;
+                    - the index's own levels — Support-Resistance Lines and OI Bars (its
+                      option chain), H Levels (his), Bias Levels — are drawn where this option
+                      would trade with the index at that level (see INDEX LEVELS ON AN OPTION
+                      CHART), each labelled with the index level;
+                    - GIFT Divergence marks this option's candle of that time;
+                    - the three alerts announce on the option's own levels, prices and zones,
+                      named with the option;
+                    - the NIFTY Bias card is the one card, as on the index chart.
+                    An option chart's switches are its own and start off (v324); the alerts'
+                    and Bias Levels' are now its own too — they were the index chart's. */}
                 <div data-ind-list="" className={menuTo('indicators') ? 'scalp-menu-list' : 'fixed md:absolute inset-x-0 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem))] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto md:overflow-hidden bg-card border-y border-white/10 md:border-0 rounded-none md:rounded-md py-1.5 z-[45] shadow-2xl flex flex-col'}>
                   <div className="order-0 px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase">Available Indicators</div>
                   
                   {/* Previous Day High/Low */}
-                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('PreviousDayHighLow', showPdhPdl)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('PreviousDayHighLow', showPdhPdl)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -16444,7 +16685,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   </div>
 
                   {/* 15m Opening Range (first-15-min high/low lines) */}
-                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('15minHighLow', showOpeningRange)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('15minHighLow', showOpeningRange)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -16476,8 +16717,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     </button>
                   </div>
 
-                  {/* Market Structure (BOS / CHoCH) — an index study */}
-                  {!isOptionView && (
+                  {/* Market Structure (BOS / CHoCH) */}
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BOSCHoCH', showStructure)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
@@ -16509,7 +16749,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       <Star size={14} fill={isFav('BOSCHoCH') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
-                  )}
 
                   {/* Institutional Levels (Martin's TradingView indicator, ported 25 Oct 2026) */}
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('InstitutionalLevels', showInstLevels)}`}>
@@ -16566,7 +16805,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   </div>
 
                   {/* Directional Zones (ported TradingView indicator; replaced Order Blocks) */}
-                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('DirectionalZones', showOrderBlocks)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('DirectionalZones', showOrderBlocks)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -16641,7 +16880,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   </div>
 
                   {/* Fair Value Gaps */}
-                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('FairValueGaps', showFvg)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('FairValueGaps', showFvg)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -16674,7 +16913,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   </div>
 
                   {/* Demand / Supply Zones */}
-                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('DemandSupplyZones', showDsZones)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('DemandSupplyZones', showDsZones)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -16707,7 +16946,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   </div>
 
                   {/* Level Touch Alerts */}
-                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('LevelTouchAlerts', levelAlertsOn)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('LevelTouchAlerts', levelAlertsOn)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -16740,7 +16979,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   </div>
 
                   {/* Zone Tap Alerts — the ported Pine script's own alert */}
-                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('ZoneTapAlerts', zoneTapAlertsOn)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('ZoneTapAlerts', zoneTapAlertsOn)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -16773,7 +17012,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   </div>
 
                   {/* Breakout Authenticity Alerts */}
-                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BreakoutFakeouts', breakoutAlertsOn)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BreakoutFakeouts', breakoutAlertsOn)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -16803,7 +17042,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     >
                       <Star size={14} fill={isFav('BreakoutFakeouts') ? 'currentColor' : 'none'} />
                     </button>
-                  </div>                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('ReversalPinBars', showPinBars)}`}>
+                  </div>                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('ReversalPinBars', showPinBars)}`}>
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
                         <button
                           onClick={(e) => { e.stopPropagation(); setShowPinBars(!showPinBars); }}
@@ -16867,7 +17106,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       ))}
                     </div>
                   )}
-                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('GiftDivergence', showGiftDiv)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('GiftDivergence', showGiftDiv)}`}>
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
                         <button
                           onClick={(e) => { e.stopPropagation(); setShowGiftDiv(!showGiftDiv); }}
@@ -16894,7 +17133,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       an option chart's list they stood lit when everything of the option
                       chart's had been cleared — and switching one there switched it for the
                       index chart. They are not shown in that list. */}
-                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BiasLevels', showBiasLevels)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BiasLevels', showBiasLevels)}`}>
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
                         <button
                           onClick={(e) => { e.stopPropagation(); setShowBiasLevels(!showBiasLevels); }}
@@ -16915,7 +17154,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       <Star size={14} fill={isFav('BiasLevels') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
-                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BiasCard', !biasCardHidden)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BiasCard', !biasCardHidden)}`}>
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
                         <button
                           onClick={(e) => { e.stopPropagation(); setBiasCardHidden(!biasCardHidden); }}
@@ -17006,7 +17245,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       <Star size={14} fill={isFav('Volume') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
-                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('SupportResistanceLines', showSnR)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('SupportResistanceLines', showSnR)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -17042,10 +17281,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     </button>
                   </div>
 
-                  {/* OI Bars — an INDEX study. The bars were already suppressed on an
-                      option chart, but leaving the switch visible invited turning on
-                      something that could never draw. */}
-                  {!isOptionView && (
+                  {/* OI Bars — the index's option chain; on an option chart each strike's
+                      bar is drawn at this option's price for the index at that strike. */}
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('OIBars', showOiBars)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
@@ -17081,7 +17318,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       <Star size={14} fill={isFav('OIBars') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
-                  )}
 
                   {/* RSI */}
                   <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('RSI', showRsi)}`}>
@@ -17121,7 +17357,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   </div>
 
                   {/* Bollinger Bands */}
-                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BollingerBands', showBB)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('BollingerBands', showBB)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
@@ -17158,7 +17394,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   </div>
 
                   {/* H Levels */}
-                  <div className={`${optKindNow ? 'hidden' : 'flex'} items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('HLevels', showHLevels)}`}>
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('HLevels', showHLevels)}`}>
                     {/* Only the checkbox toggles. The label used to be part of the button, so
                           reading down the list and brushing a name switched an indicator on. */}
                       <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">

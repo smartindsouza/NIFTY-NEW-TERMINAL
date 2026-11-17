@@ -649,6 +649,39 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Option charts: every indicator in the list, drawn on the option (v329)
+
+`src/pages/AdvancedChart.tsx` (EVERY ROW ON AN OPTION CHART TOO, at the list;
+INDEX LEVELS ON AN OPTION CHART, beside the chain query). Martin, 17 Nov 2026:
+"Why doesn’t the indicators list in the option chart in scalper pro screen show
+all the indicators. Fix it." The option chart's list showed 6 of the 23 rows
+(v324). It shows all 23, and each draws on an option chart:
+
+- **On the option's own candles:** Previous Day High/Low, 15 min High-Low,
+  BOS-CHoCH, Directional Zones, Fair Value Gaps, Demand/Supply Zones, Reversal
+  Pin Bars, Bollinger Bands.
+- **The index's levels, at this option's price for them:** Support-Resistance
+  Lines, OI Bars, H Levels (with their 50% lines) and Today's Bias Levels are
+  levels of the index. On an option chart each is drawn where the option would
+  trade with the index at that level, now. The option's implied volatility is
+  worked out from its own live price at the index's live price, then held while
+  the index alone moves to the level (Black-Scholes, as in the Option Chain's
+  Greeks). Each label keeps the index level (`RES 25500`, `RED OUTER 25450`).
+  The lines drift a little through the day as volatility and time change, and
+  are recalculated every second. They are not alerted on.
+- **GIFT Divergence:** a mark on the option's candle of that time, pointing the
+  way the signal says this option should go (a bullish divergence points up on
+  a call, down on a put). It announces only from the index chart.
+- **Level Touch, Zone Tap and Breakout-Fakeouts alerts:** the option chart's own
+  switches now (they were the index chart's). When on, they judge the option's
+  own levels, zones and candles, and each alert names the option.
+- **NIFTY Bias card:** the one card, as on the index chart.
+- Everything starts **off** on option charts, as since v324. BOS-CHoCH's own
+  "Show BOS" setting, which that clearing had turned off, is on again (once).
+- **Found while doing it:** Level Touch Alerts never announced PDH or PDL, on any
+  chart. The level list read names the PDH/PDL data does not have, so the two
+  levels never entered it, nor the breakout check that uses the same list. Fixed.
+
 ## ScalpPro: the index's name and the option's name open the Option Chain (v328)
 
 `src/pages/AdvancedChart.tsx` (THE NAMES OPEN THE OPTION CHAIN),
