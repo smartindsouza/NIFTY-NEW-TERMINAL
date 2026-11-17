@@ -649,6 +649,31 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Search: smaller results, and a + that puts one on the chart list (v332)
+
+Martin, 17 Nov 2026, with a picture of the results: "The search results fonts
+can be reduced to half the size. Also add a plus icon next to it to add them to
+the list beside the nifty chart in the main charts screen."
+
+- **Smaller.** A result's two lines are 11px over 9px (were 16px over 12px), in
+  rows 42 tall (were 59). 8px, half to the letter, is too small to read on a
+  phone. Shares and funds, which are listed as they were, are the same sizes.
+- **The +** beside each result puts it on the list under the tab beside the
+  index's (the option charts' list), and does nothing else: the chart on screen
+  stays, the search stays open and the keyboard up, so several can be lined up
+  from one search. On the list it is a green tick; a tap takes it off, as the
+  list's own × does (the chart on screen then moves to the last one left, or to
+  the index). An index has no + (it is on the index tab's menu).
+- **Desktop:** the option half's search has the + on options only, as that
+  half takes only options. The index half has no list of its own, so its search
+  has no +; an option opened from it opens the option half, whose search has it.
+- **The list holds 10** (was 5, from when each was a tab across the top). Over
+  10, the oldest goes, never the one on screen.
+- **Found while verifying (desktop):** an option picked in the index half's
+  search also landed in a list of the index half's own, so the index half grew a
+  tab of the option beside NIFTY 50 that nothing kept up to date. The index half
+  no longer keeps a list (it never meant to; see the comment on `openCharts`).
+
 ## Sync positions on the Journal; the bottom bar closes App Diagnostics (v331)
 
 - **Sync positions** moved from the chart's Settings (and the desktop chart's

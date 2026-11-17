@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, X, Clock, Loader2 } from 'lucide-react';
+import { Search, X, Clock, Loader2, Plus, Check } from 'lucide-react';
 import { useSymbolSearch, Instrument } from '../hooks/useSymbolSearch';
 import { searchLabel } from '../lib/optionName';
 
@@ -12,9 +12,18 @@ interface Props {
   // header can put the chart's name back.
   autoOpen?: boolean;
   onClose?: () => void;
+  // THE + BESIDE A RESULT (17 Nov 2026): puts it on the list of charts beside
+  // the index's tab, or takes it off, without opening it. `takes` says which
+  // results may go on that list at all (the desktop's option half holds options
+  // only); `has` whether one is on it. Not given, no + is shown.
+  list?: {
+    takes: (instrument: Instrument) => boolean;
+    has: (tradingsymbol: string) => boolean;
+    toggle: (instrument: Instrument) => void;
+  };
 }
 
-export function SymbolSearch({ onSelect, currentSymbol, autoOpen, onClose }: Props) {
+export function SymbolSearch({ onSelect, currentSymbol, autoOpen, onClose, list }: Props) {
   const [isOpen, setIsOpen] = useState(!!autoOpen);
   const wasOpen = useRef(!!autoOpen);
   useEffect(() => {
@@ -85,6 +94,33 @@ export function SymbolSearch({ onSelect, currentSymbol, autoOpen, onClose }: Pro
 
   const renderItem = (item: Instrument, index: number, isRecent = false) => {
     const isSelected = index === selectedIndex;
+    // HALF THE SIZE (17 Nov 2026). Martin, with a picture of the results: "The
+    // search results fonts can be reduced to half the size. Also add a plus icon
+    // next to it to add them to the list beside the nifty chart in the main
+    // charts screen." The lines were 16px over 12px in rows 59 tall; they are
+    // 11px over 9px in rows 42 tall. (8px would be half to the letter, and too
+    // small to read on a phone.)
+    // THE +: puts the result on the list beside the index's tab (the option
+    // charts' list), without opening it, so several can be lined up from one
+    // search. On the list already, it is a tick, and a tap takes it off. Not on
+    // an index — the indices have the index tab's own list. A finger on it does
+    // not take the keyboard away (pointerdown is not let blur the field).
+    const onList = !!list && (item as any).segment !== 'INDICES' && list.takes(item);
+    const isListed = onList && list!.has(item.tradingsymbol);
+    const plus = onList ? (
+      <button
+        type="button"
+        data-search-add={item.tradingsymbol}
+        data-listed={isListed ? 'yes' : 'no'}
+        aria-label={isListed ? 'Take off the chart list' : 'Add to the chart list'}
+        onPointerDown={(e) => e.preventDefault()}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={(e) => { e.stopPropagation(); list!.toggle(item); }}
+        className={`shrink-0 h-9 w-9 -my-[7px] -mr-3 flex items-center justify-center active:bg-foreground/10 hover:bg-foreground/5 ${isListed ? 'text-emerald-400' : 'text-foreground/70'}`}
+      >
+        {isListed ? <Check size={15} strokeWidth={2.4} /> : <Plus size={15} strokeWidth={2.2} />}
+      </button>
+    ) : null;
     // AN OPTION OR A FUTURE IS TWO LINES, IN WORDS (17 Nov 2026). Martin: "Show
     // the search in this format
     // NIFTY 17th (w) NOV 23500 CE
@@ -99,17 +135,18 @@ export function SymbolSearch({ onSelect, currentSymbol, autoOpen, onClose }: Pro
         <div
           key={item.instrument_token}
           data-search-row={item.tradingsymbol}
-          className={`px-4 py-2 cursor-pointer flex items-center gap-2 border-b /50 last:border-0 ${
+          className={`px-4 py-[7px] cursor-pointer flex items-center gap-2 border-b /50 last:border-0 ${
             isSelected ? 'bg-muted' : 'hover:bg-muted/70'
           }`}
           onClick={() => handleSelect(item)}
           onMouseEnter={() => setSelectedIndex(index)}
         >
-          {isRecent && <Clock size={12} className="text-muted-foreground shrink-0" />}
-          <div className="flex flex-col min-w-0">
-            <span className="font-semibold text-foreground/90 truncate">{label.title}</span>
-            <span className="text-xs text-muted-foreground mt-0.5 truncate">{label.sub}</span>
+          {isRecent && <Clock size={10} className="text-muted-foreground shrink-0" />}
+          <div className="flex flex-col min-w-0 flex-1">
+            <span className="text-[11px] leading-[14px] font-semibold text-foreground/90 truncate">{label.title}</span>
+            <span className="text-[9px] leading-[12px] text-muted-foreground mt-px truncate">{label.sub}</span>
           </div>
+          {plus}
         </div>
       );
     }
@@ -117,32 +154,35 @@ export function SymbolSearch({ onSelect, currentSymbol, autoOpen, onClose }: Pro
       <div
         key={item.instrument_token}
         data-search-row={item.tradingsymbol}
-        className={`px-4 py-2 cursor-pointer flex items-center justify-between border-b /50 last:border-0 ${
+        className={`px-4 py-[7px] cursor-pointer flex items-center justify-between gap-2 border-b /50 last:border-0 ${
           isSelected ? 'bg-muted' : 'hover:bg-muted/70'
         }`}
         onClick={() => handleSelect(item)}
         onMouseEnter={() => setSelectedIndex(index)}
       >
-        <div className="flex flex-col">
-          <div className="flex items-center gap-2">
-            {isRecent && <Clock size={12} className="text-muted-foreground" />}
-            <span className="font-semibold text-foreground/90">{item.tradingsymbol}</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+        <div className="flex flex-col min-w-0">
+          <div className="flex items-center gap-1.5">
+            {isRecent && <Clock size={10} className="text-muted-foreground" />}
+            <span className="text-[11px] leading-[14px] font-semibold text-foreground/90">{item.tradingsymbol}</span>
+            <span className="text-[8px] leading-none px-1 py-0.5 rounded bg-muted text-muted-foreground">
               {item.exchange}
             </span>
           </div>
-          <span className="text-xs text-muted-foreground mt-0.5 truncate max-w-[200px] sm:max-w-[300px]">
+          <span className="text-[9px] leading-[12px] text-muted-foreground mt-px truncate max-w-[200px] sm:max-w-[300px]">
             {item.name}
           </span>
         </div>
-        <div className="flex flex-col items-end text-xs text-muted-foreground">
-          <span className="text-muted-foreground">{item.instrument_type}</span>
-          {(item.strike || item.expiry) && (
-            <span>
-              {item.strike ? `${item.strike} ` : ''}
-              {formatDate(item.expiry)}
-            </span>
-          )}
+        <div className="flex items-center gap-2">
+          <div className="flex flex-col items-end text-[9px] leading-[12px] text-muted-foreground">
+            <span className="text-muted-foreground">{item.instrument_type}</span>
+            {(item.strike || item.expiry) && (
+              <span>
+                {item.strike ? `${item.strike} ` : ''}
+                {formatDate(item.expiry)}
+              </span>
+            )}
+          </div>
+          {plus}
         </div>
       </div>
     );

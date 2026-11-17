@@ -4277,6 +4277,11 @@ function persistLogicalRanges() {
 
 /** An option contract (vs an index, stock or future). Saved tabs carry only the
  *  symbol and token, so the symbol's CE/PE ending is the fallback test. */
+// How many charts the list beside the index's tab holds (17 Nov 2026: was 5, from
+// when each was a tab across the top and five was what a phone could show; the
+// list is a menu that scrolls now, and the search's + lines several up at once).
+const CHART_LIST_MAX = 10;
+
 function isOptionInstr(i: any): boolean {
   if (!i) return false;
   const t = String(i.instrument_type || '').toUpperCase();
@@ -10600,10 +10605,18 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     try { sessionStorage.setItem('openOptionCharts', JSON.stringify(openCharts)); } catch (e) {}
   }, [openCharts, isSpotPane]);
 
-  // Whatever option chart gets shown joins the list. Capped so the row cannot grow
-  // past what a phone can display.
+  // Whatever option chart gets shown joins the list. Capped (CHART_LIST_MAX) so
+  // it cannot grow without end; the oldest goes first.
   useEffect(() => {
     if (!selectedInstrument?.tradingsymbol) return;
+    // NOT ON THE INDEX HALF (17 Nov 2026). The index half owns no list (see the
+    // state above), yet an option picked in its search was set on it for the
+    // moment it takes to hand it to the option half — and this added it to a
+    // list of its own, so the index half grew a tab of the option beside its
+    // NIFTY 50, a copy the option half's list then moved on from (closing or
+    // adding there never reached it). Found while trying the search's + on
+    // the desktop.
+    if (isSpotPane) return;
     // The option pane's list holds OPTIONS only. An index that reached it (a
     // search for NIFTY typed into that half) became a "tab" of its own, so the
     // list never emptied, the split never collapsed, and the right half sat on a
@@ -10616,7 +10629,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         instrument_token: String(selectedInstrument.instrument_token),
         ...(selectedInstrument.lot_size ? { lot_size: selectedInstrument.lot_size } : {}),
         ...(selectedInstrument.exchange ? { exchange: selectedInstrument.exchange } : {}),
-      }].slice(-5);
+      }].slice(-CHART_LIST_MAX);
     });
   }, [selectedInstrument?.tradingsymbol]);
 
@@ -10666,6 +10679,52 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     setOptionMenuOpen(false);
     setOpenCharts([]);
     setSelectedInstrument(null);
+  };
+
+  // THE + IN THE SEARCH (17 Nov 2026). Martin: "add a plus icon next to it to
+  // add them to the list beside the nifty chart in the main charts screen". A
+  // result's + puts it on this list — the one under the tab beside the index's
+  // — and nothing else: the chart on screen stays, and the search stays open,
+  // so a few strikes can be lined up from one search. Tapped again (it is a
+  // tick then) it comes off, as the list's own × takes it off; the chart on
+  // screen then moves to the last one left, or to the index.
+  // The desktop's option half takes options only, as it does when one is
+  // opened; its index half has no such list (the option half is where it is
+  // shown), so its search shows no +.
+  const toggleChartList = (i: any) => {
+    const sym = String(i?.tradingsymbol || '');
+    if (!sym || isSpotPane || (isOptionPane && !isOptionInstr(i))) return;
+    if (openCharts.some((c) => c.tradingsymbol === sym)) {
+      try { dismissedChart.add(sym); } catch (e) {}
+      const next = openCharts.filter((c) => c.tradingsymbol !== sym);
+      setOpenCharts(next);
+      if (selectedInstrument?.tradingsymbol === sym) setSelectedInstrument(next.length ? next[next.length - 1] : null);
+      if (!next.length) setOptionMenuOpen(false);
+      return;
+    }
+    try { dismissedChart.remove(sym); } catch (e) {}
+    const add = {
+      tradingsymbol: sym,
+      instrument_token: String(i.instrument_token),
+      ...(i.lot_size ? { lot_size: i.lot_size } : {}),
+      ...(i.exchange ? { exchange: i.exchange } : {}),
+    };
+    setOpenCharts((prev) => {
+      const next = dedupeCharts([...prev, add]);
+      // Over the cap, the oldest goes — but never the one on screen.
+      const onScreen = selectedInstrument?.tradingsymbol;
+      while (next.length > CHART_LIST_MAX) {
+        const k = next.findIndex((c) => c.tradingsymbol !== onScreen);
+        if (k < 0) break;
+        next.splice(k, 1);
+      }
+      return next;
+    });
+  };
+  const searchList = isSpotPane ? undefined : {
+    takes: (i: any) => !isOptionPane || isOptionInstr(i),
+    has: (sym: string) => openCharts.some((c) => c.tradingsymbol === sym),
+    toggle: toggleChartList,
   };
 
   // ── Split view: shared toolbar, per-chart timeframe and indicators ───────────
@@ -16243,6 +16302,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             <div className="md:hidden flex-1 min-w-0 px-1.5 py-1" data-head="search-field" onPointerDown={(e) => e.stopPropagation()}>
               <SymbolSearch autoOpen onClose={() => setPhoneSearchOpen(false)}
                 onSelect={(i) => { setSelectedInstrument(i); setPhoneSearchOpen(false); }}
+                list={searchList}
                 currentSymbol={selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel} />
             </div>
           ) : (
@@ -16574,6 +16634,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           <SymbolSearch 
             onSelect={setSelectedInstrument} 
             onClose={() => setSearchExpanded(false)}
+            list={searchList}
             currentSymbol={selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel} 
           />
           </div>
