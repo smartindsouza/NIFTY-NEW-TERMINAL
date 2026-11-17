@@ -649,6 +649,50 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Option Chain: Lemonn's chain, as a sheet over the chart (v326)
+
+`src/components/OptionChainSheet.tsx`, `src/lib/optionGreeks.ts` (tests:
+`npx tsx src/lib/optionGreeks.test.ts`), `src/pages/OptionChain.tsx`. Martin,
+16 Nov 2026: "I also want to completely redesign the option chain screen same
+as in the lemon app. So remove the option chain screen already present in my
+app completely and redesign it as shown in the videos with the Greeks button
+and horizontal inward scrolling when Greeks are enabled. I also want the option
+strike chart to open/selected for scalp pro when I tap in the strike price in
+the option chain." The old page (the table with OI bars, zones and the NIFTY |
+SENSEX switch) is gone.
+
+- **Where it is:** the chart page's Option Chain button brings it up as a sheet
+  over the chart, from 152pt down, as Lemonn's comes up over ScalpPro; a tap
+  above it puts it away. `/option-chain` (the desktop's side bar, old links)
+  shows the same chain filling the page. Any screen can open the sheet by
+  announcing `terminal:option-chain`.
+- **What is on it,** measured off his recording: a row of controls (All, the
+  expiry, the Greeks switch); a line of four facts (the trend, PCR, Max Pain,
+  ATM IV); the table. Strike is a fixed column 88pt wide down the middle; rows
+  are 54pt. Greeks off: one column a side, the price with its change on the day
+  under it. Greeks on: eight columns a side — LTP, OI, IV, Delta, Gamma, Vega,
+  Theta, Rho, counting outward from the Strike — two in view, and the two sides
+  slide **towards each other** under the Strike as either is dragged, coming to
+  rest on a column. All (with Greeks on) jumps to a column.
+- **In the rows:** in-the-money cells are shaded; the bar along the foot of a
+  row is that strike's open interest against the largest on its side (calls
+  red, puts green); the tags are Max Pain, OI Support and OI Resistance; the
+  white pill between two strikes is the index and its change on the day.
+- **A tap on a price opens that option in ScalpPro** (on a desktop, in the
+  option half): the call side of a row is its Call, the put side its Put, the
+  strike itself the one that is out of the money.
+- **IV and the Greeks are worked out here** — the broker's quotes carry none —
+  by the model Lemonn's own figures fit: Black-Scholes on the spot, 10% interest,
+  clock time to 3:30 PM IST on the expiry day over a 365-day year, Theta a
+  calendar day, Vega and Rho a percentage point. Against the recording: twenty
+  IVs within 0.04, Vega, Theta and Rho within half a percent. A price under
+  what the option is worth exercised (a stale quote, deep in the money) implies
+  no volatility and shows "—".
+- **Data:** `GET /api/option-chain?withAnalytics=1` every five seconds, option
+  ticks between reads, and the index's daily candles once for yesterday's
+  close. Nothing on the server changed. The index is the chart's
+  (`chartUnderlying`).
+
 ## Trade guard's sheet, a tap outside, and ScalpPro that does not scroll (v325)
 
 Martin, 17 Nov 2026, with two pictures from his phone.

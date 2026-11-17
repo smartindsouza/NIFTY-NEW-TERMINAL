@@ -5,6 +5,7 @@
 
 import { lazy, Suspense, useState, useEffect } from 'react';
 import { Route, Switch, useLocation } from 'wouter';
+import { OptionChainHost } from './components/OptionChainSheet';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Header } from './components/Header';
 // The live tick connection must belong to the APP, not to a piece of chrome.
@@ -295,6 +296,7 @@ export default function App() {
         )}
       </div>
       <BiasAlert />
+      <OptionChainHost />
       <Toaster
         theme="dark"
         position="top-center"

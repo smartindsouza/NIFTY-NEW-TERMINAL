@@ -17307,12 +17307,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             rest nothing has moved. The line along its top is clear until the
             page has been scrolled, when what is above it is no longer the row
             of five.
-            Option Chain opens the Chain page; ScalpPro swaps this page for the
+            Option Chain brings the chain up as a sheet over this page (Lemonn's;
+            see components/OptionChainSheet); ScalpPro swaps this page for the
             two-chart screen. */}
         {barRowShown && (
           <div ref={setFixedRow} data-bar-row="scalp" data-scrolled={pageScrolled ? '1' : '0'}
             className={`md:hidden fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] left-0 right-0 z-40 bg-card px-3 pt-[3px] pb-1.5 flex items-center gap-2 border-t ${pageScrolled ? 'border-border' : 'border-transparent'} box-content h-10`}>
-            <button type="button" data-bar="chain" onClick={() => navigate('/option-chain')}
+            <button type="button" data-bar="chain" onClick={() => { try { window.dispatchEvent(new CustomEvent('terminal:option-chain')); } catch (e) { navigate('/option-chain'); } }}
               className="flex-1 h-10 rounded-lg border border-border text-[13px] font-semibold text-foreground flex items-center justify-center gap-2 active:bg-foreground/10">
               <Link2 size={15} /> Option Chain
             </button>
