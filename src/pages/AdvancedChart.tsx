@@ -6826,7 +6826,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const tradeFitFrozenRef = useRef<number[] | null>(null);
   const tradeFitSigRef = useRef('');
   const tradeFitBaseSpanRef = useRef(0);   // the candles' own range, as the fit last saw it
-  const fitLogRef = useRef<any[]>([]);       // TEMPORARY: the last fits that widened the range (see FINDING THE PRICE SCALE'S BLINK)
   const tradeFitLevels = (): number[] => {
     if (tradeFitFrozenRef.current) return tradeFitFrozenRef.current;
     const ser = mainSeriesRef.current;
@@ -6893,66 +6892,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     }, 400);
     return () => clearInterval(iv);
     // Reads refs only; the interval must not be torn down and rebuilt on renders.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ===== TEMPORARY — FINDING THE PRICE SCALE'S BLINK (17 Nov 2026) =====
-  // Martin sent a recording of ScalpPro's index chart: about four times a
-  // second, on each tick, the price scale is drawn ONE frame wider (its bottom
-  // ~50 points lower), the frame after that the labels and zones are drawn where
-  // that wider scale would put them, and then all is back. It does not happen
-  // on the test copy, nor on the live app in a test browser with his indicators
-  // on, at the live tick rate — so it is something in the state of the app on
-  // his phone, and guessing at it from here would be guessing.
-  // So the chart looks at itself: every 20 seconds, for two and a half seconds,
-  // it reads on each frame how many points of price a fixed height of the pane
-  // spans. A span that jumps by more than 8% and is back within three frames,
-  // three times or more, is that blink — and what the fit was doing at the time
-  // is written under "diag_chart_blink" in the settings store (at most three
-  // times a visit), where it can be read without asking him for anything.
-  // Reads only; nothing on the chart is changed by it.
-  // TO BE REMOVED once the cause is found — this, fitLogRef and the two lines
-  // in the candle series' autoscaleInfoProvider that write to it.
-  useEffect(() => {
-    let raf = 0, stopped = false, sent = 0;
-    const look = () => {
-      const ser = mainSeriesRef.current, cont = chartContainerRef.current, chart = mainChartRef.current;
-      if (stopped || sent >= 3 || !ser || !cont || !chart || document.hidden || cont.clientHeight < 120) return;
-      const h = cont.clientHeight;
-      const seq: number[] = [];
-      const t0 = performance.now();
-      const step = () => {
-        if (stopped) return;
-        let v = NaN;
-        try { v = Math.round((Number(ser.coordinateToPrice(10)) - Number(ser.coordinateToPrice(h - 50))) * 100) / 100; } catch (e) {}
-        seq.push(v);
-        if (performance.now() - t0 < 2500) { raf = requestAnimationFrame(step); return; }
-        let blinks = 0, steady = NaN, blip = NaN;
-        for (let i = 1; i < seq.length - 3; i++) {
-          const was = seq[i - 1], now = seq[i];
-          if (!(was > 0) || !(now > 0) || Math.abs(now - was) <= was * 0.08) continue;
-          if ([1, 2, 3].some((k) => Math.abs(seq[i + k] - was) < was * 0.02)) { blinks++; steady = was; blip = now; i += 3; }
-        }
-        if (blinks < 3) return;
-        sent++;
-        let lr: any = null, opts: any = null;
-        try { const r = chart.timeScale().getVisibleLogicalRange(); lr = r ? [Math.round(Number(r.from) * 10) / 10, Math.round(Number(r.to) * 10) / 10] : null; } catch (e) {}
-        try { const o: any = chart.priceScale('right').options(); opts = { auto: o?.autoScale, mode: o?.mode, margins: o?.scaleMargins }; } catch (e) {}
-        const report = {
-          at: Date.now(), role: paneRole || 'one', scalp: !!scalp, tf: timeframe, ua: String(navigator.userAgent).slice(0, 90),
-          frames: seq.length, blinks, steady, blip, spans: seq.slice(0, 45),
-          fit: fitLogRef.current.slice(-10), frozen: tradeFitFrozenRef.current, levels: (() => { try { return tradeFitLevels(); } catch (e) { return 'err'; } })(),
-          sl: slLinesRef.current.length, smap: spotMapLinesRef.current.length, pos: !!slActivePosRef.current, drag: !!exitDragRef.current,
-          bars: chartDataRef.current?.candles?.length || 0, lr, opts, h, w: cont.clientWidth,
-        };
-        try { fetch('/api/settings/diag_chart_blink', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: report }), keepalive: true }).catch(() => {}); } catch (e) {}
-      };
-      raf = requestAnimationFrame(step);
-    };
-    const first = setTimeout(look, 8000);
-    const iv = setInterval(look, 20000);
-    return () => { stopped = true; clearTimeout(first); clearInterval(iv); cancelAnimationFrame(raf); };
-    // Reads refs only; one watcher for the life of the chart.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -12302,6 +12241,45 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
     mainChartRef.current = mainChart;
 
+    // THE PRICE AXIS DOES NOT GET NARROWER (17 Nov 2026). Martin sent a recording
+    // of ScalpPro's index chart: "some kind of glitch". On every tick the price
+    // scale was drawn one frame taller, the labels and zones the frame after
+    // where that scale would have put them, and then all was back.
+    // What it was, from the recording's frames and the library's own code:
+    //  1. Every tick made the chart lay itself out afresh (see NO MARKERS, NO
+    //     MARKER LAYER, where the candles' markers are made).
+    //  2. Laid out afresh, the library gives the price axis the width its
+    //     labels need at that moment. Since the charts went to Manrope that
+    //     depends on WHICH digits they are: at this size its "1" is 3.9px wide
+    //     and its "0" 6.1px. For the range in his recording the rule gives an
+    //     axis 2px narrower than for a range fifty points taller.
+    //  3. The one-minute chart's first bar of the day, with a wick down to
+    //     25,220, sat within those 2px of the pane's left edge.
+    // So: a tick; the axis is laid out 2px narrower; the plot is 2px wider and
+    // takes that bar in; the range drops to fit its wick; the labels are now
+    // ones that need the 2px back; the library — which widens at once but
+    // never narrows by itself — lays out again; the bar is out and the range
+    // is back. Until the next tick. It needed that bar at that edge, which is
+    // why it could not be made to happen here, and why it came and went.
+    // The axis now only ever grows: whatever width it has once been given is
+    // its minimum from then on. It steps out when the labels first need the
+    // room and stays there. It starts again when the chart is built again
+    // (another contract, another interval).
+    {
+      let axisMin = isPhoneChart() ? PHONE_AXIS_MIN_WIDTH : 0;
+      const pin = () => {
+        if (mainChartRef.current !== mainChart) return;            // a removed chart is never touched again
+        try {
+          const w = Math.ceil(mainChart.priceScale('right').width());
+          if (w > axisMin) { axisMin = w; mainChart.applyOptions({ rightPriceScale: { minimumWidth: w } }); }
+        } catch (e) {}
+      };
+      // Told when the plot's width changes — which, in a box that is not itself
+      // changing size, is the axis changing. Acted on a moment later, once the
+      // library has finished the layout it is in the middle of.
+      try { mainChart.timeScale().subscribeSizeChange(() => { setTimeout(pin, 0); }); } catch (e) {}
+    }
+
     // THE FONT SWAP (see SCALP_CHART_FONT). Built before Manrope had
     // arrived, the chart is in the usual face; when the face is there it is told
     // so — if it is still the chart on screen: a removed chart must never be
@@ -12349,7 +12327,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             let flo = lo0, fhi = hi0;
             for (const p of levels) { if (p < flo) flo = p; if (p > fhi) fhi = p; }
             if (flo === lo0 && fhi === hi0) return base;
-            try { const L = fitLogRef.current; L.push({ t: Math.round(performance.now()), b: [lo0, hi0], o: [flo, fhi], n: levels.length, f: 1 }); if (L.length > 16) L.shift(); } catch (e) {}
             return { ...base, priceRange: { minValue: flo, maxValue: fhi } };
           }
           const maxSpan = span > 0 ? span * TRADE_FIT_MAX_STRETCH : Infinity;
@@ -12368,7 +12345,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           const pad = (hi - lo) * TRADE_FIT_PAD;
           if (lo < lo0) lo = Math.max(0, lo - pad);
           if (hi > hi0) hi = hi + pad;
-          try { const L = fitLogRef.current; L.push({ t: Math.round(performance.now()), b: [lo0, hi0], o: [lo, hi], n: levels.length, f: 0 }); if (L.length > 16) L.shift(); } catch (e) {}
           return { ...base, priceRange: { minValue: lo, maxValue: hi } };
         } catch (e) { return base; }
       },
@@ -12833,7 +12809,15 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     });
     
     markers.sort((a, b) => a.time - b.time);
-    createSeriesMarkers(mainSeries, markers);
+    // NO MARKERS, NO MARKER LAYER (17 Nov 2026). The library's markers are a
+    // layer attached to the candles, and that layer asks the WHOLE chart to lay
+    // itself out again every time the candles' data changes — which is every
+    // tick, four to ten times a second — whether it holds a marker or not. It
+    // was attached to every chart with an empty list. That layout on every
+    // tick is what let the price axis's width flicker (see THE PRICE AXIS DOES
+    // NOT GET NARROWER); it is also work a phone was doing for nothing. It is
+    // attached now only when there is a divergence to mark.
+    if (markers.length) createSeriesMarkers(mainSeries, markers);
 
     // Sync TimeScale
     const timeScale1 = mainChart.timeScale();

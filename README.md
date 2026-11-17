@@ -614,6 +614,41 @@ shows it the way the Lemonn app does:
 Nothing here changes which levels are armed, the entry wall, or where a drop is
 sent; it replaces the on-line pills and the old "grab the line anywhere" drag.
 
+## Chart: the price axis does not get narrower (v322)
+
+`src/pages/AdvancedChart.tsx` ("THE PRICE AXIS DOES NOT GET NARROWER", "NO
+MARKERS, NO MARKER LAYER"). Martin, 17 Nov 2026, with a recording of ScalpPro's
+index chart: "There's also some kind of glitch in the chart". On every tick the
+price scale was drawn one frame taller, the labels and zones the frame after
+where that scale would have put them, and then all was back.
+
+What it was, from the recording's frames and the charting library's code:
+
+1. Every tick made the chart lay itself out afresh. The library's series
+   markers are a layer that asks for a full layout whenever the candles' data
+   changes, and it was attached to every chart with an empty list.
+2. Laid out afresh, the library gives the price axis the width its labels need
+   at that moment. In Manrope that depends on which digits they are (its "1" is
+   3.9px wide at the chart's size, its "0" 6.1px): for the range in the
+   recording the rule gives an axis 2px narrower than for a range fifty points
+   taller.
+3. The one-minute chart's first bar of the day, with a long lower wick, sat
+   within those 2px of the pane's left edge.
+
+So each tick the axis was laid out 2px narrower, the plot took that bar in, the
+range dropped to fit its wick, the new labels needed the 2px back, the library
+(which widens at once and never narrows by itself) laid out again, and the bar
+was out. It needed that bar at that edge, so it came and went, and could not be
+made to happen on the test copy.
+
+- **The axis only ever grows.** Whatever width it has once been given is its
+  minimum until the chart is built again (another contract or interval).
+- **The marker layer is attached only when there is a divergence to mark**, so
+  a tick no longer makes a chart without one lay itself out again.
+- The temporary self-check from v320 (`diag_chart_blink`) is gone. It never
+  reported: the blink needs that one geometry, which did not come back while it
+  was watching.
+
 ## Chart: an option chart has no indicators (v321)
 
 `src/pages/AdvancedChart.tsx` (`indGet` / `indSet`, "AN OPTION CHART HAS NO
@@ -700,13 +735,8 @@ than that, so the order rested unfilled while the app said "exit placed".
   what one lot needs every 30 seconds; between two answers the figure is scaled
   by how far the price has moved, four times a second. What a Sell needs is
   margin, not premium, and stays the broker's own figure.
-- **Temporary: the chart checks itself for a blink.** On his phone ScalpPro's
-  index chart is drawn one frame wider on every tick; it does not happen on the
-  test copy or on the live app in a test browser. Every 20 seconds the chart
-  reads its own price scale for 2.5 seconds, and if it sees that blink it
-  writes what the fit was doing under `diag_chart_blink` in the settings store
-  (`GET /api/settings/diag_chart_blink`). To be removed once the cause is found
-  (FINDING THE PRICE SCALE'S BLINK in `AdvancedChart.tsx`).
+- The temporary self-check for the chart's blink that shipped with this was
+  removed in v322, where the blink is explained and fixed.
 
 ## The positions banner is one line: the overall P&L (v319)
 
