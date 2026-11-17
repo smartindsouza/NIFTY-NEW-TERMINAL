@@ -30,6 +30,18 @@ export function SymbolSearch({ onSelect, currentSymbol, autoOpen, onClose, list 
     if (wasOpen.current && !isOpen) onClose?.();
     wasOpen.current = isOpen;
   }, [isOpen]);
+  // NO MESSAGES OVER AN OPEN SEARCH (17 Nov 2026). Martin: "do not show any
+  // alert or notifications when I search in the search bar because it blocks my
+  // search". The app's messages come down from the top of the screen, which is
+  // where the field and its first results are. While the search is open the
+  // page says so (data-search-open on the body) and the messages are not drawn
+  // (src/index.css). Nothing is thrown away: one still due when the search
+  // closes is shown then, and anything spoken or sent to Telegram still is.
+  useEffect(() => {
+    if (!isOpen) return;
+    document.body.setAttribute('data-search-open', '');
+    return () => document.body.removeAttribute('data-search-open');
+  }, [isOpen]);
   const { query, setQuery, results, loading, recent, addRecent } = useSymbolSearch();
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);

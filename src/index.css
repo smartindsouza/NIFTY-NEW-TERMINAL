@@ -241,3 +241,7 @@
 .scalp-menu-rows { display: flex; flex-direction: column; gap: 12.6px; }
 .scalp-menu-rows > div:first-child { display: none; }
 .scalp-menu-rows > button { height: 33.5px !important; padding-top: 0 !important; padding-bottom: 0 !important; font-size: 14px; }
+
+/* No messages over an open search (see SymbolSearch.tsx): they come down from
+   the top, onto the field and its first results. */
+body[data-search-open] [data-sonner-toaster] { display: none !important; }

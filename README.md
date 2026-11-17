@@ -649,6 +649,15 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## No messages while the search is open (v335)
+
+Martin: "do not show any alert or notifications when I search in the search bar
+because it blocks my search". The app's messages (toasts) come down from the
+top, onto the search field. While a search is open the body carries
+`data-search-open` and the toaster is not drawn (`src/index.css`). A message
+still due when the search closes is shown then; sounds and Telegram are as
+they were.
+
 ## Chart (phone): pull down to refresh; Reload is gone from Settings (v334)
 
 `src/components/PullRefresh.tsx`. Martin, with a picture of Lemonn's spinner:
