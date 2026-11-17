@@ -649,6 +649,14 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Home page: Open Interest, Trend Summary and Supporting Evidence are gone (v344)
+
+Martin, with pictures of the three: "Remove these 3 cards from the homepage".
+The home page is now Today's Bias, the NIFTY 50 price and the Final AI Decision.
+The figures only those blocks used (the all-strike OI totals and split, the
+trend direction / strength / ADX summary) are no longer worked out there; the
+decision is worked out exactly as before.
+
 ## The home page opens without waiting for FII / DII (v343)
 
 Martin: "The app when opened for the first time takes a lot of time to load.

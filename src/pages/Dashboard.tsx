@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
-import { Card } from '@/components/ui/card';
-import { TrendingUp, Activity, ArrowRight, ArrowDownRight, TrendingDown, AlignLeft, BarChart2 } from 'lucide-react';
+import { TrendingUp, Activity, ArrowRight, ArrowDownRight, TrendingDown, AlignLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Progress } from '@/components/ui/progress';
 import { computeMasterSignal } from '@/lib/decisionEngine';
@@ -238,23 +237,8 @@ export function Dashboard() {
   }
 
   const { spot } = chain;
-  const { totalCeOi, totalPeOi, pcr, maxPain, supportZone, resistanceZone } = analytics;
+  const { supportZone, resistanceZone } = analytics;
   
-  // TOTALS OVER EVERY STRIKE (16 Nov 2026). The card below used to add up only the
-  // ~60 strikes the chain carries around spot, so it read well under other apps
-  // (2,459 lakh calls against 2,724 in the one Martin compared it with — the
-  // rest was in far strikes). The server now sends the all-strike totals too.
-  // They are for THIS card only: the decision, PCR Context, max pain and the
-  // zones below still use the strikes near spot, as before. Until the first
-  // all-strike read lands the server sends the near-strike totals and says so.
-  const oiAllStrikes = analytics.oiScope === 'all';
-  const ceOiShown: number = analytics.totalCeOiAll ?? totalCeOi;
-  const peOiShown: number = analytics.totalPeOiAll ?? totalPeOi;
-  const pcrAllStrikes: number = analytics.pcrAll ?? pcr;
-  const totalOi = ceOiShown + peOiShown;
-  const cePercent = totalOi > 0 ? (ceOiShown / totalOi) * 100 : 50;
-  const pePercent = totalOi > 0 ? (peOiShown / totalOi) * 100 : 50;
-
   const computed = computeMasterSignal({ ...analytics, spot }, taData, fiiDiiData);
 
   if (!computed) return null;
@@ -284,45 +268,6 @@ export function Dashboard() {
 
   const taBiasText = decision.bullScore > decision.bearScore ? "Bullish" : decision.bearScore > decision.bullScore ? "Bearish" : "Neutral";
   const taBiasColor = taBiasText === 'Bullish' ? 'text-green-500' : taBiasText === 'Bearish' ? 'text-red-500' : 'text-primary';
-
-  // --- Trend Computation ---
-  const vwap = taData.vwap || spot;
-  const ema20 = taData.ema20 || spot;
-  const { plusDi, minusDi, adx } = taData;
-
-  let trendDirection = 'Neutral';
-  let trendExplanation = 'No clear directional advantage.';
-  
-  if (spot > vwap && spot > ema20 && plusDi > minusDi) {
-    trendDirection = 'Bullish';
-    trendExplanation = 'Buyers currently have control.';
-  } else if (spot < vwap && spot < ema20 && minusDi > plusDi) {
-    trendDirection = 'Bearish';
-    trendExplanation = 'Sellers currently have control.';
-  }
-
-  let trendStrength = 'Weak';
-  if (adx >= 50) trendStrength = 'Extreme';
-  else if (adx >= 35) trendStrength = 'Very Strong';
-  else if (adx >= 25) trendStrength = 'Strong';
-  else if (adx >= 20) trendStrength = 'Developing';
-
-  let combinedSummaryText = 'RANGE / NO TREND';
-  let combinedSummaryColor = 'bg-primary';
-  
-  if (adx >= 20) {
-    if (trendDirection === 'Bullish') {
-      combinedSummaryColor = 'bg-green-500';
-      if (adx >= 35) combinedSummaryText = 'Very Strong Bullish Trend';
-      else if (adx >= 25) combinedSummaryText = 'Strong Bullish Trend';
-      else combinedSummaryText = 'Bullish Trend';
-    } else if (trendDirection === 'Bearish') {
-      combinedSummaryColor = 'bg-red-500';
-      if (adx >= 35) combinedSummaryText = 'Very Strong Bearish Trend';
-      else if (adx >= 25) combinedSummaryText = 'Strong Bearish Trend';
-      else combinedSummaryText = 'Bearish Trend';
-    }
-  }
 
   return (
     <div className="p-4 md:p-8 space-y-4 md:space-y-6 animate-in fade-in duration-500 max-w-[1600px] w-full mx-auto font-sans tracking-wide pb-20">
@@ -362,39 +307,10 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* OI Bars — carded with section label */}
-      <div className="bg-card border border-border rounded-xl p-4 md:p-5">
-        <div className="flex items-baseline justify-between gap-2 mb-3 flex-wrap">
-          <p className="text-[10px] font-bold text-muted-foreground tracking-widest uppercase">Open Interest Distribution</p>
-          {/* Says what is being added up, so the figure can be checked against
-              another app or NSE without guessing. */}
-          <p className="text-[10px] font-mono text-muted-foreground">
-            {oiAllStrikes ? `all ${analytics.oiStrikes} strikes` : 'strikes near spot'} · put : call {pcrAllStrikes.toFixed(2)}
-          </p>
-        </div>
-        <div className="grid grid-cols-[1fr_2fr_1fr] items-center gap-3 md:gap-8">
-          <div className="text-center">
-            <p className="text-[10px] uppercase text-muted-foreground tracking-widest">Total CE OI</p>
-            <p className="text-lg font-mono font-bold text-red-500 mt-1">{ceOiShown.toFixed(1)}L</p>
-          </div>
-          <div className="text-center w-full px-2 md:px-4">
-            <p className="text-[10px] uppercase text-muted-foreground tracking-widest mb-2">CE / PE Split</p>
-            <div className="h-2 w-full bg-muted flex overflow-hidden rounded-full">
-              <div className="bg-red-500 rounded-l-full" style={{ width: `${cePercent}%` }}></div>
-              <div className="bg-green-500 rounded-r-full" style={{ width: `${pePercent}%` }}></div>
-            </div>
-            <div className="flex justify-between text-[10px] mt-2 font-mono">
-              <span className="text-red-500/80">{cePercent.toFixed(1)}% CE</span>
-              <span className="text-green-500/80">{pePercent.toFixed(1)}% PE</span>
-            </div>
-          </div>
-          <div className="text-center">
-            <p className="text-[10px] uppercase text-muted-foreground tracking-widest">Total PE OI</p>
-            <p className="text-lg font-mono font-bold text-green-500 mt-1">{peOiShown.toFixed(1)}L</p>
-          </div>
-        </div>
-      </div>
-
+      {/* THREE BLOCKS TAKEN OFF (17 Nov 2026). Martin, with pictures of them:
+          "Remove these 3 cards from the homepage" — Open Interest Distribution
+          (here), and Trend Summary and Supporting Evidence (after the decision).
+          The decision is worked out as before; only those blocks are gone. */}
       {/* FINAL AI DECISION */}
       <div className="relative bg-card border border-border rounded-xl overflow-hidden">
         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
@@ -521,79 +437,6 @@ export function Dashboard() {
              </ul>
            </div>
         </div>
-      </div>
-
-      {/* TREND SUMMARY */}
-      <div className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground tracking-widest uppercase pt-2">
-        <Activity className="w-3 h-3 text-primary" />
-        TREND SUMMARY
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
-        <Card className="bg-card border border-border p-6 rounded-xl flex flex-col justify-center">
-          <p className="text-[10px] tracking-widest uppercase text-muted-foreground font-bold mb-2">Market Regime</p>
-          <p className="text-xl font-bold uppercase text-foreground">{decision.regime}</p>
-        </Card>
-
-        <Card className="bg-card border border-border p-6 rounded-xl flex flex-col justify-center">
-          <p className="text-[10px] tracking-widest uppercase text-muted-foreground font-bold mb-2">Trend Direction</p>
-          <p className={cn("text-xl font-bold uppercase", trendDirection === 'Bullish' ? "text-green-500" : trendDirection === 'Bearish' ? "text-red-500" : "text-primary")}>{trendDirection}</p>
-          <p className="text-xs text-muted-foreground mt-1">{trendExplanation}</p>
-        </Card>
-
-        <Card className="bg-card border border-border p-6 rounded-xl flex flex-col justify-center">
-          <p className="text-[10px] tracking-widest uppercase text-muted-foreground font-bold mb-2">Trend Strength</p>
-          <p className="text-xl font-bold text-foreground">{trendStrength} <span className="text-sm font-mono text-muted-foreground ml-1">(ADX {adx.toFixed(1)})</span></p>
-          <div className="flex items-center gap-2 mt-2">
-            <span className={cn("w-2.5 h-2.5 rounded-full shrink-0", combinedSummaryColor)}></span>
-            <p className="text-xs font-bold uppercase text-foreground">{combinedSummaryText}</p>
-          </div>
-        </Card>
-      </div>
-
-      {/* TECH INDICATORS TITLE */}
-      <div className="flex items-center gap-2 text-[10px] font-bold text-muted-foreground tracking-widest uppercase pt-2">
-         <BarChart2 className="w-3 h-3 text-primary" />
-         SUPPORTING EVIDENCE
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6">
-         {/* PCR */}
-         <Card className="bg-card border border-border p-6 rounded-xl flex flex-col items-center justify-center text-center">
-            <p className="text-[10px] tracking-widest uppercase text-muted-foreground font-bold mb-4">PCR Context</p>
-            {/* This is the PCR the decision uses: strikes near spot. The all-strike
-                ratio is on the Open Interest card above and usually reads higher. */}
-            <p className={cn("text-4xl font-mono font-bold", pcr < 0.7 ? "text-red-500" : pcr > 1.2 ? "text-green-500" : "text-primary")}>{pcr.toFixed(2)}</p>
-            <p className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground mt-2">{pcr < 0.7 ? "Oversold" : pcr > 1.2 ? "Overbought" : "Neutral"}</p>
-            {oiAllStrikes && <p className="text-[9px] font-mono text-muted-foreground/70 mt-1">strikes near spot</p>}
-         </Card>
-
-         {/* Max Pain */}
-         <Card className="bg-card border border-border p-6 rounded-xl flex flex-col justify-center items-center text-center">
-            <p className="text-[10px] tracking-widest uppercase text-muted-foreground font-bold mb-3">MAX PAIN LEVEL</p>
-            <p className="text-4xl font-mono font-bold text-foreground mb-2 mt-auto">{maxPain}</p>
-            {Math.abs(spot - maxPain) <= 300 ? (
-              <>
-                <p className="text-[11px] text-muted-foreground mb-1">Spot is <span className={cn("font-bold", spot > maxPain ? "text-green-500" : "text-red-500")}>{Math.abs(spot - maxPain).toFixed(0)} pts</span> {spot > maxPain ? "above" : "below"}</p>
-                <p className="text-[9px] uppercase tracking-widest text-primary font-bold mt-1">Intraday Relevant</p>
-              </>
-            ) : (
-              <>
-                <p className="text-[11px] text-muted-foreground mb-1">Max Pain far from spot ({Math.abs(spot - maxPain).toFixed(0)} pts)</p>
-                <p className="text-[9px] uppercase tracking-widest text-muted-foreground font-bold mt-1">Influence: Weak for intraday</p>
-              </>
-            )}
-         </Card>
-
-         {/* RSI */}
-         <Card className="bg-card border border-border p-6 rounded-xl flex flex-col justify-center items-center">
-            <p className="text-[10px] tracking-widest uppercase text-muted-foreground font-bold mb-6">RSI (14, 15m)</p>
-            <p className={cn("text-4xl font-mono font-bold", taData.rsi > 60 ? "text-green-500" : taData.rsi < 40 ? "text-red-500" : "text-primary")}>
-              {taData.rsi.toFixed(1)}
-            </p>
-            <ul className="text-[11px] text-muted-foreground mt-4 text-center">
-              <li>{taData.rsiZoneShift || (taData.rsi > 60 ? "Overbought Zone" : taData.rsi < 40 ? "Oversold Zone" : "Transition Zone")}</li>
-            </ul>
-         </Card>
       </div>
 
     </div>
