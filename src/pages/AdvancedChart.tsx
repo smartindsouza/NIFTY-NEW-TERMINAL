@@ -16206,8 +16206,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             ref={searchWrapRef}
             className={`max-md:hidden flex-1 min-w-0 sm:w-auto md:order-1 ${searchExpanded && !sharedHidden ? 'md:block md:w-64 md:flex-none' : 'md:hidden'}`}
           >
+          {/* onClose (17 Nov 2026): the field's × closes the search when the
+              field is empty, and on a desktop "closed" is the icon — without
+              this the × left the box open with the word Search in it. */}
           <SymbolSearch 
             onSelect={setSelectedInstrument} 
+            onClose={() => setSearchExpanded(false)}
             currentSymbol={selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel} 
           />
           </div>

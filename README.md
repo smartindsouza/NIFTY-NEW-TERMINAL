@@ -649,6 +649,57 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Search: a strike's own index first, results in words, a × and a tap outside (v327)
+
+`server/instrument_search.ts` (tests: `npx tsx server/instrument_search.test.ts`),
+`searchLabel` in `src/lib/optionName.ts` (tests: `npx tsx src/lib/optionName.test.ts`),
+`src/components/SymbolSearch.tsx`. Martin, 17 Nov 2026, with a picture of
+"23500" searched and six SENSEX50 contracts above NIFTY's:
+
+> The search shows strikes for SENSEX first even though SENSEX is not in the range of types strike price. Show the Nifty, bank nifty or SENSEX options in the search based on the nearest strike price. Show the search in this format
+> NIFTY 17th (w) NOV 23500 CE
+> 17 NOV WEEKLY
+> Also there's no close button inside the search to close the empty search bar. Also close it when I tap outside the search bar.
+
+- **Whose strike it is.** The search used to return the first fifty matches in
+  the order of Zerodha's contract file, which begins with BSE. Now the
+  contracts of NIFTY, Bank Nifty and SENSEX come first, and among them the
+  index a typed strike belongs to: the one whose price is nearest it (23500 is
+  NIFTY's, 57000 Bank Nifty's, 83000 SENSEX's). Then the nearest expiry, then
+  the strike nearest the index's price (a part-typed "254" gives 25450 and
+  25400 before anything further out), then the call before the put. An index's
+  price is its last tick; with none, the middle strike of its nearest expiry.
+  Everything else the search found (SENSEX50, shares with that strike) is
+  still found, after these, in the old order.
+- **An index's name** — nifty, nifty 50, banknifty, bank nifty, nifty bank,
+  sensex — gives the index, its futures, then its options from the money
+  outward. "nifty" used to give fifty funds with the word in their name.
+- **In words.** An option or a future is two lines: `NIFTY 17th (w) NOV 23500
+  CE` over `17 NOV WEEKLY`; a monthly has no `(w)` and reads `MONTHLY`
+  (`NIFTY 23rd NOV 23500 PE` / `23 NOV MONTHLY`); a future reads `NIFTY 23rd
+  NOV FUT`. The year is on the second line only when it is not this year. The
+  lines are made from the row's own name, expiry date, strike and type; only
+  weekly-or-monthly is read off the symbol. Shares, indices and funds are
+  listed as they were.
+- **Several words** are matched one by one — the name, the strike, CE / PE /
+  FUT, the month, the day, weekly / monthly — so the line as it is shown, or
+  part of it (`nifty 23500`, `23500 ce`, `sensex 83000 pe`), finds the
+  contract. As one run of letters these found nothing.
+- **×** is in the field whenever it is open: with text it clears the text, as
+  before; with none it closes the search (on a desktop, back to the icon).
+- **A tap outside closes it,** the chart included: it listened for a mouse
+  press, which a phone only makes up after a touch that nothing claimed, and
+  the chart claims its touches. It listens for the touch itself now. The tap
+  still does what it would have done where it landed.
+- **A contract that has expired is not listed.** The server keeps Zerodha's
+  file for a day from when it read it, so the morning after an expiry it still
+  holds yesterday's contracts, and with the nearest expiry first they would
+  have headed the list. A contract is listed through its last day (India's).
+- **As it was:** a symbol typed whole is the first result — the chart finds an
+  open position's contract that way — with NSE's listing before BSE's; and a
+  search with none of the three names and no strike in it (`reliance`, `nifty
+  it`, `bank`) gives what it gave, in the order it had.
+
 ## Option Chain: Lemonn's chain, as a sheet over the chart (v326)
 
 `src/components/OptionChainSheet.tsx`, `src/lib/optionGreeks.ts` (tests:

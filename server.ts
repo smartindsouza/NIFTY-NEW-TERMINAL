@@ -2976,7 +2976,11 @@ setInterval(() => {
     if (query.length < 2) {
       return res.json([]);
     }
-    const results = await searchInstruments(query);
+    // Each index's last tick, so a typed strike is given to the index it is a
+    // strike of (see server/instrument_search.ts). No tick, no price: the
+    // search then goes by the strikes each index lists.
+    const last = (token: number | null | undefined) => { const p = token ? Number(getLatestTick(Number(token))?.ltp) : 0; return p > 0 ? p : undefined; };
+    const results = await searchInstruments(query, { NIFTY: last(256265), BANKNIFTY: last(BANKNIFTY_TOKEN), SENSEX: last(sensexIndexToken) });
     res.json(results);
   });
 

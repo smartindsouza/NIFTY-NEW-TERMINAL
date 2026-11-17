@@ -1,6 +1,7 @@
 import { KiteConnect } from 'kiteconnect';
 import Database from 'better-sqlite3';
 import { generateSimulatedChain } from './simulate_data';
+import { rankInstruments, type Major } from './instrument_search';
 
 const KITE_DATA_DIR = process.env.KITE_DATA_DIR || '.';
 const db = new Database(`${KITE_DATA_DIR}/kite_session.db`);
@@ -173,7 +174,10 @@ export async function findInstrumentAnyExchange(pred: (i: any) => boolean): Prom
   return (allInstrumentsCache || []).find(pred) || null;
 }
 
-export async function searchInstruments(query: string) {
+// The order of the results is instrument_search.ts's (17 Nov 2026): the three
+// indices' contracts first, the index a typed strike belongs to before the
+// others. `spots` is each index's last price, where the caller has one.
+export async function searchInstruments(query: string, spots: Partial<Record<Major, number>> = {}) {
   const kc = getKiteClient();
   const q = query.toLowerCase();
 
@@ -191,26 +195,7 @@ export async function searchInstruments(query: string) {
 
     if (!allInstrumentsCache) return simulatedInstrumentsFallback(q);
 
-    // Filter instruments
-    const results = allInstrumentsCache.filter((i: any) => {
-      if (i.exchange !== 'NSE' && i.exchange !== 'NFO' && i.exchange !== 'BSE' && i.exchange !== 'BFO') return false;
-      const ts = i.tradingsymbol?.toLowerCase() || '';
-      const name = i.name?.toLowerCase() || '';
-      return ts.includes(q) || name.includes(q);
-    });
-
-    // Sort: exact matches first, then startsWith, etc, limit to 50
-    const sorted = results.sort((a, b) => {
-       const aTs = (a.tradingsymbol||'').toLowerCase();
-       const bTs = (b.tradingsymbol||'').toLowerCase();
-       if (aTs === q) return -1;
-       if (bTs === q) return 1;
-       if (aTs.startsWith(q) && !bTs.startsWith(q)) return -1;
-       if (bTs.startsWith(q) && !aTs.startsWith(q)) return 1;
-       return 0;
-    }).slice(0, 50);
-
-    return sorted;
+    return rankInstruments(allInstrumentsCache, query, spots, 50);
   } catch (e) {
     console.error("Error searching instruments:", e);
     return simulatedInstrumentsFallback(q);

@@ -77,3 +77,57 @@ export function orderName(tradingsymbol: string): string {
   if (weekly && mon) return `${underlying} ${weekly[3]} ${MONTH_TITLE[mon - 1]} ${weekly[1]} - ${Number(weekly[4])} ${type}`;
   return String(tradingsymbol || '');
 }
+
+// ── a contract as the search box lists it (17 Nov 2026) ──
+// Martin, of the search results, which were Zerodha's own symbols
+// (NIFTY26N1723500CE): "Show the search in this format
+// NIFTY 17th (w) NOV 23500 CE
+// 17 NOV WEEKLY".
+// The two lines are made from what the row itself says — its name, expiry date,
+// strike and type — rather than read back out of the symbol, so a name that
+// ends in digits (SENSEX50, NIFTYNXT50) cannot be mistaken for a year. Only
+// weekly-or-monthly comes from the symbol: after the name and the year a weekly
+// has one character for the month and two digits for the day (26 N 17), a
+// monthly the month's three letters (26 NOV). A monthly has no "(w)" and reads
+// MONTHLY; the year is given on the second line only when it is not this year
+// (NIFTY lists contracts years out). The server's search matches these same
+// words when they are typed (server/instrument_search.ts).
+export interface SearchLabel { title: string; sub: string }
+
+/** 1 -> "1st", 2 -> "2nd", 3 -> "3rd", 11 -> "11th", 23 -> "23rd". */
+export const ordinal = (d: number): string => {
+  const two = d % 100;
+  return `${d}${two >= 11 && two <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][d % 10] || 'th')}`;
+};
+
+/** The two lines for an option or a future; null for anything else, which keeps its own symbol and name. */
+export function searchLabel(
+  i: { tradingsymbol?: string; name?: string; instrument_type?: string; expiry?: any; strike?: any } | null | undefined,
+  nowMs: number = Date.now(),
+): SearchLabel | null {
+  const type = String(i?.instrument_type || '').toUpperCase();
+  if (!i || (type !== 'CE' && type !== 'PE' && type !== 'FUT')) return null;
+  const when = i.expiry instanceof Date ? (Number.isNaN(i.expiry.getTime()) ? '' : i.expiry.toISOString()) : String(i.expiry || '');
+  const e = /^(\d{4})-(\d{2})-(\d{2})/.exec(when);
+  if (!e) return null;
+  const y = Number(e[1]), m = Number(e[2]), d = Number(e[3]);
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const ts = String(i.tradingsymbol || '').toUpperCase();
+  const given = String(i.name || '').toUpperCase();
+  // What is left of the symbol after the name: "26N1723500CE" or "26NOV23500CE".
+  const cut = /^(.*?)(\d{2}(?:[A-Z]{3}|[1-9OND]\d{2})\d*(?:\.\d+)?(?:CE|PE|FUT))$/.exec(ts);
+  const under = given && ts.startsWith(given) ? given : (cut ? cut[1] : given);
+  if (!under) return null;
+  const rest = ts.startsWith(under) ? ts.slice(under.length) : (cut ? cut[2] : '');
+  const weekly = type !== 'FUT' && /^\d{2}[1-9OND]\d{2}/.test(rest) && !/^\d{2}[A-Z]{3}/.test(rest);
+  const mon = MONTH_ABBR[m - 1];
+  const strike = Number(i.strike);
+  if (type !== 'FUT' && !(strike > 0)) return null;
+  const thisYear = new Date(nowMs + 5.5 * 3600 * 1000).getUTCFullYear();     // the year in India
+  return {
+    title: type === 'FUT'
+      ? `${under} ${ordinal(d)} ${mon} FUT`
+      : `${under} ${ordinal(d)}${weekly ? ' (w)' : ''} ${mon} ${strike} ${type}`,
+    sub: `${d} ${mon}${y !== thisYear ? ` ${y}` : ''} ${weekly ? 'WEEKLY' : 'MONTHLY'}`,
+  };
+}

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Search, X, Clock, Loader2 } from 'lucide-react';
 import { useSymbolSearch, Instrument } from '../hooks/useSymbolSearch';
+import { searchLabel } from '../lib/optionName';
 
 interface Props {
   onSelect: (instrument: Instrument) => void;
@@ -27,16 +28,23 @@ export function SymbolSearch({ onSelect, currentSymbol, autoOpen, onClose }: Pro
 
   const displayList = query.length >= 2 ? results : recent;
 
+  // A TAP OUTSIDE CLOSES IT (17 Nov 2026). Martin, of the search open on his
+  // phone: "Also close it when I tap outside the search bar." This listened for
+  // mousedown, which a phone only makes up after a touch that nothing claimed —
+  // and the chart claims every touch on it, so a tap on the chart, which is
+  // most of what is outside, never arrived. pointerdown is the touch itself; it
+  // is heard on the way down (capture), before anything under the finger can
+  // stop it. The tap still does whatever it would have done where it landed.
   useEffect(() => {
-    const handleOutsideClick = (e: MouseEvent) => {
+    const handleOutside = (e: Event) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setIsOpen(false);
       }
     };
     if (isOpen) {
-      document.addEventListener('mousedown', handleOutsideClick);
+      document.addEventListener('pointerdown', handleOutside, true);
     }
-    return () => document.removeEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('pointerdown', handleOutside, true);
   }, [isOpen]);
 
   useEffect(() => {
@@ -77,9 +85,38 @@ export function SymbolSearch({ onSelect, currentSymbol, autoOpen, onClose }: Pro
 
   const renderItem = (item: Instrument, index: number, isRecent = false) => {
     const isSelected = index === selectedIndex;
+    // AN OPTION OR A FUTURE IS TWO LINES, IN WORDS (17 Nov 2026). Martin: "Show
+    // the search in this format
+    // NIFTY 17th (w) NOV 23500 CE
+    // 17 NOV WEEKLY".
+    // The row was Zerodha's symbol (NIFTY26N1723500CE) with the exchange, the
+    // name, the type, the strike and the date around it — everything the two
+    // lines now say once. A share, an index or a fund has no such lines
+    // (searchLabel gives none) and is listed as it was.
+    const label = searchLabel(item);
+    if (label) {
+      return (
+        <div
+          key={item.instrument_token}
+          data-search-row={item.tradingsymbol}
+          className={`px-4 py-2 cursor-pointer flex items-center gap-2 border-b /50 last:border-0 ${
+            isSelected ? 'bg-muted' : 'hover:bg-muted/70'
+          }`}
+          onClick={() => handleSelect(item)}
+          onMouseEnter={() => setSelectedIndex(index)}
+        >
+          {isRecent && <Clock size={12} className="text-muted-foreground shrink-0" />}
+          <div className="flex flex-col min-w-0">
+            <span className="font-semibold text-foreground/90 truncate">{label.title}</span>
+            <span className="text-xs text-muted-foreground mt-0.5 truncate">{label.sub}</span>
+          </div>
+        </div>
+      );
+    }
     return (
       <div
         key={item.instrument_token}
+        data-search-row={item.tradingsymbol}
         className={`px-4 py-2 cursor-pointer flex items-center justify-between border-b /50 last:border-0 ${
           isSelected ? 'bg-muted' : 'hover:bg-muted/70'
         }`}
@@ -135,18 +172,33 @@ export function SymbolSearch({ onSelect, currentSymbol, autoOpen, onClose }: Pro
               style={{ boxShadow: 'none' }}
               autoFocus
             />
-            {query.length > 0 && (
-              <X
-                size={14}
-                className="text-muted-foreground hover:text-foreground cursor-pointer shrink-0 ml-2"
-                onClick={(e) => {
-                  e.stopPropagation();
+            {loading && <Loader2 size={14} className="text-indigo-400 animate-spin shrink-0 ml-2" />}
+            {/* THE × IS ALWAYS THERE (17 Nov 2026). Martin, with a picture of
+                the field open and empty: "there's no close button inside the
+                search to close the empty search bar." The × stood only while
+                there was something typed, and what it did was rub that out, so
+                an empty field had no way shut but choosing a symbol. It is
+                there whenever the field is: with text it clears the text and
+                keeps the keyboard, as it did; with none it closes the search.
+                A button the height of the field, so a thumb finds it. */}
+            <button
+              type="button"
+              data-search="close"
+              aria-label={query.length > 0 ? 'Clear search' : 'Close search'}
+              title={query.length > 0 ? 'Clear' : 'Close'}
+              className="shrink-0 h-9 w-8 -mr-1.5 sm:-mr-2 flex items-center justify-center text-muted-foreground hover:text-foreground active:opacity-60"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (query.length > 0) {
                   setQuery('');
                   inputRef.current?.focus();
-                }}
-              />
-            )}
-            {loading && <Loader2 size={14} className="text-indigo-400 animate-spin shrink-0 ml-2" />}
+                } else {
+                  setIsOpen(false);
+                }
+              }}
+            >
+              <X size={16} />
+            </button>
           </div>
         ) : (
           <span className="text-sm font-medium text-muted-foreground truncate flex-1">
