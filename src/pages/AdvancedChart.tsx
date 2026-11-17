@@ -2548,100 +2548,191 @@ function OiBarsEditorModal({
 // change paints immediately via onChange, Cancel restores the snapshot taken on
 // open, Ok keeps it. Display only — computeDirectionalZones never sees any of it.
 // Default exit levels applied when a NEW trade appears and the server holds no
-// rule for it yet. Percentages OF THE ENTRY PREMIUM, because that is what the
-// exit rule is denominated in — the same number then drives the spot mirror
-// through the existing Black-Scholes map, so both charts stay consistent.
-function TpSlDefaultsModal({
-  onClose, initialSl, initialTp, initialTrail, initialSlOn, initialTpOn, onApply, activeSymbol,
-}: {
-  onClose: () => void, initialSl: number, initialTp: number, initialTrail: boolean,
-  initialSlOn: boolean, initialTpOn: boolean,
-  onApply: (slPct: number, tpPct: number, trail: boolean, slOn: boolean, tpOn: boolean) => void,
-  activeSymbol?: string | null,
+// rule for it yet. A percentage OF THE ENTRY PREMIUM or points of premium, as
+// chosen — the exit rule itself is a premium level either way, which then drives
+// the spot mirror through the existing Black-Scholes map, so both charts stay
+// consistent.
+type TpSlUnit = 'pct' | 'pts';
+type TpSlDefaults = {
+  slPct: number; tpPct: number; trail: boolean; slOn?: boolean; tpOn?: boolean;
+  // 17 Nov 2026 (THE SL & TP SHEET IS LEMONN'S): each leg in points or in percent.
+  // Not set = percent, which is what every saved set before this was.
+  slUnit?: TpSlUnit; tpUnit?: TpSlUnit; slPts?: number; tpPts?: number;
+};
+/** The stop and target prices for a trade entered at `entry` (long = bought), from the defaults. Never below a tick. */
+function exitPricesFor(d: TpSlDefaults, entry: number, long: boolean): { sl: number; tp: number } {
+  const slOff = d.slUnit === 'pts' ? Math.max(0, Number(d.slPts) || 0) : entry * (Number(d.slPct) || 0) / 100;
+  const tpOff = d.tpUnit === 'pts' ? Math.max(0, Number(d.tpPts) || 0) : entry * (Number(d.tpPct) || 0) / 100;
+  const px = (v: number) => Math.max(0.05, +v.toFixed(2));
+  return { sl: px(long ? entry - slOff : entry + slOff), tp: px(long ? entry + tpOff : entry - tpOff) };
+}
+
+// THE SL & TP SHEET IS LEMONN'S "Set Auto TP/SL" (17 Nov 2026). Martin, with a
+// picture of Lemonn's sheet: "Change the SL & TP UI to the exactly the one shown
+// in the screenshot." It was a small box (TP & SL Defaults: two % fields with
+// switches, a trailing switch, a reset link, Cancel / Ok). It is now Lemonn's
+// sheet, measured off his picture (430pt wide): a sheet from the foot of the
+// screen, 21pt corners; "Set Auto TP/SL" at 18px and a line under it at 12px; a
+// card each for Auto TP and Auto SL — its name, "Mkt", a switch; a box with
+// "Trigger at" and the unit, and a stepper (− value +) in black with navy
+// buttons; the estimate under it in green or red — and "Trailing stop loss" at
+// the foot of the SL card; then Save across the bottom. Every text is 12px but
+// the title and Save, as Lemonn's are.
+// WHAT EACH PART DOES HERE:
+// - The switches are the ones the box had: a leg switched off never closes the
+//   trade (the server enforces it on both its paths).
+// - "Trigger at" is Points or Percentage, each leg on its own: points of premium
+//   from the entry, or a percentage of it. His sets so far are percentages and
+//   stay so; each unit keeps its own number, so trying the other loses nothing.
+// - "Mkt": an automatic exit goes at market — a limit through the price, chased
+//   until it fills (server/exit_order.ts) — there being nothing else to choose,
+//   a tap says so.
+// - "Trailing stop loss" is his trailing exit, as the box's switch was.
+// - Save keeps them for new trades and, with a trade open, applies them to it,
+//   as Ok did; the line under the title says which.
+const TPSL_BLUE = '#6DAAFB', TPSL_GREEN = '#37AD75', TPSL_RED = '#E5505F';
+const TpSlUpDown = ({ color }: { color: string }) => (
+  <svg width="11" height="12" viewBox="0 0 11 12" aria-hidden="true" className="shrink-0"><path d="M5.5 0 L11 5 H0 Z M5.5 12 L0 7 H11 Z" fill={color} /></svg>
+);
+function TpSlDefaultsModal({ onClose, initial, onApply, activeSymbol }: {
+  onClose: () => void, initial: TpSlDefaults, onApply: (d: TpSlDefaults) => void, activeSymbol?: string | null,
 }) {
-  // Independent switches: a trade can carry only a stop, only a target, or
-  // neither. They replace the single "remove SL & TP" button, which could only
-  // do the last of those.
-  const [slOn, setSlOn] = useState(initialSlOn);
-  const [tpOn, setTpOn] = useState(initialTpOn);
-  const [sl, setSl] = useState(String(initialSl));
-  const [tp, setTp] = useState(String(initialTp));
-  const [trail, setTrail] = useState(initialTrail);
-  const slN = parseFloat(sl), tpN = parseFloat(tp);
-  // A stop at or beyond 100% of premium cannot be hit before the option is
-  // worthless, and a non-positive target is not a target.
-  // Only an ENABLED field has to be valid — a switched-off one is ignored, so it
-  // must not be able to block Ok.
-  const valid = (!slOn || (Number.isFinite(slN) && slN > 0 && slN < 100))
-             && (!tpOn || (Number.isFinite(tpN) && tpN > 0));
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-transparent p-4 animate-in fade-in duration-250" onClick={onClose}>
-      <div className="bg-card border border-0 rounded-lg w-full max-w-[320px] overflow-visible flex flex-col pt-1 relative" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-4 border-b border-0">
-          <h2 className="text-lg font-medium text-foreground">TP &amp; SL Defaults</h2>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1"><X className="w-5 h-5" /></button>
+  const [tpOn, setTpOn] = useState(initial.tpOn !== false);
+  const [slOn, setSlOn] = useState(initial.slOn !== false);
+  const [trail, setTrail] = useState(!!initial.trail);
+  const [tpUnit, setTpUnit] = useState<TpSlUnit>(initial.tpUnit === 'pts' ? 'pts' : 'pct');
+  const [slUnit, setSlUnit] = useState<TpSlUnit>(initial.slUnit === 'pts' ? 'pts' : 'pct');
+  // Each unit's own number, kept as typed (text, not a number field: v325's
+  // lesson — a number field rubbed out reads 0, and the next digit went after it).
+  const num = (v: any) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? String(+n.toFixed(2)) : '0'; };
+  const [vals, setVals] = useState<{ tpPct: string; tpPts: string; slPct: string; slPts: string }>({
+    tpPct: num(initial.tpPct), tpPts: num(initial.tpPts), slPct: num(initial.slPct), slPts: num(initial.slPts),
+  });
+  const keyOf = (leg: 'tp' | 'sl') => (leg === 'tp' ? (tpUnit === 'pts' ? 'tpPts' : 'tpPct') : (slUnit === 'pts' ? 'slPts' : 'slPct')) as keyof typeof vals;
+  const valOf = (leg: 'tp' | 'sl') => vals[keyOf(leg)];
+  const setVal = (leg: 'tp' | 'sl', text: string) => {
+    // digits and one point, no leading zeros before a digit
+    let t = text.replace(/[^0-9.]/g, '');
+    const dot = t.indexOf('.');
+    if (dot >= 0) t = t.slice(0, dot + 1) + t.slice(dot + 1).replace(/\./g, '');
+    t = t.replace(/^0+(?=\d)/, '');
+    setVals((v) => ({ ...v, [keyOf(leg)]: t }));
+  };
+  const step = (leg: 'tp' | 'sl', by: number) => {
+    const n = Math.max(0, (parseFloat(valOf(leg)) || 0) + by);
+    setVals((v) => ({ ...v, [keyOf(leg)]: String(+n.toFixed(2)) }));
+  };
+  const n = (leg: 'tp' | 'sl') => parseFloat(valOf(leg)) || 0;
+  // A switched-off leg is ignored, so it cannot hold Save back. A stop of 100%
+  // or more could not be hit before the option is worth nothing.
+  const tpOk = !tpOn || n('tp') > 0;
+  const slOk = !slOn || (n('sl') > 0 && (slUnit === 'pts' || n('sl') < 100));
+  const valid = tpOk && slOk;
+  const est = (leg: 'tp' | 'sl') => {
+    const u = leg === 'tp' ? tpUnit : slUnit;
+    const v = n(leg).toFixed(2);
+    return `${leg === 'tp' ? '+' : '-'}${v}${u === 'pts' ? ' Pts' : '%'}`;
+  };
+  const save = () => {
+    if (!valid) return;
+    const f = (k: keyof typeof vals) => parseFloat(vals[k]) || 0;
+    onApply({
+      // a percentage of 0 is not a level: the last good one is kept for the unit not in use
+      tpPct: f('tpPct') > 0 ? f('tpPct') : (initial.tpPct || 20),
+      slPct: f('slPct') > 0 && f('slPct') < 100 ? f('slPct') : (initial.slPct || 10),
+      tpPts: f('tpPts'), slPts: f('slPts'), tpUnit, slUnit, tpOn, slOn, trail,
+    });
+  };
+  // A function, not a component made here: one made inside this one would be a new
+  // kind of element on every render, put back from scratch, and never slide.
+  const toggle = (on: boolean, onClick: () => void, label: string) => (
+    <button type="button" role="switch" aria-checked={on} aria-label={label} onClick={onClick} className="-m-2 p-2 shrink-0">
+      <span className={`relative block w-[26.8px] h-[16.3px] rounded-full transition-colors ${on ? 'bg-foreground' : 'bg-foreground/25'}`}>
+        <span className={`absolute top-[2px] h-[12.3px] w-[12.3px] rounded-full transition-all ${on ? 'left-[12.8px] bg-background' : 'left-[2px] bg-foreground/85'}`} />
+      </span>
+    </button>
+  );
+  const leg = (which: 'tp' | 'sl') => {
+    const on = which === 'tp' ? tpOn : slOn;
+    const unit = which === 'tp' ? tpUnit : slUnit;
+    return (
+      <div data-tpsl-card={which} className="rounded-[13px] border border-foreground/10 px-[11.3px] pt-[11.7px] pb-[12.7px]">
+        <div className="h-[16.3px] flex items-center gap-[7.7px] text-[12px] leading-4">
+          <span className="font-semibold text-foreground">{which === 'tp' ? 'Auto TP' : 'Auto SL'}</span>
+          <button type="button" data-tpsl={`${which}-type`} onClick={() => { try { toast('Automatic exits go at market', { id: 'tpsl-mkt' }); } catch (e) {} }}
+            className="flex items-center gap-[5px] font-medium" style={{ color: TPSL_BLUE }}>
+            Mkt<TpSlUpDown color={TPSL_BLUE} />
+          </button>
+          <span className="flex-1" />
+          {toggle(on, () => (which === 'tp' ? setTpOn((v) => !v) : setSlOn((v) => !v)), which === 'tp' ? 'Auto TP' : 'Auto SL')}
         </div>
-        <div className="p-4 space-y-4">
-          <div className="text-[11px] text-muted-foreground">
-            Applied when a new trade opens and no exit rule exists yet. Percentages of the entry premium; the spot chart mirrors them automatically.
-          </div>
-          <div className="flex items-center justify-between">
-            <div className={`text-sm font-medium ${slOn ? 'text-foreground/80' : 'text-muted-foreground line-through'}`}>Stop loss</div>
-            <div className="flex items-center gap-2">
-              <input type="number" step="0.5" min="0.5" max="99" value={sl} onChange={e => setSl(e.target.value)} disabled={!slOn}
-                className="w-20 text-center bg-card/40 border border-0 font-mono text-sm h-9 rounded focus:outline-none focus:border-primary text-foreground disabled:opacity-40" />
-              <span className="text-xs text-muted-foreground">%</span>
-              <button onClick={() => setSlOn(v => !v)} aria-label={`Stop loss ${slOn ? 'on' : 'off'}`}
-                title={slOn ? 'Stop loss on — tap to switch off' : 'Stop loss off — tap to switch on'}
-                className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ${slOn ? 'bg-primary' : 'bg-slate-500/40'}`}>
-                <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${slOn ? 'left-[18px]' : 'left-0.5'}`} />
-              </button>
-            </div>
-          </div>
-          <div className="flex items-center justify-between">
-            <div className={`text-sm font-medium ${tpOn ? 'text-foreground/80' : 'text-muted-foreground line-through'}`}>Target</div>
-            <div className="flex items-center gap-2">
-              <input type="number" step="0.5" min="0.5" value={tp} onChange={e => setTp(e.target.value)} disabled={!tpOn}
-                className="w-20 text-center bg-card/40 border border-0 font-mono text-sm h-9 rounded focus:outline-none focus:border-primary text-foreground disabled:opacity-40" />
-              <span className="text-xs text-muted-foreground">%</span>
-              <button onClick={() => setTpOn(v => !v)} aria-label={`Target ${tpOn ? 'on' : 'off'}`}
-                title={tpOn ? 'Target on — tap to switch off' : 'Target off — tap to switch on'}
-                className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ${tpOn ? 'bg-primary' : 'bg-slate-500/40'}`}>
-                <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${tpOn ? 'left-[18px]' : 'left-0.5'}`} />
-              </button>
-            </div>
-          </div>
-          {!valid && <div className="text-[11px] text-amber-400">Stop must be between 0 and 100%; target above 0.</div>}
-          <div className="border-t border-white/10 pt-3">
-            <button onClick={() => setTrail(t => !t)} className="w-full flex items-center justify-between text-left">
-              <div>
-                <div className="text-sm font-medium text-foreground/80">Trailing exit</div>
-                <div className="text-[10px] text-muted-foreground leading-snug mt-0.5">
-                  Half books at TP1. Stop to cost at 70%, then trails each spot pullback break; target ×1.2 per trail.
-                </div>
-              </div>
-              <div className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ml-3 ${trail ? 'bg-primary' : 'bg-slate-700'}`}>
-                <div className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${trail ? 'left-[18px]' : 'left-0.5'}`} />
-              </div>
+        <div className={`mt-3 h-11 rounded-[10px] bg-foreground/[0.07] pl-3 pr-[11.5px] flex items-center text-[12px] leading-4 ${on ? '' : 'opacity-40'}`}>
+          <span className="text-foreground/65">Trigger at</span>
+          <button type="button" data-tpsl={`${which}-unit`} disabled={!on}
+            onClick={() => (which === 'tp' ? setTpUnit((u) => (u === 'pts' ? 'pct' : 'pts')) : setSlUnit((u) => (u === 'pts' ? 'pct' : 'pts')))}
+            className="ml-[7.7px] flex items-center gap-[6px] font-medium text-foreground">
+            {unit === 'pts' ? 'Points' : 'Percentage'}<TpSlUpDown color="currentColor" />
+          </button>
+          <span className="flex-1" />
+          <div data-tpsl={`${which}-stepper`} className="w-[104px] h-[27px] rounded-[6px] bg-background flex items-center justify-between px-[6px]">
+            <button type="button" aria-label="Less" disabled={!on} onClick={() => step(which, -1)}
+              className="h-[19.7px] w-[19.7px] rounded-[3px] flex items-center justify-center" style={{ background: '#122340' }}>
+              <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 5 H9" stroke={TPSL_BLUE} strokeWidth="1.5" strokeLinecap="round" /></svg>
+            </button>
+            <input data-tpsl={`${which}-value`} type="text" inputMode="decimal" disabled={!on} value={valOf(which)}
+              onChange={(e) => setVal(which, e.target.value)} onFocus={(e) => e.target.select()}
+              className="w-[48px] bg-transparent text-center text-[12px] leading-4 text-foreground outline-none border-0 p-0" />
+            <button type="button" aria-label="More" disabled={!on} onClick={() => step(which, 1)}
+              className="h-[19.7px] w-[19.7px] rounded-[3px] flex items-center justify-center" style={{ background: '#122340' }}>
+              <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 5 H9 M5 1 V9" stroke={TPSL_BLUE} strokeWidth="1.5" strokeLinecap="round" /></svg>
             </button>
           </div>
-          <button onClick={() => { setSl('10'); setTp('20'); }}
-            className="text-[11px] text-muted-foreground hover:text-foreground transition-colors underline">Reset to 10% / 20%</button>
         </div>
-        {activeSymbol && (
-          <div className="mx-4 mb-2 rounded-lg border border-border bg-muted/30 p-3 text-[11px] text-muted-foreground">
-            Pressing Ok also applies these switches to your open trade, <span className="font-mono text-foreground/80">{activeSymbol}</span>.
-            A switched-off leg can never close the trade. Both off lets it run free — no
-            stop, no target, no trail — and a reload keeps it that way.
-          </div>
+        <div className={`mt-[11.3px] text-[12px] leading-4 ${on ? '' : 'opacity-40'}`}>
+          <span className="text-foreground">{which === 'tp' ? 'Est. Profit: ' : 'Est. Loss: '}</span>
+          <span data-tpsl={`${which}-est`} className="font-medium" style={{ color: which === 'tp' ? TPSL_GREEN : TPSL_RED }}>{est(which)}</span>
+        </div>
+        {which === 'sl' && (
+          <>
+            <div className="mt-[12.4px] border-t border-dashed border-foreground/10" />
+            <button type="button" data-tpsl="trail" role="checkbox" aria-checked={trail} onClick={() => setTrail((v) => !v)}
+              className="mt-[13px] h-[13.7px] flex items-center gap-[8.6px] text-[12px] leading-4 text-foreground">
+              <span className={`h-[13.7px] w-[13.7px] rounded-[3px] border flex items-center justify-center ${trail ? 'border-transparent' : 'border-foreground/35'}`}
+                style={trail ? { background: TPSL_BLUE } : undefined}>
+                {trail && <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 5.2 L4 7.6 L8.6 2.6" stroke="currentColor" strokeWidth="1.6" fill="none" className="text-background" /></svg>}
+              </span>
+              Trailing stop loss
+            </button>
+          </>
         )}
-        <div className="flex items-center justify-end p-4 border-t border-0 bg-muted gap-2 mt-2">
-          <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
-          <button disabled={!valid} onClick={() => onApply(slN, tpN, trail, slOn, tpOn)}
-            className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium disabled:opacity-40">Ok</button>
+      </div>
+    );
+  };
+  return createPortal(
+    <div data-tpsl-sheet="" className="fixed inset-0 z-[200] flex flex-col justify-end md:items-center md:justify-center bg-black/75" onClick={onClose}>
+      <div className="w-full md:w-[430px] bg-card text-foreground rounded-t-[21px] md:rounded-[21px] pb-[calc(20px+env(safe-area-inset-bottom))] md:pb-5 max-h-[100dvh] overflow-y-auto overscroll-contain"
+        onClick={(e) => e.stopPropagation()}>
+        <div className="px-[16.5px] pt-[16.8px]">
+          <div className="text-[18px] leading-6 font-bold">Set Auto TP/SL</div>
+          <div className="mt-[1.5px] text-[12px] leading-4 text-foreground/65">
+            {activeSymbol ? 'Applies to new options orders and your open trade.' : 'Applies to all new options orders only.'}
+          </div>
+        </div>
+        <div className="mt-[17px] border-t border-foreground/10" />
+        <div className="px-[16.7px] pt-[19.7px] flex flex-col gap-[14px]">
+          {leg('tp')}
+          {leg('sl')}
+        </div>
+        <div className="mt-[20.3px] border-t border-foreground/10" />
+        <div className="px-[16px] pt-[15.7px]">
+          <button type="button" data-tpsl="save" disabled={!valid} onClick={save}
+            className="w-full h-[50px] rounded-[13px] text-[16px] font-bold bg-foreground text-background disabled:bg-foreground/50">
+            Save
+          </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -5839,17 +5930,16 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // existing removal: server rule cancelled, recorded so a reload cannot re-arm
   // the defaults, lines taken off). Otherwise re-arm at the given percentages
   // with the switches, which the server enforces on both firing paths.
-  const applySwitchesToLiveTrade = async (slPct: number, tpPct: number, slOn: boolean, tpOn: boolean) => {
+  const applySwitchesToLiveTrade = async (d: TpSlDefaults) => {
     const pos = slActivePosRef.current;
     if (!pos?.symbol || !(pos.entryPrice > 0)) return;
+    const slOn = d.slOn !== false, tpOn = d.tpOn !== false;
     if (!slOn && !tpOn) { await removeStopFromTrade(); return; }
     runFreeRef.current = '';
     // The ref is read by pushPremiumRule, so it must hold the new switches first.
-    tpSlDefaultsRef.current = { ...tpSlDefaultsRef.current, slPct, tpPct, slOn, tpOn };
+    tpSlDefaultsRef.current = { ...tpSlDefaultsRef.current, ...d };
     const long = pos.side !== 'SELL';
-    const e = pos.entryPrice;
-    const slPx = +(long ? e * (1 - slPct / 100) : e * (1 + slPct / 100)).toFixed(2);
-    const tpPx = +(long ? e * (1 + tpPct / 100) : e * (1 - tpPct / 100)).toFixed(2);
+    const { sl: slPx, tp: tpPx } = exitPricesFor(d, pos.entryPrice, long);
     await pushPremiumRule(slPx, tpPx);
     toast.success(`${pos.symbol}: stop ${slOn ? 'ON' : 'OFF'} · target ${tpOn ? 'ON' : 'OFF'}`);
   };
@@ -6019,14 +6109,20 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   rrArmRef.current = rrArm;
   // 10 / 20 preserves the levels this terminal has always defaulted to, so
   // nothing changes for a trade taken before these are ever opened.
-  const [tpSlDefaults, setTpSlDefaults] = useState<{ slPct: number; tpPct: number; trail: boolean; slOn?: boolean; tpOn?: boolean }>(() => {
+  const [tpSlDefaults, setTpSlDefaults] = useState<TpSlDefaults>(() => {
     try {
       const raw = localStorage.getItem('tpSlDefaults');
       if (raw) {
         const p = JSON.parse(raw);
         const sl = Number(p?.slPct), tp = Number(p?.tpPct);
         const trail = p?.trail === undefined ? true : !!p.trail;   // absent = ON: it is Martin's method
-        if (Number.isFinite(sl) && sl > 0 && sl < 100 && Number.isFinite(tp) && tp > 0) return { slPct: sl, tpPct: tp, trail, slOn: p?.slOn !== false, tpOn: p?.tpOn !== false };
+        const pts = (v: any) => { const n = Number(v); return Number.isFinite(n) && n >= 0 ? n : 0; };
+        if (Number.isFinite(sl) && sl > 0 && sl < 100 && Number.isFinite(tp) && tp > 0) return {
+          slPct: sl, tpPct: tp, trail, slOn: p?.slOn !== false, tpOn: p?.tpOn !== false,
+          // points, when chosen (THE SL & TP SHEET IS LEMONN'S); a unit chosen with no points reads as percent
+          slUnit: p?.slUnit === 'pts' && pts(p?.slPts) > 0 ? 'pts' : 'pct', tpUnit: p?.tpUnit === 'pts' && pts(p?.tpPts) > 0 ? 'pts' : 'pct',
+          slPts: pts(p?.slPts), tpPts: pts(p?.tpPts),
+        };
       }
     } catch (e) {}
     return { slPct: 10, tpPct: 20, trail: true, slOn: true, tpOn: true };
@@ -8501,9 +8597,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           } catch (e) { /* on failure fall through to arming: protection is the safer default */ }
           // Read from a ref: this runs inside an async effect, and the user may
           // have changed the defaults since it started.
-          const { slPct, tpPct } = tpSlDefaultsRef.current;
-          const slP = +((long ? pos.entryPrice * (1 - slPct / 100) : pos.entryPrice * (1 + slPct / 100))).toFixed(2);
-          const tpP = +((long ? pos.entryPrice * (1 + tpPct / 100) : pos.entryPrice * (1 - tpPct / 100))).toFixed(2);
+          const { sl: slP, tp: tpP } = exitPricesFor(tpSlDefaultsRef.current, pos.entryPrice, long);
           pushPremiumRule(slP, tpP, 'auto');   // also sets premRuleRef
         }
       } catch { if (!cancelled) setPremSync('ERROR'); }
@@ -18761,16 +18855,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
       {isEditingTpSl && (
         <TpSlDefaultsModal
-          initialSl={tpSlDefaults.slPct}
-          initialTp={tpSlDefaults.tpPct}
-          initialTrail={tpSlDefaults.trail}
+          initial={tpSlDefaults}
           onClose={() => setIsEditingTpSl(false)}
-          initialSlOn={tpSlDefaults.slOn !== false}
-          initialTpOn={tpSlDefaults.tpOn !== false}
-          onApply={(slPct, tpPct, trail, slOn, tpOn) => {
-            setTpSlDefaults({ slPct, tpPct, trail, slOn, tpOn });
+          onApply={(d) => {
+            setTpSlDefaults(d);
             setIsEditingTpSl(false);
-            applySwitchesToLiveTrade(slPct, tpPct, slOn, tpOn);
+            applySwitchesToLiveTrade(d);
           }}
           activeSymbol={slActivePos?.symbol || null}
         />
@@ -19406,10 +19496,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               const qty = triggerBox.lots * lotSize;
               const entry = triggerBox.level;
               if (!(qty > 0) || !(entry > 0) || sizingPending) return null;
-              const { slPct, tpPct } = tpSlDefaults;
               const long = triggerBox.side === 'BUY';
-              const slPrice = long ? entry * (1 - slPct / 100) : entry * (1 + slPct / 100);
-              const tpPrice = long ? entry * (1 + tpPct / 100) : entry * (1 - tpPct / 100);
+              const { sl: slPrice, tp: tpPrice } = exitPricesFor(tpSlDefaults, entry, long);
               const risk = Math.abs(entry - slPrice) * qty;
               const reward = Math.abs(tpPrice - entry) * qty;
               const money = (v: number) => `₹${Math.round(v).toLocaleString('en-IN')}`;

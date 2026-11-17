@@ -649,6 +649,31 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## SL & TP: Lemonn's "Set Auto TP/SL" sheet (v330)
+
+`TpSlDefaultsModal` and `exitPricesFor` in `src/pages/AdvancedChart.tsx`. Martin,
+17 Nov 2026, with a picture of Lemonn's sheet: "Change the SL & TP UI to the
+exactly the one shown in the screenshot."
+
+- **The sheet**, measured off his picture: from the foot of the screen (a card
+  in the middle on a desktop), "Set Auto TP/SL", then a card each for Auto TP
+  and Auto SL. Each card has its switch, "Trigger at" with a stepper (− value +),
+  and the estimate in green or red. "Trailing stop loss" sits at the foot of the
+  SL card, then Save. Text is 12px except the title (18) and Save (16), as in
+  Lemonn's. Every measured part is within a point of his picture.
+- **Trigger at: Points or Percentage**, each leg on its own. Points are premium
+  points from the entry; Percentage is a share of the entry, which is what his
+  saved defaults are and stay. Each unit keeps its own number. One helper,
+  `exitPricesFor`, turns the defaults into levels everywhere they are used: a
+  new trade's automatic arming, the order box's preview, and Save on an open
+  trade.
+- **Mkt**: automatic exits go at market (a limit through the price, chased until
+  filled, `server/exit_order.ts`). Nothing else can be chosen, so a tap says so.
+- **The switches and Save do what the old box's did:** a leg switched off never
+  closes the trade; both off lets it run free; with a trade open, Save re-arms
+  it, and the line under the title says so.
+- The numbers are typed as text, digits only, as the trade guard's are (v325).
+
 ## Option charts: every indicator in the list, drawn on the option (v329)
 
 `src/pages/AdvancedChart.tsx` (EVERY ROW ON AN OPTION CHART TOO, at the list;
