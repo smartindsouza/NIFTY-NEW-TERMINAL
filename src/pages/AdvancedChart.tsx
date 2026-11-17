@@ -17634,30 +17634,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               <span className="md:hidden text-left text-[13px] font-medium text-foreground">Reload</span>
             </button>
 
-            {/* Sync open positions from Zerodha. Deliberately NOT a RefreshCw —
-                the button immediately to its left already uses that glyph for
-                "reload the chart", and two identical icons doing different things
-                is how a user ends up reloading the app when they meant to pull
-                their positions. Down-arrow-into-tray reads as "fetch" and it is
-                tinted green, which is what carries the meaning now that the text
-                label is gone. */}
-            <button
-              onClick={() => { setPhoneSettingsOpen(false); setScalpMenu(null); try { window.dispatchEvent(new CustomEvent('sync_positions_request')); } catch (e) {} }}
-              /* Icon only, and on BOTH platforms. The "Sync" text made this the
-                 widest control in a bar that already scrolls on a phone, so it sat
-                 off the right edge — the label cost more than it explained, given
-                 the icon is tinted and unique. And md:hidden meant desktop never
-                 had it at all, which was not deliberate: the button is one of two
-                 ways to pull positions, and hiding it left only the other. Same
-                 square footprint as the reload button beside it. */
-              className={`${sharedHidden} shrink-0 md:order-4 flex items-center justify-center h-9 w-9 rounded-md transition-colors max-md:h-11 max-md:w-full max-md:justify-start max-md:gap-3 max-md:px-2.5 max-md:!bg-transparent ${
-                resolvedTheme === 'light' ? 'bg-emerald-600/15 text-emerald-700 hover:bg-emerald-600/25' : 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25'}`}
-              title="Sync open positions from Zerodha"
-              aria-label="Sync open positions from Zerodha"
-            >
-              <DownloadCloud size={18} />
-              <span className="md:hidden text-left text-[13px] font-medium text-foreground">Sync positions</span>
-            </button>
+            {/* Sync positions MOVED TO THE JOURNAL (17 Nov 2026). Martin: "Move the
+                refresh positions button to the journal screen beside the wallet
+                icon at the top right of the screen". It stood here, in the phone's
+                Settings list and on the desktop's tool bar; it is the round button
+                beside the wallet on the Journal now (TradeJournal.tsx), asking the
+                same way (sync_positions_request). */}
           {SHOW_BIAS_BADGES && (
           <div className="shrink-0 md:order-5 [&>button]:h-9"><BounceConviction taInfo={taInfo} oiData={oiData} pulseBias={pulseBias} /></div>
           )}

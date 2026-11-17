@@ -649,6 +649,20 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Sync positions on the Journal; the bottom bar closes App Diagnostics (v331)
+
+- **Sync positions** moved from the chart's Settings (and the desktop chart's
+  tool bar) to a round button beside the Journal's wallet, 14pt from it. Martin:
+  "Move the refresh positions button to the journal screen beside the wallet
+  icon at the top right of the screen". It asks the open-positions card (mounted
+  for the whole app) to read Zerodha's positions again (`sync_positions_request`).
+  The card says what it found, and the arrows turn while it works.
+- **App Diagnostics (phone)** is put away by any other button of the bottom bar.
+  Martin: "when app diagnostics screen is open, taping on any of the other icons
+  at the bottom does not automatically make it disappear." The panel belongs to
+  the shell, not to a page, so going to another page left it showing. Each other
+  button now sends `close_diagnostics`. Diag still opens and closes it.
+
 ## SL & TP: Lemonn's "Set Auto TP/SL" sheet (v330)
 
 `TpSlDefaultsModal` and `exitPricesFor` in `src/pages/AdvancedChart.tsx`. Martin,

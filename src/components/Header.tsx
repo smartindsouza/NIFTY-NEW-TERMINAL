@@ -181,6 +181,7 @@ export function Header() {
   // Option Chain is one tap from the chart page (the button under the chart)
   // and, like everything not primary, in the More sheet.
   const primaryHrefs = ['/', '/advanced-chart', '/journal', '/news'];
+  const closeDiagnostics = () => { try { window.dispatchEvent(new CustomEvent('close_diagnostics')); } catch (e) {} };
   const shortLabels: Record<string, string> = {
     '/': 'Home', '/advanced-chart': 'Chart', '/journal': 'Journal', '/news': 'News',
   };
@@ -395,6 +396,13 @@ export function Header() {
       </div>
     )}
 
+    {/* ANY OTHER BUTTON OF THE BAR PUTS APP DIAGNOSTICS AWAY (17 Nov 2026).
+        Martin: "in the mobile app when app diagnostics screen is open, taping on
+        any of the other icons at the bottom does not automatically make it
+        disappear." The panel is the shell's (App.tsx), not a page, so going to
+        another page left it over the page it went to — News lit up under it in
+        his picture. Every button of the bar but Diag now says to close it
+        (close_diagnostics); Diag still opens and closes it. */}
     {!(scalpOpen && location === '/advanced-chart') && (
     <nav
       data-bottom-nav=""
@@ -409,6 +417,7 @@ export function Header() {
           <Link
             key={link.href}
             href={link.href}
+            onClick={closeDiagnostics}
             className={cn(
               'flex-1 flex flex-col items-center justify-center gap-1 relative transition-colors',
               active ? 'text-primary' : 'text-muted-foreground'
@@ -430,7 +439,7 @@ export function Header() {
       </button>
       <button
         type="button"
-        onClick={() => setMoreOpen((v) => !v)}
+        onClick={() => { closeDiagnostics(); setMoreOpen((v) => !v); }}
         className={cn(
           'flex-1 flex flex-col items-center justify-center gap-1 transition-colors',
           moreOpen ? 'text-primary' : 'text-muted-foreground'

@@ -365,9 +365,10 @@ export function ActivePositions() {
     } finally { setSyncing(false); }
   };
 
-  // The mobile toolbar's POS button lives in AdvancedChart, which cannot reach
-  // syncNow directly; a window event keeps the two decoupled and means any other
-  // surface can request a sync the same way.
+  // The sync button lives on the Journal's header now (beside the wallet; it was
+  // in the chart's Settings), which cannot reach syncNow directly; a window event
+  // keeps the two decoupled and means any other surface can request a sync the
+  // same way.
   useEffect(() => {
     const onReq = () => { syncNow(); };
     window.addEventListener('sync_positions_request', onReq);

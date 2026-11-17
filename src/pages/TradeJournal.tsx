@@ -9,7 +9,7 @@ import {
   istDay, sessionDay, addDays, dayMonth, dayTitle, periodRange, shiftPeriod, dayTallies, sumDays, valueOf, quality,
   monthGrid, weekCells, monthWeeks, yearMonths, profitAndLoss, compact,
 } from '../lib/journalStats';
-import { ArrowLeft, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, Eye, EyeOff, Pencil, Trash2, WalletMinimal, X } from 'lucide-react';
+import { ArrowLeft, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, Eye, EyeOff, Pencil, RefreshCw, Trash2, WalletMinimal, X } from 'lucide-react';
 
 // THE TRADE JOURNAL IS LEMONN'S POSITIONS SCREEN (17 Nov 2026).
 // Martin, with four pictures of Lemonn (Positions, the wallet, Orders and
@@ -243,6 +243,7 @@ export default function TradeJournal() {
   const [fundsMore, setFundsMore] = useState(false);
 
   const [importing, setImporting] = useState(false);
+  const [syncing, setSyncing] = useState(false);   // the header's sync button, while it turns
   const importKite = async () => {
     if (importing) return;
     setImporting(true);
@@ -731,8 +732,20 @@ export default function TradeJournal() {
     <div data-journal-page="main" className="w-full md:max-w-[560px] mx-auto min-h-screen">
       <div className="flex items-center justify-between px-[17px] pt-4 pb-[17px]">
         <h1 className="text-[18px] leading-none font-[650] text-foreground">Journal</h1>
-        <button type="button" data-journal="wallet" aria-label="Funds" title="Funds" onClick={() => navigate('/journal/funds')}
-          className="h-[38px] w-[38px] rounded-full border border-foreground/[0.15] flex items-center justify-center text-foreground active:bg-foreground/10"><WalletMinimal size={18} strokeWidth={1.9} /></button>
+        {/* SYNC POSITIONS, BESIDE THE WALLET (17 Nov 2026). Martin: "Move the
+            refresh positions button to the journal screen beside the wallet icon
+            at the top right of the screen". It was in the chart's Settings. A
+            circle like the wallet's, 14pt from it, as Lemonn's two header
+            buttons are. It asks the open-positions card (mounted for the whole
+            app) to read the positions from Zerodha again, which says what it
+            found; the arrows turn while it does. */}
+        <div className="flex items-center gap-[14px]">
+          <button type="button" data-journal="sync" aria-label="Sync positions from Zerodha" title="Sync positions from Zerodha"
+            onClick={() => { setSyncing(true); try { window.dispatchEvent(new CustomEvent('sync_positions_request')); } catch (e) {} window.setTimeout(() => setSyncing(false), 1200); }}
+            className="h-[38px] w-[38px] rounded-full border border-foreground/[0.15] flex items-center justify-center text-foreground active:bg-foreground/10"><RefreshCw size={17} strokeWidth={1.9} className={syncing ? 'animate-spin' : ''} /></button>
+          <button type="button" data-journal="wallet" aria-label="Funds" title="Funds" onClick={() => navigate('/journal/funds')}
+            className="h-[38px] w-[38px] rounded-full border border-foreground/[0.15] flex items-center justify-center text-foreground active:bg-foreground/10"><WalletMinimal size={18} strokeWidth={1.9} /></button>
+        </div>
       </div>
 
       {/* THE CARD. 239pt tall: Lemonn's 180 and one more row of the same rhythm

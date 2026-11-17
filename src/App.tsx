@@ -117,8 +117,11 @@ export default function App() {
   // event (the Cpu state lives here in the shell).
   useEffect(() => {
     const f = () => setShowDiagnostics(v => !v);
+    // Any other button of the phone's bottom bar puts it away (Header.tsx).
+    const close = () => setShowDiagnostics(false);
     window.addEventListener('toggle_diagnostics', f);
-    return () => window.removeEventListener('toggle_diagnostics', f);
+    window.addEventListener('close_diagnostics', close);
+    return () => { window.removeEventListener('toggle_diagnostics', f); window.removeEventListener('close_diagnostics', close); };
   }, []);
   const { settings } = useUserSettings();
 
