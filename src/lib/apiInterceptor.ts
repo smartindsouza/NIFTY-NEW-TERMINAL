@@ -56,6 +56,14 @@ const LOCAL_ONLY_ENDPOINTS = new Set([
 // cause a 429. Every entry must name the cache that makes it safe; if that cache
 // is ever removed, the endpoint must come off this list.
 const SERVER_CACHED_ENDPOINTS = new Map<string, string>([
+  // THE SEARCH (17 Nov 2026). Martin, minutes after the search got its +: "I get
+  // a error warning when I search and add options to list", with the toast
+  // naming this endpoint, 6 times in 15 seconds. Typing is one call per pause
+  // (300ms), so a few strikes looked up one after another pass 5 easily — and
+  // the + made that the ordinary way to use it. The search is answered from
+  // the contract list the server holds in memory (fetched from Zerodha once a
+  // day), so typing asks the broker nothing and cannot earn a 429.
+  ['/api/instruments/search', 'answered from the in-memory contract list (one broker fetch a day) in server/kite_service.ts'],
   ['/api/positions-live', '1.5s shared cache + shared in-flight promise in server.ts'],
   ['/api/leverage', '55s per-symbol cache + shared in-flight promise in server/leverage.ts'],
   // /api/ta is hit by SEVERAL legitimate one-shot and slow queries (main chart,

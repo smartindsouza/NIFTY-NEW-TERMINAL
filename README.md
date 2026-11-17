@@ -649,6 +649,16 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Search no longer sets off the "high frequency" warning (v333)
+
+Martin, after v332: "I get a error warning when I search and add options to
+list" — the toast named `/api/instruments/search`, 6 calls in 15 seconds. Each
+pause in typing is one call, so looking up a few strikes in a row passes the
+limit of 5. The search is answered from the contract list the server keeps in
+memory (one fetch from Zerodha a day), so it asks the broker nothing; it is now
+on the warning's list of endpoints that cannot cause a 429
+(`SERVER_CACHED_ENDPOINTS` in `src/lib/apiInterceptor.ts`).
+
 ## Search: smaller results, and a + that puts one on the chart list (v332)
 
 Martin, 17 Nov 2026, with a picture of the results: "The search results fonts
