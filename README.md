@@ -649,6 +649,16 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Chart: S and R sit in the middle of their rings (v339)
+
+Martin, of v336 on his iPhone: "The R and S are not perfectly centered inside
+the circle." The letter was placed by its box (centre and "middle"), and each
+browser works out "middle" from the font's ascent and descent in its own way:
+worked out from Manrope's measures, Safari put the letter about 1px low and
+Chrome about 0.3px high. The ink the letter covers is measured instead, at ten
+times the size (Chrome gives these measures in whole pixels), and put on the
+ring's centre. On the test copy both letters measure within 0.1px of the centre.
+
 ## Chart (phone): the row of five has Lemonn's icons (v338)
 
 `src/components/BarIcons.tsx`. Martin, with a picture of Lemonn's row: "Use the

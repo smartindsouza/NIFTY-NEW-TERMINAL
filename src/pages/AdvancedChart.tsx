@@ -14912,7 +14912,39 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     ctx.stroke();
                     ctx.fillStyle = label.color;
                     ctx.font = `600 10px ${drawFontRef.current}`;
-                    ctx.fillText(displayText, currentX, label.y + 0.5);
+                    // THE LETTER'S INK IS CENTRED, NOT ITS BOX (17 Nov 2026).
+                    // Martin, of v336 on his iPhone: "The R and S are not
+                    // perfectly centered inside the circle." Centre-and-middle
+                    // places the letter's box: its width with the space either
+                    // side of the glyph, and a "middle" that each browser works
+                    // out from the font's own ascent and descent — Safari
+                    // differently from Chrome, so a letter that sat close to the
+                    // middle on the test browser sat off it on his phone. The ink
+                    // the letter actually covers is measured instead (the same
+                    // in every browser), and that is put on the ring's centre.
+                    // The ink is measured at ten times the size and scaled down:
+                    // Chrome gives these measures in whole pixels (at 10px an R
+                    // came back 8 tall for 7.2 of ink, which put it 0.4px low),
+                    // and a tenth of a whole pixel is too little to see.
+                    // Read as a left-aligned, alphabetic-baseline line; the old
+                    // alignment is put back for the labels drawn after it.
+                    // (Worked out from Manrope's own measures: the old way put
+                    // the letter about 1px low in Safari and 0.3px high in
+                    // Chrome; this puts it within a twentieth of a pixel in
+                    // both, as far as their measures go.)
+                    ctx.textAlign = 'left';
+                    ctx.textBaseline = 'alphabetic';
+                    ctx.font = `600 100px ${drawFontRef.current}`;
+                    const ink = ctx.measureText(displayText);
+                    ctx.font = `600 10px ${drawFontRef.current}`;
+                    const ok = (v: number) => Number.isFinite(v);
+                    const inkL = ok(ink.actualBoundingBoxLeft) ? ink.actualBoundingBoxLeft / 10 : 0;
+                    const inkR = ok(ink.actualBoundingBoxRight) ? ink.actualBoundingBoxRight / 10 : ink.width / 10;
+                    const inkA = ok(ink.actualBoundingBoxAscent) ? ink.actualBoundingBoxAscent / 10 : 7.2;
+                    const inkD = ok(ink.actualBoundingBoxDescent) ? ink.actualBoundingBoxDescent / 10 : 0;
+                    ctx.fillText(displayText, currentX - (inkR - inkL) / 2, label.y + (inkA - inkD) / 2);
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
                  } else {
                  // Draw the pill background using the label's color
                  ctx.fillStyle = label.color;
