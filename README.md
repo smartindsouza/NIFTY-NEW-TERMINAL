@@ -649,6 +649,28 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## ScalpPro: the index's name and the option's name open the Option Chain (v328)
+
+`src/pages/AdvancedChart.tsx` (THE NAMES OPEN THE OPTION CHAIN),
+`src/components/OptionChainSheet.tsx` (`ChainStart`). Martin, 17 Nov 2026, with
+a picture of ScalpPro: "When I tap on the nifty 50 text or the Option Strike
+price (NIFTY17NOV25450) text in the scaler pro screen it should open the option
+chart. Taping on CALL/PUT already changes from CALL to PUT and vice versa".
+
+- **The index's name** (NIFTY 50) opens the chain on that index, nearest
+  expiry. **The option's name** opens it on the option's own index and expiry.
+  A price tapped there swaps the option on the screen, as from the chart page.
+- **What did not change:** Call / Put still flips the side. The ⬍ after the
+  index's name, which was part of the name's button, is a button of its own and
+  still lists the indices.
+- Nothing moved: each button reaches past what it shows by padding given back
+  as a negative margin, so the two lines are where Lemonn's are (name 13.5pt
+  down, price 31.5pt, heading 57.5pt; the ⬍ 3pt after the name).
+- Any screen can open the chain on an index and expiry:
+  `terminal:option-chain` with `{ underlying: 'NIFTY' | 'BANKNIFTY' | 'SENSEX',
+  expiry: 'YYYY-MM-DD' }`, either left out. An expiry the server no longer lists
+  gets the nearest.
+
 ## Search: a strike's own index first, results in words, a × and a tap outside (v327)
 
 `server/instrument_search.ts` (tests: `npx tsx server/instrument_search.test.ts`),

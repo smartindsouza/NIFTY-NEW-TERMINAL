@@ -81,10 +81,20 @@ function cellOf(col: Col, leg: Leg | undefined, ltp: number, g: Greeks | null): 
   return { main: col === 'iv' ? g.iv.toFixed(2) : g[col].toFixed(4) };
 }
 
+/**
+ * WHAT THE SHEET OPENS ON (17 Nov 2026): an index and an expiry (YYYY-MM-DD),
+ * either left out. ScalpPro's names open it: the index's name on that index,
+ * the option's name on the option's own index and expiry, so the strikes he
+ * sees beside it are the ones he can swap it for. Left out, the index is the
+ * chart's and the expiry the nearest, as before.
+ */
+export interface ChainStart { underlying?: string; expiry?: string }
+
 // `token` is the index's own, for its daily candles when the chain does not say which it is.
-const underlyingOf = (): { symbol: string | null; ta: string; name: string; token: number } => {
-  let u = '';
-  try { u = String(localStorage.getItem('chartUnderlying') || '').toUpperCase(); } catch (e) {}
+const underlyingOf = (asked?: string): { symbol: string | null; ta: string; name: string; token: number } => {
+  let u = String(asked || '').toUpperCase();
+  if (u !== 'NIFTY' && u !== 'BANKNIFTY' && u !== 'NIFTY BANK' && u !== 'SENSEX') u = '';
+  if (!u) try { u = String(localStorage.getItem('chartUnderlying') || '').toUpperCase(); } catch (e) {}
   if (u === 'SENSEX') return { symbol: 'SENSEX', ta: 'BSE:SENSEX', name: 'SENSEX', token: 265 };
   if (u === 'BANKNIFTY' || u === 'NIFTY BANK') return { symbol: 'NIFTY BANK', ta: 'NSE:NIFTY BANK', name: 'BANKNIFTY', token: 260105 };
   return { symbol: null, ta: 'NSE:NIFTY 50', name: 'NIFTY', token: 256265 };
@@ -104,9 +114,11 @@ export function openInScalpPro(leg: Leg, type: 'CE' | 'PE', name: string) {
   return true;
 }
 
-export function OptionChainView({ onPicked }: { onPicked?: () => void }) {
-  const under = useMemo(underlyingOf, []);
-  const [expiry, setExpiry] = useState<string>('');
+export function OptionChainView({ onPicked, start }: { onPicked?: () => void; start?: ChainStart }) {
+  const under = useMemo(() => underlyingOf(start?.underlying), []);
+  // An expiry the server no longer lists (an option kept past its day) is not
+  // an error: the server answers with the nearest, and the menu shows that.
+  const [expiry, setExpiry] = useState<string>(() => (/^\d{4}-\d{2}-\d{2}/.test(String(start?.expiry || '')) ? String(start?.expiry).slice(0, 10) : ''));
   const [greeks, setGreeks] = useState<boolean>(() => { try { return localStorage.getItem('chainGreeks') === '1'; } catch (e) { return false; } });
   useEffect(() => { try { localStorage.setItem('chainGreeks', greeks ? '1' : '0'); } catch (e) {} }, [greeks]);
   const [menu, setMenu] = useState<null | 'expiry' | 'all'>(null);
@@ -412,7 +424,7 @@ export function OptionChainView({ onPicked }: { onPicked?: () => void }) {
 }
 
 /** The chain as a sheet over whatever is on screen; a tap above it, or a price picked, puts it away. */
-export function OptionChainSheet({ onClose }: { onClose: () => void }) {
+export function OptionChainSheet({ onClose, start }: { onClose: () => void; start?: ChainStart }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
@@ -421,20 +433,20 @@ export function OptionChainSheet({ onClose }: { onClose: () => void }) {
   return createPortal(
     <div data-chain-sheet="" className="fixed inset-0 z-[150] flex flex-col justify-end md:items-center md:justify-center bg-black/75" onClick={onClose}>
       <div className="w-full md:w-[430px] h-[calc(100dvh-152px)] min-h-[60dvh] md:h-[min(780px,90dvh)] rounded-t-xl md:rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-        <OptionChainView onPicked={onClose} />
+        <OptionChainView onPicked={onClose} start={start} />
       </div>
     </div>,
     document.body,
   );
 }
 
-/** Mounted once for the app: any screen opens the sheet by announcing terminal:option-chain. */
+/** Mounted once for the app: any screen opens the sheet by announcing terminal:option-chain, with a ChainStart as its detail or none. */
 export function OptionChainHost() {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState<ChainStart | null>(null);
   useEffect(() => {
-    const onOpen = () => setOpen(true);
+    const onOpen = (e: any) => setOpen(e?.detail && typeof e.detail === 'object' ? { ...e.detail } : {});
     window.addEventListener('terminal:option-chain', onOpen as any);
     return () => window.removeEventListener('terminal:option-chain', onOpen as any);
   }, []);
-  return open ? <OptionChainSheet onClose={() => setOpen(false)} /> : null;
+  return open ? <OptionChainSheet start={open} onClose={() => setOpen(null)} /> : null;
 }

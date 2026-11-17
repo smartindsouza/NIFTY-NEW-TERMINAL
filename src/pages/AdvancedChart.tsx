@@ -15769,14 +15769,47 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               className="absolute right-4 top-[17px] h-[33px] w-[33px] rounded-[6px] border border-foreground/20 bg-foreground/[0.04] flex items-center justify-center text-foreground/85 active:bg-foreground/10">
               <ListPlus size={18} strokeWidth={1.9} />
             </button>
+            {/* THE NAMES OPEN THE OPTION CHAIN (17 Nov 2026). Martin: "When I tap
+                on the nifty 50 text or the Option Strike price (NIFTY17NOV25450)
+                text in the scaler pro screen it should open the option chart.
+                Taping on CALL/PUT already changes from CALL to PUT and vice
+                versa". The underlined name is the button now, as in Lemonn's
+                ScalpPro: the index's opens the chain on that index; the
+                option's on its own index and expiry, so a price tapped there
+                swaps the option on this screen (see openInScalpPro). The marks
+                after them are what they were: Call / Put flips the side, and the
+                index's ⬍ — on its own now, it was the name's — lists the indices.
+                Each button reaches past what it shows (padding, given back with
+                a negative margin), so a thumb finds it and nothing moves. */}
             <div className="flex items-center gap-1 h-[18px] text-[12px] leading-[18px] font-[650] text-foreground">
               {isSpotPane ? (
-                <button type="button" data-scalp="index" onClick={() => setIndexMenuOpen(o => !o)} className="flex items-center gap-[3px]">
-                  <span className="block h-[18px]" style={SCALP_NAME_LINE}>{indexLabel}</span><UpDownMark />
-                </button>
+                <span className="flex items-center">
+                  <button type="button" data-scalp="index-name" aria-label={`${indexLabel} option chain`}
+                    onClick={() => { setIndexMenuOpen(false); try { window.dispatchEvent(new CustomEvent('terminal:option-chain', { detail: { underlying } })); } catch (e) {} }}
+                    className="flex -my-2 py-2 active:opacity-60">
+                    <span className="block h-[18px]" style={SCALP_NAME_LINE}>{indexLabel}</span>
+                  </button>
+                  <button type="button" data-scalp="index" aria-label="Change index" onClick={() => setIndexMenuOpen(o => !o)}
+                    className="flex items-center -my-2 py-2 pl-[3px] -mr-3 pr-3">
+                    <UpDownMark />
+                  </button>
+                </span>
               ) : scalpOpt ? (
                 <>
-                  <span data-scalp="option-name" className="block h-[18px] min-w-0 truncate" style={SCALP_NAME_LINE}>{scalpOpt.base}</span>
+                  <button type="button" data-scalp="option-name" aria-label={`${scalpOpt.base} option chain`}
+                    onClick={() => {
+                      const i: any = selectedInstrument || {};
+                      const ts = String(i.tradingsymbol || '').toUpperCase();
+                      // Its own index: the broker's name for it, or the symbol's
+                      // start (NIFTY26N17…, BANKNIFTY26NOV…) — never SENSEX50's.
+                      const own = /^(NIFTY|BANKNIFTY|SENSEX)$/.test(String(i.name || '').toUpperCase()) ? String(i.name).toUpperCase()
+                        : (/^(BANKNIFTY|NIFTY|SENSEX)\d{2}(?:[A-Z]{3}|[1-9OND]\d{2})\d/.exec(ts) || [])[1];
+                      const exp = String(i.expiry || '');
+                      try { window.dispatchEvent(new CustomEvent('terminal:option-chain', { detail: own ? { underlying: own, expiry: /^\d{4}-\d{2}-\d{2}/.test(exp) ? exp.slice(0, 10) : undefined } : {} })); } catch (e) {}
+                    }}
+                    className="flex min-w-0 -my-2 py-2 active:opacity-60">
+                    <span className="block h-[18px] min-w-0 truncate" style={SCALP_NAME_LINE}>{scalpOpt.base}</span>
+                  </button>
                   <button type="button" data-scalp="side" onClick={flipOptionSide} disabled={flipBusy}
                     className="shrink-0 flex items-center gap-1 font-normal disabled:opacity-50">
                     {scalpOpt.side === 'PE' ? 'Put' : 'Call'}<UpDownMark />
