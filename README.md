@@ -766,6 +766,19 @@ browser's own storage, so the phone and the desktop each had their own.
   taken as read the first time it runs, and only what is changed afterwards
   travels. So two devices that differed stay different in whatever has not been
   touched since; the first change to a value makes it the same everywhere.
+- **His iPhone's whole set went to every device, once (v323).** He had asked
+  for that in the same message — "I also want the indicators I have used in the
+  mobile app in iOS to be synced to all devices including laptops and pc's" —
+  and sharing changes alone never does it. The first time an iPhone opens the
+  app after v323 it sends every shared name as it stands there, stamped newer
+  than anything in the document; every other device takes it like any other
+  change, within twenty seconds of being open. A mark on the server,
+  `chart_indicators_seed`, says it has been done: no phone does it twice, and
+  nothing changed on any device afterwards is written over by it. What a
+  device held before it took a set that size is kept on that device under
+  `indSync:before`. To have a phone send its set again, clear the mark
+  (`PUT {"value":null}` to `/api/settings/chart_indicators_seed`). It does
+  nothing while the sharing is switched off.
 - **Where it is kept:** one small document, `chart_indicators`, in the server's
   existing settings store (`/api/settings/:key` — nothing on the server changed):
   `{ name: { v: value, at: time } }`.

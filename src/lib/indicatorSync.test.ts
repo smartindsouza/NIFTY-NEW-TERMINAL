@@ -1,7 +1,7 @@
 // npx tsx src/lib/indicatorSync.test.ts
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { SYNC_KEYS, SEEN_KEY, AT_KEY, SPOT_HALF_COPY, type KV, type SyncDoc, snapshot, ensureBaseline, pendingChanges, mergeForPush, commitPushed, applyRemote, adoptSpotHalfCopy, halfCopyStorageName, serverBehind, mergeForMend } from './indicatorSync';
+import { BEFORE_KEY, WHOLE_SET, isSeedDevice, mergeForSeed, keepBefore, SYNC_KEYS, SEEN_KEY, AT_KEY, SPOT_HALF_COPY, type KV, type SyncDoc, snapshot, ensureBaseline, pendingChanges, mergeForPush, commitPushed, applyRemote, adoptSpotHalfCopy, halfCopyStorageName, serverBehind, mergeForMend } from './indicatorSync';
 
 // A device: storage, and the two steps the browser part performs.
 class Device implements KV {
@@ -252,6 +252,65 @@ assert.ok(!SYNC_KEYS.includes('indicatorLinesThin'), 'a device\'s own bookkeepin
     assert.ok(new RegExp(`(?:localStorage\\.setItem|indSet)\\('${key}',`).test(src), `${name}: the chart saves "${key}"`);
   }
   assert.equal(halfCopyStorageName('ssMode'), 'swapSweepMode'); assert.equal(halfCopyStorageName('rsiColor'), 'rsiColor');
+}
+
+// ── the phone's set, once ──
+{
+  const UA_IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148';
+  assert.ok(isSeedDevice(UA_IPHONE), 'his phone');
+  for (const ua of ['Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.1 Safari/605.1.15', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0 Safari/537.36', 'Mozilla/5.0 (Linux; Android 14; Pixel 8) Chrome/130.0 Mobile Safari/537.36', '']) assert.ok(!isSeedDevice(ua), 'not a desk, not an Android phone');
+
+  // Two devices that have both been sharing since v318, and still differ in what neither has changed since.
+  const phone = new Device(), desk = new Device(), server: { doc: SyncDoc | null } = { doc: null };
+  const P: Record<string, string> = { showRsi: 'true', showBB: 'false', showVolume: 'true', showSnR: 'true', showBreakers: 'true', showOiBars: 'true', rsiColor: '#a855f7', bbColor: '#22d3ee', favIndicators: '["RSI","OIBars"]', snrWidth: '1', pdhColor: '#22c55e' };
+  const D: Record<string, string> = { showRsi: 'false', showBB: 'true', showVolume: 'true', showSnR: 'false', showFvg: 'true', rsiColor: '#00ff00', bbColor: '#445566', favIndicators: '["Volume"]', snrWidth: '3', structDays: '5' };
+  for (const [k, v] of Object.entries(P)) phone.setItem(k, v);
+  for (const [k, v] of Object.entries(D)) desk.setItem(k, v);
+  ensureBaseline(phone); ensureBaseline(desk);
+  assert.deepEqual(phone.push(server, 1000), []); assert.deepEqual(desk.push(server, 1000), []);
+  // a change on the desk since the sharing began: it reaches the phone the ordinary way
+  desk.setItem('bbPeriod', '34'); assert.deepEqual(desk.push(server, 2000), ['bbPeriod']); assert.deepEqual(phone.pull(server), ['bbPeriod']);
+  // and one made on the desk that has not been sent yet when the phone's set arrives
+  desk.setItem('rsiLineWidth', '4');
+
+  // the phone sends its whole set
+  const before = snapshot(phone);
+  const seed = mergeForSeed(server.doc, phone, 5000);
+  assert.equal(Object.keys(seed).length, SYNC_KEYS.length, 'every name is in it');
+  for (const k of SYNC_KEYS) { assert.equal(seed[k].v, before[k] ?? null, `${k}: as it stands on the phone`); assert.ok(seed[k].at >= 5000, `${k}: newer than anything`); }
+  assert.equal(seed.showFvg.v, null, 'what the phone has never set goes as unset');
+  server.doc = seed; commitPushed(phone, [...SYNC_KEYS], seed);
+  assert.deepEqual(snapshot(phone), before, 'nothing on the phone itself changes');
+  assert.deepEqual(pendingChanges(phone), [], 'and it has nothing left to send');
+
+  // the desk takes it
+  const deskWas = snapshot(desk);
+  const got = desk.pull(server);
+  assert.ok(got.length >= WHOLE_SET, 'a whole set, not one switch');
+  for (const k of SYNC_KEYS) { if (k === 'rsiLineWidth') continue; assert.equal(desk.getItem(k), phone.getItem(k), `${k}: the desk now has the phone's`); }
+  assert.equal(desk.getItem('showFvg'), null, 'set on the desk, never on the phone: unset again');
+  assert.equal(desk.getItem('bbPeriod'), '34', 'the desk\'s own change since the sharing began was the phone\'s too by then');
+  assert.equal(desk.getItem('rsiLineWidth'), '4', 'a change made on the desk and not yet sent is not written over');
+  assert.deepEqual(pendingChanges(desk), ['rsiLineWidth']);
+  // what the desk held is kept, once
+  assert.equal(keepBefore(desk, deskWas, got, 6000), true);
+  const kept = JSON.parse(desk.getItem(BEFORE_KEY)!);
+  assert.equal(kept.at, 6000); assert.equal(kept.was.showRsi, 'false'); assert.equal(kept.was.rsiColor, '#00ff00'); assert.equal(kept.was.showFvg, 'true'); assert.equal(kept.was.showBreakers, null);
+  assert.ok(!('showVolume' in kept.was), 'only what changed');
+  assert.equal(keepBefore(desk, snapshot(desk), got, 7000), false, 'never written a second time');
+  assert.equal(JSON.parse(desk.getItem(BEFORE_KEY)!).at, 6000);
+  assert.equal(keepBefore(new Device(), {}, ['showRsi', 'showBB'], 1), false, 'a switch or two is not a whole set');
+  assert.ok(!SYNC_KEYS.includes(BEFORE_KEY), 'and it is never sent');
+
+  // the desk's unsent change then goes out the ordinary way, and wins on the phone
+  assert.deepEqual(desk.push(server, 8000), ['rsiLineWidth']); assert.deepEqual(phone.pull(server), ['rsiLineWidth']); assert.equal(phone.getItem('rsiLineWidth'), '4');
+  // the set sent a second time (the mark was not saved) changes nothing anywhere
+  const again = mergeForSeed(server.doc, phone, 9000); server.doc = again; commitPushed(phone, [...SYNC_KEYS], again);
+  assert.deepEqual(desk.pull(server), []); assert.deepEqual(pendingChanges(desk), []); assert.deepEqual(pendingChanges(phone), []);
+  // a device that opens for the first time afterwards gets the whole set
+  const mac = new Device(); mac.setItem('showRsi', 'false'); mac.setItem('showDsZones', 'true'); ensureBaseline(mac);
+  mac.pull(server);
+  for (const k of SYNC_KEYS) assert.equal(mac.getItem(k), phone.getItem(k), `${k}: a new device has the phone's too`);
 }
 
 console.log('indicatorSync: all checks passed');

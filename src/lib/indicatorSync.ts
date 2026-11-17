@@ -24,6 +24,18 @@
 // until that, too, is changed somewhere. (Sending a device's whole set would
 // have had the first phone opened overwrite the desktop's chart, or the other
 // way about, with no one having asked.)
+//
+// THE PHONE'S SET, ONCE. He had asked, in the same message: "I also want the
+// indicators I have used in the mobile app in iOS to be synced to all devices
+// including laptops and pc's." Sharing changes alone never does that: what
+// already differed between his phone and his desk stayed different until each
+// thing was changed again by hand. So, one time only, his iPhone sends its
+// whole set — every name, as it stands there, stamped newer than anything in
+// the document — and every other device takes it like any other change. A mark
+// on the server (SYNC_SEED_SETTING) says it has been done, so no phone does it
+// twice and nothing a device changes afterwards is ever written over by it.
+// Before a device takes a set that size, what it held is kept under
+// "indSync:before" on that device, so it can be put back.
 // The shared copy is one small document on the server, under the same settings
 // store the H levels already use: { name: { v: value or null, at: time } }.
 //   - A CHANGE HERE is noticed by looking — the values are read every two
@@ -83,8 +95,18 @@ export const SYNC_SETTING = 'chart_indicators';
  *   curl -X PUT -H 'Content-Type: application/json' -d '{"value":true}' <app>/api/settings/chart_indicators_off
  */
 export const SYNC_OFF_SETTING = 'chart_indicators_off';
+/**
+ * The mark that the phone's whole set has been sent once (see THE PHONE'S SET,
+ * ONCE, at the top). Unset: not yet. To have a phone send its set again, clear
+ * it:  curl -X PUT -H 'Content-Type: application/json' -d '{"value":null}' <app>/api/settings/chart_indicators_seed
+ */
+export const SYNC_SEED_SETTING = 'chart_indicators_seed';
 /** What this device last saw in its own storage, to tell a change made here. */
 export const SEEN_KEY = 'indSync:seen';
+/** What this device held before it took a whole set from another: { at, was: { name: value } }. Written once, never sent. */
+export const BEFORE_KEY = 'indSync:before';
+/** A change of this many values at once is another device's whole set, not something switched in a list. */
+export const WHOLE_SET = 5;
 /** When each value was last changed here or taken from the server. */
 export const AT_KEY = 'indSync:at';
 
@@ -214,6 +236,32 @@ export function mergeForMend(doc: SyncDoc | null, store: KV, keys: string[]): Sy
   return next;
 }
 
+/** The device whose set is the one to copy: his phone, which is an iPhone. */
+export const isSeedDevice = (userAgent: string) => /iPhone/i.test(userAgent || '');
+
+/**
+ * The document that makes this device's set everyone's: every shared name as
+ * it stands here (unset ones included, as unset), each stamped newer than what
+ * the document holds for it.
+ */
+export function mergeForSeed(doc: SyncDoc | null, store: KV, at: number): SyncDoc {
+  return mergeForPush(doc, store, [...SYNC_KEYS], at);
+}
+
+/**
+ * Keeps what this device held for the names another device's whole set has
+ * just changed. Once only: the first such set is the one that replaced what he
+ * had built up here; a later one would be replacing the phone's.
+ */
+export function keepBefore(store: KV, before: Record<string, string | null>, changed: string[], at: number): boolean {
+  if (changed.length < WHOLE_SET) return false;
+  try { if (store.getItem(BEFORE_KEY) !== null) return false; } catch { return false; }
+  const was: Record<string, string | null> = {};
+  for (const k of changed) was[k] = before[k] ?? null;
+  writeJson(store, BEFORE_KEY, { at, was });
+  return true;
+}
+
 // ───────────────────────── the desktop's two halves ─────────────────────────
 //
 // THE INDEX CHART'S VALUES ARE THE PLAIN NAMES ABOVE, ON EVERY LAYOUT. That was
@@ -310,6 +358,9 @@ const busyCharts = new Set<string>();
 export const setChartBusy = (id: string, on: boolean) => { if (on) busyCharts.add(id); else busyCharts.delete(id); };
 export const anyChartBusy = () => busyCharts.size > 0;
 
+// Whether this page has yet to ask the server if the phone's set has been sent (see seedOnce).
+let seed: 'ask' | 'busy' | 'done' = 'ask';
+
 async function readDoc(fresh: boolean): Promise<SyncDoc | null> {
   // `fresh` goes round the app's five-second cache of settings reads: a document
   // about to be merged into and sent back must be the one the server has now.
@@ -339,6 +390,42 @@ export function startIndicatorSync(idle: () => boolean): () => void {
     } catch { /* offline: as it was */ }
   };
   ensureBaseline(store);
+  // Whatever is taken from the server goes through here, so that a whole set
+  // arriving is noticed and what it replaces is kept (keepBefore).
+  const take = (doc: SyncDoc | null): string[] => {
+    const before = snapshot(store);
+    const got = applyRemote(store, doc);
+    if (got.length) keepBefore(store, before, got, Date.now());
+    return got;
+  };
+  // THE PHONE'S SET, ONCE (see the top of this file). Asked on each pull until
+  // the server has answered once; a phone that finds the mark already there
+  // does nothing, now or later. `seed` is the page's, not this run's: the
+  // sharing is started afresh whenever the chart page is, and two runs must
+  // not both find the mark missing and both send.
+  const seedOnce = async () => {
+    if (seed !== 'ask' || off !== false || !isSeedDevice(window.navigator.userAgent)) return;
+    seed = 'busy';
+    let done = false;
+    try {
+      const r = await fetch(`/api/settings/${SYNC_SEED_SETTING}?_=${Date.now()}`);
+      if (!r.ok) return;
+      const j = await r.json();
+      if (j && j.value) { done = true; return; }
+      const doc = await readDoc(true);
+      // What another device changed since the sharing began is his choice too,
+      // and is already on its way here: taken first, so the set sent includes it.
+      if (take(doc).length) waiting = true;
+      const keys = [...SYNC_KEYS];
+      const next = mergeForSeed(doc, store, Date.now());
+      const w = await fetch(`/api/settings/${SYNC_SETTING}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: next }) });
+      if (!w.ok) return;                                 // asked again on the next pull
+      commitPushed(store, keys, next);
+      const m = await fetch(`/api/settings/${SYNC_SEED_SETTING}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: { at: Date.now(), names: keys.length } }) });
+      // The mark not saved: the set is sent again next time, which changes nothing anywhere.
+      done = m.ok;
+    } finally { seed = done ? 'done' : 'ask'; }
+  };
 
   const push = async () => {
     if (stopped || busy || off !== false) return;
@@ -349,7 +436,7 @@ export function startIndicatorSync(idle: () => boolean): () => void {
     try {
       const doc = await readDoc(true);
       // Something newer may have arrived for other names: take it before sending.
-      const got = applyRemote(store, doc);
+      const got = take(doc);
       if (got.length) waiting = true;
       const next = mergeForPush(doc, store, keys, Date.now());
       const r = await fetch(`/api/settings/${SYNC_SETTING}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: next }) });
@@ -363,17 +450,18 @@ export function startIndicatorSync(idle: () => boolean): () => void {
       await readOff();
       if (off !== false) return;
       const doc = await readDoc(false);
-      if (applyRemote(store, doc).length) waiting = true;
+      if (take(doc).length) waiting = true;
       // A send of this device's that another device's send wrote over: put back.
       // Looked for again in the document as the server has it NOW before
       // anything is written — the one just read may be the app's five-second-old
       // copy, from before this device's own last send.
       if (serverBehind(store, doc).length) await mend();
+      await seedOnce();
     } catch { /* offline: tried again */ } finally { busy = false; }
   };
   const mend = async () => {
     const doc = await readDoc(true);
-    if (applyRemote(store, doc).length) waiting = true;
+    if (take(doc).length) waiting = true;
     const keys = serverBehind(store, doc);
     if (!keys.length) return;
     await fetch(`/api/settings/${SYNC_SETTING}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: mergeForMend(doc, store, keys) }) });
