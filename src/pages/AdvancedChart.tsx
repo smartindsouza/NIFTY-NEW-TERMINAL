@@ -14850,16 +14850,25 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
               labels.forEach((label) => {
                  let displayText = label.text;
-                 if (displayText === 'SUP') displayText = 'SUPPORT';
-                 else if (displayText === 'RES') displayText = 'RESISTANCE';
+                 // R AND S IN A STROKED CIRCLE (17 Nov 2026). Martin: "change the
+                 // RESISTANCE and SUPPORT text to just R and S inside a stroked
+                 // circle." They were the words, in a filled pill of the line's
+                 // colour. Now: the letter in the line's colour inside a ring of
+                 // it, the ring filled with the chart's background so the line
+                 // does not run through the letter. On an option's chart the
+                 // label also carries the index level it stands for (S 25300),
+                 // so there the ring is as long as that needs.
+                 const ringed = /^(SUP|RES)( |$)/.test(displayText);
+                 if (ringed) displayText = (displayText.startsWith('SUP') ? 'S' : 'R') + displayText.slice(3);
                  else if (displayText.startsWith('PDH')) displayText = 'PDH';
                  else if (displayText.startsWith('PDL')) displayText = 'PDL';
 
                  // Measure first — the left anchor depends on the pill's width.
                  const textWidth = ctx.measureText(displayText).width;
                  const paddingX = 16; 
-                 const totalWidth = textWidth + paddingX;
                  const totalHeight = 18;
+                 // One letter: a circle (as wide as it is tall).
+                 const totalWidth = ringed && displayText.length === 1 ? totalHeight : textWidth + paddingX;
 
                  // Anchor on the LEFT edge. If another label already occupies this
                  // row, step to the RIGHT only (stepping left would run off-chart).
@@ -14882,6 +14891,20 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                  const bgY = label.y - totalHeight / 2;
                  leftLabelRects.push({ right: bgX + totalWidth, y: label.y });
 
+                 const isDark = document.documentElement.classList.contains('dark');
+                 if (ringed) {
+                    ctx.fillStyle = isDark ? '#0d1117' : '#ffffff';
+                    ctx.beginPath();
+                    ctx.roundRect(bgX + 0.75, bgY + 0.75, totalWidth - 1.5, totalHeight - 1.5, (totalHeight - 1.5) / 2);
+                    ctx.fill();
+                    ctx.setLineDash([]);
+                    ctx.lineWidth = 1.5;
+                    ctx.strokeStyle = label.color;
+                    ctx.stroke();
+                    ctx.fillStyle = label.color;
+                    ctx.font = `600 10px ${drawFontRef.current}`;
+                    ctx.fillText(displayText, currentX, label.y + 0.5);
+                 } else {
                  // Draw the pill background using the label's color
                  ctx.fillStyle = label.color;
                  ctx.beginPath();
@@ -14890,10 +14913,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                  
                  // Draw the text in the chart's background color
                  // (smaller font for the text only — pill size above is still measured at 12px)
-                 const isDark = document.documentElement.classList.contains('dark');
                  ctx.fillStyle = isDark ? '#0d1117' : '#ffffff';
                  ctx.font = `10px ${drawFontRef.current}`;
                  ctx.fillText(displayText, currentX, label.y);
+                 }
                  
                  // Restore font for next inline label's measurements
                  ctx.font = `12px ${drawFontRef.current}`;

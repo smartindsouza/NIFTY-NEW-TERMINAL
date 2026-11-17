@@ -649,6 +649,16 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Chart: support and resistance are S and R in a ring (v336)
+
+Martin: "change the RESISTANCE and SUPPORT text to just R and S inside a
+stroked circle." The labels at the left end of the two lines were the words in
+a filled pill. Each is now its letter in the line's colour inside an 18px ring
+of that colour, the ring filled with the chart's background so the line does
+not run through the letter. On an option's chart the label also carries the
+index level it stands for ("S 25200"), so the ring there is as long as that
+needs. PDH, PDL and the other labels are as they were.
+
 ## No messages while the search is open (v335)
 
 Martin: "do not show any alert or notifications when I search in the search bar
