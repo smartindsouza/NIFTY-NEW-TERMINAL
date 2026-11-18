@@ -188,8 +188,8 @@ export function BiasButton({ className = '', plain = false }: { className?: stri
           borderColor: 'color-mix(in srgb, var(--primary) 45%, #30333a)', borderLeftColor: 'color-mix(in srgb, var(--primary) 20%, #30333a)',
         }}>
         {busy
-          ? <span className={`block rounded-full border-2 animate-spin ${plain ? 'h-[17px] w-[17px]' : 'h-[15px] w-[15px]'}`} style={{ borderColor: 'color-mix(in srgb, var(--primary) 30%, transparent)', borderTopColor: 'var(--primary)' }} />
-          : <BiasIcon width={plain ? 19 : 16.3} color="var(--primary)" />}
+          ? <span className={`block rounded-full border-2 animate-spin ${'h-[15px] w-[15px]'}`} style={{ borderColor: 'color-mix(in srgb, var(--primary) 30%, transparent)', borderTopColor: 'var(--primary)' }} />
+          : <BiasIcon width={plain ? 16 : 16.3} color="var(--primary)" />}
       </button>
       {note && createPortal(<BiasSheet note={note} onClose={() => setNote(null)} />, document.body)}
     </>

@@ -231,14 +231,23 @@ function WheelRow({ m, onOpen }: { m: Market; onOpen?: () => void }) {
   );
 }
 
-function WheelHeader({ title, collapsed, onToggle, right }: { title: string; collapsed: boolean; onToggle: () => void; right?: ReactNode }) {
+// The headings stand out and each says whether its market is open (18 Nov 2026).
+// Martin: "The side bar headings for Indian, US, UK etc are not clearly
+// distinguished. Make them highlighted and OPEN/CLOSED should appear beside
+// every heading. Not only for Indian market". A filled, outlined pill in the
+// accent with the name in full strength; OPEN / CLOSED before it, and how old
+// the numbers are where the section says.
+function WheelHeader({ title, collapsed, onToggle, open, age }: { title: string; collapsed: boolean; onToggle: () => void; open?: boolean; age?: string }) {
   return (
-    <button type="button" onClick={onToggle} aria-expanded={!collapsed} data-wheel-head=""
-      className="w-full h-9 pl-3 pr-[52px] flex items-center justify-end gap-1.5 text-[10px] uppercase tracking-wider font-bold text-foreground/45">
-      {right}
-      <span className="truncate">{title}</span>
-      <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${collapsed ? '-rotate-90' : ''}`} />
-    </button>
+    <div className="h-11 pl-3 pr-[52px] flex items-center justify-end gap-2" data-wheel-head="">
+      {age && <span className="text-[9px] font-mono text-foreground/45 whitespace-nowrap">{age}</span>}
+      <StatusPill open={open} />
+      <button type="button" onClick={onToggle} aria-expanded={!collapsed}
+        className="h-7 pl-3 pr-2 rounded-full border border-primary/40 bg-primary/15 flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-bold text-foreground whitespace-nowrap">
+        <span>{title}</span>
+        <ChevronDown className={`w-3 h-3 shrink-0 text-primary transition-transform ${collapsed ? '-rotate-90' : ''}`} />
+      </button>
+    </div>
   );
 }
 
@@ -347,9 +356,12 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
     return () => window.removeEventListener('market_context_open', f);
   }, []);
   // Which categories are hidden. Persisted so the sidebar opens how you left it.
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
-    try { return JSON.parse(localStorage.getItem("mc_collapsed") || "{}"); } catch { return {}; }
-  });
+  // It opens with Indian Indices folded and the rest open, every time (18 Nov
+  // 2026; Martin: "by default collapse only the Indian market rather all other
+  // headings when opening the sidebar"). A heading tapped while it is open
+  // folds or unfolds until it is closed.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ indian: true });
+  useEffect(() => { if (open) setCollapsed({ indian: true }); }, [open]);
   const toggle = (k: string) =>
     setCollapsed((prev) => {
       const next = { ...prev, [k]: !prev[k] };
@@ -538,7 +550,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
             title="Indian Indices"
             collapsed={!!collapsed.indian}
             onToggle={() => toggle("indian")}
-            right={<StatusPill open={status.indian} />}
+            open={status.indian}
           />
           {!collapsed.indian && indian.map((m) => (
             <WheelRow key={m.key} m={m} onOpen={openChart(m)} />
@@ -548,7 +560,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
             title="US Futures"
             collapsed={!!collapsed.us}
             onToggle={() => toggle("us")}
-            right={usAsOf ? <span className="text-slate-600 normal-case font-mono">{freshnessLabel(usAsOf)}</span> : null}
+            open={status.us} age={usAsOf ? freshnessLabel(usAsOf) : undefined}
           />
           {/* "Loading…" was shown for an empty array forever, so a failed fetch and
               a slow one looked identical and the panel simply read nothing. If the
@@ -573,7 +585,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
             title="UK Markets"
             collapsed={!!collapsed.uk}
             onToggle={() => toggle("uk")}
-            right={ukAsOf ? <span className="text-slate-600 normal-case font-mono">{freshnessLabel(ukAsOf)}</span> : null}
+            open={status.uk} age={ukAsOf ? freshnessLabel(ukAsOf) : undefined}
           />
           {!collapsed.uk && uk.length === 0 && (
             <div className="pl-3 pr-[52px] py-3 text-right text-xs text-slate-500">Loading…</div>
@@ -591,7 +603,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
             title="Global & Commodities"
             collapsed={!!collapsed.global}
             onToggle={() => toggle("global")}
-            right={globalAsOf ? <span className="text-slate-600 normal-case font-mono">{freshnessLabel(globalAsOf)}</span> : null}
+            open={globalMkts.length ? globalMkts.some((m) => m.open === true) : undefined} age={globalAsOf ? freshnessLabel(globalAsOf) : undefined}
           />
           {!collapsed.global && globalMkts.length === 0 && (
             <div className="pl-3 pr-[52px] py-3 text-right text-xs text-slate-500">Loading…</div>

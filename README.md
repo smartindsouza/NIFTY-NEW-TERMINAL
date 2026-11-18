@@ -649,6 +649,18 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Chart header icons smaller and centred; sidebar headings stand out (v358)
+
+Martin: "Keep the search icon at the center. Looks a bit off center towards the left.
+Reduce the size of the search icon at the left and bias icon at the right. The side bar
+headings for Indian, US, UK etc are not clearly distinguished. Make them highlighted and
+OPEN/CLOSED should appear beside every heading. Not only for Indian market. Also by
+default collapse only the Indian market rather all other headings when opening the
+sidebar". The phone header's search and bias icons are 16px (were 19) and the search
+icon stands in the middle of its corner. Each sidebar heading is an accent pill with
+OPEN / CLOSED beside it (Global: open if any of its markets is). The sidebar opens with
+Indian Indices folded and the others open, every time.
+
 ## Phone chart: swipe from the right edge for Market Context; the bias icon is in the header (v357)
 
 Martin: "remove the globe icon to display the side bar and instead make the side bar

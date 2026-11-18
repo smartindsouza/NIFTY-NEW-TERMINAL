@@ -16472,7 +16472,15 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             <button type="button" onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(false); setPhoneSearchOpen(true); }}
               aria-label="Search symbol" title="Search symbol" data-head="search"
               className="md:hidden shrink-0 h-11 w-9 -mr-1 flex items-center justify-center text-foreground/90 active:opacity-60">
-              <Search size={19} />
+              {/* Smaller, and in the middle of the corner it stands in (18 Nov
+                  2026; Martin: "Keep the search icon at the center. Looks a bit off
+                  center towards the left. Reduce the size of the search icon at
+                  the left and bias icon at the right"). The corner runs from the
+                  screen's edge to the tab, 58 wide; the button's box is not
+                  centred on it and cannot move without moving the tabs, so the
+                  icon is shifted inside it: 7 right, and 3 down to the tab's
+                  middle. */}
+              <Search size={16} className="translate-x-[7px] translate-y-[3px]" />
             </button>
           ))}
 
@@ -16668,7 +16676,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               screen's right edge (MarketContext.tsx). */}
           {!isPane && !phoneSearchOpen && (
             <span data-head="context" className="md:hidden shrink-0 h-11 w-9 mr-0.5 flex items-center justify-center">
-              <BiasButton plain className="h-9 w-9" />
+              <BiasButton plain className="h-9 w-9 translate-y-[3px]" />
             </span>
           )}
 
