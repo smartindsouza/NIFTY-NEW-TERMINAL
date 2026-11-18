@@ -16657,12 +16657,19 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               here (36px, 2px margin), and the pull tab is not drawn on a phone
               (MarketContext.tsx). The panel itself lives in that component and
               opens when it hears this event. */}
+          {/* THE BIAS BUTTON IS HERE NOW, AND THE GLOBE IS GONE (18 Nov 2026).
+              Martin: "remove the globe icon to display the side bar and instead
+              make the side bar appear by swiping from the edge of the screen in
+              the mobile app ... Move the bias icon to the from the chart to the
+              top where the globe icon is currently. Remove the outline of the
+              bias icon and keep only the icon". The box is the globe's own (36px,
+              2px margin), so the tabs are no wider or narrower for it; the icon
+              stands in it bare. The sidebar comes in with a swipe from the
+              screen's right edge (MarketContext.tsx). */}
           {!isPane && !phoneSearchOpen && (
-            <button type="button" onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(false); try { window.dispatchEvent(new Event('market_context_open')); } catch (e) {} }}
-              aria-label="Market context" title="Market context" data-head="context"
-              className="md:hidden shrink-0 h-11 w-9 mr-0.5 flex items-center justify-center text-foreground/90 active:opacity-60">
-              <Globe size={19} />
-            </button>
+            <span data-head="context" className="md:hidden shrink-0 h-11 w-9 mr-0.5 flex items-center justify-center">
+              <BiasButton plain className="h-9 w-9" />
+            </span>
           )}
 
           {/* The old tab strip is retired — the dropdowns above replace it on every
@@ -17922,7 +17929,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 <span ref={headPriceRef} data-head="price" className="text-[22px] leading-7 font-bold tracking-tight text-foreground tabular-nums">—</span>
                 <span ref={headChangeRef} data-head="change" className="text-[11px] font-semibold tabular-nums" />
               </div>
-              <div className={`shrink-0 [&>span]:!text-xs ${!isOptionView ? 'mr-[51px]' : ''}`}><IstSessionClock /></div>
+              <div className="shrink-0 [&>span]:!text-xs"><IstSessionClock /></div>
               {/* THE BIAS BUTTON on the index chart (BiasCheck.tsx): Lemonn's
                   33pt square, centred on this line so the line keeps its height.
                   ABOVE THE PRICES (17 Nov 2026). Martin, with a picture of it
@@ -17935,7 +17942,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   button's, of which the page's own margin is 4. ScalperX's is
                   where it was ("The scalperX screen icon does not require any
                   changes"). */}
-              {!isOptionView && <BiasButton className="absolute right-[20.2px] top-1/2 -translate-y-1/2 h-[33px] w-[33px]" />}
             </div>
           )}
 

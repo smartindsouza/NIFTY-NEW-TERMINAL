@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronDown, TrendingUp, TrendingDown, Globe, X, LineChart } from "lucide-react";
+import { ChevronDown, TrendingUp, TrendingDown, Globe, X, LineChart } from "lucide-react";
 import { useLocation } from "wouter";
 import { notificationService } from "../lib/notificationService";
 import { toast } from "sonner";
@@ -474,9 +474,35 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
           data-context-tab=""
           className="max-md:hidden fixed top-1/2 -translate-y-1/2 right-0 z-[9997] bg-card border border-border border-r-0 rounded-l-lg px-1.5 py-3 text-slate-300 hover:text-foreground hover:bg-white/5 transition-colors flex flex-col items-center gap-1"
         >
-          <ChevronLeft className="w-4 h-4" />
           <Globe className="w-4 h-4" />
         </button>
+      )}
+
+      {/* A SWIPE FROM THE RIGHT EDGE OPENS IT ON A PHONE (18 Nov 2026). Martin:
+          "remove the globe icon to display the side bar and instead make the
+          side bar appear by swiping from the edge of the screen in the mobile
+          app ... the swipe from the edge of the screen must be only in the chart
+          screen. You can also keep a thin swipe identifier at the edge of the
+          screen". This component is only on the chart screen, so the strip is
+          too: 18px of the right edge, the middle half of the screen's height,
+          with a thin bar at its middle to show it is there. A touch that begins
+          on it and moves left 24px (and more sideways than up or down) opens
+          the list. Not while a sheet or a list is over the chart (tabHidden). */}
+      {!open && !tabHidden && (
+        <div data-context-swipe="" aria-hidden="true"
+          className="md:hidden fixed right-0 top-1/4 h-1/2 w-[18px] z-[45] flex items-center justify-end touch-none"
+          onPointerDown={(e) => {
+            const x0 = e.clientX, y0 = e.clientY; const el = e.currentTarget;
+            try { el.setPointerCapture(e.pointerId); } catch (er) {}
+            const move = (ev: PointerEvent) => {
+              const dx = x0 - ev.clientX, dy = Math.abs(ev.clientY - y0);
+              if (dx > 24 && dx > dy) { done(); setOpen(true); }
+            };
+            const done = () => { el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', done); el.removeEventListener('pointercancel', done); };
+            el.addEventListener('pointermove', move); el.addEventListener('pointerup', done); el.addEventListener('pointercancel', done);
+          }}>
+          <span className="h-14 w-[4px] rounded-l-full bg-primary/70" />
+        </div>
       )}
 
       {/* Tap-anywhere backdrop to dismiss (reliable close on mobile + desktop) */}

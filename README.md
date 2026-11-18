@@ -649,6 +649,20 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Phone chart: swipe from the right edge for Market Context; the bias icon is in the header (v357)
+
+Martin: "remove the globe icon to display the side bar and instead make the side bar
+appear by swiping from the edge of the screen in the mobile app. In the desktop keep
+the globe icon at the edge of the screen as it is but remove the small arrow above it.
+Move the bias icon to the from the chart to the top where the globe icon is currently.
+Remove the outline of the bias icon and keep only the icon. Also the swipe from the
+edge of the screen must be only in the chart screen. You can also keep a thin swipe
+identifier at the edge". On a phone the chart header's globe is gone; in its box is the
+bias button, bare (`<BiasButton plain>`), no longer on the price line. A strip on the
+right edge of the chart screen (18px, the middle half of the height, a thin accent bar
+marking it) opens Market Context on a leftward swipe. The desktop's pull tab is the
+globe alone. ScalperX's bias button is unchanged.
+
 ## Market Context floats over a blurred screen (v356)
 
 Martin: "Remove the background color for the side bar and make the entire background

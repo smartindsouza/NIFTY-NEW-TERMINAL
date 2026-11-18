@@ -155,7 +155,7 @@ function BiasSheet({ note, onClose }: { note: BiasNote; onClose: () => void }) {
 
 /** The button: Lemonn's 33pt square, dark navy going lighter to the right, a
  *  blue-grey edge, the chart-line in blue. `className` places and sizes it. */
-export function BiasButton({ className = '' }: { className?: string }) {
+export function BiasButton({ className = '', plain = false }: { className?: string; /** Only the icon: no box, no edge (the phone chart's header). */ plain?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<BiasNote | null>(null);
   const run = async () => {
@@ -182,14 +182,14 @@ export function BiasButton({ className = '' }: { className?: string }) {
     <>
       <button type="button" data-bias="button" aria-label="Check bias" title="Check bias" aria-busy={busy}
         onClick={() => { void run(); }}
-        className={`flex items-center justify-center rounded-[6px] border active:opacity-80 ${className}`}
-        style={{
+        className={`flex items-center justify-center active:opacity-60 ${plain ? '' : 'rounded-[6px] border active:opacity-80'} ${className}`}
+        style={plain ? { color: 'var(--primary)' } : {
           background: 'linear-gradient(90deg, color-mix(in srgb, var(--primary) 3%, #06070c) 0%, color-mix(in srgb, var(--primary) 12%, #14161c) 15%, color-mix(in srgb, var(--primary) 26%, #1c1f26) 50%, color-mix(in srgb, var(--primary) 20%, #1c1f26) 100%)',
           borderColor: 'color-mix(in srgb, var(--primary) 45%, #30333a)', borderLeftColor: 'color-mix(in srgb, var(--primary) 20%, #30333a)',
         }}>
         {busy
-          ? <span className="block h-[15px] w-[15px] rounded-full border-2 animate-spin" style={{ borderColor: 'color-mix(in srgb, var(--primary) 30%, transparent)', borderTopColor: 'var(--primary)' }} />
-          : <BiasIcon width={16.3} color="var(--primary)" />}
+          ? <span className={`block rounded-full border-2 animate-spin ${plain ? 'h-[17px] w-[17px]' : 'h-[15px] w-[15px]'}`} style={{ borderColor: 'color-mix(in srgb, var(--primary) 30%, transparent)', borderTopColor: 'var(--primary)' }} />
+          : <BiasIcon width={plain ? 19 : 16.3} color="var(--primary)" />}
       </button>
       {note && createPortal(<BiasSheet note={note} onClose={() => setNote(null)} />, document.body)}
     </>
