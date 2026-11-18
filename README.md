@@ -649,6 +649,13 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Chart: Option Chain and ScalperX are the journal's pill size (v350)
+
+Martin, with a picture of the journal's Open / History: "Use this size for buttons Option
+chain and ScalperX in the chart screen at the bottom. They look a little thicker to me."
+The two are 32 tall with round ends and 12px Medium words, as the journal's tabs are
+(were 40 tall, 8px corners, 13px SemiBold). The row they sit in keeps its height.
+
 ## White pills and buttons take the accent too; the screen stays on (v349)
 
 - Martin, with pictures of the journal's Open / History, the news chips and the heatmap's

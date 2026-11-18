@@ -17839,11 +17839,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           <div ref={setFixedRow} data-bar-row="scalp" data-scrolled={pageScrolled ? '1' : '0'}
             className={`md:hidden fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] left-0 right-0 z-40 bg-card px-3 pt-[3px] pb-1.5 flex items-center gap-2 border-t ${pageScrolled ? 'border-border' : 'border-transparent'} box-content h-10`}>
             <button type="button" data-bar="chain" onClick={() => { try { window.dispatchEvent(new CustomEvent('terminal:option-chain')); } catch (e) {} }}
-              className="flex-1 h-10 rounded-lg border border-border text-[13px] font-semibold text-foreground flex items-center justify-center gap-2 active:bg-foreground/10">
+              className="flex-1 h-8 rounded-full border border-foreground/[0.2] text-[12px] leading-none font-medium text-foreground/90 flex items-center justify-center gap-2 active:bg-foreground/10">
               <Link2 size={15} /> Option Chain
             </button>
             <button type="button" data-bar="scalp" onClick={openScalp}
-              className="flex-1 h-10 rounded-lg bg-primary text-primary-foreground text-[13px] font-semibold flex items-center justify-center gap-2 active:opacity-80">
+              className="flex-1 h-8 rounded-full bg-primary text-primary-foreground text-[12px] leading-none font-medium flex items-center justify-center gap-2 active:opacity-80">
               <CandlestickChart size={15} /> ScalperX
             </button>
           </div>
