@@ -17975,6 +17975,22 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               or on the spot pane in split view, never twice. */}
           {/* The bias button on the desktop's index half (BiasCheck.tsx), before
               the shield. Not on a phone: there it is on the price line. */}
+          {/* THE OPTION CHAIN ON THE DESKTOP (18 Nov 2026). Martin: "option chain is
+              missing in the desktop version". The phone opens it from the button
+              under its chart (data-bar="chain"), and that row is the phone's
+              alone; the desktop had no way to it at all. It is here, on the
+              index half's tool bar, the same button, opening the same chain on
+              this half's index — on a desktop screen as the wide chain with every
+              column (see THE DESKTOP'S CHAIN in OptionChainSheet). */}
+          {isSpotPane && !scalp && !isFocusedChart && (
+            <button type="button" data-desk="chain" title="Option chain" onClick={() => {
+              const u = underlying === 'NIFTY' || underlying === 'BANKNIFTY' || underlying === 'SENSEX' ? underlying : undefined;
+              try { window.dispatchEvent(new CustomEvent('terminal:option-chain', { detail: u ? { underlying: u } : {} })); } catch (e) {}
+            }}
+              className="hidden md:flex md:order-2 h-8 shrink-0 items-center gap-2 px-3 rounded-full border border-foreground/[0.2] text-[12px] leading-none font-medium text-foreground/90 hover:bg-foreground/10 whitespace-nowrap">
+              <Link2 size={15} /> Option Chain
+            </button>
+          )}
           {isSpotPane && !scalp && !isFocusedChart && <BiasButton className="hidden md:flex md:order-2 h-9 w-9 shrink-0" />}
           {!isReferenceChart && paneRole !== 'option' && (
             <TradeGuardButton className="md:order-2 max-md:h-11 max-md:w-full max-md:justify-start max-md:gap-3 max-md:px-2.5 max-md:!bg-transparent" label

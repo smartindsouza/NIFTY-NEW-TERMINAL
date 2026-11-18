@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { navigate } from 'wouter/use-browser-location';
-import { ChevronsUpDown, LineChart } from 'lucide-react';
+import { ChevronsUpDown, LineChart, X } from 'lucide-react';
 import { addWsMessageListener } from '../hooks/useWebSocket';
 import { optionGreeks, yearsToExpiry, type Greeks } from '../lib/optionGreeks';
 
@@ -40,6 +40,19 @@ import { optionGreeks, yearsToExpiry, type Greeks } from '../lib/optionGreeks';
 // the one that is out of the money — the Call above the index, the Put below.
 
 const STRIKE_W = 88, ROW_H = 54, SPOT_H = 43;
+// THE DESKTOP'S CHAIN (18 Nov 2026). Martin: "option chain is missing in the
+// desktop version. Re work the option chain ... in the desktop version to fit
+// the desktop screen. Option chain does not need the Greeks button in desktop.
+// Show it with the Greeks". On a screen 1,024px wide or more the sheet fills
+// the screen bar a margin, and every column is in view at once — the eight of
+// each side, counting outward from the Strike, as the phone shows them two at
+// a time — so there is no Greeks switch, no "All" jump list and nothing to
+// slide. Rows are a little shorter (more strikes in view), the Strike column a
+// little wider (its tags), and the index is named, since nothing else on the
+// sheet says which chain it is. A phone, even held sideways, is not this wide
+// and keeps the sheet exactly as it was.
+export const WIDE_CHAIN_QUERY = '(min-width: 1024px)';
+const WIDE = { strikeW: 104, rowH: 46, spotH: 40, minCol: 58 };
 const GREEN = '#2EA068', RED = '#E24556', BLUE = 'var(--primary)', TREND_BLUE = 'var(--primary)';
 const SIDE_COLS = ['ltp', 'oi', 'iv', 'delta', 'gamma', 'vega', 'theta', 'rho'] as const;
 type Col = typeof SIDE_COLS[number];
@@ -107,15 +120,21 @@ export function openInScalpPro(leg: Leg, type: 'CE' | 'PE', name: string) {
     tradingsymbol: leg.tradingsymbol, instrument_token: String(leg.instrument_token), exchange: leg.exchange || 'NFO',
     lot_size: leg.lot_size, instrument_type: type, strike: leg.strikePrice, expiry: leg.expiry, name,
   };
-  try { sessionStorage.setItem('selectedInstrument', JSON.stringify(instr)); sessionStorage.setItem('scalpPro', '1'); } catch (e) {}
+  // On a desktop there is no ScalperX (ChartWorkspace shows the two halves at
+  // 768px and wider): the option opens in the split view's option half, and
+  // ScalperX's flag is not left set behind it.
+  let desk = false;
+  try { desk = window.matchMedia('(min-width: 768px)').matches; } catch (e) {}
+  try { sessionStorage.setItem('selectedInstrument', JSON.stringify(instr)); if (!desk) sessionStorage.setItem('scalpPro', '1'); } catch (e) {}
   try { window.dispatchEvent(new CustomEvent('terminal:open-option', { detail: instr })); } catch (e) {}
-  try { window.dispatchEvent(new CustomEvent('terminal:scalp', { detail: true })); } catch (e) {}
+  if (!desk) try { window.dispatchEvent(new CustomEvent('terminal:scalp', { detail: true })); } catch (e) {}
   if (window.location.pathname !== '/advanced-chart') navigate('/advanced-chart');
   return true;
 }
 
-export function OptionChainView({ onPicked, start }: { onPicked?: () => void; start?: ChainStart }) {
+export function OptionChainView({ onPicked, start, wide = false, onClose }: { onPicked?: () => void; start?: ChainStart; wide?: boolean; onClose?: () => void }) {
   const under = useMemo(() => underlyingOf(start?.underlying), []);
+  const strikeW = wide ? WIDE.strikeW : STRIKE_W, rowH = wide ? WIDE.rowH : ROW_H, spotH = wide ? WIDE.spotH : SPOT_H;
   // An expiry the server no longer lists (an option kept past its day) is not
   // an error: the server answers with the nearest, and the menu shows that.
   const [expiry, setExpiry] = useState<string>(() => (/^\d{4}-\d{2}-\d{2}/.test(String(start?.expiry || '')) ? String(start?.expiry).slice(0, 10) : ''));
@@ -214,9 +233,13 @@ export function OptionChainView({ onPicked, start }: { onPicked?: () => void; st
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const sideW = Math.max(0, (w - STRIKE_W) / 2);
-  const cols: Col[] = greeks ? [...SIDE_COLS] : ['ltp'];
-  const colW = greeks ? sideW / 2 : sideW;
+  const sideW = Math.max(0, (w - strikeW) / 2);
+  // Wide, every column is shown, whatever the phone's switch was last left at.
+  const allCols = wide || greeks;
+  const cols: Col[] = allCols ? [...SIDE_COLS] : ['ltp'];
+  // Wide: an eighth of the side each, never narrower than a price needs — below
+  // that the sides slide as the phone's do (a window only just 1,024 wide).
+  const colW = wide ? Math.max(WIDE.minCol, sideW / SIDE_COLS.length) : greeks ? sideW / 2 : sideW;
   const maxSlide = Math.max(0, cols.length * colW - sideW);
   // How far the sides have slid inward, in px. Kept out of React while a finger
   // is on it: the four strips are moved directly, sixty times a second.
@@ -236,7 +259,7 @@ export function OptionChainView({ onPicked, start }: { onPicked?: () => void; st
     }
   };
   // Greeks switched, or the sheet a different width: back to the first two columns.
-  useLayoutEffect(() => { place(0, false); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [greeks, w]);
+  useLayoutEffect(() => { place(0, false); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [allCols, w]);
   // A strip that has only just been put on the page (the rows arrive after the
   // heading does) starts where the others are.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -245,10 +268,10 @@ export function OptionChainView({ onPicked, start }: { onPicked?: () => void; st
   const drag = useRef<{ x: number; y: number; from: number; side: 1 | -1; on: boolean; t: number; lastX: number; v: number } | null>(null);
   const dragged = useRef(0);
   const onDown = (e: React.PointerEvent) => {
-    if (!greeks || !boxRef.current) return;
+    if (!allCols || maxSlide <= 0 || !boxRef.current) return;
     const r = boxRef.current.getBoundingClientRect();
     const x = e.clientX - r.left;
-    if (x > sideW && x < sideW + STRIKE_W) return;                  // the Strike column does not slide
+    if (x > sideW && x < sideW + strikeW) return;                   // the Strike column does not slide
     drag.current = { x: e.clientX, y: e.clientY, from: slide.current, side: x <= sideW ? 1 : -1, on: false, t: e.timeStamp, lastX: e.clientX, v: 0 };
   };
   const onMove = (e: React.PointerEvent) => {
@@ -282,10 +305,10 @@ export function OptionChainView({ onPicked, start }: { onPicked?: () => void; st
     const key = `${chain?.expiryDate || ''}`;
     if (!el || !strikes.length || opened.current === key) return;
     opened.current = key;
-    el.scrollTop = Math.max(0, below * ROW_H + SPOT_H / 2 - el.clientHeight / 2);
+    el.scrollTop = Math.max(0, below * rowH + spotH / 2 - el.clientHeight / 2);
   }, [strikes.length, below, chain?.expiryDate]);
-  const rowTop = (i: number) => i * ROW_H + (i >= below ? SPOT_H : 0);
-  const total = strikes.length * ROW_H + (strikes.length ? SPOT_H : 0);
+  const rowTop = (i: number) => i * rowH + (i >= below ? spotH : 0);
+  const total = strikes.length * rowH + (strikes.length ? spotH : 0);
 
   const pick = (k: number, type: 'CE' | 'PE') => {
     if (Date.now() - dragged.current < 350) return;                 // the end of a slide is not a tap
@@ -298,8 +321,8 @@ export function OptionChainView({ onPicked, start }: { onPicked?: () => void; st
     <div key={c} className="shrink-0 flex items-center justify-center text-[12px] leading-none text-foreground/60 whitespace-nowrap" style={{ width: colW }}>{HEAD[c][put ? 1 : 0]}</div>
   );
   const bodyCell = (c: Col, cell: Cell) => (
-    <div key={c} className="shrink-0 flex flex-col items-center justify-center gap-[6px] whitespace-nowrap" style={{ width: colW, height: ROW_H }}>
-      <span className="text-[12px] leading-none text-foreground/85 tabular-nums">{cell.main}</span>
+    <div key={c} className={`shrink-0 flex flex-col items-center justify-center ${wide ? 'gap-[5px]' : 'gap-[6px]'} whitespace-nowrap`} style={{ width: colW, height: rowH }}>
+      <span className={`${colW < 64 ? 'text-[11px]' : 'text-[12px]'} leading-none text-foreground/85 tabular-nums`}>{cell.main}</span>
       {cell.sub && <span className="text-[10px] leading-none tabular-nums" style={{ color: cell.tone === 'down' ? RED : GREEN }}>{cell.sub}</span>}
     </div>
   );
@@ -312,7 +335,7 @@ export function OptionChainView({ onPicked, start }: { onPicked?: () => void; st
         const len = max > 0 ? Math.min(1, (Number(leg?.oi) || 0) / max) * sideW : 0;
         return (
           <div key={k} data-chain-cell={put ? 'pe' : 'ce'} onClick={() => pick(k, put ? 'PE' : 'CE')}
-            className={`absolute inset-x-0 border-b border-foreground/[0.07] ${itm ? 'bg-primary/[0.08]' : ''}`} style={{ top: rowTop(i), height: ROW_H }}>
+            className={`absolute inset-x-0 border-b border-foreground/[0.07] ${itm ? 'bg-primary/[0.08]' : ''} ${wide ? 'cursor-pointer hover:bg-foreground/[0.05]' : ''}`} style={{ top: rowTop(i), height: rowH }}>
             {len > 1 && <div className="absolute bottom-[-1px] h-[2px] rounded-full z-[1]" style={{ width: len, ...(put ? { left: 0, background: `linear-gradient(to right, ${GREEN}55, ${GREEN})` } : { right: 0, background: `linear-gradient(to left, ${RED}55, ${RED})` }) }} />}
           </div>
         );
@@ -320,10 +343,10 @@ export function OptionChainView({ onPicked, start }: { onPicked?: () => void; st
       <div ref={(el) => { strips.current[put ? 'putBody' : 'callBody'] = el; }} className="absolute left-0 top-0 pointer-events-none will-change-transform" style={{ width: cols.length * colW }}>
         {strikes.map((k, i) => {
           const leg = (put ? chain?.peData : chain?.ceData)?.[k];
-          const g = greeks ? greeksOf(leg, k, !put) : null;
+          const g = allCols ? greeksOf(leg, k, !put) : null;
           const ltp = ltpOf(leg);
           return (
-            <div key={k} className="absolute left-0 flex" style={{ top: rowTop(i), height: ROW_H }}>
+            <div key={k} className="absolute left-0 flex" style={{ top: rowTop(i), height: rowH }}>
               {(put ? cols : [...cols].reverse()).map((c) => bodyCell(c, cellOf(c, leg, ltp, g)))}
             </div>
           );
@@ -336,25 +359,49 @@ export function OptionChainView({ onPicked, start }: { onPicked?: () => void; st
     <div ref={boxRef} data-chain="" className="relative flex flex-col h-full min-h-0 bg-background text-foreground select-none" onClick={() => menu && setMenu(null)}>
       {/* controls */}
       <div className="shrink-0 h-[54px] flex items-center pl-4 pr-[17px] bg-card">
-        <button type="button" data-chain="all" disabled={!greeks} onClick={(e) => { e.stopPropagation(); setMenu(menu === 'all' ? null : 'all'); }}
-          className={`flex items-center gap-1 text-[12px] leading-none ${greeks ? 'text-foreground/85' : 'text-foreground/45'}`}>
-          All{greeks && <ChevronsUpDown size={11} strokeWidth={2.4} />}
-        </button>
+        {wide ? (
+          <span data-chain="index" className="text-[14px] leading-none font-semibold">{under.name === 'BANKNIFTY' ? 'BANK NIFTY' : under.name === 'NIFTY' ? 'NIFTY 50' : under.name}<span className="ml-2 font-normal text-foreground/60">Option Chain</span></span>
+        ) : (
+          <button type="button" data-chain="all" disabled={!greeks} onClick={(e) => { e.stopPropagation(); setMenu(menu === 'all' ? null : 'all'); }}
+            className={`flex items-center gap-1 text-[12px] leading-none ${greeks ? 'text-foreground/85' : 'text-foreground/45'}`}>
+            All{greeks && <ChevronsUpDown size={11} strokeWidth={2.4} />}
+          </button>
+        )}
         <span className="mx-[10px] h-[18px] w-px bg-foreground/20" aria-hidden="true" />
         <button type="button" data-chain="expiry" onClick={(e) => { e.stopPropagation(); setMenu(menu === 'expiry' ? null : 'expiry'); }} className="flex items-center gap-1 text-[12px] leading-none">
           <span className="text-foreground/60">Expiry:</span><span className="font-semibold">{expiryText(chain?.expiryDate || '')}</span>
           <svg width="8" height="5" viewBox="0 0 8 5" aria-hidden="true"><path d="M0 0h8L4 5z" fill="currentColor" /></svg>
         </button>
-        <button type="button" data-chain="greeks" role="switch" aria-checked={greeks} onClick={() => setGreeks((v) => !v)}
-          className="ml-auto h-[29px] pl-[9px] pr-[8px] flex items-center gap-[7px] rounded-full border border-foreground/20 text-[12px] leading-none text-foreground/70">
-          Greeks
-          <span className="relative h-3 w-[22px] rounded-full transition-colors" style={{ background: greeks ? BLUE : 'rgba(128,128,128,0.35)' }}>
-            <span className="absolute top-[2px] h-2 w-2 rounded-full bg-white transition-[left]" style={{ left: greeks ? 12 : 2 }} />
-          </span>
-        </button>
+        {wide ? (
+          onClose && (
+            <button type="button" data-chain="close" aria-label="Close the option chain" title="Close (Esc)" onClick={onClose}
+              className="ml-auto h-8 w-8 flex items-center justify-center rounded-full text-foreground/70 hover:bg-foreground/10 hover:text-foreground">
+              <X size={18} />
+            </button>
+          )
+        ) : (
+          <>
+          <button type="button" data-chain="greeks" role="switch" aria-checked={greeks} onClick={() => setGreeks((v) => !v)}
+            className="ml-auto h-[29px] pl-[9px] pr-[8px] flex items-center gap-[7px] rounded-full border border-foreground/20 text-[12px] leading-none text-foreground/70">
+            Greeks
+            <span className="relative h-3 w-[22px] rounded-full transition-colors" style={{ background: greeks ? BLUE : 'rgba(128,128,128,0.35)' }}>
+              <span className="absolute top-[2px] h-2 w-2 rounded-full bg-white transition-[left]" style={{ left: greeks ? 12 : 2 }} />
+            </span>
+          </button>
+          {/* A close button beside it (18 Nov 2026; Martin: "add a small close
+              screen button beside the Greeks button on the extreme right"). A
+              tap above the sheet still closes it too. */}
+          {onClose && (
+            <button type="button" data-chain="close" aria-label="Close the option chain" onClick={onClose}
+              className="ml-[10px] -mr-[6px] h-[29px] w-[29px] flex items-center justify-center rounded-full border border-foreground/20 text-foreground/70 active:bg-foreground/10">
+              <X size={15} />
+            </button>
+          )}
+          </>
+        )}
       </div>
       {menu && (
-        <div data-chain-menu={menu} className="absolute z-20 top-[46px] max-h-[60%] overflow-y-auto rounded-xl border border-foreground/15 bg-card py-1 shadow-2xl" style={{ left: menu === 'all' ? 10 : 44 }} onClick={(e) => e.stopPropagation()}>
+        <div data-chain-menu={menu} className="absolute z-20 top-[46px] max-h-[60%] overflow-y-auto rounded-xl border border-foreground/15 bg-card py-1 shadow-2xl" style={{ left: menu === 'all' ? 10 : wide ? 190 : 44 }} onClick={(e) => e.stopPropagation()}>
           {menu === 'expiry'
             ? (chain?.expiries || []).map((d) => (
               <button key={d} type="button" onClick={() => { setExpiry(d); setMenu(null); }} className={`block w-full px-4 h-9 text-left text-[13px] ${d.slice(0, 10) === (chain?.expiryDate || '').slice(0, 10) ? 'font-semibold text-foreground' : 'text-foreground/70'}`}>{expiryText(d)}</button>
@@ -378,7 +425,7 @@ export function OptionChainView({ onPicked, start }: { onPicked?: () => void; st
       <div className="flex-1 min-h-0 flex flex-col" style={{ touchAction: 'pan-y' }} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
         <div className="shrink-0 h-10 flex border-b border-foreground/[0.07]">
           <div className="overflow-hidden" style={{ width: sideW }}><div ref={(el) => { strips.current.callHead = el; }} className="flex h-full will-change-transform" style={{ width: cols.length * colW }}>{[...cols].reverse().map((c) => headCell(c, false))}</div></div>
-          <div className="shrink-0 flex items-center justify-center bg-card text-[12px] leading-none font-semibold" style={{ width: STRIKE_W }}>Strike</div>
+          <div className="shrink-0 flex items-center justify-center bg-card text-[12px] leading-none font-semibold" style={{ width: strikeW }}>Strike</div>
           <div className="overflow-hidden" style={{ width: sideW }}><div ref={(el) => { strips.current.putHead = el; }} className="flex h-full will-change-transform" style={{ width: cols.length * colW }}>{cols.map((c) => headCell(c, true))}</div></div>
         </div>
         {/* The list is a scroller of its own, so it must say for itself that only
@@ -389,12 +436,12 @@ export function OptionChainView({ onPicked, start }: { onPicked?: () => void; st
             : (
               <div className="relative flex" style={{ height: total }}>
                 {side(false)}
-                <div className="relative shrink-0 bg-card" style={{ width: STRIKE_W, height: total }}>
+                <div className="relative shrink-0 bg-card" style={{ width: strikeW, height: total }}>
                   {strikes.map((k, i) => {
                     const t = tags(k);
                     return (
                       <div key={k} data-chain-strike={k} onClick={() => pick(k, k >= spot ? 'CE' : 'PE')}
-                        className="absolute inset-x-0 flex flex-col items-center justify-center gap-[5px] border-b border-foreground/[0.07]" style={{ top: rowTop(i), height: ROW_H }}>
+                        className={`absolute inset-x-0 flex flex-col items-center justify-center gap-[5px] border-b border-foreground/[0.07] ${wide ? 'cursor-pointer hover:bg-foreground/[0.05]' : ''}`} style={{ top: rowTop(i), height: rowH }}>
                         <span className="text-[12px] leading-none font-semibold text-foreground/95 tabular-nums">{k.toLocaleString('en-IN')}</span>
                         {t.map(([name, color]) => <span key={name} className="px-[6px] h-[15px] flex items-center rounded-[4px] text-[10px] leading-none font-medium text-white whitespace-nowrap" style={{ background: color }}>{name}</span>)}
                       </div>
@@ -403,7 +450,7 @@ export function OptionChainView({ onPicked, start }: { onPicked?: () => void; st
                 </div>
                 {side(true)}
                 {/* the index, between the strikes on either side of it */}
-                <div className="absolute inset-x-0 pointer-events-none" style={{ top: below * ROW_H, height: SPOT_H }}>
+                <div className="absolute inset-x-0 pointer-events-none" style={{ top: below * rowH, height: spotH }}>
                   <div className="absolute inset-x-0 top-1/2 h-px bg-foreground/20" />
                   <div data-chain="spot" className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-7 px-[9px] flex items-center gap-[6px] rounded-lg bg-foreground text-background text-[12px] leading-none font-semibold tabular-nums whitespace-nowrap">
                     {spot.toFixed(2)}
@@ -423,17 +470,44 @@ export function OptionChainView({ onPicked, start }: { onPicked?: () => void; st
   );
 }
 
-/** The chain as a sheet over whatever is on screen; a tap above it, or a price picked, puts it away. */
+function useWideChain() {
+  const [wide, setWide] = useState(() => { try { return window.matchMedia(WIDE_CHAIN_QUERY).matches; } catch (e) { return false; } });
+  useEffect(() => {
+    let mq: MediaQueryList;
+    try { mq = window.matchMedia(WIDE_CHAIN_QUERY); } catch (e) { return; }
+    const on = (e: MediaQueryListEvent) => setWide(e.matches);
+    if (mq.addEventListener) mq.addEventListener('change', on); else mq.addListener(on as any);
+    return () => { if (mq.removeEventListener) mq.removeEventListener('change', on); else mq.removeListener(on as any); };
+  }, []);
+  return wide;
+}
+
+/** The chain as a sheet over whatever is on screen; a tap above it, or a price picked, puts it away.
+ *  On a desktop screen (WIDE_CHAIN_QUERY) it is the screen, bar a margin, with every column shown. */
 export function OptionChainSheet({ onClose, start }: { onClose: () => void; start?: ChainStart }) {
+  const wide = useWideChain();
+  // THE PAGE BEHIND STAYS PUT (18 Nov 2026). Martin: "The screen behind the
+  // option chain also scrolls behind. Disable it." A finger that reached the
+  // end of the chain's list, or landed on the dimmed part, scrolled the chart
+  // page under it. While the sheet is up the page does not scroll — the same
+  // lock the Market Context sidebar uses.
+  useEffect(() => {
+    const html = document.documentElement, body = document.body;
+    const was = { h: html.style.overflow, b: body.style.overflow, o: html.style.overscrollBehavior };
+    html.style.overflow = 'hidden'; body.style.overflow = 'hidden'; html.style.overscrollBehavior = 'none';
+    return () => { html.style.overflow = was.h; body.style.overflow = was.b; html.style.overscrollBehavior = was.o; };
+  }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
   return createPortal(
-    <div data-chain-sheet="" className="fixed inset-0 z-[150] flex flex-col justify-end md:items-center md:justify-center bg-black/75" onClick={onClose}>
-      <div className="w-full md:w-[430px] h-[calc(100dvh-152px)] min-h-[60dvh] md:h-[min(780px,90dvh)] rounded-t-xl md:rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-        <OptionChainView onPicked={onClose} start={start} />
+    <div data-chain-sheet={wide ? 'wide' : ''} className="fixed inset-0 z-[150] flex flex-col justify-end md:items-center md:justify-center bg-black/75" onClick={onClose}>
+      <div className={wide
+        ? 'w-[min(1600px,calc(100vw-48px))] h-[calc(100dvh-48px)] rounded-xl overflow-hidden border border-foreground/10'
+        : 'w-full md:w-[430px] h-[calc(100dvh-152px)] min-h-[60dvh] md:h-[min(780px,90dvh)] rounded-t-xl md:rounded-xl overflow-hidden'} onClick={(e) => e.stopPropagation()}>
+        <OptionChainView key={wide ? 'wide' : 'narrow'} onPicked={onClose} start={start} wide={wide} onClose={onClose} />
       </div>
     </div>,
     document.body,
