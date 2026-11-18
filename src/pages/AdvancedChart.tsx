@@ -1128,7 +1128,12 @@ function PositionEditorModal({ kind, value, onApply, onClose }: {
               {field('Stop Loss', stop, setStop, 'stop')}
               <div className="flex items-center gap-4">
                 <span className="text-sm text-muted-foreground min-w-[96px]">Reward/Risk</span>
-                <span data-pos-field="rr" className="text-sm font-medium text-foreground">{rr}</span>
+                {/* px-3: the same inset as the text in the fields above, so every
+                    value starts on one line down the card (19 Nov 2026; Martin:
+                    "The risk reward text seems a bit off alignment. Align it with
+                    the other texts"). It started at the fields' edge, 12pt left
+                    of their text. */}
+                <span data-pos-field="rr" className="px-3 text-sm font-medium text-foreground">{rr}</span>
               </div>
               {error && <p className="text-[12px] text-red-500" data-pos-error="">{error}</p>}
             </div>
