@@ -649,6 +649,12 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## The More sheet leaves the bottom bar clear (v363)
+
+Martin: "Keep the bottom bar background below this instead of showing a blurred
+background". The sheet's blurred layer stopped at the screen's foot and covered the
+bar; it now stops at the bar's top, so the bar shows as it is under the sheet.
+
 ## Chart: the clock ends at the price axis's figures; ScalperX's back arrow is smaller and centred (v362)
 
 Martin: "Keep the time text right indented with the right edge of the bottom strike

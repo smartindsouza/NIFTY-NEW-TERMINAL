@@ -342,10 +342,14 @@ export function Header() {
 
     {/* ===== Mobile bottom navigation (TradingView-style) — small screens only ===== */}
     {moreOpen && (
-      <div className="md:hidden fixed inset-0 z-[60]" onClick={() => setMoreOpen(false)}>
+      // The sheet's layer stops at the top of the bottom bar (18 Nov 2026; Martin:
+      // "Keep the bottom bar background below this instead of showing a blurred
+      // background"): it covered the bar too, so the bar showed blurred and
+      // dimmed under the sheet. The bar stays as it is, and its More closes this.
+      <div className="md:hidden fixed inset-x-0 top-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-[60]" onClick={() => setMoreOpen(false)}>
         <div className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-in fade-in duration-150" />
         <div
-          className="absolute bottom-16 left-0 right-0 bg-sidebar border-t border-sidebar-border rounded-t-2xl p-4 pb-5 animate-in slide-in-from-bottom duration-200"
+          className="absolute bottom-0 left-0 right-0 bg-sidebar border-t border-sidebar-border rounded-t-2xl p-4 pb-5 animate-in slide-in-from-bottom duration-200"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="w-10 h-1 rounded-full bg-muted-foreground/30 mx-auto mb-4" />
