@@ -1184,10 +1184,11 @@ const UpDownMark = () => (
 // outside the space the row shares out, so without it Sell came out 2pt wider
 // than Buy.) The stepper's − and + are 11.7pt across and 1.5pt thick, and a
 // button that cannot be pressed only dims its mark — at one lot Lemonn's − is a
-// shade greyer, not a ghost.
+// shade greyer, not a ghost. All of them are pills (Martin, 18 Nov 2026: "Turn
+// all these buttons and shapes to pill shape").
 const SCALP_BTN = 'flex-1 min-w-0 border text-[12px] leading-none font-bold flex items-center justify-center disabled:opacity-60';
-const SCALP_BTN_FILL = `${SCALP_BTN} h-9 rounded-[13px] border-transparent active:opacity-80`;
-const SCALP_BTN_LINE = `${SCALP_BTN} h-[34px] rounded-[12px] border-foreground text-foreground active:bg-foreground/10`;
+const SCALP_BTN_FILL = `${SCALP_BTN} h-9 rounded-full border-transparent active:opacity-80`;
+const SCALP_BTN_LINE = `${SCALP_BTN} h-[34px] rounded-full border-foreground text-foreground active:bg-foreground/10`;
 const SCALP_STEP = 'shrink-0 h-8 w-8 rounded-full border-2 border-foreground/15 bg-card flex items-center justify-center text-foreground/80 disabled:text-foreground/65 active:bg-foreground/10';
 // THE CHART PAGE'S TWO TABS ON A PHONE ARE LEMONN'S FOLDER TABS (16 Nov 2026).
 // Martin, of the tab-shaped top row ScalpPro got in v308: "Use the same design
@@ -18817,11 +18818,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   half is pressed over the switch's whole height, not only its
                   24pt pill (the ::after). */}
               <div className="flex justify-center mb-0.5">
-                <div data-scalp="mode" className="inline-flex items-center h-[34px] rounded-[12px] border border-foreground/15 bg-card p-1 text-[12px] leading-none font-bold">
+                <div data-scalp="mode" className="inline-flex items-center h-[34px] rounded-full border border-foreground/15 bg-card p-1 text-[12px] leading-none font-bold">
                   <button type="button" data-mode="market" aria-pressed={!atOn} onClick={() => { if (atOn) atOff(); }}
-                    className={`relative h-6 px-[9px] rounded-[9px] after:absolute after:inset-x-0 after:-inset-y-[5px] after:content-[''] ${!atOn ? 'bg-primary text-primary-foreground' : 'text-foreground'}`}>Market</button>
+                    className={`relative h-6 px-[9px] rounded-full after:absolute after:inset-x-0 after:-inset-y-[5px] after:content-[''] ${!atOn ? 'bg-primary text-primary-foreground' : 'text-foreground'}`}>Market</button>
                   <button type="button" data-mode="at" aria-pressed={atOn} onClick={() => { if (!atOn) onScalpAt?.(() => ({ on: true, src: 'option', optPx: null, spotPx: null })); }}
-                    className={`relative h-6 px-[9px] rounded-[9px] after:absolute after:inset-x-0 after:-inset-y-[5px] after:content-[''] ${atOn ? 'bg-primary text-primary-foreground' : 'text-foreground'}`}>Limit/Trigger</button>
+                    className={`relative h-6 px-[9px] rounded-full after:absolute after:inset-x-0 after:-inset-y-[5px] after:content-[''] ${atOn ? 'bg-primary text-primary-foreground' : 'text-foreground'}`}>Limit/Trigger</button>
                 </div>
               </div>
               <div className="flex items-center h-9">

@@ -649,6 +649,13 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## ScalperX: the order row is pills (v352)
+
+Martin, with a picture of ScalperX's order row: "Turn all these buttons and shapes to
+pill shape", then "Except the plus and minus buttons keep them as it is". Buy, Sell,
+Exit and the Market | Limit/Trigger switch (its frame and both halves) have round ends;
+sizes are unchanged. The − and + were already round and are untouched.
+
 ## ScalperX: Buy at Mkt is the accent colour (v351)
 
 Martin: "Also change the buy at market button color to accent color". ScalperX's Buy
