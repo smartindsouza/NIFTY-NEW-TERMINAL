@@ -649,6 +649,27 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Chart: index menu, the chosen option survives ScalperX, Range and Interval lists (v354)
+
+- **Index menu.** Martin: "Remove the US 30 and Gift nifty from this list and move it to
+  global market sidebar. And rearrange the list in this way. Nifty50, Sensex, Bank
+  Nifty". The menu is NIFTY 50, SENSEX, BANK NIFTY. The Market Context sidebar (the
+  globe) has a "GIFT Nifty" row at the head of Indian Indices (quoted from Zerodha's NSE
+  IX contract in the same one quote) and its "Dow Fut" row; tapping either opens the
+  chart's own GIFT NIFTY / US30 chart (`open-index-chart`, `indexChartOpen`).
+- **Cards under the chart.** They already asked for the chosen index's chain; the
+  previous index's numbers stood in until it arrived. They no longer do.
+- **The chosen option.** Martin: "When I select an option chart from the list in the
+  chart screen and then move to scalperX screen and later come back the option chart i
+  selected changes to some other chart". `selectedInstrument` is shared with ScalperX's
+  lower chart and was cleared on leaving it. The chart page keeps its own copy
+  (`chartPageInstrument`), which leaving ScalperX puts back.
+- **Range and Interval.** Martin: "use the same dropdown list for time frame as you used
+  for Range. Do not use built in browser list. Also when I tap the range or time frame
+  button again, the list should disappear". The phone's Interval, and ScalperX's corner
+  interval, open the app's own list; a second tap on Range or Interval closes it (the
+  press closed it through the layer behind and the click reopened it).
+
 ## News: smaller cards on a phone (v353)
 
 Martin: "Reduce the sizes of fonts inside the news cards to accommodate more news cards

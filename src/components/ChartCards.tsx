@@ -110,7 +110,13 @@ export function ChartCards({ chainSymbol, getDay, onOpenOption, onOpenPositions 
   const { data: chain } = useQuery({
     queryKey: ['chart-cards-chain', chainSymbol],
     queryFn: async () => { const r = await fetch(`/api/option-chain?symbol=${encodeURIComponent(chainSymbol || '')}`); if (!r.ok) throw new Error('chain'); return r.json(); },
-    enabled: seen && !!chainSymbol, refetchInterval: seen ? 15000 : false, staleTime: 10000, placeholderData: (p: any) => p,
+    enabled: seen && !!chainSymbol, refetchInterval: seen ? 15000 : false, staleTime: 10000,
+    // The last answer stands in while the next is fetched — but only the same
+    // index's. Kept across a change of index, NIFTY's totals and top options
+    // stood under SENSEX or BANK NIFTY until that index's chain arrived (18 Nov
+    // 2026; Martin: "when I select Sensex or bank nifty, change the data
+    // that's shown ... to that index which I have selected").
+    placeholderData: (p: any, q: any) => (q?.queryKey?.[1] === chainSymbol ? p : undefined),
   });
 
   const [day, setDay] = useState<Day | null>(null);

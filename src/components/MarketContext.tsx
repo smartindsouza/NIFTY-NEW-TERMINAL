@@ -268,6 +268,22 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
     enabled: open, staleTime: 6 * 3600e3, retry: 1,
   });
   const openChart = (m: Market) => {
+    // GIFT NIFTY and US30 (the "Dow Fut" row) open the chart's own two
+    // reference charts — they left the chart's index menu for this sidebar
+    // (18 Nov 2026).
+    const own = m.key === 'GIFT' ? 'GIFT' : m.key === 'DJI' ? 'US30' : null;
+    if (own) {
+      return () => {
+        try {
+          sessionStorage.setItem('indexChartOpen', own);
+          sessionStorage.removeItem('refChartOpen');
+          sessionStorage.removeItem('selectedInstrument');
+        } catch (e) {}
+        try { window.dispatchEvent(new CustomEvent('open-index-chart', { detail: own })); } catch (e) {}
+        setOpen(false);
+        if (!window.location.pathname.startsWith('/advanced-chart')) setLocation('/advanced-chart');
+      };
+    }
     const ref = refMap?.[m.key];
     if (!ref?.available) return undefined;
     return () => {

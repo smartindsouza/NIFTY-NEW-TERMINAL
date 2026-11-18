@@ -3299,6 +3299,16 @@ setInterval(() => {
         { key: 'VIX', label: 'India VIX', sym: 'NSE:INDIA VIX' },
         { key: 'SENSEX', label: 'Sensex', sym: 'BSE:SENSEX' },
       ];
+      // GIFT NIFTY heads the list (18 Nov 2026). Martin moved it, and US30, out
+      // of the chart's index menu: "Remove the US 30 and Gift nifty from this
+      // list and move it to global market sidebar". Its contract is resolved
+      // from Zerodha's NSE IX list (never guessed) and rides the same one quote;
+      // tapping the row opens the chart's own GIFT NIFTY chart. US30 is the
+      // "Dow Fut" row under US.
+      try {
+        const gift = hasKite ? await getGiftNiftyInstrument() : null;
+        IND.unshift({ key: 'GIFT', label: 'GIFT Nifty', sym: gift?.symbol ? `NSEIX:${gift.symbol}` : 'NSEIX:GIFT NIFTY' });
+      } catch (e) { IND.unshift({ key: 'GIFT', label: 'GIFT Nifty', sym: 'NSEIX:GIFT NIFTY' }); }
       if (hasKite) {
         try {
           const q = await kc.getQuote(IND.map(i => i.sym));

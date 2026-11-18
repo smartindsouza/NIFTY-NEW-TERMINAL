@@ -5360,6 +5360,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const [underlying, setUnderlying] = useState<'NIFTY' | 'BANKNIFTY' | 'SENSEX' | 'GIFT' | 'US30' | 'REF'>(() => {
     // A chart asked for from the Market Context sidebar on another page.
     try { if (sessionStorage.getItem('refChartOpen') === '1' && sessionStorage.getItem('refChart')) return 'REF'; } catch (e) {}
+    try { const k = sessionStorage.getItem('indexChartOpen'); if (k === 'GIFT' || k === 'US30') { sessionStorage.removeItem('indexChartOpen'); return k; } } catch (e) {}
     // Validated against the known set rather than trusted: an old or hand-edited
     // value must fall back to NIFTY, not leave the chart pointing at nothing.
     try {
@@ -5383,8 +5384,17 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       setRefChart(d); setUnderlying('REF'); setSelectedInstrument(null);
       try { sessionStorage.removeItem('refChartOpen'); } catch (er) {}
     };
+    // GIFT NIFTY and US30 from the sidebar: this chart's own two reference
+    // charts (their own hours and feeds), not a plain Zerodha reference.
+    const onIndex = (e: any) => {
+      const k = e?.detail;
+      if (k !== 'GIFT' && k !== 'US30') return;
+      setUnderlying(k); setSelectedInstrument(null);
+      try { sessionStorage.removeItem('indexChartOpen'); } catch (er) {}
+    };
     window.addEventListener('open-ref-chart', onOpen as any);
-    return () => window.removeEventListener('open-ref-chart', onOpen as any);
+    window.addEventListener('open-index-chart', onIndex as any);
+    return () => { window.removeEventListener('open-ref-chart', onOpen as any); window.removeEventListener('open-index-chart', onIndex as any); };
   }, []);
 
   // Each index has its OWN levels. Keys are suffixed per index so NIFTY, Bank
@@ -5807,6 +5817,17 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       } else {
         sessionStorage.removeItem('selectedInstrument');
       }
+      // THE CHART PAGE'S OWN CHOICE (18 Nov 2026). Martin: "When I select an
+      // option chart from the list in the chart screen and then move to
+      // scalperX screen and later come back the option chart i selected changes
+      // to some other chart". 'selectedInstrument' is shared with ScalperX's
+      // lower chart, which writes whatever it shows there, and leaving ScalperX
+      // cleared it. The page keeps a copy of its own that ScalperX never
+      // touches; leaving ScalperX puts it back (closeScalp, ChartWorkspace).
+      if (!isPane && !scalp) {
+        if (selectedInstrument) sessionStorage.setItem('chartPageInstrument', JSON.stringify(selectedInstrument));
+        else sessionStorage.removeItem('chartPageInstrument');
+      }
       // Keep the retired permanent key clear on every change, so an older build
       // that wrote it cannot leave a value behind to be restored later.
       localStorage.removeItem('selectedInstrument');
@@ -5891,8 +5912,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const [phoneSearchOpen, setPhoneSearchOpen] = useState(false);
   const [phoneSettingsOpen, setPhoneSettingsOpen] = useState(false);
   const [rangeOpen, setRangeOpen] = useState(false);
+  // The interval's list (phone, and ScalperX's corner), and when the see-through
+  // layer behind either list last closed it (see the Range button).
+  const [tfOpen, setTfOpen] = useState(false);
+  const sheetClosedAtRef = useRef(0);
   const [rangeChoice, setRangeChoice] = useState<string | null>(null);
-  const lemonSheetOpen = rangeOpen || phoneSettingsOpen;
+  const lemonSheetOpen = rangeOpen || tfOpen || phoneSettingsOpen;
   // THE SCALPPRO MENU (17 Nov 2026). On the ScalpPro screen a chart has no tool
   // bar — its header and the row of five are the chart page's. Martin asked for
   // Lemonn's way in: a button at the top right of each of the two charts that
@@ -16358,7 +16383,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             </div>
             {isSpotPane && indexMenuOpen && (
               <div data-scalp="index-menu" className="absolute left-2 top-full z-[60] min-w-[150px] bg-card border border-white/10 rounded-md shadow-2xl overflow-hidden">
-                {[{ k: 'NIFTY', label: 'NIFTY 50' }, { k: 'BANKNIFTY', label: 'BANK NIFTY' }, { k: 'SENSEX', label: 'SENSEX' }].map((o) => (
+                {[{ k: 'NIFTY', label: 'NIFTY 50' }, { k: 'SENSEX', label: 'SENSEX' }, { k: 'BANKNIFTY', label: 'BANK NIFTY' }].map((o) => (
                   <button key={o.k} type="button"
                     onClick={() => { setUnderlying(o.k as any); setSelectedInstrument(null); setIndexMenuOpen(false); }}
                     className={`w-full text-left px-3 py-2 text-xs transition-colors ${underlying === o.k ? 'bg-primary/15 text-primary font-bold' : 'text-foreground/80 active:bg-muted'}`}>
@@ -16501,8 +16526,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               </div>
               {indexMenuOpen && (
                 <div className="absolute left-0 top-full mt-1 z-[60] min-w-[150px] bg-card border border-white/10 rounded-md shadow-2xl overflow-hidden">
-                  {[{ k: 'NIFTY', label: 'NIFTY 50' }, { k: 'GIFT', label: 'GIFT NIFTY' }, { k: 'US30', label: 'US30' },
-                    { k: 'BANKNIFTY', label: 'BANK NIFTY' }, { k: 'SENSEX', label: 'SENSEX' }].map((o) => (
+                  {/* NIFTY 50, SENSEX, BANK NIFTY (18 Nov 2026). Martin: "Remove the
+                      US 30 and Gift nifty from this list and move it to global
+                      market sidebar. And rearrange the list in this way. Nifty50,
+                      Sensex, Bank Nifty". GIFT NIFTY and US30 open from the Market
+                      Context sidebar (the globe). */}
+                  {[{ k: 'NIFTY', label: 'NIFTY 50' }, { k: 'SENSEX', label: 'SENSEX' }, { k: 'BANKNIFTY', label: 'BANK NIFTY' }].map((o) => (
                     <button key={o.k}
                       onClick={() => { setUnderlying(o.k as any); setSelectedInstrument(null); setIndexMenuOpen(false); }}
                       className={`w-full text-left px-3 py-2 text-xs font-mono transition-colors ${
@@ -16730,14 +16759,24 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           {!isPane && (
             <div className="md:hidden relative flex-1 flex justify-center order-1">
               <button type="button" data-bar="range" title="How much of the chart is on screen"
-                onClick={() => { pageToTop(); setPhoneSettingsOpen(false); setRangeOpen(o => !o); }}
+                onClick={() => {
+                  // A SECOND TAP HIDES THE LIST (18 Nov 2026). Martin: "when I tap the
+                  // range or time frame button again, the list should disappear.
+                  // Currently it keeps appearing again and again". The press lands on
+                  // the see-through layer behind the list, which closes it; the click
+                  // that follows then reached this button and opened it again. A click
+                  // within half a second of that close is the same tap, and is let go
+                  // (as the Indicators button does).
+                  if (Date.now() - sheetClosedAtRef.current < 500) { sheetClosedAtRef.current = 0; return; }
+                  pageToTop(); setPhoneSettingsOpen(false); setTfOpen(false); setRangeOpen(o => !o);
+                }}
                 className={`h-10 w-full flex flex-col items-center justify-center gap-0.5 rounded-md ${rangeOpen ? 'text-primary' : 'text-foreground/90'}`}>
                 {rangeChoice ? <span className="h-[18px] text-[15px] leading-[18px] font-semibold">{rangeChoice === 'ALL' ? 'All' : rangeChoice}</span> : <RangeIcon size={18} />}
                 <span className="text-[10px] leading-none font-medium text-muted-foreground">Range</span>
               </button>
               {rangeOpen && (
                 <>
-                  <div className="fixed inset-0 z-[88]" aria-hidden="true" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setRangeOpen(false); }} />
+                  <div className="fixed inset-0 z-[88]" aria-hidden="true" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); sheetClosedAtRef.current = Date.now(); setRangeOpen(false); }} />
                   <div data-range-sheet="" className="fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem))] z-[90] bg-card border border-white/10 rounded-xl shadow-2xl overflow-hidden">
                     {([['1D', '1D'], ['2D', '2D'], ['5D', '5D'], ['1M', '1M'], ['ALL', 'All']] as const).map(([k, label]) => (
                       <button key={k} type="button" data-range-pick={k} onClick={() => applyRange(k)}
@@ -16865,11 +16904,33 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               {({ '1': '1m', '3': '3m', '5': '5m', '15': '15m', '60': '1h', '240': '4h', '1440': '1D', '10080': '1W', '43200': '1M' } as Record<string, string>)[String(timeframe)] || `${timeframe}m`}
             </span>
             <span className="md:hidden text-[10px] leading-none font-medium text-muted-foreground">Interval</span>
+            {/* THE PHONE'S INTERVAL LIST IS THE APP'S OWN (18 Nov 2026). Martin: "use
+                the same dropdown list for time frame as you used for Range. Do not
+                use built in browser list". The button lies over the two lines; the
+                list is Range's. The desktop keeps its select. */}
+            <button type="button" data-bar="interval-btn" aria-label="Interval" className="md:hidden absolute inset-0"
+              onClick={() => {
+                if (Date.now() - sheetClosedAtRef.current < 500) { sheetClosedAtRef.current = 0; return; }
+                pageToTop(); setPhoneSettingsOpen(false); setRangeOpen(false); setTfOpen(o => !o);
+              }} />
+            {tfOpen && !scalp && (
+              <>
+                <div className="md:hidden fixed inset-0 z-[88]" aria-hidden="true" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); sheetClosedAtRef.current = Date.now(); setTfOpen(false); }} />
+                <div data-interval-sheet="" className="md:hidden fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem))] z-[90] bg-card border border-white/10 rounded-xl shadow-2xl overflow-hidden">
+                  {([['1', '1m'], ['3', '3m'], ['5', '5m'], ['15', '15m'], ['60', '1h'], ['240', '4h'], ['1440', '1D'], ['10080', '1W'], ['43200', '1M']] as const).map(([k, label]) => (
+                    <button key={k} type="button" data-interval-pick={k} onClick={() => { setTimeframe(k); setTfOpen(false); }}
+                      className={`w-full flex items-center justify-between px-3 py-2.5 text-left text-[13px] font-medium active:bg-muted ${String(timeframe) === k ? 'text-primary' : 'text-foreground'}`}>
+                      <span>{label}</span>{String(timeframe) === k && <Check size={15} />}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
             <select
               value={timeframe}
               onChange={(e) => setTimeframe(e.target.value)}
               aria-label="Interval"
-              className="appearance-none text-center bg-muted/40 text-foreground border border-0 text-xs md:text-sm rounded-md px-3 focus:outline-none focus:ring-1 focus:ring-primary h-9 [&::-ms-expand]:hidden shrink-0 max-md:absolute max-md:inset-0 max-md:h-full max-md:w-full max-md:opacity-0"
+              className="appearance-none text-center bg-muted/40 text-foreground border border-0 text-xs md:text-sm rounded-md px-3 focus:outline-none focus:ring-1 focus:ring-primary h-9 [&::-ms-expand]:hidden shrink-0 max-md:hidden max-md:absolute max-md:inset-0 max-md:h-full max-md:w-full max-md:opacity-0"
             >
               <option value="1">1m</option>
               <option value="3">3m</option>
@@ -18700,14 +18761,26 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 the price axis, as tall as the time axis (see scalpCornerRef) —
                 or its line is a step off the chart's and stops short of it. */}
             {scalp && (
-              <label ref={scalpCornerRef} data-scalp="interval" className="absolute right-0 bottom-0 z-[44] flex items-center justify-end gap-[3px] pr-[13px] text-[12px] font-normal text-foreground bg-card border-t"
+<>
+              <button type="button" ref={scalpCornerRef as any} data-scalp="interval" className="absolute right-0 bottom-0 z-[44] flex items-center justify-end gap-[3px] pr-[13px] text-[12px] font-normal text-foreground bg-card border-t"
+                onClick={() => { if (Date.now() - sheetClosedAtRef.current < 500) { sheetClosedAtRef.current = 0; return; } setTfOpen(o => !o); }}
                 style={{ width: 56, height: 30, borderTopColor: resolvedTheme !== 'light' ? 'rgba(255, 255, 255, 0.18)' : palette.border }}>
                 {tfLabelOf(timeframe)}<svg width="8" height="4" viewBox="0 0 8 4" aria-hidden="true"><path d="M0 0 H8 L4 4 Z" fill="currentColor" /></svg>
-                <select value={timeframe} onChange={(e) => setTimeframe(e.target.value)} aria-label="Interval" className="absolute inset-0 h-full w-full opacity-0">
-                  <option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="15">15m</option>
-                  <option value="60">1h</option><option value="240">4h</option><option value="1440">1D</option>
-                </select>
-              </label>
+              </button>
+              {tfOpen && (
+                <>
+                  <div className="fixed inset-0 z-[88]" aria-hidden="true" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); sheetClosedAtRef.current = Date.now(); setTfOpen(false); }} />
+                  <div data-interval-sheet="" className="absolute right-1 bottom-[32px] z-[90] min-w-[96px] bg-card border border-white/10 rounded-xl shadow-2xl overflow-hidden">
+                    {([['1', '1m'], ['3', '3m'], ['5', '5m'], ['15', '15m'], ['60', '1h'], ['240', '4h'], ['1440', '1D']] as const).map(([k, label]) => (
+                      <button key={k} type="button" data-interval-pick={k} onClick={() => { setTimeframe(k); setTfOpen(false); }}
+                        className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-left text-[13px] font-medium active:bg-muted ${String(timeframe) === k ? 'text-primary' : 'text-foreground'}`}>
+                        <span>{label}</span>{String(timeframe) === k && <Check size={14} />}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+              </>
             )}
             {/* The option pane before it has an option: without a contract this
                 component falls back to the index, and the index must not flash

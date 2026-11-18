@@ -328,7 +328,13 @@ export function ChartWorkspace() {
   // Announced, not just set: the app's bottom bar listens too (it steps aside
   // while this screen is up) and must hear that it has closed.
   const closeScalp = () => {
-    try { sessionStorage.removeItem('selectedInstrument'); } catch (e) {}
+    // Back to the chart page with the option IT had chosen (its own copy, which
+    // ScalperX never writes: see THE CHART PAGE'S OWN CHOICE in AdvancedChart),
+    // or the index if it had none — not whatever ScalperX last showed.
+    try {
+      const own = sessionStorage.getItem('chartPageInstrument');
+      if (own) sessionStorage.setItem('selectedInstrument', own); else sessionStorage.removeItem('selectedInstrument');
+    } catch (e) {}
     try { window.dispatchEvent(new CustomEvent('terminal:scalp', { detail: false })); } catch (e) { setScalp(false); }
   };
 
