@@ -429,7 +429,13 @@ export function Header() {
           <Link
             key={link.href}
             href={link.href}
-            onClick={closeDiagnostics}
+            // …and puts the More sheet away (18 Nov 2026). Martin: "When more
+            // option is selected and tap on an icon like chart from the bottom
+            // bar, it switches the screen behind without opening the actual
+            // screen. I need to manually close this screen". The sheet ends
+            // where the bar begins, so the bar's buttons are live under it —
+            // and they changed the page without closing the sheet over it.
+            onClick={() => { closeDiagnostics(); setMoreOpen(false); }}
             className={cn(
               'flex-1 flex flex-col items-center justify-center gap-1 relative transition-colors',
               active ? 'text-primary' : 'text-muted-foreground'
