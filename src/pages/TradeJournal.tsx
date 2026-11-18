@@ -258,7 +258,45 @@ export default function TradeJournal() {
     finally { setImporting(false); }
   };
   // The export wants both ends; without them it answers for today only.
-  const downloadExcel = (from: string, to: string) => { window.location.href = `/api/journal/export.xlsx?from=${from}&to=${to}`; };
+  // THE FILE IS FETCHED, NOT GONE TO (18 Nov 2026). Martin, with the phone on a
+  // black page showing the .xlsx and "Open in Excel": "Once the trade journal is
+  // downloaded as excel sheet, this screen appears and I'm not able to go back
+  // to the app". The button sent the whole app to the file's address. In a
+  // browser tab that is a download; in the app on an iPhone's home screen there
+  // are no tabs and no back button, so the file's preview REPLACED the app and
+  // the only way back was to close it. The app now stays where it is: it reads
+  // the file itself and hands it to the phone's share sheet (Save to Files,
+  // Excel…), or, where there is no such sheet — a desktop — saves it as a
+  // download. The sheet must follow a tap; if the file took too long for the
+  // first tap to still count, a toast offers the tap again.
+  const xlsxBusy = useRef(false);
+  const downloadExcel = async (from: string, to: string) => {
+    if (xlsxBusy.current) return;
+    xlsxBusy.current = true;
+    try {
+      const r = await fetch(`/api/journal/export.xlsx?from=${from}&to=${to}`);
+      if (!r.ok) throw new Error(String(r.status));
+      const name = /filename="?([^";]+)"?/i.exec(r.headers.get('Content-Disposition') || '')?.[1] || `trades_${from}_to_${to}.xlsx`;
+      const blob = await r.blob();
+      const file = new File([blob], name, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const nav: any = navigator;
+      const phone = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      if (phone && nav.share && nav.canShare?.({ files: [file] })) {
+        const share = () => nav.share({ files: [file] });
+        try { await share(); }
+        catch (e: any) {
+          if (e?.name === 'AbortError') return;                       // he closed the sheet
+          toast('Excel file ready', { duration: 15000, action: { label: 'Save', onClick: () => { share().catch(() => {}); } } });
+        }
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch (e) { toast.error('Could not make the Excel file'); }
+    finally { xlsxBusy.current = false; }
+  };
 
   // ----- Filter: which of the history is listed -----
   const [filterOpen, setFilterOpen] = useState(false);
