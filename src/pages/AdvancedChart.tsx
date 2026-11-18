@@ -1161,6 +1161,10 @@ function PositionEditorModal({ kind, value, onApply, onClose }: {
   );
 }
 
+// When each contract was last declared to the server's live feed (see ONCE IN 20
+// SECONDS FOR A CONTRACT).
+const tickerWatchSaidAt = new Map<string, number>();
+
 // The armed exit rule is read by three separate pollers — the option chart's
 // rule sync, the spot mirror's re-solve, and the armed-rule discovery — and in
 // split view each runs in BOTH pane instances, so a single position produced up
@@ -10713,7 +10717,20 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     let stopped = false;
     const ping = () => {
       if (stopped) return;
-      fetch(`/api/ticker/watch?token=${encodeURIComponent(String(instrumentToken))}`).catch(() => {});
+      // ONCE IN 20 SECONDS FOR A CONTRACT, WHOEVER ASKS (19 Nov 2026). Martin: "Got
+      // high frequency api warning again when switching to landscape mode." The
+      // app's own record of the warning: /api/ticker/watch, 6 in 15 s, on
+      // ScalperX. Turning the phone changes the layout (a phone on its side is as
+      // wide as a small desktop), the charts are put up again — more than once
+      // as the screen settles — and each one, in each half, declared its
+      // contract afresh the moment it appeared. The server only needs telling
+      // once in its two-minute window, so a chart that appears within 20 s of
+      // the last telling for the same contract says nothing. Kept outside the
+      // component so that both halves and every re-appearance share it.
+      const tok = String(instrumentToken), now = Date.now();
+      if (now - (tickerWatchSaidAt.get(tok) || 0) < 20000) return;
+      tickerWatchSaidAt.set(tok, now);
+      fetch(`/api/ticker/watch?token=${encodeURIComponent(tok)}`).catch(() => {});
     };
     ping();
     const iv = setInterval(ping, 60000);
