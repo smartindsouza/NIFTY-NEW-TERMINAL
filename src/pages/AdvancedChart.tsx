@@ -12,7 +12,9 @@ import { zoomDiag } from "../lib/zoomDiag";
 import { confluenceSignals, detectSwapSweep, ssIstDay, type SsConfluence, type SsSignal } from "../lib/swapSweep";
 import { detectGiftDivergence, type GiftDiv } from "../lib/giftDivergence";
 import { mergeLiveCandles, archiveFingerprint } from "../lib/liveCandles";
-import { DRAWINGS_KEY, DRAW_COLORS, FIB_LEVELS, parseDrawings, timeToIndex, indexToTime, hitDrawing, anchorsOf, moveAnchor, slideDrawing, textSizePx, type Drawing, type DrawingType, type DrawPoint, type DrawGeom, type AnchorKey } from "../lib/chartDrawings";
+import { DRAWINGS_KEY, DRAW_COLORS, FIB_LEVELS, parseDrawings, timeToIndex, indexToTime, hitDrawing, anchorsOf, moveAnchor, slideDrawing, textSizePx, isPositionType, positionOutcome, positionTexts, POS_COLORS, type Drawing, type DrawingType, type DrawPoint, type DrawGeom, type AnchorKey, type PosBar, type DrawRect } from "../lib/chartDrawings";
+import { usePageScrollLock } from "../lib/scrollLock";
+import { FolderTabFeet } from "../components/FolderTabFeet";
 import { getDivergences } from "../lib/divergence";
 import { evaluateBreakout } from "../lib/breakoutQuality";
 import { calculateBollingerBands } from "../indicators/bollingerBands";
@@ -861,6 +863,10 @@ function LineEditorModal({
   const [labelVisible, setLabelVisible] = useState(initialLabelVisible);
   const [title, setTitle] = useState(initialTitle || '');
   const [alertOn, setAlertOn] = useState(!!initialAlertOn);
+  // The page under the card stays still (19 Nov 2026; Martin: "disable the
+  // screen scrolling behind it").
+  const cardRef = useRef<HTMLDivElement>(null);
+  usePageScrollLock(cardRef);
 
   const isFirstRender = useRef(true);
   
@@ -891,7 +897,7 @@ function LineEditorModal({
     // that was open has to disappear"). This one and the H Levels box were the
     // two that stayed until their own Cancel was found. Closing is Cancel.
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="bg-card border border-0 rounded-lg w-full max-w-[400px] overflow-visible flex flex-col animate-in zoom-in-95 duration-200 relative" onClick={(e) => e.stopPropagation()}>
+      <div ref={cardRef} data-line-card="" className="bg-card border border-0 rounded-lg w-full max-w-[400px] overflow-visible flex flex-col animate-in zoom-in-95 duration-200 relative" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between p-4 border-b border-0">
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-medium text-foreground">Horizontal line</h2>
@@ -991,14 +997,158 @@ function LineEditorModal({
           )}
         </div>
 
-        <div className="flex items-center justify-between p-4 border-t border-0 bg-muted">
-           <div>
-              {/* Left section */}
-              <button onClick={onDelete} className="text-sm text-red-500 hover:text-red-400 transition-colors">Delete</button>
-           </div>
+        {/* rounded-b-lg: the card is rounded, but it does not clip (its colour
+            picker opens outside it), so this strip's own square corners were
+            drawn over the card's two bottom ones (19 Nov 2026; Martin: "Make the
+            corners of the horizontal line settings card curved"). No Delete in
+            it any more ("You can also remove the delete button in the
+            horizontal line settings card"): the line's tool bar on the chart
+            has one. */}
+        <div data-line-card-foot="" className="flex items-center justify-end p-4 border-t border-0 bg-muted rounded-b-lg">
            <div className="flex gap-2">
              <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
              <button onClick={() => onApply(price, color, lineWidth, lineStyle, labelVisible, title, alertOn)} className="px-4 py-1.5 text-sm bg-primary text-primary-foreground hover:bg-primary/90 rounded transition-colors font-medium">Ok</button>
+           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// THE LONG / SHORT POSITION'S SETTINGS CARD (19 Nov 2026). Martin first asked
+// for his other app's position sheet ("the settings card for the long/short
+// position needs to be as per the 2nd screenshot": Lot Size, Entry Price, Target
+// Price, Stop Loss, Reward/Risk, and Target, Stop, Line and Label colours), then,
+// with a picture of the horizontal line's card: "Change the long & short
+// position settings to the same card design as shown in the screenshot". So:
+// that sheet's fields in the line card's frame — its header, its tabs (Inputs
+// for the numbers, Style for the colours, as TradingView splits a position's),
+// its colour picker, and its Cancel and Ok. Nothing on the chart changes
+// until Ok: the fields are drafts, so a half-typed price never puts the box
+// somewhere odd. A tap outside, the cross and Cancel close it without applying.
+export type PositionEditValue = {
+  qty: number; entry: number; target: number; stop: number;
+  tColor: string; sColor: string; color: string; lColor: string;
+};
+function PositionEditorModal({ kind, value, onApply, onClose }: {
+  kind: 'long' | 'short';
+  value: PositionEditValue;
+  onApply: (v: PositionEditValue) => void;
+  onClose: () => void;
+}) {
+  const [tab, setTab] = useState<'inputs' | 'style'>('inputs');
+  const [qty, setQty] = useState(String(value.qty));
+  const [entry, setEntry] = useState(value.entry.toFixed(2));
+  const [target, setTarget] = useState(value.target.toFixed(2));
+  const [stop, setStop] = useState(value.stop.toFixed(2));
+  const [tColor, setTColor] = useState(value.tColor);
+  const [sColor, setSColor] = useState(value.sColor);
+  const [lineColor, setLineColor] = useState(value.color);
+  const [lColor, setLColor] = useState(value.lColor);
+  const cardRef = useRef<HTMLDivElement>(null);
+  usePageScrollLock(cardRef);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const long = kind === 'long';
+  const q = Number(qty), e = Number(entry), t = Number(target), s = Number(stop);
+  const pricesOk = entry !== '' && target !== '' && stop !== '' && [e, t, s].every((x) => Number.isFinite(x) && x > 0);
+  const error =
+    !(Number.isInteger(q) && q >= 1 && q <= 1000000) ? 'Lot Size must be a whole number, 1 or more'
+    : !pricesOk ? 'Enter the entry, target and stop as prices'
+    : long && !(t > e) ? 'The target must be above the entry'
+    : long && !(s < e) ? 'The stop must be below the entry'
+    : !long && !(t < e) ? 'The target must be below the entry'
+    : !long && !(s > e) ? 'The stop must be above the entry'
+    : '';
+  const risk = Math.abs(e - s), reward = Math.abs(t - e);
+  const rr = pricesOk && risk > 0 ? `${+(reward / risk).toFixed(2)}:1` : '—';
+  const r2 = (x: number) => Math.round(x * 100) / 100;
+  const apply = () => {
+    if (error) { setTab('inputs'); return; }
+    onApply({ qty: q, entry: r2(e), target: r2(t), stop: r2(s), tColor, sColor, color: lineColor, lColor });
+  };
+  // Prices as they are typed: digits and one point.
+  const clean = (v: string, whole = false) => {
+    let x = v.replace(whole ? /[^0-9]/g : /[^0-9.]/g, '');
+    const i = x.indexOf('.');
+    if (i >= 0) x = x.slice(0, i + 1) + x.slice(i + 1).replace(/\./g, '');
+    return x;
+  };
+  const field = (label: string, v: string, set: (v: string) => void, key: string, whole = false) => (
+    <label className="flex items-center gap-4">
+      <span className="text-sm text-muted-foreground min-w-[96px]">{label}</span>
+      <input data-pos-field={key} type="text" inputMode={whole ? 'numeric' : 'decimal'} autoComplete="off" enterKeyHint="done"
+        value={v} onChange={(ev) => set(clean(ev.target.value, whole))}
+        onKeyDown={(ev) => { if (ev.key === 'Enter') (ev.target as HTMLInputElement).blur(); }}
+        className="bg-background border border-0 text-sm text-foreground rounded-md px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary h-9 flex-1 min-w-0" />
+    </label>
+  );
+  const colour = (label: string, c: string, set: (c: string) => void, key: string) => (
+    <div className="flex items-center gap-4 relative" data-pos-color={key}>
+      <span className="text-sm text-muted-foreground min-w-[96px]">{label}</span>
+      <TVStylePicker color={c} onColorChange={set} />
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" data-pos-settings={kind} onClick={onClose}>
+      <div ref={cardRef} className="bg-card border border-0 rounded-lg w-full max-w-[400px] overflow-visible flex flex-col animate-in zoom-in-95 duration-200 relative" onClick={(ev) => ev.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-0">
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-medium text-foreground">{long ? 'Long position' : 'Short position'}</h2>
+            <div className="w-3 h-3 text-muted-foreground ml-1">
+               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+            </div>
+          </div>
+          <button onClick={onClose} data-pos-settings-close="" className="text-muted-foreground hover:text-foreground p-1">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex px-4 border-b border-0 mt-2 gap-4">
+          {(['inputs', 'style'] as const).map((k) => (
+            <button key={k} data-pos-tab={k} onClick={() => setTab(k)}
+              className={`pb-2 text-sm font-medium transition-colors ${tab === k ? 'text-foreground border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}>
+              {k === 'inputs' ? 'Inputs' : 'Style'}
+            </button>
+          ))}
+        </div>
+
+        {/* The two tabs the same height, so the card does not jump between them. */}
+        <div className="p-4" style={{ minHeight: '266px' }}>
+          {tab === 'inputs' && (
+            <div className="space-y-3">
+              {field('Lot Size', qty, setQty, 'qty', true)}
+              {field('Entry Price', entry, setEntry, 'entry')}
+              {field('Target Price', target, setTarget, 'target')}
+              {field('Stop Loss', stop, setStop, 'stop')}
+              <div className="flex items-center gap-4">
+                <span className="text-sm text-muted-foreground min-w-[96px]">Reward/Risk</span>
+                <span data-pos-field="rr" className="text-sm font-medium text-foreground">{rr}</span>
+              </div>
+              {error && <p className="text-[12px] text-red-500" data-pos-error="">{error}</p>}
+            </div>
+          )}
+          {tab === 'style' && (
+            <div className="space-y-4">
+              {colour('Target', tColor, setTColor, 'tColor')}
+              {colour('Stop', sColor, setSColor, 'sColor')}
+              {colour('Line', lineColor, setLineColor, 'color')}
+              {colour('Label', lColor, setLColor, 'lColor')}
+            </div>
+          )}
+        </div>
+
+        {/* No Delete, as the line's card has none now: the trash on the
+            position's tool bar removes it. */}
+        <div className="flex items-center justify-end p-4 border-t border-0 bg-muted rounded-b-lg">
+           <div className="flex gap-2">
+             <button onClick={onClose} data-pos-cancel="" className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
+             <button onClick={apply} data-pos-apply="" disabled={!!error} className="px-4 py-1.5 text-sm bg-primary text-primary-foreground hover:bg-primary/90 rounded transition-colors font-medium disabled:opacity-50">Ok</button>
            </div>
         </div>
       </div>
@@ -1193,16 +1343,15 @@ const SCALP_STEP = 'shrink-0 h-8 w-8 rounded-full border-2 border-foreground/15 
 // THE CHART PAGE'S TWO TABS ON A PHONE ARE LEMONN'S FOLDER TABS (16 Nov 2026).
 // Martin, of the tab-shaped top row ScalpPro got in v308: "Use the same design
 // at the top for the main nifty screen". The chart on screen is the tab — 37pt
-// tall, top corners at 13pt, feet flaring out at 10pt, in the chart's own
+// tall, top corners at 12pt, feet flaring out at 11pt (Lemonn's, measured 19 Nov), in the chart's own
 // colour so the tab, the price under it and the chart are one piece — and the
 // other chart's name is plain words beside it. On the desktop they stay the
 // two outlined boxes they were.
-const PHONE_TAB_ON = 'max-md:relative max-md:overflow-visible max-md:h-[37px] max-md:rounded-b-none max-md:rounded-t-[13px] max-md:border-b-0 max-md:border-foreground/15 max-md:bg-card';
+const PHONE_TAB_ON = 'max-md:relative max-md:overflow-visible max-md:h-[37px] max-md:rounded-b-none max-md:rounded-t-[12px] max-md:border-b-0 max-md:border-foreground/15 max-md:bg-card';
 const PHONE_TAB_OFF = 'max-md:h-[37px] max-md:border-transparent max-md:bg-transparent';
-const PhoneTabFeet = () => (<>
-  <span className="md:hidden absolute -left-[10px] bottom-0 h-[10px] w-[10px] pointer-events-none" aria-hidden="true" style={{ background: 'radial-gradient(circle at 0 0, transparent 9.5px, var(--card) 10px)' }} />
-  <span className="md:hidden absolute -right-[10px] bottom-0 h-[10px] w-[10px] pointer-events-none" aria-hidden="true" style={{ background: 'radial-gradient(circle at 100% 0, transparent 9.5px, var(--card) 10px)' }} />
-</>);
+// The feet are drawn by FolderTabFeet (19 Nov 2026: with their outline, at
+// Lemonn's 11pt, and its corners at 12pt — see that file for the measuring).
+const PhoneTabFeet = () => <FolderTabFeet className="md:hidden" />;
 // A SCALPPRO PRICE LINE'S DASHES: 4pt on, 4pt off, in the element's own colour
 // (a CSS dashed border's dashes are whatever the browser makes them).
 const SCALP_DASH: React.CSSProperties = { backgroundImage: 'repeating-linear-gradient(to right, currentColor 0 4px, transparent 4px 8px)' };
@@ -4343,8 +4492,8 @@ function PinnedQuote({ priceEl, changeEl }: { priceEl: React.RefObject<HTMLSpanE
   }, [priceEl, changeEl]);
   return (
     <span data-pinned="quote" className="flex items-baseline gap-[6px] whitespace-nowrap tabular-nums">
-      <span className="text-[11px] leading-4 font-bold text-foreground">{q.p}</span>
-      <span className="text-[11px] leading-4 font-medium" style={{ color: q.color || undefined }}>{q.c}</span>
+      <span data-pinned="price" className="text-[11px] leading-4 font-bold text-foreground">{q.p}</span>
+      <span data-pinned="change" className="text-[11px] leading-4 font-medium" style={{ color: q.color || undefined }}>{q.c}</span>
     </span>
   );
 }
@@ -4579,7 +4728,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const [quickTradeEnabled, setQuickTradeEnabled] = useState(false);
   const quickTradeEnabledRef = useRef(quickTradeEnabled);
   const exitDragRefForQt = useRef<any>(null);       // filled once the drag refs exist (below)
-  const rrDraggingRefForQt = useRef<any>(null);
   useEffect(() => {
     quickTradeEnabledRef.current = quickTradeEnabled;
   }, [quickTradeEnabled]);
@@ -4593,7 +4741,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     // finger lifts. In split view both panes run this; the toast id makes it one.
     const iv = setInterval(() => {
       if (Date.now() < offAt) return;
-      if (exitDragRefForQt.current?.current || rrDraggingRefForQt.current?.current) return;
+      if (exitDragRefForQt.current?.current) return;
       clearInterval(iv);
       setQuickTradeEnabled(false);
       try { toast('Quick Trade switched off (1 minute)', { id: 'qt-auto-off' }); } catch (e) {}
@@ -5890,8 +6038,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // show me variety of options to draw on the chart… these are the things I
   // want." Its Drawing Tools sheet lists Horizontal Line, Trend Line, Rectangle,
   // Fibonacci Retracement, Long Position, Short Position and Text. The first is
-  // his own line, above, and the positions are the risk:reward box, both older
-  // than this; the other four are these. The shapes and their arithmetic are in
+  // his own line, above; the other six are these (the two positions since 18 Nov
+  // 2026 — before that they were one full-width risk:reward box per chart). The shapes and their arithmetic are in
   // lib/chartDrawings, where they are tested without a browser; what is here is
   // the part that needs a chart.
   //
@@ -5913,6 +6061,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const selectedDrawIdRef = useRef<number | null>(null);
   selectedDrawIdRef.current = selectedDrawId;
   const [drawToolPop, setDrawToolPop] = useState<null | 'color' | 'width'>(null);
+  // The position whose settings card is open (see PositionSettingsSheet).
+  const [posSettingsId, setPosSettingsId] = useState<number | null>(null);
   // The tool waiting for its taps ('hline' is the horizontal line).
   const [drawArm, setDrawArm] = useState<null | DrawingType | 'hline'>(null);
   const drawArmRef = useRef(drawArm);
@@ -5968,7 +6118,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const drawMoveEl = useRef<HTMLDivElement | null>(null);
   // The colour and thickness last given to a drawing of each kind are what the
   // next one of that kind starts with.
-  const drawDefaultsRef = useRef<Record<string, { color?: string; width?: number }> | null>(null);
+  const drawDefaultsRef = useRef<Record<string, { color?: string; width?: number; tColor?: string; sColor?: string; lColor?: string }> | null>(null);
   if (drawDefaultsRef.current === null) {
     try { const v = JSON.parse(localStorage.getItem('chartDrawingDefaults') || '{}'); drawDefaultsRef.current = v && typeof v === 'object' ? v : {}; }
     catch (e) { drawDefaultsRef.current = {}; }
@@ -6034,11 +6184,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     }
   };
 
-  // ===== Risk:Reward tool =====
-  // A measuring tool, deliberately inert: it never arms, orders or touches the
-  // exit rule. Placing one is tap-to-place like a drawing, and the box is local
-  // to the chart it was placed on.
-  const [rrArm, setRrArm] = useState<null | 'long' | 'short'>(null);
   // Desktop search collapses to an icon. Mobile is untouched — its search lives
   // in the bottom toolbar and stays the full pill.
   const [searchExpanded, setSearchExpanded] = useState(false);
@@ -6112,20 +6257,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // already reads closed and the handler opened a fresh card. The open/closed
   // flag alone cannot tell the two apart; the timestamp of the dismissal can.
   const triggerBoxClosedAtRef = useRef(0);
-
-  // Capital deployed at the R:R entry, in rupees. When set, the SL and TP tags
-  // also show the rupee loss and profit: P&L at a price P on capital C entered
-  // at E is C × (P − E) / E, so the tags are C × risk% and C × reward%. That is
-  // the honest figure for "if I put this much in": no lot rounding, because the
-  // amount is what Martin types, not a lot count. Persisted, since the number he
-  // trades with changes rarely; read through a ref because the canvas draw loop
-  // is built once and cannot see state.
-  const [rrCapital, setRrCapital] = useState<number>(() => {
-    try { const v = Number(localStorage.getItem('rrCapital')); return Number.isFinite(v) && v > 0 ? v : 0; } catch (e) { return 0; }
-  });
-  const rrCapitalRef = useRef(rrCapital);
-  rrCapitalRef.current = rrCapital;
-  useEffect(() => { try { localStorage.setItem('rrCapital', String(rrCapital || 0)); } catch (e) {} }, [rrCapital]);
 
   const [rrMenuOpen, setRrMenuOpen] = useState(false);
   // THE PAGE STAYS STILL WHILE A CARD OF THE BOTTOM ROW IS UP (18 Nov 2026).
@@ -6238,18 +6369,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       document.removeEventListener('touchstart', onDown);
     };
   }, [rrMenuOpen]);
-  const [rrBox, setRrBox] = useState<null | { kind: 'long' | 'short'; entry: number; stop: number; target: number }>(null);
-  // While an edge is being dragged the REF is the source of truth, not state —
-  // see the move handler. Syncing from state on every render would clobber the
-  // in-flight value, and during market hours ticks re-render constantly.
-  // A dedicated flag rather than draggingLineRef, which is declared far below
-  // this line and would be in its temporal dead zone here.
-  const rrDraggingRef = useRef(false);
-  rrDraggingRefForQt.current = rrDraggingRef;
-  const rrBoxRef = useRef(rrBox);
-  if (!rrDraggingRef.current) rrBoxRef.current = rrBox;
-  const rrArmRef = useRef(rrArm);
-  rrArmRef.current = rrArm;
   // 10 / 20 preserves the levels this terminal has always defaulted to, so
   // nothing changes for a trade taken before these are ever opened.
   const [tpSlDefaults, setTpSlDefaults] = useState<TpSlDefaults>(() => {
@@ -6318,7 +6437,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // storage either way, and is on the chart the next time it is built.
   // Said under a name of this chart's own, and unsaid when the chart goes.
   const busyId = useRef(`chart-${Math.random().toString(36).slice(2)}`).current;
-  const chartBusy = chartOverlayOpen || !!drawArm || !!rrArm || !!rrBox || quickTradeEnabled;
+  const chartBusy = chartOverlayOpen || !!drawArm || quickTradeEnabled;
   useEffect(() => { setChartBusy(busyId, chartBusy); return () => setChartBusy(busyId, false); }, [chartBusy, busyId]);
 
   const logicalRangeRef = useRef<any>(null);
@@ -6693,89 +6812,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // Document level also keeps the drag alive if a finger strays off the chart.
   useEffect(() => {
     const onTouchMove = (ev: TouchEvent) => {
-      if ((draggingLineRef.current || rrDraggingRef.current || exitDragRef.current) && ev.cancelable) ev.preventDefault();
+      if ((draggingLineRef.current || exitDragRef.current) && ev.cancelable) ev.preventDefault();
     };
     document.addEventListener('touchmove', onTouchMove, { passive: false });
     return () => document.removeEventListener('touchmove', onTouchMove);
   }, []);
 
-  // R:R drag runs on its OWN document-level listeners rather than the chart's
-  // React handlers. Two concrete failures forced this:
-  //   * onPointerLeave is wired to the release handler, so the instant a finger
-  //     crossed the chart edge — trivial when dragging toward the top or bottom —
-  //     the drag ENDED mid-gesture. The line froze, and because the release path
-  //     had already cleared the dragging flag, the next render resynced the ref
-  //     from stale state and the box jumped back. That is the snap-back.
-  //   * the chart's handleScroll/handleScale were switched off at grab and never
-  //     restored on this path, so panning stayed dead after the first drag.
-  // Document listeners are immune to element boundaries and end only on a real
-  // pointerup or pointercancel.
-  const rrDragRef = useRef<{ edge: 'stop' | 'target' | 'entry'; grabOffset: number } | null>(null);
-  const startRrDrag = () => {
-    const move = (ev: PointerEvent) => {
-      const cont = chartContainerRef.current;
-      const series = mainSeriesRef.current;
-      const d = rrDragRef.current;
-      if (!cont || !series || !d) return;
-      const rect = cont.getBoundingClientRect();
-      const raw = series.coordinateToPrice(ev.clientY - rect.top + d.grabOffset);
-      if (raw === null) return;
-      const price = snapTick(raw);
-      const cur = rrBoxRef.current;
-      if (!cur) return;
-
-      if (d.edge === 'entry') {
-        // Dragging entry moves the WHOLE box: stop and target keep their exact
-        // distances, so the ratio is unchanged and you are re-pricing the same
-        // idea at a different entry rather than reshaping it.
-        const delta = price - cur.entry;
-        if (delta === 0) return;
-        rrBoxRef.current = {
-          ...cur,
-          entry: price,
-          stop: +(cur.stop + delta).toFixed(2),
-          target: +(cur.target + delta).toFixed(2),
-        };
-        return;
-      }
-
-      // Stop and target may not cross entry — a stop on the wrong side of it is
-      // not a stop, and crossing would silently invert the trade's direction and
-      // print a meaningless ratio. Held one tick clear so risk can never be zero,
-      // which would divide by zero in the ratio.
-      const long = cur.kind === 'long';
-      let next = price;
-      if (d.edge === 'stop') {
-        next = long ? Math.min(price, cur.entry - TICK) : Math.max(price, cur.entry + TICK);
-      } else {
-        next = long ? Math.max(price, cur.entry + TICK) : Math.min(price, cur.entry - TICK);
-      }
-      next = +next.toFixed(2);
-      if (cur[d.edge] !== next) rrBoxRef.current = { ...cur, [d.edge]: next };
-    };
-    const end = () => {
-      document.removeEventListener('pointermove', move);
-      document.removeEventListener('pointerup', end);
-      document.removeEventListener('pointercancel', end);
-      rrDragRef.current = null;
-      rrDraggingRef.current = false;
-      try {
-        mainChartRef.current?.applyOptions({
-          handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
-          handleScale: { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
-        });
-      } catch (e) {}
-      try { if (chartContainerRef.current) chartContainerRef.current.style.touchAction = ''; } catch (e) {}
-      const fb = rrBoxRef.current;
-      setRrBox(fb ? { ...fb } : fb);
-    };
-    document.addEventListener('pointermove', move);
-    document.addEventListener('pointerup', end);
-    document.addEventListener('pointercancel', end);
-  };
-
-  // The SL/TP lines and their spot mirrors now use the SAME document-listener
-  // drag as the R:R edges, for the same two reasons that broke those: the
+  // The SL/TP lines and their spot mirrors use a document-listener drag (the
+  // old R:R box's edges had the same one), for two reasons that broke it: the
   // chart's onPointerLeave is wired to the release handler, so crossing the pane
   // edge mid-gesture ended the drag and left the line stranded; and a drag that
   // ends outside the element never reaches the React handler at all. Document
@@ -7847,28 +7891,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     // the only handle; it starts the same drag this did, behind the same Quick
     // Trade switch. A press on the line itself is an ordinary press on the chart.
 
-    // R:R edges. Checked before manual lines so a box sitting on top of a drawing
-    // still grabs. Entry is checked LAST: it sits between the other two, and when
-    // the box is tight the grab zones overlap — testing stop and target first
-    // means the edge you are aiming at wins rather than the whole box sliding.
-    if (rrBoxRef.current) {
-      const box = rrBoxRef.current;
-      for (const edge of ['stop', 'target', 'entry'] as const) {
-        const edgeY = mainSeriesRef.current.priceToCoordinate(box[edge]);
-        if (edgeY !== null && Math.abs(edgeY - y) < 22) {
-          // Deliberately does NOT set draggingLineRef: that ref is read by the
-          // chart's own pointer handlers, including the pointerleave-bound release
-          // that was cutting this drag short.
-          rrDraggingRef.current = true;
-          rrDragRef.current = { edge, grabOffset: edgeY - y };
-          mainChartRef.current.applyOptions({ handleScroll: false, handleScale: false });
-          beginLineDrag(e);
-          startRrDrag();
-          return;
-        }
-      }
-    }
-
     // His own lines. With a MOUSE any of them can be picked up where the pointer
     // is. With a FINGER only the selected one can: an unselected line used to
     // take the press too, so a swipe to scroll that began near any line moved
@@ -8246,6 +8268,63 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     drawDefaultsRef.current = { ...(drawDefaultsRef.current || {}), [type]: next };
     try { localStorage.setItem('chartDrawingDefaults', JSON.stringify(drawDefaultsRef.current)); } catch (e) {}
   };
+  // A NEW POSITION'S LOOK AND SIZE: the colours last applied to one of its kind,
+  // and the Lot Size last applied on this index (from its settings card) — else
+  // one lot of the option on screen, else one lot of the index's options (65 for
+  // NIFTY, as his own position card shows; Bank Nifty 30 and SENSEX 20 are the
+  // exchanges' lots since their last revision). Whatever he applies is kept.
+  const posStyleFor = (kind: 'long' | 'short') => {
+    const d: any = drawDefaultsRef.current?.[kind] || {};
+    const c = (v: any, def: string) => (typeof v === 'string' && v ? v : def);
+    return { color: c(d.color, POS_COLORS.line), tColor: c(d.tColor, POS_COLORS.target), sColor: c(d.sColor, POS_COLORS.stop), lColor: c(d.lColor, POS_COLORS.label) };
+  };
+  const posRoot = (): string => {
+    const ts = String(selectedInstrument?.tradingsymbol || '').toUpperCase();
+    if (isOptionViewRef.current && ts) return /^BANKNIFTY/.test(ts) ? 'BANKNIFTY' : /^SENSEX/.test(ts) ? 'SENSEX' : /^NIFTY/.test(ts) ? 'NIFTY' : ts.replace(/\d.*$/, '');
+    return String(underlying);
+  };
+  const posQtyFor = (): number => {
+    const root = posRoot();
+    try { const v = Number(JSON.parse(localStorage.getItem('positionQty') || '{}')?.[root]); if (Number.isInteger(v) && v >= 1) return v; } catch (e) {}
+    const lot = Number((selectedInstrument as any)?.lot_size);
+    if (isOptionViewRef.current && Number.isInteger(lot) && lot >= 1) return lot;
+    return ({ NIFTY: 65, BANKNIFTY: 30, SENSEX: 20 } as Record<string, number>)[root] || 1;
+  };
+  const rememberPosition = (kind: 'long' | 'short', v: { qty: number; color: string; tColor: string; sColor: string; lColor: string }) => {
+    drawDefaultsRef.current = { ...(drawDefaultsRef.current || {}), [kind]: { ...(drawDefaultsRef.current?.[kind] || {}), color: v.color, tColor: v.tColor, sColor: v.sColor, lColor: v.lColor } };
+    try { localStorage.setItem('chartDrawingDefaults', JSON.stringify(drawDefaultsRef.current)); } catch (e) {}
+    try { const q = JSON.parse(localStorage.getItem('positionQty') || '{}') || {}; q[posRoot()] = v.qty; localStorage.setItem('positionQty', JSON.stringify(q)); } catch (e) {}
+  };
+
+  // THE CANDLES A POSITION PLAYS ITS TRADE OUT ON: the chart's own, read once for
+  // each set of candles (the same key as the ruler's, above), and the forming
+  // candle read again on every frame — it changes with every tick under that key.
+  const drawBarsRef = useRef<{ key: string; bars: PosBar[] }>({ key: '', bars: [] });
+  const drawBars = (): PosBar[] => {
+    const chart = mainChartRef.current, ser = mainSeriesRef.current;
+    if (!chart || !ser) return [];
+    const conv = (r: any): PosBar | null => {
+      if (!r) return null;
+      const t = Number(r.time), hi = Number(r.high ?? r.value), lo = Number(r.low ?? r.value), cl = Number(r.close ?? r.value);
+      return Number.isFinite(t) && Number.isFinite(hi) && Number.isFinite(lo) && Number.isFinite(cl) ? { time: t, high: hi, low: lo, close: cl } : null;
+    };
+    try {
+      const key = drawTimesRef.current.key;
+      if (!key) return [];
+      if (drawBarsRef.current.key !== key) {
+        const bars: PosBar[] = [];
+        for (const r of (ser.data() || []) as any[]) { const b = conv(r); if (b) bars.push(b); }
+        drawBarsRef.current = { key, bars };
+      }
+      const bars = drawBarsRef.current.bars;
+      const lastIdx = chart.timeScale().timeToIndex(4e10 as any, true);
+      if (bars.length && lastIdx !== null) {
+        const b = conv(ser.dataByIndex(lastIdx, -1));
+        if (b && b.time === bars[bars.length - 1].time) bars[bars.length - 1] = b;
+      }
+      return bars;
+    } catch (e) { return []; }
+  };
 
   // PAINTED ON THE R:R CANVAS, by its frame (see "Dedicated R:R renderer"). One
   // more canvas the size of the chart is several megabytes on a phone, and that
@@ -8265,6 +8344,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     const m = drawMapper();
     if (!m) return;
     const font = drawFontRef.current;
+    // The selected position's three prices, on the price axis: drawn last, past the plot's clip.
+    const axisTags: { y: number; text: string; bg: string }[] = [];
     ctx.save();
     try {
       ctx.beginPath(); ctx.rect(0, 0, Math.max(0, m.plotW), ch); ctx.clip();
@@ -8313,8 +8394,68 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         }
         return g;
       };
+      // A LONG OR SHORT POSITION (see POSITIONS in lib/chartDrawings), as
+      // TradingView draws one: the box between its two sides, the target zone and
+      // the stop zone, the trade played out on the candles inside it — shaded
+      // from where it filled to where it closed (or is now), with a dashed line
+      // between the two — the entry line, and four tags: the target and its
+      // profit outside the target edge, the stop and its loss outside the stop
+      // edge, and the P&L and the reward/risk at the entry.
+      const bars = list.some((d) => d.token === tok && isPositionType(d.type)) ? drawBars() : [];
+      // A tag is centred on the box, but kept inside the plot: on a phone the box
+      // is narrower than its tags, and one near the prices was cut off by them.
+      const tag = (text: string, cx: number, cy: number, bg: string, fg: string, out: DrawRect[]) => {
+        const w = ctx.measureText(text).width + 14, h = 18, y = cy - h / 2, r = 4;
+        const x = Math.max(2, Math.min(cx - w / 2, m.plotW - w - 2));
+        cx = x + w / 2;
+        ctx.fillStyle = bg;
+        ctx.beginPath();
+        ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = fg; ctx.fillText(text, cx, cy + 0.5);
+        out.push({ x, y, w, h });
+      };
+      const paintPosition = (d: Drawing): DrawGeom | null => {
+        const xa = m.xOf(d.a.t), xb = m.xOf(d.b.t), yE = m.yOf(d.a.p), yT = m.yOf(Number(d.target)), yS = m.yOf(Number(d.stop));
+        if (xa === null || xb === null || yE === null || yT === null || yS === null) return null;
+        const L = Math.min(xa, xb), R = Math.max(xa, xb), W = Math.max(1, R - L);
+        const tc = d.tColor || POS_COLORS.target, sc = d.sColor || POS_COLORS.stop;
+        const lc = d.color || POS_COLORS.line, fg = d.lColor || POS_COLORS.label;
+        const tTop = Math.min(yT, yE), tH = Math.abs(yE - yT), sTop = Math.min(yS, yE), sH = Math.abs(yS - yE);
+        ctx.setLineDash([]); ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.2;
+        ctx.fillStyle = tc; ctx.fillRect(L, tTop, W, tH);
+        ctx.fillStyle = sc; ctx.fillRect(L, sTop, W, sH);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = tc; ctx.strokeRect(L, tTop, W, tH);
+        ctx.strokeStyle = sc; ctx.strokeRect(L, sTop, W, sH);
+        const o = positionOutcome(d, bars, m.step);
+        if (o.filled) {
+          const xf = m.xOf(bars[o.fillIndex].time), xe = m.xOf(bars[o.exitIndex].time), ye = m.yOf(o.exitPrice);
+          if (xf !== null && xe !== null && ye !== null) {
+            ctx.globalAlpha = 0.3; ctx.fillStyle = o.pnl >= 0 ? tc : sc;
+            ctx.fillRect(Math.min(xf, xe), Math.min(yE, ye), Math.max(2, Math.abs(xe - xf)), Math.abs(ye - yE));
+            ctx.globalAlpha = 1; ctx.strokeStyle = lc; ctx.setLineDash([4, 4]);
+            ctx.beginPath(); ctx.moveTo(xf, yE); ctx.lineTo(xe, ye); ctx.stroke();
+            ctx.setLineDash([]);
+          }
+        }
+        ctx.strokeStyle = lc; ctx.beginPath(); ctx.moveTo(L, yE); ctx.lineTo(R, yE); ctx.stroke();
+        const tx = positionTexts(d, o);
+        ctx.font = `600 11px ${font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        const cx = (L + R) / 2, boxes: DrawRect[] = [];
+        tag(tx.target, cx, yT < yE ? yT - 12 : yT + 12, tc, fg, boxes);
+        tag(tx.stop, cx, yS > yE ? yS + 12 : yS - 12, sc, fg, boxes);
+        tag(tx.pnl, cx, yE - 11, 'rgba(15, 17, 23, 0.72)', fg, boxes);
+        tag(tx.rr, cx, yE + 11, 'rgba(15, 17, 23, 0.72)', fg, boxes);
+        if (d.id === selectedDrawIdRef.current) {
+          axisTags.push({ y: yT, text: Number(d.target).toFixed(2), bg: tc }, { y: yE, text: d.a.p.toFixed(2), bg: '#475569' }, { y: yS, text: Number(d.stop).toFixed(2), bg: sc });
+        }
+        return { ax: xa, ay: yT, bx: xb, by: yS, ys: [yE], boxes };
+      };
       for (const d of list) {
         if (d.token !== tok) continue;
+        if (isPositionType(d.type)) { const pg = paintPosition(d); if (pg) geoms.set(d.id, pg); continue; }
         const ax = m.xOf(d.a.t), ay = m.yOf(d.a.p), bx = m.xOf(d.b.t), by = m.yOf(d.b.p);
         if (ax === null || ay === null || bx === null || by === null) continue;
         const g = paint(d.type, ax, ay, bx, by, d.a.p, d.b.p, d.color, Math.max(1, Math.min(4, Number(d.width) || 1)), d.text);
@@ -8329,7 +8470,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       }
       // A drawing still being placed: its first point, and on a desktop a
       // preview out to the pointer. (A finger has no pointer to preview to.)
-      if (first && arm && arm !== 'hline' && arm !== 'text') {
+      if (first && arm && arm !== 'hline' && arm !== 'text' && !isPositionType(arm)) {
         const fx = m.xOf(first.t), fy = m.yOf(first.p);
         if (fx !== null && fy !== null) {
           const st = drawStyleFor(arm);
@@ -8345,6 +8486,18 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         }
       }
     } finally { ctx.restore(); }
+    if (axisTags.length) {
+      ctx.save();
+      try {
+        const x = Math.max(0, m.plotW) + 1, w = Math.max(0, cw - x);
+        ctx.font = `600 11px ${font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        for (const a of axisTags) {
+          if (a.y < -9 || a.y > m.plotH + 9) continue;
+          ctx.fillStyle = a.bg; ctx.fillRect(x, a.y - 9, w, 18);
+          ctx.fillStyle = '#ffffff'; ctx.fillText(a.text, x + w / 2, a.y + 0.5);
+        }
+      } finally { ctx.restore(); }
+    }
   };
 
   // Which drawing, if any, is under a tap — the newest first, as it is painted
@@ -8391,6 +8544,37 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       setDrawArm(null);
       return;
     }
+    if (isPositionType(arm)) {
+      // ONE TAP: the entry where the finger is, the box's left side on that
+      // candle and its right side some way on. The stop is as far as the last
+      // fourteen candles' average range — sized to how this chart is moving, as
+      // the old box always was — and the target twice that.
+      const cds = chartDataRef.current?.candles || [];
+      const recent = cds.slice(-14);
+      const avg = recent.length
+        ? recent.reduce((acc: number, c: any) => acc + Math.abs((c.high ?? 0) - (c.low ?? 0)), 0) / recent.length
+        : Math.abs(pt.p) * 0.003;
+      const risk = Math.max(TICK, +snapTick(Math.max(avg, Math.abs(pt.p) * 0.0005) || 1).toFixed(2));
+      const xs = m.xOf(pt.t) ?? x;
+      const wpx = Math.max(48, Math.min(m.plotW * 0.4, m.plotW - xs - 6));
+      const i0 = timeToIndex(m.times, pt.t, m.step);
+      const tb = i0 === null ? null : indexToTime(m.times, i0 + Math.max(4, Math.round(wpx / m.sp)), m.step);
+      if (tb === null) return;
+      const long = arm === 'long';
+      const st = posStyleFor(arm);
+      const d: Drawing = {
+        id: Date.now() + Math.random(), type: arm, token: tok,
+        a: { t: pt.t, p: pt.p }, b: { t: tb, p: pt.p },
+        color: st.color, width: 1, tColor: st.tColor, sColor: st.sColor, lColor: st.lColor,
+        target: +(long ? pt.p + 2 * risk : pt.p - 2 * risk).toFixed(2),
+        stop: +(long ? pt.p - risk : pt.p + risk).toFixed(2),
+        qty: posQtyFor(),
+      };
+      setDrawings(prev => [...prev, d].slice(-DRAW_MAX));
+      setSelectedDrawId(d.id); setDrawToolPop(null);
+      setDrawArm(null);
+      return;
+    }
     if (arm === 'text') { setDrawTextEdit({ id: null, at: pt, token: tok, value: '' }); setDrawArm(null); return; }
     const first = drawFirstRef.current && drawFirstRef.current.token === tok ? drawFirstRef.current : null;
     if (!first) { drawFirstRef.current = { ...pt, token: tok }; setDrawFirstSet(true); return; }
@@ -8406,9 +8590,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   useEffect(() => { drawFirstRef.current = null; setDrawFirstSet(false); }, [drawArm]);
   // A tool being placed has the chart to itself: nothing stays selected under it.
   useEffect(() => {
-    if (!drawArm && !rrArm) return;
+    if (!drawArm) return;
     setSelectedLineId(null); setLineToolPop(null); setSelectedDrawId(null); setDrawToolPop(null);
-  }, [drawArm, rrArm]);
+  }, [drawArm]);
 
   // EVERY DRAG OF A DRAWING STARTS ON ONE OF ITS HANDLES — its points, and a
   // round one in the middle that moves the whole of it — and never on its body.
@@ -8496,12 +8680,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         const d = drawingsRef.current.find((x) => x.id === selectedDrawIdRef.current);
         const m = d ? drawMapper() : null;
         const an = d && m ? anchorsOf(d) : [];
-        for (let i = 0; i < 4; i++) {
+        for (let i = 0; i < 6; i++) {
           const a = an[i];
           place(drawAnchorEls.current[i], a && m ? m.xOf(a.t) : null, a && m ? m.yOf(a.p) : null, m);
         }
         let mx: number | null = null, my: number | null = null;
-        if (d && m && d.type !== 'text') {
+        // (A position is moved from its tool bar, not from a handle in its middle,
+        // where its P&L and reward/risk tags are.)
+        if (d && m && d.type !== 'text' && !isPositionType(d.type)) {
           const ax = m.xOf(d.a.t), ay = m.yOf(d.a.p), bx = m.xOf(d.b.t), by = m.yOf(d.b.p);
           if (ax !== null && ay !== null && bx !== null && by !== null) {
             mx = (ax + bx) / 2; my = (ay + by) / 2;
@@ -10926,8 +11112,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // Drawn things (R:R boxes, lines) stay with the chart they were drawn on.
   const paneSync: Record<string, [any, (v: any) => void]> = {
     quickTradeEnabled: [quickTradeEnabled, setQuickTradeEnabled], trailTpOn: [trailTpOn, setTrailTpOn],
-    rrArm: [rrArm, setRrArm], rrCapital: [rrCapital, setRrCapital],
-    // A drawing tool is armed on both halves, like the R:R tool: the button is
+    // A drawing tool (a position too) is armed on both halves: the button is
     // drawn once, and the next tap on EITHER chart is where the drawing goes.
     drawArm: [drawArm, setDrawArm],
   };
@@ -11024,7 +11209,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       try { window.dispatchEvent(new CustomEvent('terminal:pane-sync', { detail: { from: paneRole, key: k, value: paneSync[k][0] } })); } catch (e) {}
     }
   });
-  const [peerRrBox, setPeerRrBox] = useState(false);
   useEffect(() => {
     if (!isPane) return;
     const onSync = (e: any) => {
@@ -11037,8 +11221,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     const onCmd = (e: any) => {
       const d = e?.detail; if (!d || d.from === paneRole) return;
       if (d.cmd === 'refresh') { try { reloadChartRef.current(); } catch (err) {} }
-      else if (d.cmd === 'rr-clear') { setRrBox(null); setRrArm(null); }
-      else if (d.cmd === 'rr-box') setPeerRrBox(!!d.value);
     };
     window.addEventListener('terminal:pane-sync', onSync as any);
     window.addEventListener('terminal:pane-cmd', onCmd as any);
@@ -11048,7 +11230,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     if (!isPane) return;
     try { window.dispatchEvent(new CustomEvent('terminal:pane-cmd', { detail: { from: paneRole, cmd, value } })); } catch (e) {}
   };
-  useEffect(() => { paneCmd('rr-box', !!rrBox); }, [!!rrBox]);
   // The shared toolbar buttons live on the option pane while both are on screen;
   // the index half keeps only its own timeframe and Indicators.
   const sharedHidden = isSpotPane && split ? 'md:hidden' : '';
@@ -12951,24 +13132,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           // near a line with the tool armed selected the line and left the tool
           // waiting.)
           if (drawArmRef.current) { drawTapRef.current(param.point.x, y); return; }
-          if (rrArmRef.current && price !== null) {
-            const kind = rrArmRef.current;
-            // Stop distance from recent range rather than a fixed percentage, so
-            // the box is sized to how this instrument is actually moving. Target
-            // is placed at 2R, which is what the ratio readout starts from.
-            const cds = chartDataRef.current?.candles || [];
-            const recent = cds.slice(-14);
-            const avgRange = recent.length
-              ? recent.reduce((a: number, c: any) => a + Math.abs((c.high ?? 0) - (c.low ?? 0)), 0) / recent.length
-              : Math.abs(price) * 0.003;
-            const risk = Math.max(avgRange, Math.abs(price) * 0.0005) || 1;
-            setRrBox(kind === 'long'
-              ? { kind, entry: price, stop: price - risk, target: price + risk * 2 }
-              : { kind, entry: price, stop: price + risk, target: price - risk * 2 });
-            setRrArm(null);
-            return;
-          }
-
           // HIS OWN LINES AND DRAWINGS come next. A tap on one selects it (its
           // handles and tools appear); with one selected, a tap anywhere else
           // only lets go of it. Both END the tap here: it must not go on to be
@@ -13817,57 +13980,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, cw, ch);
 
-        // His drawings share this canvas and this frame (see DRAWINGS), under the box.
+        // His drawings, positions among them, share this canvas and this frame (see DRAWINGS).
         try { paintDrawingsRef.current(ctx, cw, ch); } catch (e) { /* a bad frame must not stop the box */ }
 
-        const rrB = rrBoxRef.current;
-        if (!rrB) return;
-        const yE = series.priceToCoordinate(rrB.entry);
-        const yS = series.priceToCoordinate(rrB.stop);
-        const yT = series.priceToCoordinate(rrB.target);
-        if (yE === null || yS === null || yT === null) return;
-        const priceScaleWidth = mainChartRef.current
-          ? mainChartRef.current.priceScale('right').width() : 0;
-        const x0 = 0, x1 = Math.max(0, cw - priceScaleWidth);
-
-        ctx.fillStyle = 'rgba(244,63,94,0.14)';
-        ctx.fillRect(x0, Math.min(yE, yS), x1 - x0, Math.abs(yS - yE));
-        ctx.fillStyle = 'rgba(16,185,129,0.14)';
-        ctx.fillRect(x0, Math.min(yE, yT), x1 - x0, Math.abs(yT - yE));
-        const edge = (yy: number, color: string) => {
-          ctx.beginPath(); ctx.setLineDash([]); ctx.strokeStyle = color; ctx.lineWidth = 1.5;
-          ctx.moveTo(x0, yy); ctx.lineTo(x1, yy); ctx.stroke();
-        };
-        edge(yS, 'rgba(244,63,94,0.95)');
-        edge(yT, 'rgba(16,185,129,0.95)');
-        edge(yE, 'rgba(226,232,240,0.9)');
-        const risk = Math.abs(rrB.entry - rrB.stop);
-        const reward = Math.abs(rrB.target - rrB.entry);
-        const ratio = risk > 0 ? reward / risk : 0;
-        const pct = (d: number) => (rrB.entry > 0 ? ` (${(d / rrB.entry * 100).toFixed(1)}%)` : '');
-        // Rupee P&L on the deployed capital, when one has been entered.
-        const cap = rrCapitalRef.current;
-        const inr = (d: number) => {
-          if (!(cap > 0) || !(rrB.entry > 0)) return '';
-          const amt = cap * d / rrB.entry;
-          return `  ${amt < 0 ? '−' : ''}₹${Math.abs(Math.round(amt)).toLocaleString('en-IN')}`;
-        };
-        const tag = (yy: number, text: string, bg: string) => {
-          ctx.font = `bold 10px ${drawFontRef.current}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-          const w = ctx.measureText(text).width + 10;
-          ctx.fillStyle = bg; ctx.fillRect(6, yy - 8, w, 16);
-          ctx.fillStyle = '#0b0f14'; ctx.fillText(text, 11, yy);
-        };
-        tag(yE, `${rrB.kind === 'long' ? 'LONG' : 'SHORT'} ${rrB.entry.toFixed(2)}`, 'rgba(226,232,240,0.95)');
-        tag(yS, `SL ${rrB.stop.toFixed(2)}  −${risk.toFixed(2)}${pct(risk)}${inr(-risk)}`, 'rgba(244,63,94,0.95)');
-        tag(yT, `TP ${rrB.target.toFixed(2)}  +${reward.toFixed(2)}${pct(reward)}${inr(reward)}`, 'rgba(16,185,129,0.95)');
-        const rrText = `R:R  1 : ${ratio.toFixed(2)}`;
-        ctx.font = `bold 11px ${drawFontRef.current}`; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-        const rw = ctx.measureText(rrText).width + 12;
-        const ry = (Math.min(yS, yT) + Math.max(yS, yT)) / 2;
-        ctx.fillStyle = ratio >= 2 ? 'rgba(16,185,129,0.95)' : ratio >= 1 ? 'rgba(234,179,8,0.95)' : 'rgba(244,63,94,0.95)';
-        ctx.fillRect(x1 - rw - 6, ry - 9, rw, 18);
-        ctx.fillStyle = '#0b0f14'; ctx.fillText(rrText, x1 - 12, ry);
       } catch (e) { /* disposed mid-frame */ }
     };
     drawRR();
@@ -15333,7 +15448,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             // states the price a tap would arm (and states it rounded to the tick,
             // which the raw axis figure beside it contradicted by a few paise).
             const plotBottomP = ch - (mainChartRef.current.timeScale().height() || 26);
-            const pillOn = !!(isOptionViewRef.current && quickTradeEnabledRef.current && !rrArmRef.current
+            const pillOn = !!(isOptionViewRef.current && quickTradeEnabledRef.current && !drawArmRef.current
               && !triggerBoxOpenRef.current && !isReferenceChartRef.current
               && crossX >= 0 && crossX < x && crossY <= plotBottomP && Number.isFinite(crossPrice));
 
@@ -15690,25 +15805,112 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     return () => { settle.forEach(clearTimeout); clearInterval(iv); try { ro?.disconnect(); } catch (e) {} window.removeEventListener('resize', set); root.style.removeProperty('--chart-bar-h'); root.style.removeProperty('--chart-row-h'); };
   }, [barRowShown]);
 
-  // HOW FAR THE PAGE IS SCROLLED, as two yes / no answers (phone): off its rest
-  // position at all (the fixed buttons then show their top line), and far
-  // enough that the header and the price have gone off the top (the small
-  // header then comes down, see data-layout="pinned-head"). Kept as booleans so
-  // that scrolling re-renders this page twice, not on every frame.
+  // HOW FAR THE PAGE IS SCROLLED (phone): off its rest position at all, as a
+  // yes / no — the fixed buttons then show their top line, and the Market
+  // Context tab steps aside. Kept as a boolean so that scrolling re-renders this
+  // page twice, not on every frame.
   const [pageScrolled, setPageScrolled] = useState(false);
-  const [headPinned, setHeadPinned] = useState(false);
   useEffect(() => {
     if (isPane || scalp) return;
     const on = () => {
       if (window.innerWidth >= 768) return;
-      const y = window.scrollY || 0;
-      setPageScrolled(y > 1);
-      setHeadPinned(y > 96);
+      setPageScrolled((window.scrollY || 0) > 1);
     };
     on();
     window.addEventListener('scroll', on, { passive: true });
     return () => window.removeEventListener('scroll', on);
   }, [isPane, scalp]);
+
+  // THE NAME AND THE PRICE GLIDE INTO THE SMALL HEADER (19 Nov 2026). Martin,
+  // with a recording of Lemonn's chart page: "Check how the nifty heading moves
+  // to the center when I scroll down. I want this exact movement in my app as
+  // well." Lemonn's title does not jump: over the first stretch of the scroll
+  // the name and the price slide from where they rest — at the left, the price
+  // large — to the middle of the bar at the top, shrinking as they go, the
+  // whole way in step with the finger; scrolled back, they go back the same
+  // way, and the day's change in points drops off half way. Here the small
+  // header (data-layout="pinned-head") used to appear whole once the page had
+  // scrolled 96pt.
+  // Now it is always there, see-through at rest. As the page scrolls through
+  // its first POS_COLLAPSE points, three copies — the open tab's name, the
+  // price, the change — are drawn on top, each placed between where its own
+  // original is at that moment (moving up with the page) and where its place in
+  // the small header is, by how far through the stretch the scroll is: position,
+  // font size, weight, line height and letter spacing all in between (Manrope is
+  // a variable font, so the weight can be 650 on the way). The originals step
+  // aside while their copies are up, and the small header's own words appear
+  // when the copies arrive, so there is never a jump from one to the other. The
+  // header's background and back arrow fade in over the first 40% of the
+  // stretch, closing over the tabs as they rise; it takes taps only once the
+  // words are in it. All of it is written straight onto the elements from a
+  // scroll handler, one frame at a time: nothing re-renders as the finger moves.
+  const POS_COLLAPSE = 84;
+  const pinRef = useRef<HTMLDivElement | null>(null);
+  const pinBgRef = useRef<HTMLDivElement | null>(null);
+  const pinBackRef = useRef<HTMLButtonElement | null>(null);
+  const flyRefs = useRef<(HTMLSpanElement | null)[]>([null, null, null]);
+  useEffect(() => {
+    if (isPane || scalp || isFocusedChart) return;
+    let raf = 0;
+    type Look = { ff: string; fs: number; fw: number; lh: number; ls: number };
+    const look = (el: Element): Look => {
+      const c = getComputedStyle(el);
+      const fs = parseFloat(c.fontSize) || 12;
+      const lh = parseFloat(c.lineHeight);
+      return { ff: c.fontFamily, fs, fw: parseFloat(c.fontWeight) || 400, lh: Number.isFinite(lh) ? lh : fs * 1.25, ls: parseFloat(c.letterSpacing) || 0 };
+    };
+    const mix = (a: number, b: number, t: number) => a + (b - a) * t;
+    const frame = () => {
+      raf = 0;
+      const pin = pinRef.current, bg = pinBgRef.current, back = pinBackRef.current;
+      if (!pin) return;
+      if (window.innerWidth >= 768) return;
+      const t = Math.max(0, Math.min(1, (window.scrollY || 0) / POS_COLLAPSE));
+      const shade = Math.min(1, t / 0.4);
+      if (bg) bg.style.opacity = String(shade);
+      if (back) back.style.opacity = String(shade);
+      pin.style.pointerEvents = t >= 1 ? 'auto' : 'none';
+      const ends = [pin.querySelector('[data-pinned="name"]'), pin.querySelector('[data-pinned="price"]'), pin.querySelector('[data-pinned="change"]')] as (HTMLElement | null)[];
+      const starts = [document.querySelector('[data-head-tab="on"] [data-head="name"]'), headPriceRef.current, headChangeRef.current] as (HTMLElement | null)[];
+      const gliding = t > 0 && t < 1;
+      for (let i = 0; i < 3; i++) {
+        const st = starts[i], en = ends[i], fly = flyRefs.current[i];
+        if (en) en.style.opacity = !st || t >= 1 ? (st ? '1' : String(shade)) : '0';
+        if (st) st.style.visibility = gliding ? 'hidden' : '';
+        if (!fly) continue;
+        if (!gliding || !st || !en) { if (fly.style.display !== 'none') fly.style.display = 'none'; continue; }
+        const a = look(st), b = look(en);
+        const ra = st.getBoundingClientRect(), rb = en.getBoundingClientRect();
+        const fs = mix(a.fs, b.fs, t), lh = mix(a.lh, b.lh, t);
+        const x = mix(ra.left, rb.left, t);
+        const cy = mix(ra.top + ra.height / 2, rb.top + rb.height / 2, t);
+        // The change loses its points half way, as Lemonn's does; the colour is the original's.
+        fly.textContent = i === 2 && t >= 0.5 ? (en.textContent || '') : (st.textContent || '');
+        if (i === 2) fly.style.color = st.style.color || '';
+        fly.style.fontFamily = a.ff;
+        fly.style.fontSize = `${fs}px`;
+        fly.style.fontWeight = String(Math.round(mix(a.fw, b.fw, t)));
+        fly.style.lineHeight = `${lh}px`;
+        fly.style.letterSpacing = `${mix(a.ls, b.ls, t)}px`;
+        fly.style.transform = `translate(${x}px, ${cy - lh / 2}px)`;
+        if (fly.style.display !== 'block') fly.style.display = 'block';
+      }
+    };
+    const on = () => { if (!raf) raf = requestAnimationFrame(frame); };
+    on();
+    // A price that changes while the page is held part of the way down.
+    const iv = setInterval(() => { const y = window.scrollY || 0; if (y > 0 && y < POS_COLLAPSE) on(); }, 500);
+    window.addEventListener('scroll', on, { passive: true });
+    window.addEventListener('resize', on);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      clearInterval(iv);
+      window.removeEventListener('scroll', on);
+      window.removeEventListener('resize', on);
+      try { for (const el of [document.querySelector('[data-head-tab="on"] [data-head="name"]'), headPriceRef.current, headChangeRef.current] as (HTMLElement | null)[]) if (el) el.style.visibility = ''; } catch (e) {}
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPane, scalp, isFocusedChart]);
   // NO BOUNCE PAST THE TOP (18 Nov 2026). Martin, with a recording: "when the
   // chart screen is scrolled to the top, the bottom menu gets half or fully
   // hidden for sometime and then appears fully." The recording shows the page
@@ -16816,7 +17018,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   className={`flex-1 min-w-0 truncate text-left px-2.5 max-md:pl-3 max-md:pr-1 h-8 max-md:h-full text-xs font-mono font-bold transition-colors ${
                     !selectedInstrument ? 'text-primary max-md:text-foreground' : 'text-muted-foreground'}`}
                 >
-                  {indexLabel}
+                  <span data-head="name">{indexLabel}</span>
                 </button>
                 <button
                   onClick={() => { setOptionMenuOpen(false); setIndexMenuOpen(o => !o); }}
@@ -16878,7 +17080,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     className={`flex-1 min-w-0 truncate text-left px-2.5 max-md:pl-3 max-md:pr-1 h-8 max-md:h-full text-xs font-mono font-bold transition-colors ${
                       selectedInstrument ? 'text-primary max-md:text-foreground' : 'text-muted-foreground'}`}
                   >
-                    {optionTarget ? shortOptionName(optionTarget.tradingsymbol) : `Options (${tabCharts.length})`}
+                    <span data-head="name">{optionTarget ? shortOptionName(optionTarget.tradingsymbol) : `Options (${tabCharts.length})`}</span>
                   </button>
                   <button
                     onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(o => !o); }}
@@ -17148,15 +17350,18 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               This was the risk:reward button: it opened a menu of two (long, short)
               and, with a box on the chart, cleared the box instead. The two
               position boxes are now two of seven tools on one sheet (see DRAWINGS),
-              so the button always opens the sheet — he may want a trend line while
-              a box is up — and removing the box is the sheet's first row. */}
+              so the button always opens the sheet. Since 18 Nov 2026 a position is
+              a drawing like the rest (POSITIONS, in lib/chartDrawings): as many
+              as he likes, each removed from its own tool bar, and the capital
+              field that sat under the list is gone — a position's size is its
+              Lot Size, on its settings card. */}
           <div className={`relative shrink-0 md:order-2 max-md:order-4 max-md:flex-1 max-md:flex max-md:justify-center ${sharedHidden}`} ref={rrMenuRef}>
             <button
               onClick={() => { pageToTop(); setRangeOpen(false); setPhoneSettingsOpen(false); setRrMenuOpen(o => !o); }}
               title="Drawing tools"
               data-draw-button=""
               className={`flex items-center justify-center h-9 w-9 rounded-md transition-colors max-md:h-10 max-md:w-full max-md:flex-col max-md:gap-0.5 max-md:!bg-transparent ${rrMenuOpen ? 'max-md:!text-primary' : ''} ${
-                (rrArm || drawArm) ? 'bg-primary/25 text-primary' : (rrBox || (split && peerRrBox)) ? 'bg-emerald-500/15 text-emerald-300' : 'bg-muted/40 text-muted-foreground hover:text-foreground max-md:text-foreground/90'}`}
+                drawArm ? 'bg-primary/25 text-primary' : 'bg-muted/40 text-muted-foreground hover:text-foreground max-md:text-foreground/90'}`}
             >
               <DrawingsIcon size={18} />
               <span className="md:hidden text-[10px] leading-none font-medium text-muted-foreground">Drawings</span>
@@ -17165,9 +17370,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               const pick = (k: DrawingType | 'hline' | 'long' | 'short') => {
                 setRrMenuOpen(false);
                 setScalpMenu(null);
-                // One tool at a time: arming one puts the other down.
-                if (k === 'long' || k === 'short') { setDrawArm(null); setRrArm(k); }
-                else { setRrArm(null); setDrawArm(k); }
+                // One tool at a time: arming one puts any other down.
+                setDrawArm(k);
               };
               const row = 'w-full flex items-center gap-3 px-3 py-2.5 md:py-2 text-left text-[13px] md:text-xs font-medium hover:bg-muted active:bg-muted transition-colors';
               const tools: { k: DrawingType | 'hline' | 'long' | 'short'; label: string; icon: React.ReactNode; tone: string }[] = [
@@ -17187,35 +17391,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 <MenuPortal to={menuTo('drawings')}>
                 <div data-draw-sheet="" className={menuTo('drawings') ? 'scalp-menu-rows' : 'fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+8px)] md:bottom-auto md:top-full md:mt-2 md:right-0 z-[90] md:w-60 bg-card border border-foreground/15 dark:border-white/10 rounded-xl md:rounded-lg shadow-2xl md:shadow-xl overflow-hidden'}>
                   <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Drawing Tools</div>
-                  {(rrBox || (split && peerRrBox)) && (
-                    // Split view: one sheet for both charts, so it clears a box on either of them.
-                    <button data-draw-pick="rr-clear" className={`${row} text-rose-400`}
-                      onClick={() => { setRrBox(null); setRrArm(null); setRrMenuOpen(false); setScalpMenu(null); if (split) paneCmd('rr-clear'); }}>
-                      <Trash2 size={16} /> Remove the position box
-                    </button>
-                  )}
                   {tools.map((t) => (
                     <button key={t.k} data-draw-pick={t.k} className={`${row} ${t.tone}`} onClick={() => pick(t.k)}>
                       {t.icon} {t.label}
                     </button>
                   ))}
-                  {/* Capital: optional, for the two position boxes. Leave it at 0
-                      and their tags show points and percent; set it and they add
-                      the rupee loss at SL and profit at TP for that amount. */}
-                  <div className="px-3 pt-2 pb-2.5 border-t border-white/10">
-                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Capital for a position (₹)</div>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min={0}
-                      step={1000}
-                      value={rrCapital || ''}
-                      placeholder="e.g. 50000"
-                      onChange={(e) => setRrCapital(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
-                      onPointerDown={(e) => e.stopPropagation()}
-                      className="w-full h-8 px-2 rounded-md bg-muted/40 border border-white/10 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
                 </div>
                 </MenuPortal>
               );
@@ -18596,12 +18776,17 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               const col = sel.color;
               const w = Math.max(1, Math.min(4, Math.round(Number(sel.width)) || 1));
               const isText = sel.type === 'text';
+              // A POSITION'S TOOLS are TradingView's: move (press and drag the
+              // grip — the whole position follows the finger), copy, its settings
+              // card, delete. Its colours are on the card, so the colour and
+              // thickness buttons are not here; its six handles are grey.
+              const isPos = isPositionType(sel.type);
               const tool = 'h-8 w-8 rounded-md flex items-center justify-center text-foreground/80 hover:bg-foreground/10 active:bg-foreground/15';
               const bar = toolsBarPlace(drawToolsPos);
               return (
                 <div className="absolute inset-0 z-[42] pointer-events-none overflow-hidden select-none" data-draw-tools=""
                   style={{ fontFamily: SCALP_CHART_FONT(settings.customFontUrl) }}>
-                  {!isText && (
+                  {!isText && !isPos && (
                     <div
                       ref={drawMoveEl}
                       data-draw-move=""
@@ -18622,15 +18807,22 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       ref={(el) => { drawAnchorEls.current[i] = el; }}
                       data-draw-anchor={a.key}
                       onPointerDown={startDrawDrag(a.key)}
-                      title={isText ? 'Drag to move the text' : 'Drag to move this point'}
+                      title={isText ? 'Drag to move the text'
+                        : isPos ? `Drag to move the ${a.key[0] === 't' ? 'target' : a.key[0] === 'e' ? 'entry' : 'stop'}`
+                        : 'Drag to move this point'}
                       className="absolute left-0 top-0 pointer-events-auto p-3 cursor-grab"
                       style={{ display: 'none', touchAction: 'none', willChange: 'transform' }}
                     >
-                      <div className="h-[13px] w-[13px] rounded-full shadow" style={{ background: col, border: '2px solid #ffffff' }} />
+                      <div className="h-[13px] w-[13px] rounded-full shadow" style={{ background: isPos ? '#b4b7bd' : col, border: '2px solid #ffffff' }} />
                     </div>
                   ))}
                   <div className={bar.className} style={bar.style} data-draw-toolbar="" data-tools-pos={drawToolsPos}>
                     <div className="flex items-center gap-0.5 h-10 px-1 rounded-lg border border-border bg-card/95 shadow-lg backdrop-blur-sm">
+                      {isPos && (
+                        <button type="button" data-draw-tool="move" title="Drag to move the position" className={`${tool} cursor-move`}
+                          style={{ touchAction: 'none' }} onPointerDown={startDrawDrag('move')}><GripVertical size={17} /></button>
+                      )}
+                      {!isPos && (<>
                       <button type="button" data-draw-tool="color" title="Colour" className={tool}
                         onClick={() => setDrawToolPop((v) => (v === 'color' ? null : 'color'))}>
                         <span className="block h-[18px] w-[18px] rounded-[5px] border border-white/30" style={{ background: col }} />
@@ -18640,14 +18832,19 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                         onClick={() => setDrawToolPop((v) => (v === 'width' ? null : 'width'))}>
                         {isText ? ['S', 'M', 'L', 'XL'][w - 1] : `${w}px`} <ChevronDown size={13} className="opacity-70" />
                       </button>
+                      </>)}
                       {isText && (
                         <button type="button" data-draw-tool="edit" title="Change the text" className={tool}
                           onClick={() => { setDrawToolPop(null); setDrawTextEdit({ id: sel.id, value: sel.text || '' }); }}><Edit2 size={15} /></button>
                       )}
                       <button type="button" data-draw-tool="copy" title="Copy this drawing" className={tool} onClick={copySelectedDrawing}><Copy size={16} /></button>
+                      {isPos && (
+                        <button type="button" data-draw-tool="settings" title="Settings" className={tool}
+                          onClick={() => { setDrawToolPop(null); setPosSettingsId(sel.id); }}><Settings size={16} /></button>
+                      )}
                       <button type="button" data-draw-tool="delete" title="Delete this drawing" className={`${tool} text-rose-400`} onClick={deleteSelectedDrawing}><Trash2 size={16} /></button>
                     </div>
-                    {drawToolPop === 'color' && (
+                    {!isPos && drawToolPop === 'color' && (
                       <div className="inline-flex items-center gap-1.5 p-1.5 rounded-lg border border-border bg-card/95 shadow-lg backdrop-blur-sm">
                         {DRAW_COLORS.map((c) => (
                           <button key={c} type="button" data-draw-color={c} title={c}
@@ -18657,7 +18854,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                         ))}
                       </div>
                     )}
-                    {drawToolPop === 'width' && (
+                    {!isPos && drawToolPop === 'width' && (
                       <div className="inline-flex items-center gap-1 p-1 rounded-lg border border-border bg-card/95 shadow-lg backdrop-blur-sm">
                         {[1, 2, 3, 4].map((px) => (
                           <button key={px} type="button" data-draw-width={px}
@@ -18678,8 +18875,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 Only the cross takes a press: the words let a tap through to the
                 chart beneath them, or the top middle of the chart would be the
                 one place a point could not be put. */}
-            {(drawArm || rrArm) && (() => {
-              const label = rrArm ? `${rrArm === 'long' ? 'Long' : 'Short'} position · tap the entry price`
+            {drawArm && (() => {
+              const label = isPositionType(drawArm) ? `${drawArm === 'long' ? 'Long' : 'Short'} position · tap the entry price`
                 : drawArm === 'hline' ? 'Horizontal line · tap the price'
                 : drawArm === 'trend' ? `Trend line · tap the ${drawFirstSet ? 'second' : 'first'} point`
                 : drawArm === 'rect' ? `Rectangle · tap ${drawFirstSet ? 'the opposite corner' : 'one corner'}`
@@ -18691,7 +18888,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     <span className="truncate">{label}</span>
                     <button type="button" title="Cancel" data-draw-cancel=""
                       className="pointer-events-auto h-6 w-6 shrink-0 rounded-full flex items-center justify-center text-foreground/70 hover:bg-foreground/10 active:bg-foreground/15"
-                      onClick={() => { setDrawArm(null); setRrArm(null); }}><X size={13} /></button>
+                      onClick={() => setDrawArm(null)}><X size={13} /></button>
                   </div>
                 </div>
               );
@@ -18873,11 +19070,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               ref={overlayCanvasRef}
               className="absolute inset-0 w-full h-full pointer-events-none rounded-none z-30"
             />
-            {/* The R:R box gets its own canvas. The overlay above redraws EVERYTHING
-                every frame — Bollinger bands recomputed live, OI bars, zones, S&R,
-                levels, structure, crosshair — so on a phone its frames are long,
-                and a dragged line could only move when one finished. That is the
-                stutter. This canvas draws one box and nothing else. */}
+            {/* His drawings get their own canvas (it was the R:R box's). The overlay
+                above redraws EVERYTHING every frame — Bollinger bands recomputed
+                live, OI bars, zones, S&R, levels, structure, crosshair — so on a
+                phone its frames are long, and a dragged line could only move when
+                one finished. That is the stutter. This canvas draws his drawings
+                and positions and nothing else. */}
             <canvas
               ref={rrCanvasRef}
               className="absolute inset-0 w-full h-full pointer-events-none rounded-none z-[31]"
@@ -19339,6 +19537,32 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           </div>
         </div>
       )}
+      {/* A position's settings card (see PositionEditorModal): here beside the
+          line's, at the top of the page, so nothing of the chart's is over it. */}
+      {posSettingsId !== null && (() => {
+        const d = drawings.find((x) => x.id === posSettingsId);
+        if (!d || !isPositionType(d.type)) return null;
+        const kind = d.type;
+        const st = posStyleFor(kind);
+        return (
+          <PositionEditorModal
+            kind={kind}
+            value={{
+              qty: Number(d.qty) >= 1 ? Number(d.qty) : posQtyFor(), entry: d.a.p, target: Number(d.target), stop: Number(d.stop),
+              tColor: d.tColor || st.tColor, sColor: d.sColor || st.sColor, color: d.color || st.color, lColor: d.lColor || st.lColor,
+            }}
+            onClose={() => setPosSettingsId(null)}
+            onApply={(v) => {
+              setDrawings((prev) => prev.map((x) => (x.id === d.id ? {
+                ...x, a: { t: x.a.t, p: v.entry }, b: { t: x.b.t, p: v.entry }, target: v.target, stop: v.stop, qty: v.qty,
+                color: v.color, tColor: v.tColor, sColor: v.sColor, lColor: v.lColor,
+              } : x)));
+              rememberPosition(kind, v);
+              setPosSettingsId(null);
+            }}
+          />
+        );
+      })()}
       {editingLineId && (
         <LineEditorModal
           lineId={editingLineId}
@@ -20186,23 +20410,35 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         onOpenPositions={() => navigate('/journal')}
       />
     )}
-    {/* THE SMALL HEADER THAT COMES DOWN ONCE THE PAGE'S OWN HAS SCROLLED AWAY
-        (phone), as Lemonn's does: the back arrow, and in the middle the chart's
-        name over its price and the day's change. The price is not kept twice:
-        it is read off the big header's line, which is still being written a
-        few times a second just above the top of the screen. */}
-    {!isPane && !scalp && !isFocusedChart && headPinned && (
-      <div data-layout="pinned-head" className="md:hidden fixed top-0 inset-x-0 z-[46] bg-background border-b border-white/10 pt-[max(env(safe-area-inset-top),12px)]">
+    {/* THE SMALL HEADER (phone), as Lemonn's: the back arrow, and in the middle
+        the chart's name over its price and the day's change. The price is not
+        kept twice: it is read off the big header's line, which is still being
+        written a few times a second just above the top of the screen. Always
+        there, and see-through until the page scrolls: its background, its arrow
+        and its words come in as the name and the price glide up into it (see
+        THE NAME AND THE PRICE GLIDE INTO THE SMALL HEADER). */}
+    {!isPane && !scalp && !isFocusedChart && (
+      <div ref={pinRef} data-layout="pinned-head" className="md:hidden fixed top-0 inset-x-0 z-[46] pt-[max(env(safe-area-inset-top),12px)]" style={{ pointerEvents: 'none' }}>
+        <div ref={pinBgRef} aria-hidden="true" className="absolute inset-0 bg-background border-b border-foreground/15 dark:border-white/10" style={{ opacity: 0 }} />
         <div className="relative h-[52px] flex items-center">
-          <button type="button" onClick={() => { try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { window.scrollTo(0, 0); } }} aria-label="Back to the chart"
-            className="absolute left-1 top-1/2 -translate-y-1/2 h-11 w-9 flex items-center justify-center text-foreground active:opacity-60">
+          <button ref={pinBackRef} type="button" onClick={() => { try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { window.scrollTo(0, 0); } }} aria-label="Back to the chart"
+            className="absolute left-1 top-1/2 -translate-y-1/2 h-11 w-9 flex items-center justify-center text-foreground active:opacity-60" style={{ opacity: 0 }}>
             <ArrowLeft size={27} strokeWidth={1.8} />
           </button>
           <div className="mx-auto flex flex-col items-center min-w-0 max-w-[70%]">
-            <span data-pinned="name" className="text-[16px] leading-5 font-semibold text-foreground truncate max-w-full">{isOptionView && selectedInstrument ? shortOptionName(selectedInstrument.tradingsymbol) : indexLabel}</span>
+            <span data-pinned="name" className="text-[16px] leading-5 font-semibold text-foreground truncate max-w-full" style={{ opacity: 0 }}>{isOptionView && selectedInstrument ? shortOptionName(selectedInstrument.tradingsymbol) : indexLabel}</span>
             <PinnedQuote priceEl={headPriceRef} changeEl={headChangeRef} />
           </div>
         </div>
+      </div>
+    )}
+    {!isPane && !scalp && !isFocusedChart && (
+      <div aria-hidden="true" data-layout="pinned-glide" className="md:hidden fixed inset-0 z-[47] pointer-events-none overflow-hidden">
+        {[0, 1, 2].map((i) => (
+          <span key={i} ref={(el) => { flyRefs.current[i] = el; }} data-glide={['name', 'price', 'change'][i]}
+            className={`absolute left-0 top-0 whitespace-nowrap tabular-nums ${i === 2 ? '' : 'text-foreground'}`}
+            style={{ display: 'none', willChange: 'transform' }} />
+        ))}
       </div>
     )}
     </>

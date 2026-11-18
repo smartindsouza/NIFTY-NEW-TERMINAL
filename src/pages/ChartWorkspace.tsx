@@ -1,3 +1,4 @@
+import { FolderTabFeet } from "../components/FolderTabFeet";
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { AdvancedChart, type ScalpAt, type ScalpShared } from './AdvancedChart';
@@ -241,7 +242,7 @@ function ScalpScreen({ onClose }: { onClose: () => void }) {
           pro text" — and of the button beside their tab, "No need of add more
           strategies button". Measured off the picture: a back arrow 16pt wide,
           10pt in from the edge; then a tab cut like a folder's — 37pt tall, its
-          top corners rounded at 13pt, its feet flaring out at 10pt into the
+          top corners rounded at 12pt, its feet flaring out at 11pt into the
           surface below — in the charts' own colour, so the tab and the chart
           under it are one piece, with a hairline under the rest of the row. */}
       <div data-scalp-top="" className="relative shrink-0 h-11 flex items-end bg-background">
@@ -255,9 +256,9 @@ function ScalpScreen({ onClose }: { onClose: () => void }) {
               shifted 5.5 right, and 3.5 down to the tab's middle. */}
           <ArrowLeft size={18} strokeWidth={2} className="translate-x-[5.5px] translate-y-[3.5px]" />
         </button>
-        <div data-scalp="tab" className="relative ml-[11px] h-[37px] px-[17px] flex items-center rounded-t-[13px] border border-b-0 border-foreground/15 bg-card text-[12px] font-[650] text-foreground">
-          <span className="absolute -left-[10px] bottom-0 h-[10px] w-[10px]" aria-hidden="true" style={{ background: 'radial-gradient(circle at 0 0, transparent 9.5px, var(--card) 10px)' }} />
-          <span className="absolute -right-[10px] bottom-0 h-[10px] w-[10px]" aria-hidden="true" style={{ background: 'radial-gradient(circle at 100% 0, transparent 9.5px, var(--card) 10px)' }} />
+        <div data-scalp="tab" className="relative ml-[11px] h-[37px] px-[17px] flex items-center rounded-t-[12px] border border-b-0 border-foreground/15 bg-card text-[12px] font-[650] text-foreground">
+          {/* Its feet, with their outline (19 Nov 2026): see FolderTabFeet. */}
+          <FolderTabFeet />
           {/* SCALPERX (17 Nov 2026). Martin: "Also change the ScalpPro name to
               ScaperX everywhere in my app", and asked which he meant, ScalperX. The
               name on the screen is changed wherever it is shown; the code's own
