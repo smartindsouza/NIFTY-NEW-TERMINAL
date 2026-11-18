@@ -506,7 +506,12 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
           the list. Not while a sheet or a list is over the chart (tabHidden). */}
       {!open && !tabHidden && (
         <div data-context-swipe="" aria-hidden="true"
-          className="md:hidden fixed right-0 top-1/4 h-1/2 w-[18px] z-[45] flex items-center justify-end touch-none"
+          // Only the bar itself is the handle now, and it is wider (18 Nov 2026;
+          // Martin: "increase the width of the sidebar accent bar at the screen edge
+          // and make the side bar appear only when I swipe on that accent bar and
+          // not on the entire screen edge"): the touch area is the bar's own
+          // height, with a finger's width of room beside it.
+          className="md:hidden fixed right-0 top-1/2 -translate-y-1/2 h-16 w-[22px] z-[45] flex items-center justify-end touch-none"
           onPointerDown={(e) => {
             const x0 = e.clientX, y0 = e.clientY; const el = e.currentTarget;
             try { el.setPointerCapture(e.pointerId); } catch (er) {}
@@ -517,7 +522,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
             const done = () => { el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', done); el.removeEventListener('pointercancel', done); };
             el.addEventListener('pointermove', move); el.addEventListener('pointerup', done); el.addEventListener('pointercancel', done);
           }}>
-          <span className="h-14 w-[4px] rounded-l-full bg-primary/70" />
+          <span className="h-16 w-[8px] rounded-l-full bg-primary/80" />
         </div>
       )}
 

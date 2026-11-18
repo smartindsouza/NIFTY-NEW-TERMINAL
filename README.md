@@ -649,6 +649,13 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## The sidebar's swipe handle is the accent bar alone, and wider (v360)
+
+Martin: "increase the width of the sidebar accent bar at the screen edge and make the
+side bar appear only when I swipe on that accent bar and not on the entire screen
+edge". The bar is 8px wide and 64 tall; only a swipe that starts on it (its height,
+22px in from the edge) opens the sidebar.
+
 ## Sidebar: the picked name glows, without an outline (v359)
 
 Martin: "Remove the outline for the indice highlighted. Keep the outline for the
