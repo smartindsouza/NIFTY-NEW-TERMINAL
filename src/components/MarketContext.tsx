@@ -227,8 +227,12 @@ function WheelRow({ m, onOpen }: { m: Market; onOpen?: () => void }) {
           {ok && m.prevSrc === 'price' && <span className="ml-1 text-primary/70" title="No previous close available from the data source, so the change cannot be computed">no ref</span>}
         </span>
       </div>
+      {/* The picked tile's outline is the change's own colour, green or red, not
+          the accent (18 Nov 2026; Martin: "change the highlighted percentage text
+          outline color to red or green based on the positive or negative
+          percentage change instead of accent color"). */}
       <div data-wheel="tile"
-        className={`shrink-0 h-[42px] w-[62px] rounded-full border border-transparent bg-foreground/[0.06] flex items-center justify-center text-[11px] leading-none font-bold font-mono tabular-nums group-data-[on]:border-primary group-data-[on]:bg-primary/10 ${!ok ? 'text-foreground/35' : up ? 'text-emerald-400' : 'text-rose-400'}`}>
+        className={`shrink-0 h-[42px] w-[62px] rounded-full border border-transparent bg-foreground/[0.06] flex items-center justify-center text-[11px] leading-none font-bold font-mono tabular-nums ${!ok ? 'text-foreground/35 group-data-[on]:border-foreground/30' : up ? 'text-emerald-400 group-data-[on]:border-emerald-400 group-data-[on]:bg-emerald-400/10' : 'text-rose-400 group-data-[on]:border-rose-400 group-data-[on]:bg-rose-400/10'}`}>
         {ok ? `${up ? '+' : ''}${(m.changePct ?? 0).toFixed(2)}%` : '—'}
       </div>
     </div>
@@ -287,7 +291,7 @@ function Wheel({ active, children }: { active: boolean; children: ReactNode }) {
   useEffect(() => { if (active) paint(); });
   return (
     <div className="relative flex-1 min-h-0 [container-type:size]">
-      <div ref={ref} data-wheel="" className="h-full overflow-y-auto snap-y snap-proximity [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" style={{ paddingTop: 'calc(50cqh - 29px)', paddingBottom: 'calc(50cqh - 29px)' }}>
+      <div ref={ref} data-wheel="" className="h-full overflow-y-auto overscroll-contain snap-y snap-proximity [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" style={{ paddingTop: 'calc(50cqh - 29px)', paddingBottom: 'calc(50cqh - 29px)' }}>
         {children}
       </div>
       {/* The line down the right and the handle at its middle. */}
@@ -354,6 +358,18 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
   // the pull tab below — Martin had it moved to the top right, where search
   // used to be. The header's button (data-head="context" in AdvancedChart.tsx)
   // cannot reach this component's state, so it says so with an event.
+  // THE PAGE BEHIND DOES NOT SCROLL WHILE IT IS OPEN (18 Nov 2026). Martin:
+  // "avoid scrolling of the background screen when sidebar is on". The page is
+  // held still (its scroll is switched off and put back as it was on closing),
+  // the layer behind the list takes no dragging, and the list keeps its own
+  // scrolling to itself at its ends (overscroll-contain on the wheel).
+  useEffect(() => {
+    if (!open) return;
+    const html = document.documentElement, body = document.body;
+    const was = { h: html.style.overflow, b: body.style.overflow, o: html.style.overscrollBehavior };
+    html.style.overflow = 'hidden'; body.style.overflow = 'hidden'; html.style.overscrollBehavior = 'none';
+    return () => { html.style.overflow = was.h; body.style.overflow = was.b; html.style.overscrollBehavior = was.o; };
+  }, [open]);
   useEffect(() => {
     const f = () => setOpen(true);
     window.addEventListener('market_context_open', f);
@@ -530,7 +546,8 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
       {open && (
         <div
           onClick={() => setOpen(false)}
-          className="fixed inset-0 z-[9998] bg-black/55 backdrop-blur-md"
+          className="fixed inset-0 z-[9998] bg-black/55 backdrop-blur-md touch-none"
+          onTouchMove={(e) => { e.stopPropagation(); }}
           aria-label="Close market context"
         />
       )}

@@ -649,6 +649,14 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Sidebar: the picked tile is outlined in green or red (v361)
+
+Martin: "change the highlighted percentage text outline color to red or green based on
+the positive or negative percentage change instead of accent color". The picked row's
+percentage tile is outlined (and faintly tinted) in the change's own colour.
+Also: "avoid scrolling of the background screen when sidebar is on" — the page behind
+is held still while the sidebar is open.
+
 ## The sidebar's swipe handle is the accent bar alone, and wider (v360)
 
 Martin: "increase the width of the sidebar accent bar at the screen edge and make the
