@@ -6128,6 +6128,71 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   useEffect(() => { try { localStorage.setItem('rrCapital', String(rrCapital || 0)); } catch (e) {} }, [rrCapital]);
 
   const [rrMenuOpen, setRrMenuOpen] = useState(false);
+  // THE PAGE STAYS STILL WHILE A CARD OF THE BOTTOM ROW IS UP (18 Nov 2026).
+  // Martin: "Also prevent the scrolls of the background area when these cards
+  // appear." With Range, Interval, Indicators, Drawings or Settings open on a
+  // phone, a drag anywhere moved the page behind. While one is open the page
+  // cannot scroll, and a drag is let through only inside the card itself, where
+  // something there can scroll (the Indicators list is longer than its card;
+  // its overscroll is contained so it does not hand the drag on to the page).
+  const bottomCardUp = phoneSettingsOpen || rangeOpen || tfOpen || isIndicatorsOpen || rrMenuOpen;
+  useEffect(() => {
+    if (!bottomCardUp) return;
+    try { if (window.innerWidth >= 768) return; } catch (e) { return; }
+    const html = document.documentElement, body = document.body;
+    const prev = [html.style.overflow, body.style.overflow, html.style.overscrollBehavior];
+    html.style.overflow = 'hidden'; body.style.overflow = 'hidden'; html.style.overscrollBehavior = 'none';
+    const CARDS = '[data-range-sheet],[data-interval-sheet],[data-ind-list],[data-draw-sheet],[data-settings-sheet="open"]';
+    const onMove = (e: TouchEvent) => {
+      const t = e.target as Element | null;
+      const card = t && t.closest ? t.closest(CARDS) as HTMLElement | null : null;
+      if (!card) { e.preventDefault(); return; }
+      let el: HTMLElement | null = t as HTMLElement;
+      while (el && el !== card.parentElement) {
+        if (el.scrollHeight > el.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(el).overflowY)) return;
+        el = el.parentElement;
+      }
+      e.preventDefault();
+    };
+    // A finger that goes down OUTSIDE the card closes it (the see-through layer),
+    // and the same finger then drags on: the page must not start moving under
+    // it once the card is gone. So the hold is let go when that finger lifts,
+    // not the moment the card closes.
+    let fingers = 0;
+    const onStart = (e: TouchEvent) => { fingers = e.touches.length; };
+    // The layer closes the card on pointerdown, which comes BEFORE touchstart:
+    // counting from touchstart alone, the card was gone with "no finger down".
+    const onDown = (e: PointerEvent) => { if (e.pointerType === 'touch' && fingers === 0) fingers = 1; };
+    document.addEventListener('pointerdown', onDown, true);
+    const onEnd = (e: TouchEvent) => { fingers = e.touches.length; if (gone && fingers === 0) release(); };
+    let gone = false, released = false;
+    const release = () => {
+      if (released) return; released = true;
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchstart', onStart, true);
+      document.removeEventListener('pointerdown', onDown, true);
+      document.removeEventListener('touchend', onEnd, true);
+      document.removeEventListener('touchcancel', onEnd, true);
+      html.style.overflow = prev[0]; body.style.overflow = prev[1]; html.style.overscrollBehavior = prev[2];
+    };
+    const onMoveHeld = (e: TouchEvent) => { if (gone) { e.preventDefault(); return; } onMove(e); };
+    document.addEventListener('touchmove', onMoveHeld, { passive: false });
+    document.addEventListener('touchstart', onStart, true);
+    document.addEventListener('touchend', onEnd, true);
+    document.addEventListener('touchcancel', onEnd, true);
+    return () => {
+      gone = true;
+      document.removeEventListener('touchmove', onMoveHeld);
+      if (fingers === 0) { release(); return; }
+      // Still down: keep holding the page until it lifts (2 s at most).
+      document.addEventListener('touchmove', onMoveHeld, { passive: false });
+      const lift = () => { document.removeEventListener('touchmove', onMoveHeld); release(); };
+      const once = (e: TouchEvent) => { if (e.touches.length === 0) { document.removeEventListener('touchend', once, true); document.removeEventListener('touchcancel', once, true); lift(); } };
+      document.addEventListener('touchend', once, true);
+      document.addEventListener('touchcancel', once, true);
+      setTimeout(lift, 2000);
+    };
+  }, [bottomCardUp]);
   // Panels rendered outside this page still cover the chart. Each one announces
   // itself by id, so two open at once cannot cancel each other out on close.
   const externalOverlaysRef = useRef<Set<string>>(new Set());
@@ -17003,7 +17068,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               {rangeOpen && (
                 <>
                   <div className="fixed inset-0 z-[88]" aria-hidden="true" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); sheetClosedAtRef.current = Date.now(); setRangeOpen(false); }} />
-                  <div data-range-sheet="" className="fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+8px)] z-[90] bg-card border border-white/10 rounded-xl shadow-2xl overflow-hidden">
+                  <div data-range-sheet="" className="fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+8px)] z-[90] bg-card border border-foreground/15 dark:border-white/10 rounded-xl shadow-2xl overflow-hidden">
                     {([['1D', '1D'], ['2D', '2D'], ['5D', '5D'], ['1M', '1M'], ['ALL', 'All']] as const).map(([k, label]) => (
                       <button key={k} type="button" data-range-pick={k} onClick={() => applyRange(k)}
                         className={`w-full flex items-center justify-between px-3 py-2.5 text-left text-[13px] font-medium active:bg-muted ${rangeChoice === k ? 'text-primary' : 'text-foreground'}`}>
@@ -17085,7 +17150,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 // old two-item menu opened upwards, off the top of the page; seven
                 // rows would have left only the last of them on screen.
                 <MenuPortal to={menuTo('drawings')}>
-                <div data-draw-sheet="" className={menuTo('drawings') ? 'scalp-menu-rows' : 'fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+8px)] md:bottom-auto md:top-full md:mt-2 md:right-0 z-[90] md:w-60 bg-card border border-white/10 rounded-xl md:rounded-lg shadow-2xl md:shadow-xl overflow-hidden'}>
+                <div data-draw-sheet="" className={menuTo('drawings') ? 'scalp-menu-rows' : 'fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+8px)] md:bottom-auto md:top-full md:mt-2 md:right-0 z-[90] md:w-60 bg-card border border-foreground/15 dark:border-white/10 rounded-xl md:rounded-lg shadow-2xl md:shadow-xl overflow-hidden'}>
                   <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Drawing Tools</div>
                   {(rrBox || (split && peerRrBox)) && (
                     // Split view: one sheet for both charts, so it clears a box on either of them.
@@ -17145,7 +17210,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             {tfOpen && !scalp && (
               <>
                 <div className="md:hidden fixed inset-0 z-[88]" aria-hidden="true" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); sheetClosedAtRef.current = Date.now(); setTfOpen(false); }} />
-                <div data-interval-sheet="" className="md:hidden fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+8px)] z-[90] bg-card border border-white/10 rounded-xl shadow-2xl overflow-hidden">
+                <div data-interval-sheet="" className="md:hidden fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+8px)] z-[90] bg-card border border-foreground/15 dark:border-white/10 rounded-xl shadow-2xl overflow-hidden">
                   {([['1', '1m'], ['3', '3m'], ['5', '5m'], ['15', '15m'], ['60', '1h'], ['240', '4h'], ['1440', '1D'], ['10080', '1W'], ['43200', '1M']] as const).map(([k, label]) => (
                     <button key={k} type="button" data-interval-pick={k} onClick={() => { setTimeframe(k); setTfOpen(false); }}
                       className={`w-full flex items-center justify-between px-3 py-2.5 text-left text-[13px] font-medium active:bg-muted ${String(timeframe) === k ? 'text-primary' : 'text-foreground'}`}>
@@ -17209,6 +17274,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               )}
               {(isIndicatorsOpen || !!menuTo('indicators')) && (
                 <MenuPortal to={menuTo('indicators')}>
+                {/* AN OUTLINE ON THE LIGHT THEME TOO (18 Nov 2026). Martin: "add a light
+                    outline to each and every card that appears from these bottom menus
+                    because they cannot be distinguished from the chart background", then
+                    "These outline appear on the dark theme but not in the light theme".
+                    The five cards were outlined in white at 10%: there on the dark theme,
+                    nothing on the light theme's white chart. On the light theme the
+                    outline is the text colour at 15%, a light grey line; the dark theme's
+                    is left as it was. */}
                 {/* ONE CARD LIKE THE OTHERS, CLEAR OF THE BAR (18 Nov 2026). Martin: "All the
                     cards from the bottom bar like the range, time frame, drawings and
                     settings using this rounded card style except the indicators. So fix
@@ -17234,7 +17307,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     - the NIFTY Bias card is the one card, as on the index chart.
                     An option chart's switches are its own and start off (v324); the alerts'
                     and Bias Levels' are now its own too — they were the index chart's. */}
-                <div data-ind-list="" className={menuTo('indicators') ? 'scalp-menu-list' : 'fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+8px)] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto md:overflow-hidden bg-card border border-white/10 md:border-0 rounded-xl md:rounded-md py-1.5 z-[45] shadow-2xl flex flex-col'}>
+                <div data-ind-list="" className={menuTo('indicators') ? 'scalp-menu-list' : 'fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+8px)] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto overscroll-contain md:overflow-hidden bg-card border border-foreground/15 dark:border-white/10 md:border-0 rounded-xl md:rounded-md py-1.5 z-[45] shadow-2xl flex flex-col'}>
                   <div className="order-0 px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase">Available Indicators</div>
                   
                   {/* Previous Day High/Low */}
@@ -18027,7 +18100,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           <MenuPortal to={menuTo('settings')}>
           <div data-settings-sheet={phoneSettingsOpen ? 'open' : 'closed'}
             className={menuTo('settings') ? 'scalp-menu-rows flex flex-col items-stretch' : `${phoneSettingsOpen && !isPane
-              ? 'max-md:flex max-md:fixed max-md:inset-x-2 max-md:bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+8px)] max-md:z-[90] max-md:flex-col max-md:items-stretch max-md:gap-0 max-md:max-w-none max-md:overflow-visible max-md:rounded-xl max-md:border max-md:border-white/10 max-md:bg-card max-md:p-1.5 max-md:shadow-2xl'
+              ? 'max-md:flex max-md:fixed max-md:inset-x-2 max-md:bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+8px)] max-md:z-[90] max-md:flex-col max-md:items-stretch max-md:gap-0 max-md:max-w-none max-md:overflow-visible max-md:rounded-xl max-md:border max-md:border-foreground/15 max-md:dark:border-white/10 max-md:bg-card max-md:p-1.5 max-md:shadow-2xl'
               : isPane ? 'flex' : 'max-md:hidden flex'} items-center gap-2 flex-none max-w-[45%] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents md:min-w-0 md:basis-auto pr-1`}>
           {/* Trailing TP, beside Quick Trade. Distinct icon and colour so the two
               switches are not mistaken for each other at a glance.
