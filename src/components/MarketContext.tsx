@@ -214,7 +214,7 @@ function WheelRow({ m, onOpen }: { m: Market; onOpen?: () => void }) {
     <div data-wheel-row={m.key}
       title={onOpen ? undefined : (m.reason || undefined)}
       style={{ height: WHEEL_ROW }}
-      className="group relative snap-center flex items-center justify-end gap-3 pl-3 pr-[72px] will-change-[opacity]">
+      className="group relative snap-center flex items-center justify-end gap-3 pl-3 pr-[78px] will-change-[opacity]">
       {/* THE ROW ITSELF OPENS NOTHING (18 Nov 2026). Martin: "when I tap an
           index by mistake, its chart opens up in the chart screen. So prevent
           it by adding a small chart open icon somewhere for every index". The
@@ -223,7 +223,7 @@ function WheelRow({ m, onOpen }: { m: Market; onOpen?: () => void }) {
           a row with no chart to open has none. It stands past the line down
           the right, at the screen's edge (Martin, the same day: "Move the
           candlestick icons to the right on the other side of the straight
-          white line"); the line and its handle moved 20px in so the handle of the picked row stops short of it. */}
+          white line"); the line and its handle moved 26px in, in three steps at his word, so the handle of the picked row stops well short of it. */}
       {onOpen && (
         <button type="button" data-wheel="open" onClick={(e) => { e.stopPropagation(); onOpen(); }}
           aria-label={`Open the ${m.label} chart`} title={`Open the ${m.label} chart (Zerodha data)`}
@@ -268,7 +268,7 @@ function WheelRow({ m, onOpen }: { m: Market; onOpen?: () => void }) {
 // the numbers are where the section says.
 function WheelHeader({ title, collapsed, onToggle, open, age }: { title: string; collapsed: boolean; onToggle: () => void; open?: boolean; age?: string }) {
   return (
-    <div className="h-11 pl-3 pr-[72px] flex items-center justify-end gap-2" data-wheel-head="">
+    <div className="h-11 pl-3 pr-[78px] flex items-center justify-end gap-2" data-wheel-head="">
       {age && <span className="text-[9px] font-mono text-foreground/45 whitespace-nowrap">{age}</span>}
       <StatusPill open={open} />
       <button type="button" onClick={onToggle} aria-expanded={!collapsed}
@@ -284,7 +284,7 @@ function WheelHeader({ title, collapsed, onToggle, open, age }: { title: string;
 // middle, and after every scroll (once a frame) marks the row nearest the
 // middle and fades the rest by their distance from it. Written straight to
 // the rows, not through React: it runs on every scroll frame.
-function Wheel({ active, children }: { active: boolean; children: ReactNode }) {
+function Wheel({ active, startKey, children }: { active: boolean; startKey?: string; children: ReactNode }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const paint = () => {
     const el = ref.current; if (!el) return;
@@ -310,14 +310,30 @@ function Wheel({ active, children }: { active: boolean; children: ReactNode }) {
   }, [active]);
   // Rows come and go (a section folded, prices arriving): mark again.
   useEffect(() => { if (active) paint(); });
+  // IT OPENS ON ONE ROW (18 Nov 2026). Martin: "Keep the highlighter at Dow
+  // jones index by default in the sidebar". The list used to open at its top,
+  // so the first row was the picked one. Each time it opens it is now brought
+  // to `startKey`'s row, once — as soon as that row exists (the figures may
+  // arrive after the list has opened) — and is his to scroll from there.
+  const placed = useRef(false);
+  useEffect(() => {
+    if (!active) { placed.current = false; return; }
+    if (placed.current || !startKey) return;
+    const el = ref.current; const row = el?.querySelector<HTMLElement>(`[data-wheel-row="${startKey}"]`);
+    if (!el || !row) return;
+    const box = el.getBoundingClientRect(), b = row.getBoundingClientRect();
+    el.scrollTop += (b.top + b.height / 2) - (box.top + box.height / 2);
+    placed.current = true;
+    paint();
+  });
   return (
     <div className="relative flex-1 min-h-0 [container-type:size]">
       <div ref={ref} data-wheel="" className="h-full overflow-y-auto overscroll-contain snap-y snap-proximity [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" style={{ paddingTop: 'calc(50cqh - 29px)', paddingBottom: 'calc(50cqh - 29px)' }}>
         {children}
       </div>
       {/* The line down the right and the handle at its middle. */}
-      <div className="pointer-events-none absolute right-[46px] inset-y-0 w-px bg-foreground/15" aria-hidden="true" />
-      <div className="pointer-events-none absolute right-[32px] top-1/2 -translate-y-1/2 h-[10px] w-[29px] rounded-full bg-foreground/70" aria-hidden="true" />
+      <div className="pointer-events-none absolute right-[52px] inset-y-0 w-px bg-foreground/15" aria-hidden="true" />
+      <div className="pointer-events-none absolute right-[38px] top-1/2 -translate-y-1/2 h-[10px] w-[29px] rounded-full bg-foreground/70" aria-hidden="true" />
     </div>
   );
 }
@@ -619,7 +635,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
         // the sidebar" — the layer behind the list is that same colour, whole,
         // in place of the blur, and the hairline between the two is gone.
         data-context-panel=""
-        className={`fixed top-0 right-0 h-full z-[9999] w-[290px] max-w-[85vw] bg-background transition-transform duration-300 flex flex-col ${open ? "translate-x-0" : "translate-x-full"}`}
+        className={`fixed top-0 right-0 h-full z-[9999] w-[340px] max-w-full bg-background transition-transform duration-300 flex flex-col ${open ? "translate-x-0" : "translate-x-full"}`}
       >
         <div className="flex items-center justify-between px-3 py-3">
           <div className="flex items-center gap-2">
@@ -636,7 +652,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
           </button>
         </div>
 
-        <Wheel active={open}>
+        <Wheel active={open} startKey="DJI_IDX">
           <WheelHeader
             title="Indian Indices"
             collapsed={!!collapsed.indian}
@@ -657,7 +673,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
               a slow one looked identical and the panel simply read nothing. If the
               server reported an error, say so instead. */}
           {!collapsed.us && us.length === 0 && (
-            <div className="pl-3 pr-[72px] py-3 text-right text-xs text-slate-500">
+            <div className="pl-3 pr-[78px] py-3 text-right text-xs text-slate-500">
               {data && (data as any).success === false
                 ? <span className="text-primary/80 font-mono text-[10px]">server error: {String((data as any).error || 'unknown').slice(0, 90)}</span>
                 : data ? 'no rows returned' : 'Loading…'}
@@ -667,7 +683,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
             <WheelRow key={m.key} m={m} onOpen={openChart(m)} />
           ))}
           {!collapsed.us && us.length > 0 && us.every((m) => !m.available) && (
-            <div className="pl-3 pr-[72px] py-2 text-right text-[10px] text-slate-500 leading-relaxed">
+            <div className="pl-3 pr-[78px] py-2 text-right text-[10px] text-slate-500 leading-relaxed">
               US data source unreachable from the server right now. Indian indices above are unaffected.
             </div>
           )}
@@ -679,13 +695,13 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
             open={status.uk}
           />
           {!collapsed.uk && uk.length === 0 && (
-            <div className="pl-3 pr-[72px] py-3 text-right text-xs text-slate-500">Loading…</div>
+            <div className="pl-3 pr-[78px] py-3 text-right text-xs text-slate-500">Loading…</div>
           )}
           {!collapsed.uk && uk.map((m) => (
             <WheelRow key={m.key} m={m} onOpen={openChart(m)} />
           ))}
           {!collapsed.uk && uk.length > 0 && uk.every((m) => !m.available) && (
-            <div className="pl-3 pr-[72px] py-2 text-right text-[10px] text-slate-500 leading-relaxed">
+            <div className="pl-3 pr-[78px] py-2 text-right text-[10px] text-slate-500 leading-relaxed">
               UK data source unreachable from the server right now. Sections above are unaffected.
             </div>
           )}
@@ -697,13 +713,13 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
             open={globalMkts.length ? globalMkts.some((m) => m.open === true) : undefined}
           />
           {!collapsed.global && globalMkts.length === 0 && (
-            <div className="pl-3 pr-[72px] py-3 text-right text-xs text-slate-500">Loading…</div>
+            <div className="pl-3 pr-[78px] py-3 text-right text-xs text-slate-500">Loading…</div>
           )}
           {!collapsed.global && globalMkts.map((m) => (
             <WheelRow key={m.key} m={m} onOpen={openChart(m)} />
           ))}
           {!collapsed.global && globalMkts.length > 0 && globalMkts.every((m) => !m.available) && (
-            <div className="pl-3 pr-[72px] py-2 text-right text-[10px] text-slate-500 leading-relaxed">
+            <div className="pl-3 pr-[78px] py-2 text-right text-[10px] text-slate-500 leading-relaxed">
               Global data source unreachable from the server right now. Sections above are unaffected.
             </div>
           )}
