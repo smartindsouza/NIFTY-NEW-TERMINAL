@@ -497,11 +497,31 @@ export function OptionChainSheet({ onClose, start }: { onClose: () => void; star
     html.style.overflow = 'hidden'; body.style.overflow = 'hidden'; html.style.overscrollBehavior = 'none';
     return () => { html.style.overflow = was.h; body.style.overflow = was.b; html.style.overscrollBehavior = was.o; };
   }, []);
+  // CLOSING: on a phone the sheet slides back down first and is taken away when
+  // it has gone (see chain-sheet-down in index.css). Anywhere the slide does not
+  // run — the desktop, a phone asking for reduced motion — it closes at once. A
+  // strike picked from the chain closes at once too: the screen is changing
+  // under it. The slide's own end is the close (onAnimationEnd), so the sheet is
+  // never taken away part of the way down; the timer is for a slide that never
+  // reports its end.
+  const [leaving, setLeaving] = useState(false);
+  const leaveTimer = useRef<any>(null);
+  const leave = () => {
+    if (leaveTimer.current) return;
+    let slide = false;
+    try { slide = window.innerWidth < 768 && !window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+    if (!slide) { onClose(); return; }
+    setLeaving(true);
+    leaveTimer.current = setTimeout(onClose, 700);
+  };
+  useEffect(() => () => { if (leaveTimer.current) clearTimeout(leaveTimer.current); }, []);
+  const leaveRef = useRef(leave);
+  leaveRef.current = leave;
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') leaveRef.current(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, []);
   // THE TOP STAYS IN USE ON THE PHONE'S CHART (18 Nov 2026). Martin, with the
   // chain open over the chart: "Show the top part which is dimmed so that option
   // chain can be changed for sensex and bank nifty from the same screen". The
@@ -564,14 +584,15 @@ export function OptionChainSheet({ onClose, start }: { onClose: () => void; star
   return createPortal(
     <div data-chain-sheet={wide ? 'wide' : openTop ? 'open-top' : ''}
       className={openTop
-        ? `chain-sheet-up fixed inset-x-0 bottom-0 z-[150] flex flex-col justify-end rounded-t-xl ${topPx != null ? 'bg-card' : ''}`
-        : 'chain-dim-in fixed inset-0 z-[150] flex flex-col justify-end md:items-center md:justify-center bg-black/75'}
+        ? `${leaving ? 'chain-sheet-down' : 'chain-sheet-up'} fixed inset-x-0 bottom-0 z-[150] flex flex-col justify-end rounded-t-xl ${topPx != null ? 'bg-card' : ''}`
+        : `${leaving ? 'chain-dim-out' : 'chain-dim-in'} fixed inset-0 z-[150] flex flex-col justify-end md:items-center md:justify-center bg-black/75`}
       style={openTop && topPx != null ? { top: topPx } : undefined}
-      onClick={openTop ? undefined : onClose}>
+      onAnimationEnd={(e) => { if (leaving && e.animationName === 'chain-sheet-down') onClose(); }}
+      onClick={openTop ? undefined : leave}>
       <div style={openTop && topPx != null ? { height: '100%', minHeight: 0 } : undefined} className={wide
         ? 'w-[min(1600px,calc(100vw-48px))] h-[calc(100dvh-48px)] rounded-xl overflow-hidden border border-foreground/10'
-        : `${openTop ? '' : 'chain-sheet-up '}w-full md:w-[430px] h-[calc(100dvh-152px)] min-h-[60dvh] md:h-[min(780px,90dvh)] rounded-t-xl md:rounded-xl overflow-hidden ${openTop ? 'shadow-[0_-8px_24px_rgba(0,0,0,0.35)]' : ''}`} onClick={(e) => e.stopPropagation()}>
-        <OptionChainView key={`${wide ? 'wide' : 'narrow'}|${underlyingOf(shown?.underlying).name}`} onPicked={onClose} start={shown} wide={wide} onClose={onClose} />
+        : `${openTop ? '' : leaving ? 'chain-sheet-down ' : 'chain-sheet-up '}w-full md:w-[430px] h-[calc(100dvh-152px)] min-h-[60dvh] md:h-[min(780px,90dvh)] rounded-t-xl md:rounded-xl overflow-hidden ${openTop ? 'shadow-[0_-8px_24px_rgba(0,0,0,0.35)]' : ''}`} onClick={(e) => e.stopPropagation()}>
+        <OptionChainView key={`${wide ? 'wide' : 'narrow'}|${underlyingOf(shown?.underlying).name}`} onPicked={onClose} start={shown} wide={wide} onClose={leave} />
       </div>
     </div>,
     document.body,

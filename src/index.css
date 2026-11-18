@@ -268,6 +268,19 @@ body[data-search-open] [data-sonner-toaster] { display: none !important; }
   .chain-sheet-up { animation: chain-sheet-up 0.34s cubic-bezier(0.32, 0.72, 0, 1); will-change: transform; }
   .chain-dim-in { animation: chain-dim-in 0.34s ease-out; }
 }
-@media (prefers-reduced-motion: reduce) { .chain-sheet-up, .chain-dim-in { animation: none; } }
+/* ...AND GOES DOWN THE SAME WAY. Martin, the same evening: "The closing
+   animation for the option chain is not smooth enough. Make it as smooth as it
+   slides up when it slide down as well". It had none: the sheet vanished. It
+   leaves by the way it came, starting gently and gathering pace, and is taken
+   off the page when the slide has ended (see `leave` in OptionChainSheet).
+   Not the rise's curve run backwards: that waits for most of its time and then
+   drops, which reads as a delay. */
+@keyframes chain-sheet-down { from { transform: translateY(0); } to { transform: translateY(100%); } }
+@keyframes chain-dim-out { to { background-color: rgb(0 0 0 / 0); } }
+@media (max-width: 767px) {
+  .chain-sheet-down { animation: chain-sheet-down 0.3s cubic-bezier(0.4, 0, 1, 1) forwards; will-change: transform; }
+  .chain-dim-out { animation: chain-dim-out 0.3s ease-in forwards; }
+}
+@media (prefers-reduced-motion: reduce) { .chain-sheet-up, .chain-dim-in, .chain-sheet-down, .chain-dim-out { animation: none; } }
 @keyframes bias-sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
 @media (max-width: 767px) { .bias-sheet, .heatmap-sheet { animation: bias-sheet-up 220ms cubic-bezier(0.2, 0.8, 0.2, 1); } }
