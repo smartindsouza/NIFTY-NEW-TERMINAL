@@ -17003,7 +17003,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               {rangeOpen && (
                 <>
                   <div className="fixed inset-0 z-[88]" aria-hidden="true" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); sheetClosedAtRef.current = Date.now(); setRangeOpen(false); }} />
-                  <div data-range-sheet="" className="fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem))] z-[90] bg-card border border-white/10 rounded-xl shadow-2xl overflow-hidden">
+                  <div data-range-sheet="" className="fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+8px)] z-[90] bg-card border border-white/10 rounded-xl shadow-2xl overflow-hidden">
                     {([['1D', '1D'], ['2D', '2D'], ['5D', '5D'], ['1M', '1M'], ['ALL', 'All']] as const).map(([k, label]) => (
                       <button key={k} type="button" data-range-pick={k} onClick={() => applyRange(k)}
                         className={`w-full flex items-center justify-between px-3 py-2.5 text-left text-[13px] font-medium active:bg-muted ${rangeChoice === k ? 'text-primary' : 'text-foreground'}`}>
@@ -17085,7 +17085,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 // old two-item menu opened upwards, off the top of the page; seven
                 // rows would have left only the last of them on screen.
                 <MenuPortal to={menuTo('drawings')}>
-                <div data-draw-sheet="" className={menuTo('drawings') ? 'scalp-menu-rows' : 'fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem))] md:bottom-auto md:top-full md:mt-2 md:right-0 z-[90] md:w-60 bg-card border border-white/10 rounded-xl md:rounded-lg shadow-2xl md:shadow-xl overflow-hidden'}>
+                <div data-draw-sheet="" className={menuTo('drawings') ? 'scalp-menu-rows' : 'fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+8px)] md:bottom-auto md:top-full md:mt-2 md:right-0 z-[90] md:w-60 bg-card border border-white/10 rounded-xl md:rounded-lg shadow-2xl md:shadow-xl overflow-hidden'}>
                   <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Drawing Tools</div>
                   {(rrBox || (split && peerRrBox)) && (
                     // Split view: one sheet for both charts, so it clears a box on either of them.
@@ -17145,7 +17145,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             {tfOpen && !scalp && (
               <>
                 <div className="md:hidden fixed inset-0 z-[88]" aria-hidden="true" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); sheetClosedAtRef.current = Date.now(); setTfOpen(false); }} />
-                <div data-interval-sheet="" className="md:hidden fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem))] z-[90] bg-card border border-white/10 rounded-xl shadow-2xl overflow-hidden">
+                <div data-interval-sheet="" className="md:hidden fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+8px)] z-[90] bg-card border border-white/10 rounded-xl shadow-2xl overflow-hidden">
                   {([['1', '1m'], ['3', '3m'], ['5', '5m'], ['15', '15m'], ['60', '1h'], ['240', '4h'], ['1440', '1D'], ['10080', '1W'], ['43200', '1M']] as const).map(([k, label]) => (
                     <button key={k} type="button" data-interval-pick={k} onClick={() => { setTimeframe(k); setTfOpen(false); }}
                       className={`w-full flex items-center justify-between px-3 py-2.5 text-left text-[13px] font-medium active:bg-muted ${String(timeframe) === k ? 'text-primary' : 'text-foreground'}`}>
@@ -17209,6 +17209,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               )}
               {(isIndicatorsOpen || !!menuTo('indicators')) && (
                 <MenuPortal to={menuTo('indicators')}>
+                {/* ONE CARD LIKE THE OTHERS, CLEAR OF THE BAR (18 Nov 2026). Martin: "All the
+                    cards from the bottom bar like the range, time frame, drawings and
+                    settings using this rounded card style except the indicators. So fix
+                    it. Also keep a slight gap between these cards and the bar". The list
+                    ran edge to edge with square corners; on a phone it is now inset, fully
+                    outlined and rounded as Range, Interval, Drawings and Settings are, and
+                    all five stand 8px above the row of five instead of resting on it. */}
                 {/* EVERY ROW ON AN OPTION CHART TOO (17 Nov 2026). Martin: "Why doesn’t the
                     indicators list in the option chart in scalper pro screen show all the
                     indicators. Fix it." The list showed six rows there (v324); the others
@@ -17227,7 +17234,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     - the NIFTY Bias card is the one card, as on the index chart.
                     An option chart's switches are its own and start off (v324); the alerts'
                     and Bias Levels' are now its own too — they were the index chart's. */}
-                <div data-ind-list="" className={menuTo('indicators') ? 'scalp-menu-list' : 'fixed md:absolute inset-x-0 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem))] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto md:overflow-hidden bg-card border-y border-white/10 md:border-0 rounded-none md:rounded-md py-1.5 z-[45] shadow-2xl flex flex-col'}>
+                <div data-ind-list="" className={menuTo('indicators') ? 'scalp-menu-list' : 'fixed md:absolute inset-x-2 md:inset-x-auto bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+8px)] md:bottom-auto md:top-full md:mt-1.5 md:right-0 min-w-0 md:min-w-[240px] max-h-[55vh] md:max-h-none overflow-y-auto md:overflow-hidden bg-card border border-white/10 md:border-0 rounded-xl md:rounded-md py-1.5 z-[45] shadow-2xl flex flex-col'}>
                   <div className="order-0 px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase">Available Indicators</div>
                   
                   {/* Previous Day High/Low */}
@@ -18020,7 +18027,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           <MenuPortal to={menuTo('settings')}>
           <div data-settings-sheet={phoneSettingsOpen ? 'open' : 'closed'}
             className={menuTo('settings') ? 'scalp-menu-rows flex flex-col items-stretch' : `${phoneSettingsOpen && !isPane
-              ? 'max-md:flex max-md:fixed max-md:inset-x-2 max-md:bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem))] max-md:z-[90] max-md:flex-col max-md:items-stretch max-md:gap-0 max-md:max-w-none max-md:overflow-visible max-md:rounded-xl max-md:border max-md:border-white/10 max-md:bg-card max-md:p-1.5 max-md:shadow-2xl'
+              ? 'max-md:flex max-md:fixed max-md:inset-x-2 max-md:bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+8px)] max-md:z-[90] max-md:flex-col max-md:items-stretch max-md:gap-0 max-md:max-w-none max-md:overflow-visible max-md:rounded-xl max-md:border max-md:border-white/10 max-md:bg-card max-md:p-1.5 max-md:shadow-2xl'
               : isPane ? 'flex' : 'max-md:hidden flex'} items-center gap-2 flex-none max-w-[45%] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:contents md:min-w-0 md:basis-auto pr-1`}>
           {/* Trailing TP, beside Quick Trade. Distinct icon and colour so the two
               switches are not mistaken for each other at a glance.
