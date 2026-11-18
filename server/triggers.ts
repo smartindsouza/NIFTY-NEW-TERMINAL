@@ -41,6 +41,18 @@
 //     looked placed and was gone when he looked again. It is refused now, with
 //     "Market closed". Before the open is different: an order armed at 9:05 is
 //     still there at 9:15.
+//   * ON THE CANDLE'S CLOSE (18 Nov 2026). Martin: "whenever I set a
+//     limit/trigger order, when the price reaches that particular price and the
+//     candle closes above it with a green candle for option buying and vice
+//     versa and for spot chart green candle for CALL and Red candle for PUT,
+//     only then activate the trade." Until this date every level fired on the
+//     first tick that touched it — a wick through the line was an entry. A row
+//     armed with confirm='CLOSE' waits instead: the level must be reached, and
+//     then a candle of the chart it was set on (confirm_tf minutes) must CLOSE
+//     beyond it in the trade's colour — see candleConfirms. confirm='TOUCH' (and
+//     every row from before this date, and any request that does not say) is the
+//     old rule, unchanged. Which of the two is his switch, per chart, on the
+//     ScalpPro screen; the server never decides it.
 
 import express from 'express';
 import { getKiteClient } from './kite_service';
@@ -85,7 +97,13 @@ async function guardSays(row: { tradingsymbol: string; side: string }, opts?: { 
 
 // Tests only: lets a test fire a level outside market hours, and send the order
 // to its own stand-in for /api/orders. Nothing in the app sets these.
-export const __test: { marketOpen: boolean | null; place: null | ((row: any) => Promise<{ ok: boolean; orderId?: string; error?: string }>) } = { marketOpen: null, place: null };
+export const __test: {
+  marketOpen: boolean | null;
+  place: null | ((row: any) => Promise<{ ok: boolean; orderId?: string; error?: string }>);
+  now: null | (() => number);                                                    // the clock the candles are cut by
+  candle: null | ((token: number, tf: number, startMs: number) => Promise<{ o: number; h: number; l: number } | null>);   // stands in for the broker's candle
+} = { marketOpen: null, place: null, now: null, candle: null };
+const nowMs = () => (__test.now ? __test.now() : Date.now());
 
 /** Pure: which way must price move to reach the level, decided when arming.
  *  A level AT the price counts as up: it is reached on the next tick either
@@ -99,6 +117,46 @@ export function directionFor(triggerPrice: number, currentPrice: number): 'UP' |
 /** Pure: has the level been reached? */
 export function isHit(direction: 'UP' | 'DOWN', triggerPrice: number, ltp: number): boolean {
   return direction === 'UP' ? ltp >= triggerPrice : ltp <= triggerPrice;
+}
+
+// ── ON THE CANDLE'S CLOSE: the pure rules ──
+
+/** Pure: does this order want the watched price UP? On the option's own chart a
+ *  buy does and a sell does not. On the index it is the option that says: a
+ *  CALL bought (or a PUT sold) wants the index up, a PUT bought (or a CALL sold)
+ *  wants it down — "green candle for CALL and Red candle for PUT". */
+export function wantsUp(side: string, tradingsymbol: string, onIndex: boolean): boolean {
+  const buy = String(side).toUpperCase() === 'BUY';
+  if (!onIndex) return buy;
+  const put = /PE$/i.test(String(tradingsymbol));
+  return buy ? !put : put;
+}
+
+/** Pure: does a finished candle activate the order? Green and closed above the
+ *  level for an order that wants the price up; red and closed below it for one
+ *  that wants it down. A close ON the level, or a doji, is neither. */
+export function candleConfirms(up: boolean, level: number, bar: { o: number; c: number }): boolean {
+  return up ? (bar.c > bar.o && bar.c > level) : (bar.c < bar.o && bar.c < level);
+}
+
+/** Pure: the candle lengths a row may wait on. All divide a day, so one grid
+ *  from 9:15 serves every day. A day or week chart waits on the hour's candle:
+ *  an armed order does not outlive its day (see the header). */
+const CONFIRM_TFS = [1, 2, 3, 4, 5, 10, 15, 30, 60];
+export function cleanTf(v: any): number {
+  const n = parseInt(String(v), 10);
+  if (!(n > 0)) return /^[dwm]/i.test(String(v || '')) ? 60 : 5;
+  if (n > 60) return 60;
+  return CONFIRM_TFS.includes(n) ? n : 5;
+}
+
+/** Pure: which candle of `tf` minutes a moment falls in, counted on the grid
+ *  Zerodha cuts its candles on — from 9:15 IST. */
+export function bucketOf(ms: number, tf: number): number {
+  return Math.floor((ms + IST_MS - TRIGGER_WINDOW.openMin * 60000) / (tf * 60000));
+}
+export function bucketStartMs(b: number, tf: number): number {
+  return b * tf * 60000 + TRIGGER_WINDOW.openMin * 60000 - IST_MS;
 }
 
 let db: any = null;
@@ -124,6 +182,13 @@ export function initTriggers(database: any) {
   // and on every level set in the option's own premium.
   try { db.exec(`ALTER TABLE pending_triggers ADD COLUMN watch_token INTEGER`); } catch (e) { /* exists */ }
   try { db.exec(`ALTER TABLE pending_triggers ADD COLUMN watch_name TEXT`); } catch (e) { /* exists */ }
+  // On the candle's close (see the header). NULL confirm on every older row is
+  // the old rule. `touched` is kept in the row, not in memory: a restart in the
+  // minutes between the level being reached and the candle closing must not
+  // forget that it was reached.
+  try { db.exec(`ALTER TABLE pending_triggers ADD COLUMN confirm TEXT`); } catch (e) { /* exists */ }
+  try { db.exec(`ALTER TABLE pending_triggers ADD COLUMN confirm_tf INTEGER`); } catch (e) { /* exists */ }
+  try { db.exec(`ALTER TABLE pending_triggers ADD COLUMN touched INTEGER`); } catch (e) { /* exists */ }
   // Anything left ARMED from an earlier day cannot be honoured today — the level
   // meant something in yesterday's market. Retire them at boot.
   try {
@@ -260,23 +325,118 @@ async function placeThroughOwnApi(row: any): Promise<{ ok: boolean; orderId?: st
   }
 }
 
-/** Called for every tick of a subscribed instrument. Hot path: keep it cheap. */
-export function onTickForTriggers(token: number, ltp: number) {
-  if (!db || !(ltp > 0)) return;
-  let rows: any[];
+// ── ON THE CANDLE'S CLOSE: the candles ──
+//
+// The server cuts its own candles from the ticks it is already given, one per
+// (watched instrument, candle length) that an armed row is waiting on, and only
+// while one is. Two things it cannot see from ticks alone, and what is done
+// about each:
+//   * THE OPEN OF A CANDLE IT JOINED LATE. An order is nearly always armed in
+//     the middle of a candle, and a restart lands in the middle of one. Green or
+//     red is close against OPEN, so a late candle's open (and its high and low
+//     so far) is read from the broker's one-minute candles. If that cannot be
+//     read by the time the candle closes, the candle is NOT judged — the row
+//     waits for the next one. Guessing an open is how a red candle gets bought.
+//   * THE CLOSE WHEN NO TICK FOLLOWS. A quiet option may not print in the first
+//     seconds of the next candle, so a one-second timer closes candles by the
+//     clock as well as the next tick doing it.
+// The close used is the last tick the server saw in the candle. The feed gives
+// about one a second, so it can differ from the broker's own candle by a tick's
+// worth — only on a close within a tick of the level or of the open.
+type Bar = { b: number; o: number; h: number; l: number; c: number; whole: boolean };
+const bars = new Map<string, Bar>();
+const LATE_MS = 2000;
+
+const istStamp = (ms: number) => {
+  const x = new Date(ms + IST_MS); const p = (n: number) => String(n).padStart(2, '0');
+  return `${x.getUTCFullYear()}-${p(x.getUTCMonth() + 1)}-${p(x.getUTCDate())} ${p(x.getUTCHours())}:${p(x.getUTCMinutes())}:${p(x.getUTCSeconds())}`;
+};
+async function brokerCandle(token: number, tf: number, startMs: number): Promise<{ o: number; h: number; l: number } | null> {
+  if (__test.candle) return __test.candle(token, tf, startMs);
   try {
-    // A row is judged by the price of what it WATCHES: its own contract, or —
-    // a level set on the spot chart — the index.
-    rows = db.prepare(`SELECT * FROM pending_triggers WHERE status='ARMED' AND COALESCE(watch_token, instrument_token) = ?`).all(Number(token)) as any[];
-  } catch (e) { return; }
-  if (!rows.length) return;
+    const kc: any = getKiteClient();
+    if (!kc || !kc.access_token) return null;
+    const endMs = Math.min(startMs + tf * 60000 - 1000, Date.now());
+    const cs: any[] = (await kc.getHistoricalData(token, 'minute', istStamp(startMs), istStamp(endMs))) || [];
+    const inBar = cs.filter((c) => { const t = new Date(c.date).getTime(); return t >= startMs && t < startMs + tf * 60000; });
+    if (!inBar.length || !(Number(inBar[0].open) > 0)) return null;
+    return { o: Number(inBar[0].open), h: Math.max(...inBar.map((c) => Number(c.high))), l: Math.min(...inBar.map((c) => Number(c.low))) };
+  } catch (e: any) {
+    console.warn('[triggers] candle not readable from the broker:', e?.message || e);
+    return null;
+  }
+}
+function makeWhole(bar: Bar, got: { o: number; h: number; l: number } | null) {
+  if (!got || bar.whole) return;
+  bar.o = got.o; bar.h = Math.max(bar.h, got.h); bar.l = Math.min(bar.l, got.l); bar.whole = true;
+}
 
+function waitingRows(token: number, tf?: number): any[] {
+  try {
+    return (db.prepare(`SELECT * FROM pending_triggers WHERE status='ARMED' AND confirm='CLOSE' AND COALESCE(watch_token, instrument_token) = ?`).all(Number(token)) as any[])
+      .filter((r) => tf === undefined || cleanTf(r.confirm_tf) === tf);
+  } catch (e) { return []; }
+}
+
+async function closeBar(token: number, tf: number, bar: Bar) {
+  const key = `${token}|${tf}`;
+  if (bars.get(key) === bar) bars.delete(key);
+  if (!bar.whole) makeWhole(bar, await brokerCandle(token, tf, bucketStartMs(bar.b, tf)));
+  for (const row of waitingRows(token, tf)) {
+    if (!row.touched) continue;
+    if (!bar.whole) {
+      console.warn(`[triggers] ${row.tradingsymbol}: the ${tf}m candle that just closed was joined late and its open could not be read — not judged, waiting for the next`);
+      continue;
+    }
+    const up = wantsUp(row.side, row.tradingsymbol, Number(row.watch_token) > 0);
+    if (!candleConfirms(up, Number(row.trigger_price), bar)) continue;
+    console.log(`[triggers] ${row.tradingsymbol}: ${tf}m candle closed ${up ? 'green above' : 'red below'} ${row.trigger_price} (open ${bar.o}, close ${bar.c})`);
+    fire(row, bar.c);
+  }
+}
+
+/** Closes every candle whose time is up. On a one-second timer; exported for the tests. */
+export function closeEndedBars(): Promise<void[]> {
+  const out: Promise<void>[] = [];
+  const now = nowMs();
+  for (const [key, bar] of [...bars]) {
+    const [token, tf] = key.split('|').map(Number);
+    if (bucketOf(now, tf) !== bar.b) out.push(closeBar(token, tf, bar).catch((e) => console.error('[triggers] candle close failed', e)));
+  }
+  return Promise.all(out);
+}
+
+function onTickForCloseRows(token: number, ltp: number, rows: any[]) {
+  const now = nowMs();
   for (const row of rows) {
-    if (!isHit(row.direction, row.trigger_price, ltp)) continue;
+    if (row.touched || !isHit(row.direction, row.trigger_price, ltp)) continue;
+    try { db.prepare(`UPDATE pending_triggers SET touched=1 WHERE id=? AND status='ARMED'`).run(row.id); } catch (e) {}
+    console.log(`[triggers] ${row.tradingsymbol}: ${row.watch_token ? `${row.watch_name || 'index'} ` : ''}level ${row.trigger_price} reached at ${ltp} — waiting for the ${cleanTf(row.confirm_tf)}m candle to close`);
+  }
+  for (const tf of new Set(rows.map((r) => cleanTf(r.confirm_tf)))) {
+    const key = `${token}|${tf}`;
+    const b = bucketOf(now, tf);
+    let bar = bars.get(key);
+    if (bar && bar.b !== b) { closeBar(token, tf, bar).catch((e) => console.error('[triggers] candle close failed', e)); bar = undefined; }
+    if (!bar) {
+      const fresh: Bar = { b, o: ltp, h: ltp, l: ltp, c: ltp, whole: now - bucketStartMs(b, tf) <= LATE_MS };
+      bars.set(key, fresh);
+      if (!fresh.whole) brokerCandle(token, tf, bucketStartMs(b, tf)).then((got) => makeWhole(fresh, got)).catch(() => {});
+      continue;
+    }
+    if (ltp > bar.h) bar.h = ltp;
+    if (ltp < bar.l) bar.l = ltp;
+    bar.c = ltp;
+  }
+}
 
+/** The order goes in: claim the row, ask the guard, size it, place it. One
+ *  path for a level touched and a candle closed — nothing about firing differs. */
+function fire(row: any, ltp: number) {
+  {
     // Refuse outside market hours even though a tick arrived — pre-open and
     // post-close prints exist, and neither is a tradable moment.
-    if (!marketOpenNow()) continue;
+    if (!marketOpenNow()) return;
 
     // THE ONE-SHOT CLAIM. Ticks arrive many times a second; only the update that
     // actually changes a row may proceed to place an order.
@@ -286,8 +446,7 @@ export function onTickForTriggers(token: number, ltp: number) {
         .run(ltp, row.id);
       claimed = res.changes === 1;
     } catch (e) { claimed = false; }
-    if (!claimed) continue;
-
+    if (!claimed) return;
     console.log(`[triggers] ${row.side} ${row.quantity} ${row.tradingsymbol} — ${row.watch_token ? `${row.watch_name || 'index'} ` : ''}level ${row.trigger_price} reached at ${ltp}`);
     // THE TRADE GUARD, at the moment that matters. Asked AFTER the claim, so a
     // level reached while the guard is still thinking cannot be claimed twice;
@@ -328,6 +487,25 @@ export function onTickForTriggers(token: number, ltp: number) {
         }
       } catch (e) { console.error('[triggers] could not record outcome', e); }
     }).catch((e) => console.error('[triggers] fire chain error — check Kite for this order', e));
+  }
+}
+
+/** Called for every tick of a subscribed instrument. Hot path: keep it cheap. */
+export function onTickForTriggers(token: number, ltp: number) {
+  if (!db || !(ltp > 0)) return;
+  let rows: any[];
+  try {
+    // A row is judged by the price of what it WATCHES: its own contract, or —
+    // a level set on the spot chart — the index.
+    rows = db.prepare(`SELECT * FROM pending_triggers WHERE status='ARMED' AND COALESCE(watch_token, instrument_token) = ?`).all(Number(token)) as any[];
+  } catch (e) { return; }
+  if (!rows.length) return;
+
+  const onClose = rows.filter((r) => r.confirm === 'CLOSE');
+  if (onClose.length) onTickForCloseRows(Number(token), ltp, onClose);
+  for (const row of rows) {
+    if (row.confirm === 'CLOSE') continue;
+    if (isHit(row.direction, row.trigger_price, ltp)) fire(row, ltp);
   }
 }
 
@@ -424,21 +602,27 @@ export function registerTriggers(app: any, database: any) {
         }
       }
 
+      // On the candle's close, or on the touch (see the header). Only the word
+      // CLOSE asks for the candle: a request that does not say — an older
+      // bundle still open on his phone — keeps the rule it was written for.
+      const confirm = String(b.confirm || '').toUpperCase() === 'CLOSE' ? 'CLOSE' : 'TOUCH';
+      const confirmTf = confirm === 'CLOSE' ? cleanTf(b.confirm_tf) : null;
+
       const id = `trg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       db.prepare(`INSERT INTO pending_triggers
         (id, created_at, trade_date, tradingsymbol, instrument_token, exchange, side, product, quantity,
-         trigger_price, direction, armed_at_price, status, lot_size, watch_token, watch_name)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ARMED', ?, ?, ?)`)
+         trigger_price, direction, armed_at_price, status, lot_size, watch_token, watch_name, confirm, confirm_tf, touched)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ARMED', ?, ?, ?, ?, ?, 0)`)
         .run(id, Date.now(), istDate(), String(b.tradingsymbol).toUpperCase(), token,
              String(b.exchange || 'NFO'), side, product, quantity,
              triggerPrice, directionFor(triggerPrice, currentPrice), currentPrice,
              (parseInt(String(b.lot_size), 10) > 0 ? parseInt(String(b.lot_size), 10) : null),
-             watchToken, watchName);
+             watchToken, watchName, confirm, confirmTf);
 
       res.json({
-        ok: true, id, direction: directionFor(triggerPrice, currentPrice),
+        ok: true, id, direction: directionFor(triggerPrice, currentPrice), confirm, confirm_tf: confirmTf,
         note: marketOpenNow()
-          ? 'armed — will place a market order when the level is reached'
+          ? (confirm === 'CLOSE' ? `armed — will place a market order when a ${confirmTf}m candle closes beyond the level` : 'armed — will place a market order when the level is reached')
           : 'armed, but the market is closed; it expires at the next close if untouched',
       });
     } catch (e: any) { res.status(500).json({ ok: false, error: e?.message || String(e) }); }
@@ -467,6 +651,8 @@ export function registerTriggers(app: any, database: any) {
   setInterval(() => {
     try { if (istMinuteOfDay() > TRIGGER_WINDOW.closeMin) expireAtClose(); } catch (e) {}
   }, 60000);
+  // Candles end by the clock, whether or not a tick comes to say so.
+  setInterval(() => { try { if (bars.size) closeEndedBars(); } catch (e) {} }, 1000);
 
   console.log('[triggers] price-trigger engine registered');
 }

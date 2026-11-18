@@ -4310,7 +4310,19 @@ export type ScalpAt = { on: boolean; src: 'option' | 'spot'; optPx: number | nul
 /** What each ScalpPro chart tells the other without a render: the index's live
  *  price, token and name (the bar sits on the option chart and needs them to
  *  arm a level on the index), and the option's short name for the index's chip. */
-export type ScalpShared = { spotNow: number; spotToken: string | null; spotName: string; optShort: string };
+export type ScalpShared = { spotNow: number; spotToken: string | null; spotName: string; optShort: string; spotTf?: string };
+
+// ACTIVATE ON CANDLE CLOSE (18 Nov 2026). Martin: "add an option to select the
+// trade activation on candle close or candle crossing the line in the settings
+// of both spot and option chart in scalperX screen. Just a check box is enough.
+// Keep the default as activate on candle close". One answer for the spot chart
+// and one for the option chart, kept on this device; anything but a stored '0'
+// is the default, on. It is read at the moment an order is set to wait, and
+// sent with it — an order already waiting keeps the rule it was set with (see
+// ON THE CANDLE'S CLOSE in server/triggers.ts).
+export const confirmOnClose = (chart: 'spot' | 'option'): boolean => {
+  try { return localStorage.getItem(`atConfirmClose:${chart}`) !== '0'; } catch (e) { return true; }
+};
 
 /** The price line of the small header that shows once the chart page is
  *  scrolled: a copy, twice a second, of what the page's own header says — "the
@@ -5934,6 +5946,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // is the box in the sheet they are drawn into, held in state so that the
   // lists are drawn once it exists.
   const [scalpMenu, setScalpMenu] = useState<null | 'range' | 'indicators' | 'drawings' | 'settings'>(null);
+  const confirmChart: 'spot' | 'option' = paneRole === 'option' ? 'option' : 'spot';
+  const [confirmClose, setConfirmClose] = useState(() => confirmOnClose(confirmChart));
   const [menuBody, setMenuBody] = useState<HTMLDivElement | null>(null);
   const menuTo = (k: 'indicators' | 'drawings' | 'settings') => (scalp && scalpMenu === k ? menuBody : null);
   const drawGeomRef = useRef<Map<number, DrawGeom>>(new Map());
@@ -9452,6 +9466,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           side: triggerBox.side, product: triggerBox.product, quantity: qty,
           lot_size: triggerBox.contract.lot_size || 0,   // lets the server re-size in whole lots when it fires
           trigger_price: triggerBox.level, current_price: triggerBox.current,
+          confirm: confirmOnClose('option') ? 'CLOSE' : 'TOUCH', confirm_tf: String(timeframe),
           ...(force ? { force: true } : {}),
         }),
       });
@@ -10721,7 +10736,16 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     if (selectedInstrument) return;
     const opts = openCharts.filter((c) => isOptionInstr(c));
     if (opts.length !== openCharts.length) { setOpenCharts(opts); return; }
-    if (opts.length) { setSelectedInstrument(opts[opts.length - 1]); return; }
+    if (opts.length) {
+      // On ScalperX the option is one of the index above it, where there is
+      // one (see SCALPERX OPENS ON THE CHARTS THIS PAGE HAS): the newest open
+      // option of that index, and only failing that the newest of any.
+      let idx: string | null = null;
+      if (scalp) { try { idx = localStorage.getItem('chartUnderlying'); } catch (e) {} }
+      const same = idx ? opts.filter((c) => rootOfOption(c.tradingsymbol) === idx) : [];
+      setSelectedInstrument((same.length ? same : opts)[(same.length ? same : opts).length - 1]);
+      return;
+    }
     try { window.dispatchEvent(new CustomEvent('terminal:options-empty')); } catch (e) {}
   }, [isOptionPane, selectedInstrument, openCharts]);
   useEffect(() => {
@@ -15421,7 +15445,27 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // The chart page's button for it (and its neighbour, Option Chain) sit in a
   // second row of the phone's tool bar. Everything that opens above that bar,
   // here and in the app's shell, reads the bar's height from this variable.
-  const openScalp = () => { try { window.dispatchEvent(new CustomEvent('terminal:scalp', { detail: true })); } catch (e) {} };
+  // SCALPERX OPENS ON THE CHARTS THIS PAGE HAS (18 Nov 2026). Martin, with NIFTY
+  // 50 on the spot tab and NIFTY 25300 CE on the tab beside it: "when I tapped
+  // on scalperX it opened the nifty spot chart at the top and sensex option
+  // chart at the bottom ... It should the same charts in scalperX screen which
+  // is open in the chart screen". With the spot tab in front no option is
+  // "selected", so the lower chart was left to pick one itself and took the
+  // newest in the whole list of open options — a SENSEX one from an earlier
+  // trade, which this page's tab does not even list while NIFTY is the index.
+  // The option the tab names (the same three steps the tab uses) is now handed
+  // to it. Coming back is unchanged: the page returns to its own choice, the
+  // index (closeScalp, ChartWorkspace).
+  const openScalp = () => {
+    try {
+      if (!selectedInstrument && !isReferenceChart) {
+        const stillOpen = lastOption && tabCharts.some(c => c.tradingsymbol === lastOption.tradingsymbol) ? lastOption : null;
+        const t = stillOpen || tabCharts[tabCharts.length - 1];
+        if (t) sessionStorage.setItem('selectedInstrument', JSON.stringify(t));
+      }
+    } catch (e) {}
+    try { window.dispatchEvent(new CustomEvent('terminal:scalp', { detail: true })); } catch (e) {}
+  };
   const barRowShown = !isPane && !isFocusedChart;
   // THE BAR'S REAL HEIGHT, NOT A FIGURE FOR IT (17 Nov 2026). The variable was
   // "6.25rem" — 100px — and the bar on Martin's phone is 103: App Diagnostics,
@@ -15689,7 +15733,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   useEffect(() => {
     if (!scalp || !scalpShared) return;
     if (isSpotPane) {
-      const w = () => { const sh = scalpShared.current; sh.spotNow = Number(lastCandleDataRef.current?.close) || 0; sh.spotToken = indexToken; sh.spotName = indexLabel; };
+      const w = () => { const sh = scalpShared.current; sh.spotNow = Number(lastCandleDataRef.current?.close) || 0; sh.spotToken = indexToken; sh.spotName = indexLabel; sh.spotTf = String(timeframe); };
       w();
       const iv = setInterval(w, 250);
       return () => clearInterval(iv);
@@ -15912,6 +15956,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     const watchToken = onSpot ? Number(scalpShared?.current.spotToken) : 0;
     if (level === null || !(level > 0)) { toast.error('Set a price'); return; }
     if (!(now > 0) || (onSpot && !(watchToken > 0))) { toast.error('No live price yet'); return; }
+    const onClose = confirmOnClose(onSpot ? 'spot' : 'option');
+    const confirmTf = onSpot ? String(scalpShared?.current.spotTf || timeframe) : String(timeframe);
     scalpBusyRef.current = side; setScalpBusy(side);
     try {
       const res = await fetch('/api/triggers', {
@@ -15921,6 +15967,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           side, product: 'NRML', quantity: scalpLots * scalpLot, lot_size: scalpLot,
           trigger_price: level, current_price: now,
           ...(onSpot ? { watch_token: watchToken, watch_name: scalpShared?.current.spotName || '' } : {}),
+          // On the candle's close or on the touch: the switch of the chart the
+          // line is on, and that chart's candles.
+          confirm: onClose ? 'CLOSE' : 'TOUCH', confirm_tf: confirmTf,
         }),
       });
       const d = await res.json().catch(() => ({ ok: false }));
@@ -15928,7 +15977,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       // not offered an "anyway" here as it is in the trigger box: on a one-tap
       // bar the answer is simply no.
       if (!d.ok) { toast.error(d.needsConfirm ? 'Not enough funds' : (d.error || 'Not placed')); return; }
-      toast.success(`${side === 'BUY' ? 'Buy' : 'Sell'} at ${onSpot ? `${scalpShared?.current.spotName || 'index'} ` : ''}${level.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+      toast.success(`${side === 'BUY' ? 'Buy' : 'Sell'} at ${onSpot ? `${scalpShared?.current.spotName || 'index'} ` : ''}${level.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${d.confirm === 'CLOSE' ? ` · on ${d.confirm_tf}m close` : ''}`);
       atOff();
       refetchTriggers();
     } catch (e) { toast.error('Not placed'); }
@@ -17888,6 +17937,23 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               I can place limit/trigger orders directly from the charts". An
               order that waits at a price is now set by a line on the ScalpPro
               screen — see LIMIT / TRIGGER.) */}
+          {/* Activate on candle close — see confirmOnClose. Only in the ScalpPro
+              menu: it is a setting of the line that screen's bar draws. */}
+          {scalp && menuTo('settings') ? (
+          <button type="button" role="checkbox" aria-checked={confirmClose} data-settings="confirm-close"
+            onClick={() => {
+              const next = !confirmClose;
+              setConfirmClose(next);
+              try { localStorage.setItem(`atConfirmClose:${confirmChart}`, next ? '1' : '0'); } catch (e) {}
+              try { toast(next ? 'Orders activate when a candle closes past the line' : 'Orders activate as soon as price crosses the line'); } catch (e) {}
+            }}
+            className="flex items-center h-11 w-full justify-start gap-3 px-2.5 rounded-md text-muted-foreground">
+            <span className={`flex h-[17px] w-[17px] shrink-0 items-center justify-center rounded-[4px] border ${confirmClose ? 'bg-primary border-primary text-primary-foreground' : 'border-foreground/40'}`}>
+              {confirmClose ? <Check size={13} strokeWidth={3} /> : null}
+            </span>
+            <span className="text-left text-[13px] font-medium text-foreground">Activate on candle close</span>
+          </button>
+          ) : null}
           {isOptionView && slActivePos ? (
           <button
             data-layout="icons"

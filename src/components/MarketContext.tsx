@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, TrendingUp, TrendingDown, Globe, X, LineChart } from "lucide-react";
+import { ChevronDown, TrendingUp, TrendingDown, Globe, X, LineChart, ChartCandlestick } from "lucide-react";
 import { useLocation } from "wouter";
 import { notificationService } from "../lib/notificationService";
 import { toast } from "sonner";
@@ -198,7 +198,8 @@ function Row({ m, onOpen }: { m: Market; onOpen?: () => void }) {
 // panel is the picked-out one (the accent colour stands in for the picture's
 // pink); the others fade with their distance from it; the list snaps a row to
 // the middle. The sections are still headed Indian, US, UK, Global, and a tap
-// on a heading still folds it. A tap on a row opens its chart, as before.
+// on a heading still folds it. A row's chart is opened by the small icon
+// before its name (see WheelRow), not by the row.
 const WHEEL_ROW = 58;
 function WheelRow({ m, onOpen }: { m: Market; onOpen?: () => void }) {
   const ok = m.available;
@@ -210,10 +211,23 @@ function WheelRow({ m, onOpen }: { m: Market; onOpen?: () => void }) {
     : m.reason === 'no_price_in_response' ? 'no price'
     : m.reason ? m.reason : 'unavailable') : '';
   return (
-    <div data-wheel-row={m.key} onClick={onOpen} role={onOpen ? 'button' : undefined}
-      title={onOpen ? `Open the ${m.label} chart (Zerodha data)` : (m.reason || undefined)}
+    <div data-wheel-row={m.key}
+      title={onOpen ? undefined : (m.reason || undefined)}
       style={{ height: WHEEL_ROW }}
-      className={`group snap-center flex items-center justify-end gap-3 pl-3 pr-[52px] will-change-[opacity] ${onOpen ? 'cursor-pointer' : ''}`}>
+      className="group snap-center flex items-center justify-end gap-3 pl-3 pr-[52px] will-change-[opacity]">
+      {/* THE ROW ITSELF OPENS NOTHING (18 Nov 2026). Martin: "when I tap an
+          index by mistake, its chart opens up in the chart screen. So prevent
+          it by adding a small chart open icon somewhere for every index". The
+          whole row was the button, and the row is also what a thumb lands on
+          while scrolling the list. The chart is opened by this icon alone,
+          before the name; a row with no chart to open has none. */}
+      {onOpen && (
+        <button type="button" data-wheel="open" onClick={(e) => { e.stopPropagation(); onOpen(); }}
+          aria-label={`Open the ${m.label} chart`} title={`Open the ${m.label} chart (Zerodha data)`}
+          className="shrink-0 -mr-1.5 h-8 w-8 flex items-center justify-center rounded-full text-foreground/50 group-data-[on]:text-primary active:bg-foreground/10">
+          <ChartCandlestick size={14} />
+        </button>
+      )}
       <div className="min-w-0 flex flex-col items-end">
         <span data-wheel="name" // No chip round the picked name: a glow in the accent behind it (18 Nov
           // 2026; Martin: "Remove the outline for the indice highlighted. Keep the

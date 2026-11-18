@@ -259,6 +259,102 @@ assert.equal(T.closedForArming(3, 11 * 60, true), true, 'a holiday');
   console.log(`  (arming with the real clock: ${closed ? 'refused, market closed' : 'accepted'})`);
 }
 
+// ── 10. on the candle's close (18 Nov 2026) ──
+// the pure rules
+assert.equal(T.wantsUp('BUY', SYM, false), true, 'option chart: a buy wants the premium up');
+assert.equal(T.wantsUp('SELL', SYM, false), false, 'option chart: a sell wants it down');
+assert.equal(T.wantsUp('BUY', 'NIFTY26N1725200CE', true), true, 'spot chart: a CALL wants the index up');
+assert.equal(T.wantsUp('BUY', 'NIFTY26N1725200PE', true), false, 'spot chart: a PUT wants it down');
+assert.equal(T.wantsUp('SELL', 'NIFTY26N1725200PE', true), true); assert.equal(T.wantsUp('SELL', 'NIFTY26N1725200CE', true), false);
+assert.equal(T.candleConfirms(true, 150, { o: 148, c: 151 }), true, 'green, closed above');
+assert.equal(T.candleConfirms(true, 150, { o: 152, c: 151 }), false, 'above the level but red');
+assert.equal(T.candleConfirms(true, 150, { o: 148, c: 150 }), false, 'a close on the level is not above it');
+assert.equal(T.candleConfirms(true, 150, { o: 148, c: 149.5 }), false, 'green but closed back under — the wick');
+assert.equal(T.candleConfirms(false, 150, { o: 152, c: 149 }), true, 'red, closed below');
+assert.equal(T.candleConfirms(false, 150, { o: 148, c: 149 }), false, 'below but green');
+assert.equal(T.candleConfirms(false, 150, { o: 152, c: 150 }), false);
+assert.equal(T.cleanTf('15'), 15); assert.equal(T.cleanTf(1), 1); assert.equal(T.cleanTf('D'), 60); assert.equal(T.cleanTf('120'), 60); assert.equal(T.cleanTf('7'), 5); assert.equal(T.cleanTf(undefined), 5);
+{
+  const at = (h: number, m: number, sec = 0) => Date.UTC(2026, 10, 18, h, m, sec) - 5.5 * 3600e3;   // IST clock time on 18 Nov
+  assert.equal(T.bucketOf(at(9, 15), 15), T.bucketOf(at(9, 29, 59), 15), '9:15 to 9:30 is one 15m candle');
+  assert.equal(T.bucketOf(at(9, 30), 15), T.bucketOf(at(9, 15), 15) + 1);
+  assert.equal(T.bucketOf(at(10, 14, 59), 60), T.bucketOf(at(9, 15), 60), 'the hour candle runs 9:15 to 10:15');
+  assert.equal(T.bucketStartMs(T.bucketOf(at(11, 7, 30), 5), 5), at(11, 5));
+
+  let clock = at(11, 0, 0);
+  T.__test.now = () => clock;
+  let opens: any = null; T.__test.candle = async () => opens;
+  const tick = async (h: number, m: number, sec: number, px: number, tok = TOK) => { clock = at(h, m, sec); await T.closeEndedBars(); T.onTickForTriggers(tok, px); await sleep(15); };
+  const end = async (h: number, m: number) => { clock = at(h, m, 0); await T.closeEndedBars(); await sleep(40); };
+  const row = async (id: string) => (await call('GET', '/api/triggers')).body.rows.find((r: any) => r.id === id);
+  const n0 = placed.length;
+
+  // a) the wick: reached, closed back under — no order; the next candle closes green above — order
+  a = await arm({ confirm: 'CLOSE', confirm_tf: 5 }); assert.equal(a.status, 200); assert.equal(a.body.confirm, 'CLOSE'); assert.equal(a.body.confirm_tf, 5);
+  let id = a.body.id;
+  await tick(11, 0, 1, 141); await tick(11, 2, 0, 152);
+  assert.equal(placed.length, n0, 'the touch alone places nothing'); assert.equal((await row(id)).touched, 1); assert.equal((await row(id)).status, 'ARMED');
+  await tick(11, 4, 50, 149); await end(11, 5);
+  assert.equal(placed.length, n0, 'a candle that closed back under the level places nothing'); assert.equal((await row(id)).status, 'ARMED');
+  await tick(11, 5, 1, 149); await tick(11, 9, 58, 151.5); await end(11, 10);
+  assert.equal(placed.length, n0 + 1, 'green close above: placed, by the clock, with no further tick'); assert.equal((await row(id)).status, 'FIRED'); assert.equal((await row(id)).fired_price, 151.5);
+
+  // b) above the level but red: no; and a tick in the next candle closes the last one too
+  a = await arm({ confirm: 'CLOSE', confirm_tf: 5 }); id = a.body.id;
+  await tick(11, 10, 1, 153); await tick(11, 14, 0, 151);
+  await tick(11, 15, 1, 151); assert.equal(placed.length, n0 + 1, 'closed above but red (153 -> 151)');
+  await tick(11, 19, 0, 152); await tick(11, 20, 1, 152); await sleep(40);
+  assert.equal(placed.length, n0 + 2, 'the next one, green above, closed by the first tick of the candle after');
+
+  // c) a buy below the price (a dip): green candles above the level do nothing until the level has been reached
+  a = await arm({ confirm: 'CLOSE', confirm_tf: 5, trigger_price: 130, current_price: 140 }); id = a.body.id; assert.equal(a.body.direction, 'DOWN');
+  await tick(11, 25, 1, 140); await tick(11, 29, 0, 142); await end(11, 30);
+  assert.equal(placed.length, n0 + 2, 'never reached: a green close above it is not an entry');
+  await tick(11, 30, 1, 142); await tick(11, 32, 0, 129); await tick(11, 34, 0, 128); await end(11, 35);
+  assert.equal(placed.length, n0 + 2, 'reached, closed red below'); assert.equal((await row(id)).touched, 1);
+  await tick(11, 35, 1, 128); await tick(11, 39, 0, 131); await end(11, 40);
+  assert.equal(placed.length, n0 + 3, 'then a green close back above');
+
+  // d) vice versa: a sell waits for a red close below
+  a = await arm({ confirm: 'CLOSE', confirm_tf: 5, side: 'SELL', trigger_price: 120, current_price: 131 }); id = a.body.id;
+  await tick(11, 40, 1, 131); await tick(11, 43, 0, 119); await tick(11, 44, 0, 121); await end(11, 45);
+  assert.equal(placed.length, n0 + 3, 'dipped under and closed back above');
+  await tick(11, 45, 1, 121); await tick(11, 49, 0, 119); await end(11, 50);
+  assert.equal(placed.length, n0 + 4); assert.equal(placed[placed.length - 1].side, 'SELL');
+
+  // e) on the index: a PUT waits for a red close below the level, a CALL for a green close above
+  const IDX2 = 256265, PUT = 'NIFTY26N1725200PE';
+  a = await arm({ confirm: 'CLOSE', confirm_tf: 15, tradingsymbol: PUT, trigger_price: 25200, current_price: 25250, watch_token: IDX2, watch_name: 'NIFTY 50' }); id = a.body.id;
+  await tick(12, 0, 1, 25250, IDX2); await tick(12, 5, 0, 25190, IDX2); await tick(12, 14, 0, 25210, IDX2); await end(12, 15);
+  assert.equal(placed.length, n0 + 4, 'index dipped under and closed back above: no PUT');
+  await tick(12, 15, 1, 25210, IDX2); await tick(12, 20, 0, 25150, TOK); assert.equal(placed.length, n0 + 4, "the option's own price is not what is watched");
+  await tick(12, 29, 0, 25180, IDX2); await end(12, 30);
+  assert.equal(placed.length, n0 + 5, 'red 15m close below'); assert.equal(placed[placed.length - 1].sym, PUT);
+
+  // f) joined late, open not readable: not judged. Readable: judged on the broker's open.
+  a = await arm({ confirm: 'CLOSE', confirm_tf: 5 }); id = a.body.id;
+  opens = null;
+  await tick(12, 32, 0, 149); await tick(12, 34, 0, 152); await end(12, 35);
+  assert.equal(placed.length, n0 + 5, 'the open of a candle joined at 12:32 is unknown: nothing placed');
+  opens = { o: 153, h: 153.5, l: 148 };
+  await tick(12, 37, 0, 150.5); await tick(12, 39, 0, 152); await end(12, 40);
+  assert.equal(placed.length, n0 + 5, 'the broker says it opened at 153: 152 is a red close');
+  opens = { o: 149, h: 152, l: 148.5 };
+  await tick(12, 42, 0, 150.5); await tick(12, 44, 0, 152); await end(12, 45);
+  assert.equal(placed.length, n0 + 6, 'opened at 149 by the broker, closed 152: green above');
+
+  // g) the switch off (or an older bundle that says nothing): the touch, as before
+  a = await arm({ confirm: 'TOUCH' }); await tick(12, 46, 0, 150); assert.equal(placed.length, n0 + 7, 'TOUCH places on the tick');
+  a = await arm(); assert.equal(a.body.confirm, 'TOUCH'); await tick(12, 47, 0, 150); assert.equal(placed.length, n0 + 8);
+
+  // h) cancelled while waiting: its candle closing does nothing
+  a = await arm({ confirm: 'CLOSE', confirm_tf: 5 }); id = a.body.id;
+  await tick(12, 50, 1, 149); await tick(12, 52, 0, 152); await call('DELETE', `/api/triggers/${id}`); await end(12, 55);
+  assert.equal(placed.length, n0 + 8); assert.equal((await row(id)).status, 'CANCELLED');
+  T.__test.now = null; T.__test.candle = null;
+  assert.deepEqual(T.armedTriggerTokens(), [], 'nothing left armed');
+}
+
 srv.close();
 console.log('triggers: all checks passed');
 process.exit(0);
