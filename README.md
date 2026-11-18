@@ -649,6 +649,23 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## GIFT Nifty's change, live Zerodha prices for three global indices, Flow in the bottom bar (v364)
+
+- Martin: "Gift nifty percentage shows 0% in the side bar". Zerodha's `net_change` is 0
+  for a future; the sidebar's Indian rows now take the change against `ohlc.close`.
+- Martin: "most of the global indices shows 10 mins old etc. even though market is
+  open ... Try using market data from Zerodha whenever available". The free feed is
+  10–15 minutes behind. Dow Jones (index), FTSE 100 and Hang Seng take Zerodha's own
+  quote (US30, UK100, HANGSENG, found through `server/chart_ref.ts`) whenever it is
+  fresh (stamped within 5 minutes); otherwise the feed's figure stands. The futures rows
+  and the commodities have no Zerodha equivalent of the same thing and stay on the
+  feed. A figure more than two minutes old says so on its own row.
+- Martin: "Remove the app diagnostic button in the bottom bar and bring the
+  institutional flow icon here". The bar is Home, Chart, Journal, News, Flow, More;
+  Diagnostics is a tile in the More sheet.
+- Martin: "Display the drop down arrow only when that tab is actively open". On a
+  phone the chart header's two tabs show their arrow only on the open one.
+
 ## The More sheet leaves the bottom bar clear (v363)
 
 Martin: "Keep the bottom bar background below this instead of showing a blurred

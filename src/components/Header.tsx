@@ -179,10 +179,13 @@ export function Header() {
   // chain screen from the bottom tab and replace it with trade journal"). The
   // Option Chain is one tap from the chart page (the button under the chart)
   // and, like everything not primary, in the More sheet.
-  const primaryHrefs = ['/', '/advanced-chart', '/journal', '/news'];
+  // Institutional Flow is the fifth, where Diag was (18 Nov 2026; Martin:
+  // "Remove the app diagnostic button in the bottom bar and bring the
+  // institutional flow icon here"). App Diagnostics opens from the More sheet.
+  const primaryHrefs = ['/', '/advanced-chart', '/journal', '/news', '/institutional-flow'];
   const closeDiagnostics = () => { try { window.dispatchEvent(new CustomEvent('close_diagnostics')); } catch (e) {} };
   const shortLabels: Record<string, string> = {
-    '/': 'Home', '/advanced-chart': 'Chart', '/journal': 'Journal', '/news': 'News',
+    '/': 'Home', '/advanced-chart': 'Chart', '/journal': 'Journal', '/news': 'News', '/institutional-flow': 'Flow',
   };
   // The journal's second screen (/journal/analysis) is still the Journal tab.
   const isActive = (href: string) => location === href || (href === '/journal' && location.startsWith('/journal/'));
@@ -374,6 +377,12 @@ export function Header() {
                 </Link>
               );
             })}
+            <button type="button" data-more="diag"
+              onClick={() => { setMoreOpen(false); try { window.dispatchEvent(new CustomEvent('toggle_diagnostics')); } catch (e) {} }}
+              className="flex flex-col items-center gap-1.5 p-2.5 rounded-xl border border-transparent text-muted-foreground">
+              <Cpu className="w-5 h-5" />
+              <span className="text-[9px] font-medium text-center leading-tight">Diagnostics</span>
+            </button>
             <Link
               href="/kite-login"
               onClick={() => setMoreOpen(false)}
@@ -432,14 +441,6 @@ export function Header() {
           </Link>
         );
       })}
-      <button
-        type="button"
-        onClick={() => { try { window.dispatchEvent(new CustomEvent('toggle_diagnostics')); } catch (e) {} }}
-        className="flex-1 flex flex-col items-center justify-center gap-1 transition-colors text-muted-foreground"
-      >
-        <Cpu className="w-5 h-5" />
-        <span className="text-[9px] font-medium">Diag</span>
-      </button>
       <button
         type="button"
         onClick={() => { closeDiagnostics(); setMoreOpen((v) => !v); }}

@@ -223,6 +223,10 @@ function WheelRow({ m, onOpen }: { m: Market; onOpen?: () => void }) {
           {m.label}
         </span>
         <span className="pr-2.5 text-[10px] leading-3 font-mono tabular-nums text-foreground/45 group-data-[on]:text-foreground/80">
+          {/* How old the figure is stands on its own row, when it is more than
+              two minutes old — not on the heading, where one row's age spoke
+              for a section whose rows now come from two sources (18 Nov 2026). */}
+          {ok && m.asOf && Date.now() - m.asOf > 2 * 60000 && <span className="mr-1.5 text-foreground/35">{freshnessLabel(m.asOf).replace('~', '').replace(' old', '')}</span>}
           {ok ? m.price?.toLocaleString(undefined, { maximumFractionDigits: 2 }) : why}
           {ok && m.prevSrc === 'price' && <span className="ml-1 text-primary/70" title="No previous close available from the data source, so the change cannot be computed">no ref</span>}
         </span>
@@ -586,7 +590,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
             title="US Futures"
             collapsed={!!collapsed.us}
             onToggle={() => toggle("us")}
-            open={status.us} age={usAsOf ? freshnessLabel(usAsOf) : undefined}
+            open={status.us}
           />
           {/* "Loading…" was shown for an empty array forever, so a failed fetch and
               a slow one looked identical and the panel simply read nothing. If the
@@ -611,7 +615,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
             title="UK Markets"
             collapsed={!!collapsed.uk}
             onToggle={() => toggle("uk")}
-            open={status.uk} age={ukAsOf ? freshnessLabel(ukAsOf) : undefined}
+            open={status.uk}
           />
           {!collapsed.uk && uk.length === 0 && (
             <div className="pl-3 pr-[52px] py-3 text-right text-xs text-slate-500">Loading…</div>
@@ -629,7 +633,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
             title="Global & Commodities"
             collapsed={!!collapsed.global}
             onToggle={() => toggle("global")}
-            open={globalMkts.length ? globalMkts.some((m) => m.open === true) : undefined} age={globalAsOf ? freshnessLabel(globalAsOf) : undefined}
+            open={globalMkts.length ? globalMkts.some((m) => m.open === true) : undefined}
           />
           {!collapsed.global && globalMkts.length === 0 && (
             <div className="pl-3 pr-[52px] py-3 text-right text-xs text-slate-500">Loading…</div>

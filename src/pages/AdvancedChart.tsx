@@ -16527,8 +16527,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   onClick={() => { setOptionMenuOpen(false); setIndexMenuOpen(o => !o); }}
                   aria-label="Choose index"
                   className={`shrink-0 px-1.5 max-md:pl-1 max-md:pr-2 h-8 max-md:h-full flex items-center transition-colors ${
-                    !selectedInstrument ? 'text-primary max-md:text-foreground' : 'text-muted-foreground'}`}
+                    !selectedInstrument ? 'text-primary max-md:text-foreground' : 'text-muted-foreground max-md:invisible'}`}
                 >
+                  {/* On a phone a tab's arrow shows only on the tab that is open
+                      (18 Nov 2026; Martin: "Display the drop down arrow only when
+                      that tab is actively open. Otherwise hide it"). It keeps its
+                      room, so the names do not move; the other tab's name still
+                      brings that tab up, and its arrow with it. */}
                   <ChevronDown size={13} className={indexMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
                 </button>
               </div>
@@ -16579,7 +16584,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(o => !o); }}
                     aria-label="Choose option chart"
                     className={`shrink-0 px-1.5 max-md:pl-1 max-md:pr-2 h-8 max-md:h-full flex items-center transition-colors ${
-                      selectedInstrument ? 'text-primary max-md:text-foreground' : 'text-muted-foreground'}`}
+                      selectedInstrument ? 'text-primary max-md:text-foreground' : 'text-muted-foreground max-md:invisible'}`}
                   >
                     <ChevronDown size={13} className={optionMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
                   </button>

@@ -38,7 +38,7 @@ import { registerReversalWatch } from './server/reversal_watch';
 import { registerDhan, dhanConfigured } from './server/dhan_service';
 import { buildDhanOrder, instrumentByKey } from './server/dhan_kite_adapter';
 import { activeBroker, getDhanKite, startDhanTrial, endDhanTrial } from './server/kite_service';
-import { registerChartRef } from './server/chart_ref';
+import { registerChartRef, resolveChartRef } from './server/chart_ref';
 import { lastUs30Source } from './server/us30';
 import { registerTradeGuard, guardEntryBlock, guardOrderBlock } from './server/trade_guard';
 import { registerSignalTrader, signalOnTick, signalTokens, signalNoteManualRearm, signalManages, signalManagedLevels, signalNotify } from './server/signal_trader';
@@ -3315,8 +3315,14 @@ setInterval(() => {
           for (const i of IND) {
             const d = q?.[i.sym];
             if (d && typeof d.last_price === 'number') {
-              const prevClose = d.ohlc?.close ?? (d.last_price - (d.net_change || 0));
-              const chg = d.net_change ?? (d.last_price - prevClose);
+              // THE CHANGE IS AGAINST THE PREVIOUS CLOSE (18 Nov 2026). Zerodha's
+              // net_change is 0 for a future (GIFT Nifty's row said 0.00% all
+              // day — Martin: "Gift nifty percentage shows 0% in the side bar");
+              // its ohlc.close is the previous close for futures and indices
+              // alike. net_change is only the fallback when there is no close.
+              const hasClose = Number(d.ohlc?.close) > 0;
+              const prevClose = hasClose ? Number(d.ohlc.close) : (d.last_price - (d.net_change || 0));
+              const chg = hasClose ? d.last_price - prevClose : (d.net_change ?? 0);
               const chgPct = prevClose ? (chg / prevClose) * 100 : 0;
               indian.push({
                 key: i.key, label: i.label, price: d.last_price,
@@ -3535,6 +3541,50 @@ setInterval(() => {
       // Open/closed per market group (regular weekday sessions in each exchange's
       // timezone; holidays not tracked). Minutes-of-day windows, 0=Sun..6=Sat.
       const status = { indian: indOpenNow, uk: ukOpenNow, us: usOpenNow };
+
+      // ZERODHA'S OWN PRICE WHERE IT HAS THE SAME MARKET, LIVE (18 Nov 2026).
+      // Martin: "most of the global indices shows 10 mins old etc. even though
+      // market is open ... Try using market data from Zerodha whenever
+      // available to avoid this delay". The free feed is 10 to 15 minutes
+      // behind. Zerodha lists three of these markets as indices of its own —
+      // the Dow (US30), the FTSE 100 (UK100) and the Hang Seng — found in its
+      // instrument list, never guessed (server/chart_ref.ts, as the charts
+      // are). One quote for the three; a row takes Zerodha's price only when
+      // that quote is fresh (stamped within 5 minutes), so a market that is
+      // shut keeps the feed's last figure and its age. The futures rows (S&P,
+      // Nasdaq, Dow Fut) and the commodities have no Zerodha equivalent of the
+      // same thing (its commodities are MCX contracts in rupees) and stay on
+      // the feed.
+      if (hasKite) {
+        try {
+          const want: Array<[any[], string]> = [[us, 'DJI_IDX'], [uk, 'FTSE'], [globalMkts, 'HSI']];
+          const refs = await Promise.all(want.map(([, k]) => resolveChartRef(k).catch(() => null)));
+          const syms = refs.map((r) => (r?.available ? `${r.exchange}:${r.tradingsymbol}` : null));
+          const ask = syms.filter(Boolean) as string[];
+          const q: any = ask.length ? await kc.getQuote(ask) : {};
+          const stampMs = (v: any) => {
+            if (!v) return 0;
+            if (v instanceof Date) return v.getTime();
+            const t = String(v);
+            // "2026-11-18 12:20:01" is IST with no zone written.
+            const ms = /[zZ]|[+-]\d\d:?\d\d$/.test(t) ? Date.parse(t) : Date.parse(t.replace(' ', 'T') + '+05:30');
+            return Number.isFinite(ms) ? ms : 0;
+          };
+          want.forEach(([rows, key], i) => {
+            const d = syms[i] ? q?.[syms[i] as string] : null;
+            const row = rows.find((m: any) => m.key === key);
+            if (!d || !row || !(Number(d.last_price) > 0)) return;
+            const at = Math.max(stampMs(d.timestamp), stampMs(d.last_trade_time));
+            if (!at || Date.now() - at > 5 * 60 * 1000) return;
+            const prev = Number(d.ohlc?.close) > 0 ? Number(d.ohlc.close) : Number(row.prev) > 0 ? Number(row.prev) : null;
+            if (!prev) return;
+            row.price = d.last_price; row.prev = prev;
+            row.change = +(d.last_price - prev).toFixed(2);
+            row.changePct = +(((d.last_price - prev) / prev) * 100).toFixed(2);
+            row.asOf = at; row.available = true; row.src = 'kite'; delete row.reason; delete row.prevSrc;
+          });
+        } catch (e) { /* the feed's figures stand */ }
+      }
 
       const payload = { success: true, indian, us, uk, global: globalMkts, status, ts: Date.now() };
       marketContextCache = { at: Date.now(), data: payload };
