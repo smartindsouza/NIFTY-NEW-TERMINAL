@@ -215,7 +215,11 @@ function WheelRow({ m, onOpen }: { m: Market; onOpen?: () => void }) {
       style={{ height: WHEEL_ROW }}
       className={`group snap-center flex items-center justify-end gap-3 pl-3 pr-[52px] will-change-[opacity] ${onOpen ? 'cursor-pointer' : ''}`}>
       <div className="min-w-0 flex flex-col items-end">
-        <span data-wheel="name" className="max-w-full truncate rounded-full border border-transparent px-2.5 py-[3px] text-[14px] leading-[18px] font-medium text-foreground/60 group-data-[on]:border-foreground/25 group-data-[on]:bg-foreground/[0.04] group-data-[on]:text-foreground group-data-[on]:font-semibold">
+        <span data-wheel="name" // No chip round the picked name: a glow in the accent behind it (18 Nov
+          // 2026; Martin: "Remove the outline for the indice highlighted. Keep the
+          // outline for the percentage figure. You can also add a small glow
+          // behind indice text in accent color").
+          className="whitespace-nowrap px-2.5 py-[3px] text-[14px] leading-[18px] font-medium text-foreground/60 group-data-[on]:text-foreground group-data-[on]:font-semibold group-data-[on]:[text-shadow:0_0_12px_var(--primary),0_0_22px_color-mix(in_srgb,var(--primary)_55%,transparent)]">
           {m.label}
         </span>
         <span className="pr-2.5 text-[10px] leading-3 font-mono tabular-nums text-foreground/45 group-data-[on]:text-foreground/80">

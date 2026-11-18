@@ -649,6 +649,13 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Sidebar: the picked name glows, without an outline (v359)
+
+Martin: "Remove the outline for the indice highlighted. Keep the outline for the
+percentage figure. You can also add a small glow behind indice text in accent color".
+The picked row's name has no chip; it is at full strength with a soft accent glow
+behind the letters. Its percentage tile keeps the accent outline.
+
 ## Chart header icons smaller and centred; sidebar headings stand out (v358)
 
 Martin: "Keep the search icon at the center. Looks a bit off center towards the left.
