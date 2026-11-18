@@ -559,6 +559,13 @@ export function OptionChainSheet({ onClose, start }: { onClose: () => void; star
     return () => { try { st.remove(); } catch (e) {} };
   }, [openTop]);
   const shown = openTop ? follow : start;
+  // SQUARE TOP CORNERS OVER THE CHART (18 Nov 2026). Martin, with dark wedges at
+  // both top corners in the light theme: "Make the top corner edges of the
+  // option chain card pointed instead of curved so that these dark areas around
+  // the corners are fixed". The rounded corners left a little of what was behind
+  // showing, and the sheet's dark upward shadow filled it. Over the chart the
+  // sheet now meets the price line square, with no shadow; elsewhere (dimmed,
+  // desktop) it keeps its rounded corners.
   // NO STRIP OF CHART BETWEEN THE PRICE AND THE SHEET (18 Nov 2026). Martin,
   // marking it in red: "There appears to be a small gap here ... Fill that up".
   // The sheet began 152pt down whatever was above it, and on his phone the price
@@ -584,14 +591,14 @@ export function OptionChainSheet({ onClose, start }: { onClose: () => void; star
   return createPortal(
     <div data-chain-sheet={wide ? 'wide' : openTop ? 'open-top' : ''}
       className={openTop
-        ? `${leaving ? 'chain-sheet-down' : 'chain-sheet-up'} fixed inset-x-0 bottom-0 z-[150] flex flex-col justify-end rounded-t-xl ${topPx != null ? 'bg-card' : ''}`
+        ? `${leaving ? 'chain-sheet-down' : 'chain-sheet-up'} fixed inset-x-0 bottom-0 z-[150] flex flex-col justify-end ${topPx != null ? 'bg-card' : ''}`
         : `${leaving ? 'chain-dim-out' : 'chain-dim-in'} fixed inset-0 z-[150] flex flex-col justify-end md:items-center md:justify-center bg-black/75`}
       style={openTop && topPx != null ? { top: topPx } : undefined}
       onAnimationEnd={(e) => { if (leaving && e.animationName === 'chain-sheet-down') onClose(); }}
       onClick={openTop ? undefined : leave}>
       <div style={openTop && topPx != null ? { height: '100%', minHeight: 0 } : undefined} className={wide
         ? 'w-[min(1600px,calc(100vw-48px))] h-[calc(100dvh-48px)] rounded-xl overflow-hidden border border-foreground/10'
-        : `${openTop ? '' : leaving ? 'chain-sheet-down ' : 'chain-sheet-up '}w-full md:w-[430px] h-[calc(100dvh-152px)] min-h-[60dvh] md:h-[min(780px,90dvh)] rounded-t-xl md:rounded-xl overflow-hidden ${openTop ? 'shadow-[0_-8px_24px_rgba(0,0,0,0.35)]' : ''}`} onClick={(e) => e.stopPropagation()}>
+        : `${openTop ? '' : leaving ? 'chain-sheet-down ' : 'chain-sheet-up '}w-full md:w-[430px] h-[calc(100dvh-152px)] min-h-[60dvh] md:h-[min(780px,90dvh)] ${openTop ? 'rounded-none' : 'rounded-t-xl'} md:rounded-xl overflow-hidden`} onClick={(e) => e.stopPropagation()}>
         <OptionChainView key={`${wide ? 'wide' : 'narrow'}|${underlyingOf(shown?.underlying).name}`} onPicked={onClose} start={shown} wide={wide} onClose={leave} />
       </div>
     </div>,
