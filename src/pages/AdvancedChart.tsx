@@ -15840,7 +15840,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // a variable font, so the weight can be 650 on the way). The originals step
   // aside while their copies are up, and the small header's own words appear
   // when the copies arrive, so there is never a jump from one to the other. The
-  // header's background and back arrow fade in over the first 40% of the
+  // header's background and back arrow fade in over the first quarter of the
   // stretch, closing over the tabs as they rise; it takes taps only once the
   // words are in it. All of it is written straight onto the elements from a
   // scroll handler, one frame at a time: nothing re-renders as the finger moves.
@@ -15865,8 +15865,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       const pin = pinRef.current, bg = pinBgRef.current, back = pinBackRef.current;
       if (!pin) return;
       if (window.innerWidth >= 768) return;
-      const t = Math.max(0, Math.min(1, (window.scrollY || 0) / POS_COLLAPSE));
-      const shade = Math.min(1, t / 0.4);
+      const sy = Math.max(0, window.scrollY || 0);
+      const t = Math.min(1, sy / POS_COLLAPSE);
+      // (a quarter of the stretch: the tabs rise under it faster than the copies travel)
+      const shade = Math.min(1, t / 0.25);
       if (bg) bg.style.opacity = String(shade);
       if (back) back.style.opacity = String(shade);
       pin.style.pointerEvents = t >= 1 ? 'auto' : 'none';
@@ -15883,7 +15885,16 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         const ra = st.getBoundingClientRect(), rb = en.getBoundingClientRect();
         const fs = mix(a.fs, b.fs, t), lh = mix(a.lh, b.lh, t);
         const x = mix(ra.left, rb.left, t);
-        const cy = mix(ra.top + ra.height / 2, rb.top + rb.height / 2, t);
+        // FROM WHERE THE ORIGINAL RESTS, NOT FROM WHERE IT HAS SCROLLED TO (19 Nov
+        // 2026). Martin, with a recording: "The nifty text goes behind the top
+        // status bar while moving to the center. Can make it entirely below the
+        // status bar without getting cut off". The copy set out from its
+        // original's place at that moment — and the tab's name, near the top of
+        // the screen, rises with the page faster than the copy travels: half
+        // way it was 9pt up into the status bar's strip. Measured from the
+        // original's place at rest, each copy only ever moves between two
+        // places that are both below the status bar.
+        const cy = mix(ra.top + sy + ra.height / 2, rb.top + rb.height / 2, t);
         // The change loses its points half way, as Lemonn's does; the colour is the original's.
         fly.textContent = i === 2 && t >= 0.5 ? (en.textContent || '') : (st.textContent || '');
         if (i === 2) fly.style.color = st.style.color || '';
