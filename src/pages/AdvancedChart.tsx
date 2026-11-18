@@ -5383,6 +5383,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   });
   useEffect(() => {
     try { localStorage.setItem('chartUnderlying', underlying); } catch(e) {}
+    // An open option chain follows the chart's index (see THE TOP STAYS IN USE
+    // in OptionChainSheet): it is told here, where the choice is saved. Not from
+    // The sheet listens only on a phone, where there is one chart.
+    try { window.dispatchEvent(new CustomEvent('terminal:chart-underlying', { detail: underlying })); } catch (e) {}
   }, [underlying]);
   // Market Context sidebar → any Zerodha instrument as a reference chart.
   type RefChart = { token: string; label: string; kind: 'NSE' | 'MCX' | 'GLOBAL'; exchange: string; tradingsymbol: string };
@@ -16720,7 +16724,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 </button>
               </div>
               {indexMenuOpen && (
-                <div className="absolute left-0 top-full mt-1 z-[60] min-w-[150px] bg-card border border-white/10 rounded-md shadow-2xl overflow-hidden">
+                <div data-index-menu className="absolute left-0 top-full mt-1 z-[60] min-w-[150px] bg-card border border-white/10 rounded-md shadow-2xl overflow-hidden">
                   {/* NIFTY 50, SENSEX, BANK NIFTY (18 Nov 2026). Martin: "Remove the
                       US 30 and Gift nifty from this list and move it to global
                       market sidebar. And rearrange the list in this way. Nifty50,

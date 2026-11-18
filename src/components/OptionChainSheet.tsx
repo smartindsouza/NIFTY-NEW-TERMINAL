@@ -502,12 +502,53 @@ export function OptionChainSheet({ onClose, start }: { onClose: () => void; star
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+  // THE TOP STAYS IN USE ON THE PHONE'S CHART (18 Nov 2026). Martin, with the
+  // chain open over the chart: "Show the top part which is dimmed so that option
+  // chain can be changed for sensex and bank nifty from the same screen". The
+  // sheet starts 152pt down and the dark layer covered the header above it — a
+  // tap there closed the chain. On the chart page of a phone there is no dark
+  // layer and nothing over the header: the index tab and its list work, and the
+  // chain shows whichever index is chosen there (the chart announces it as
+  // terminal:chart-underlying). The cross beside Greeks closes it. Anywhere
+  // else — another page, the desktop — it is as it was: dimmed, a tap outside
+  // closes.
+  const [openTop] = useState(() => {
+    try { return !wide && window.innerWidth < 768 && window.location.pathname === '/advanced-chart' && sessionStorage.getItem('scalpPro') !== '1'; } catch (e) { return false; }
+  });
+  const [follow, setFollow] = useState<ChainStart | undefined>(() => ({ ...start, underlying: underlyingOf(start?.underlying).name }));
+  useEffect(() => {
+    if (!openTop) return;
+    const on = (e: any) => {
+      const u = String(e?.detail || '').toUpperCase();
+      if (u !== 'NIFTY' && u !== 'BANKNIFTY' && u !== 'SENSEX') return;
+      // The expiry asked for was the first index's; the new one starts at its nearest.
+      // Compared with what the sheet was ASKED for, never with underlyingOf() of
+      // nothing: that reads the saved index, which the chart has just changed.
+      setFollow((f) => (f?.underlying && underlyingOf(f.underlying).name === u ? f : { underlying: u }));
+    };
+    window.addEventListener('terminal:chart-underlying', on as any);
+    return () => window.removeEventListener('terminal:chart-underlying', on as any);
+  }, [openTop]);
+  // The index list hangs from the header down over the sheet's first rows, so
+  // while the chain is up it is lifted above the sheet (it is under it otherwise).
+  useEffect(() => {
+    if (!openTop) return;
+    const st = document.createElement('style');
+    st.textContent = '[data-index-menu]{z-index:160}';
+    document.head.appendChild(st);
+    return () => { try { st.remove(); } catch (e) {} };
+  }, [openTop]);
+  const shown = openTop ? follow : start;
   return createPortal(
-    <div data-chain-sheet={wide ? 'wide' : ''} className="fixed inset-0 z-[150] flex flex-col justify-end md:items-center md:justify-center bg-black/75" onClick={onClose}>
+    <div data-chain-sheet={wide ? 'wide' : openTop ? 'open-top' : ''}
+      className={openTop
+        ? 'fixed inset-x-0 bottom-0 z-[150] flex flex-col justify-end'
+        : 'fixed inset-0 z-[150] flex flex-col justify-end md:items-center md:justify-center bg-black/75'}
+      onClick={openTop ? undefined : onClose}>
       <div className={wide
         ? 'w-[min(1600px,calc(100vw-48px))] h-[calc(100dvh-48px)] rounded-xl overflow-hidden border border-foreground/10'
-        : 'w-full md:w-[430px] h-[calc(100dvh-152px)] min-h-[60dvh] md:h-[min(780px,90dvh)] rounded-t-xl md:rounded-xl overflow-hidden'} onClick={(e) => e.stopPropagation()}>
-        <OptionChainView key={wide ? 'wide' : 'narrow'} onPicked={onClose} start={start} wide={wide} onClose={onClose} />
+        : `w-full md:w-[430px] h-[calc(100dvh-152px)] min-h-[60dvh] md:h-[min(780px,90dvh)] rounded-t-xl md:rounded-xl overflow-hidden ${openTop ? 'shadow-[0_-8px_24px_rgba(0,0,0,0.35)]' : ''}`} onClick={(e) => e.stopPropagation()}>
+        <OptionChainView key={`${wide ? 'wide' : 'narrow'}|${underlyingOf(shown?.underlying).name}`} onPicked={onClose} start={shown} wide={wide} onClose={onClose} />
       </div>
     </div>,
     document.body,
