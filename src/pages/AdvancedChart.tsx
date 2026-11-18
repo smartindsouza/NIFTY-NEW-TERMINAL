@@ -5932,6 +5932,15 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // layer behind either list last closed it (see the Range button).
   const [tfOpen, setTfOpen] = useState(false);
   const sheetClosedAtRef = useRef(0);
+  // THE SETTINGS BUTTON CLOSES ITS OWN SHEET (18 Nov 2026). Martin: "the settings
+  // button on the chart screen does not close the settings screen on a second
+  // tap. It keeps showing the settings screen no matter how many times I tap on
+  // it." The see-through layer behind the sheet lies over the button too: the
+  // finger going down closed the sheet through the layer, and the tap that
+  // followed reached the button and opened it again. Range and Interval had
+  // this guard (sheetClosedAtRef); Settings was left out. Its own ref, so a tap
+  // on another button of the row while Settings is up still opens that one.
+  const settingsClosedAtRef = useRef(0);
   const [rangeChoice, setRangeChoice] = useState<string | null>(null);
   const lemonSheetOpen = rangeOpen || tfOpen || phoneSettingsOpen;
   // THE SCALPPRO MENU (17 Nov 2026). On the ScalpPro screen a chart has no tool
@@ -17046,7 +17055,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               onClick={() => { pageToTop(); setRangeOpen(false); setPhoneSettingsOpen(false); setRrMenuOpen(o => !o); }}
               title="Drawing tools"
               data-draw-button=""
-              className={`flex items-center justify-center h-9 w-9 rounded-md transition-colors max-md:h-10 max-md:w-full max-md:flex-col max-md:gap-0.5 max-md:!bg-transparent ${
+              className={`flex items-center justify-center h-9 w-9 rounded-md transition-colors max-md:h-10 max-md:w-full max-md:flex-col max-md:gap-0.5 max-md:!bg-transparent ${rrMenuOpen ? 'max-md:!text-primary' : ''} ${
                 (rrArm || drawArm) ? 'bg-primary/25 text-primary' : (rrBox || (split && peerRrBox)) ? 'bg-emerald-500/15 text-emerald-300' : 'bg-muted/40 text-muted-foreground hover:text-foreground max-md:text-foreground/90'}`}
             >
               <DrawingsIcon size={18} />
@@ -17117,7 +17126,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             {/* Phone: what is seen is these two lines; the chooser itself is laid
                 over them, invisible, so a tap anywhere on the pair opens the
                 phone's own picker. */}
-            <span className="md:hidden h-[18px] text-[15px] leading-[18px] font-semibold text-foreground/90">
+            {/* The figure takes the accent while its list is up, as Range, Indicators
+                and Settings do (18 Nov 2026; Martin: "the time frame and drawings
+                button do not light in accent color when tapped"). */}
+            <span data-bar-lit={tfOpen ? '1' : '0'} className={`md:hidden h-[18px] text-[15px] leading-[18px] font-semibold ${tfOpen && !scalp ? 'text-primary' : 'text-foreground/90'}`}>
               {({ '1': '1m', '3': '3m', '5': '5m', '15': '15m', '60': '1h', '240': '4h', '1440': '1D', '10080': '1W', '43200': '1M' } as Record<string, string>)[String(timeframe)] || `${timeframe}m`}
             </span>
             <span className="md:hidden text-[10px] leading-none font-medium text-muted-foreground">Interval</span>
@@ -17981,7 +17993,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           {!isPane && (
             <div className="md:hidden relative flex-1 flex justify-center order-5">
               <button type="button" data-bar="settings" title="Settings"
-                onClick={() => { pageToTop(); setRangeOpen(false); setRrMenuOpen(false); setIsIndicatorsOpen(false); setPhoneSettingsOpen(o => !o); }}
+                onClick={() => { if (Date.now() - settingsClosedAtRef.current < 500) { settingsClosedAtRef.current = 0; return; } pageToTop(); setRangeOpen(false); setRrMenuOpen(false); setIsIndicatorsOpen(false); setPhoneSettingsOpen(o => !o); }}
                 className={`h-10 w-full flex flex-col items-center justify-center gap-0.5 rounded-md ${phoneSettingsOpen ? 'text-primary' : 'text-foreground/90'}`}>
                 <SettingsIcon size={18} />
                 <span className="text-[10px] leading-none font-medium text-muted-foreground">Settings</span>
@@ -18003,7 +18015,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               On a desktop none of this applies: md:contents, as before. */}
           {phoneSettingsOpen && !isPane && (
             <div className="md:hidden fixed inset-0 z-[88]" aria-hidden="true"
-              onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setPhoneSettingsOpen(false); }} />
+              onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); settingsClosedAtRef.current = Date.now(); setPhoneSettingsOpen(false); }} />
           )}
           <MenuPortal to={menuTo('settings')}>
           <div data-settings-sheet={phoneSettingsOpen ? 'open' : 'closed'}
