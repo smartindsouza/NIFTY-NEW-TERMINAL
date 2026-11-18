@@ -649,6 +649,13 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Market Context floats over a blurred screen (v356)
+
+Martin: "Remove the background color for the side bar and make the entire background
+(screen) blurred. Remove the chick of text at the bottom explaining things". The
+sidebar has no panel of its own: the whole screen behind it is blurred and dimmed and
+the list floats on that. The footnote is gone.
+
 ## Market Context sidebar is a straight picker wheel (v355)
 
 Martin, with a picture of a picker wheel: "I want to change my side bar to this exact

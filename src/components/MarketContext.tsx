@@ -483,16 +483,16 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
       {open && (
         <div
           onClick={() => setOpen(false)}
-          className="fixed inset-0 z-[9998] bg-black/40"
+          className="fixed inset-0 z-[9998] bg-black/55 backdrop-blur-md"
           aria-label="Close market context"
         />
       )}
 
       {/* Slide-out panel */}
       <div
-        className={`fixed top-0 right-0 h-full z-[9999] w-[290px] max-w-[85vw] bg-card border-l border-border shadow-2xl transition-transform duration-300 flex flex-col ${open ? "translate-x-0" : "translate-x-full"}`}
+        className={`fixed top-0 right-0 h-full z-[9999] w-[290px] max-w-[85vw] transition-transform duration-300 flex flex-col ${open ? "translate-x-0" : "translate-x-full"}`}
       >
-        <div className="flex items-center justify-between px-3 py-3 border-b border-border bg-app-base">
+        <div className="flex items-center justify-between px-3 py-3">
           <div className="flex items-center gap-2">
             <Globe className="w-4 h-4 text-primary" />
             <span className="font-bold text-foreground text-sm">Market Context</span>
@@ -580,9 +580,10 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
           )}
         </Wheel>
 
-        <div className="px-3 py-2 border-t border-border text-[9px] text-slate-500 leading-tight">
-          Indian: live via Kite. US, UK, global &amp; commodities: via a free third-party feed (may lag or drop out) — context only, confirm before trading. Tap a row to open its chart from Zerodha data. Open/Closed reflects regular session hours; exchange holidays aren't tracked.
-        </div>
+        {/* NO PANEL, NO FOOTNOTE (18 Nov 2026). Martin: "Remove the background color
+            for the side bar and make the entire background (screen) blurred. Remove
+            the chick of text at the bottom explaining things". The list floats
+            over the whole screen, blurred and dimmed behind it. */}
       </div>
     </>,
     document.body
