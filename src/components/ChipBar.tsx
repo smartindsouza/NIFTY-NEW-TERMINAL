@@ -29,9 +29,14 @@ export function UpDownArrows({ className = '', scale = 1 }: { className?: string
 // big, 8.5 apart, 15 to the end; the line 8 after the pill and the chips 16
 // after the line; the chips 16 either side of the word and 8.2 apart; the
 // line and the chips' edges #323232.
+// THE THEME'S COLOURS, NOT LEMONN'S DARK ONES (18 Nov 2026). Martin, in the
+// light theme, with the pill's word and the chips' words gone: "Some screens
+// where I saw bugs when changing to light theme". The words were white and
+// #e8e8e8 and the edges #373737, right on a dark page only. They are the
+// text colour now (and washes of it), which is those same shades in the dark.
 const LOOK = {
-  news: { toggle: 'pl-[14px] pr-[16px] gap-[10px]', arrows: 1, line: 'mx-[8.5px] bg-[#373737]', edge: 'border-[#373737]', chip: 'px-[16.5px]', gap: 'gap-[8.6px]' },
-  heatmap: { toggle: 'pl-[12px] pr-[15px] gap-[8.5px]', arrows: 1.15, line: 'ml-2 mr-4 bg-[#323232]', edge: 'border-[#323232]', chip: 'px-4', gap: 'gap-[8.2px]' },
+  news: { toggle: 'pl-[14px] pr-[16px] gap-[10px]', arrows: 1, line: 'mx-[8.5px] bg-foreground/20', edge: 'border-foreground/20', chip: 'px-[16.5px]', gap: 'gap-[8.6px]' },
+  heatmap: { toggle: 'pl-[12px] pr-[15px] gap-[8.5px]', arrows: 1.15, line: 'ml-2 mr-4 bg-foreground/20', edge: 'border-foreground/20', chip: 'px-4', gap: 'gap-[8.2px]' },
 } as const;
 
 export function ChipBar<T extends string>({ toggleLabel, onToggle, chips, active, onPick, name, look = 'news' }: {
@@ -48,7 +53,7 @@ export function ChipBar<T extends string>({ toggleLabel, onToggle, chips, active
   return (
     <div className="flex items-center min-w-0" data-chipbar={name}>
       <button type="button" onClick={() => onToggle()} data-chipbar-toggle={toggleLabel}
-        className={`shrink-0 h-[34px] rounded-full border border-primary ${L.toggle} flex items-center text-[12px] font-semibold text-white whitespace-nowrap active:bg-white/10`}>
+        className={`shrink-0 h-[34px] rounded-full border border-primary ${L.toggle} flex items-center text-[12px] font-semibold text-foreground whitespace-nowrap active:bg-foreground/10`}>
         {toggleLabel}
         <UpDownArrows scale={L.arrows} />
       </button>
@@ -58,7 +63,7 @@ export function ChipBar<T extends string>({ toggleLabel, onToggle, chips, active
           <button key={c} type="button" role="tab" aria-selected={c === active} data-chip={c}
             onClick={() => onPick(c)}
             className={`shrink-0 h-8 rounded-full ${L.chip} text-[12px] font-medium whitespace-nowrap border transition-colors ${
-              c === active ? 'bg-primary text-primary-foreground border-primary' : `${L.edge} text-[#e8e8e8] active:bg-white/10`
+              c === active ? 'bg-primary text-primary-foreground border-primary' : `${L.edge} text-foreground/90 active:bg-foreground/10`
             }`}>
             {c}
           </button>

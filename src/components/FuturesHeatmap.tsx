@@ -101,10 +101,10 @@ function ExpirySheet({ expiries, chosen, onPick, onClose, title = 'Expiry', labe
           boxes with a 1pt #222 edge, the first 53.7 down, 16 apart; the
           chosen one white with a blue tick, the rest grey. */}
       <div role="dialog" aria-label={title}
-        className="heatmap-sheet absolute inset-x-0 bottom-0 max-h-[82dvh] overflow-y-auto rounded-t-[24px] bg-[#161616] pt-[53.7px] pb-[calc(67.7px+env(safe-area-inset-bottom))] md:inset-x-auto md:bottom-auto md:left-1/2 md:top-1/2 md:w-[430px] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-[24px] md:pb-6">
-        <div className="absolute left-4 top-[15.4px] text-[16px] leading-6 font-semibold text-[#ebebeb]">{title}</div>
+        className="heatmap-sheet absolute inset-x-0 bottom-0 max-h-[82dvh] overflow-y-auto rounded-t-[24px] bg-card pt-[53.7px] pb-[calc(67.7px+env(safe-area-inset-bottom))] md:inset-x-auto md:bottom-auto md:left-1/2 md:top-1/2 md:w-[430px] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-[24px] md:pb-6">
+        <div className="absolute left-4 top-[15.4px] text-[16px] leading-6 font-semibold text-foreground">{title}</div>
         <button type="button" aria-label="Close" onClick={() => onClose()}
-          className="absolute right-[14px] top-[17px] h-5 w-5 flex items-center justify-center text-[#e6e6e6]">
+          className="absolute right-[14px] top-[17px] h-5 w-5 flex items-center justify-center text-foreground">
           <svg width="8.7" height="8.7" viewBox="0 0 8.7 8.7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
             <path d="M0.75 0.75 7.95 7.95M7.95 0.75 0.75 7.95" />
           </svg>
@@ -113,7 +113,7 @@ function ExpirySheet({ expiries, chosen, onPick, onClose, title = 'Expiry', labe
           {expiries.map((e) => (
             <button key={e} type="button" data-heatmap-option={e} aria-pressed={e === chosen}
               onClick={() => onPick(e)}
-              className={`h-[42px] rounded-[12px] border border-[#222222] pl-3 pr-[14.3px] flex items-center justify-between text-[12px] font-medium active:bg-white/[0.04] ${e === chosen ? 'text-[#e8e8e8]' : 'text-[#b5b5b5]'}`}>
+              className={`h-[42px] rounded-[12px] border border-border pl-3 pr-[14.3px] flex items-center justify-between text-[12px] font-medium active:bg-foreground/[0.04] ${e === chosen ? 'text-foreground' : 'text-foreground/70'}`}>
               <span className="relative top-px">{label(e)}</span>
               {e === chosen && (
                 <svg width="11.3" height="9.3" viewBox="0 0 11.3 9.3" fill="none" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -164,7 +164,7 @@ export function FuturesHeatmap() {
     // tracking-normal: the home page sets its letters a little apart
     // (tracking-wide); the recording's are at the face's own spacing.
     <section data-heatmap="" className="pt-2 tracking-normal">
-      <h2 className="text-center text-[18px] leading-6 font-bold text-white">Futures Heatmap</h2>
+      <h2 className="text-center text-[18px] leading-6 font-bold text-foreground">Futures Heatmap</h2>
       {/* ONE LINE: Index ⇕ · the index (a list) · the expiry · Price ⇕ (18 Nov
           2026). Martin, with a picture of the two rows: "Change the indices
           shown separately in a horizontal line to a list and bring all the
@@ -173,27 +173,32 @@ export function FuturesHeatmap() {
           pill that opens the same sheet the expiry's does. Pills 34 tall, as
           measured for the expiry's; a long name is cut short in its pill. */}
       <div className="mt-5 flex items-center gap-2">
+        {/* The controls and the sheets take the theme's colours (18 Nov 2026):
+            in the light theme the pills were black with a white word, or a
+            white word on white (Martin: "Some screens where I saw bugs when
+            changing to light theme"). The tiles keep their own six shades and
+            white figures in both themes — they are the map. */}
         <button type="button" data-chipbar-toggle={mode}
           onClick={() => {
             const next = mode === 'Index' ? 'Sector' : 'Index';
             setMode(next);
             setChip(next === 'Index' ? INDEX_CHIPS[0] : SECTOR_CHIPS[0]);
           }}
-          className="shrink-0 h-[34px] rounded-full border border-primary pl-3 pr-[13px] flex items-center gap-[7px] text-[12px] font-semibold text-white whitespace-nowrap active:bg-white/10">
+          className="shrink-0 h-[34px] rounded-full border border-primary pl-3 pr-[13px] flex items-center gap-[7px] text-[12px] font-semibold text-foreground whitespace-nowrap active:bg-foreground/10">
           {mode}
           <UpDownArrows />
         </button>
-        <button type="button" data-heatmap-group={chip} onClick={() => setGroupSheet(true)} className="h-[34px] min-w-0 rounded-full border border-primary bg-[#191919] px-3 flex items-center gap-[5px] text-[12px] font-medium text-white whitespace-nowrap active:bg-white/10">
+        <button type="button" data-heatmap-group={chip} onClick={() => setGroupSheet(true)} className="h-[34px] min-w-0 rounded-full border border-primary bg-card px-3 flex items-center gap-[5px] text-[12px] font-medium text-foreground whitespace-nowrap active:bg-foreground/10">
           <span className="relative top-px truncate">{chip}</span>
           <svg width="10" height="5.3" viewBox="0 0 10 5.3" className="relative -top-[0.8px] shrink-0" aria-hidden="true"><path d="M0 0H10L5 5.3Z" fill="currentColor" /></svg>
         </button>
         <button type="button" data-heatmap-expiry={expiry || ''} disabled={!data?.expiries?.length}
-          onClick={() => setSheet(true)} className="shrink-0 h-[34px] min-w-0 rounded-full border border-primary bg-[#191919] px-3 flex items-center gap-[5px] text-[12px] font-medium text-white whitespace-nowrap active:bg-white/10">
+          onClick={() => setSheet(true)} className="shrink-0 h-[34px] min-w-0 rounded-full border border-primary bg-card px-3 flex items-center gap-[5px] text-[12px] font-medium text-foreground whitespace-nowrap active:bg-foreground/10">
           <span className="relative top-px">{expiry ? expiryLabel(expiry) : 'Expiry'}</span>
           <svg width="10" height="5.3" viewBox="0 0 10 5.3" className="relative -top-[0.8px] shrink-0" aria-hidden="true"><path d="M0 0H10L5 5.3Z" fill="currentColor" /></svg>
         </button>
         <button type="button" data-heatmap-view={view} onClick={() => setView(view === 'Price' ? 'OI' : 'Price')}
-          className="shrink-0 ml-auto h-[34px] flex items-center gap-[7px] pl-1 mr-[1.9px] text-[12px] font-semibold text-white">
+          className="shrink-0 ml-auto h-[34px] flex items-center gap-[7px] pl-1 mr-[1.9px] text-[12px] font-semibold text-foreground">
           {view}
           <UpDownArrows scale={0.85} />
         </button>
@@ -211,7 +216,7 @@ export function FuturesHeatmap() {
           <div className="-mx-4 md:mx-0 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-px">
             {data
               ? rows.map((r) => <Tile key={r.s} r={r} view={view} />)
-              : Array.from({ length: 9 }, (_, i) => <div key={i} className="h-[119px] bg-white/[0.04] animate-pulse" />)}
+              : Array.from({ length: 9 }, (_, i) => <div key={i} className="h-[119px] bg-foreground/[0.04] animate-pulse" />)}
           </div>
         )}
       </div>

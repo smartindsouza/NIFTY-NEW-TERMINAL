@@ -180,8 +180,10 @@ export function BiasButton({ className = '', plain = false }: { className?: stri
         onClick={() => { void run(); }}
         className={`flex items-center justify-center active:opacity-60 ${plain ? '' : 'rounded-[6px] border active:opacity-80'} ${className}`}
         style={plain ? { color: 'var(--primary)' } : {
-          background: 'linear-gradient(90deg, color-mix(in srgb, var(--primary) 3%, #06070c) 0%, color-mix(in srgb, var(--primary) 12%, #14161c) 15%, color-mix(in srgb, var(--primary) 26%, #1c1f26) 50%, color-mix(in srgb, var(--primary) 20%, #1c1f26) 100%)',
-          borderColor: 'color-mix(in srgb, var(--primary) 45%, #30333a)', borderLeftColor: 'color-mix(in srgb, var(--primary) 20%, #30333a)',
+          // Mixed with the theme's own colours, not with dark greys: in the light
+          // theme the box was a black square on a white chart (18 Nov 2026).
+          background: 'linear-gradient(90deg, color-mix(in srgb, var(--primary) 3%, var(--background)) 0%, color-mix(in srgb, var(--primary) 12%, var(--card)) 15%, color-mix(in srgb, var(--primary) 26%, var(--card)) 50%, color-mix(in srgb, var(--primary) 20%, var(--card)) 100%)',
+          borderColor: 'color-mix(in srgb, var(--primary) 45%, var(--border))', borderLeftColor: 'color-mix(in srgb, var(--primary) 20%, var(--border))',
         }}>
         {busy
           ? <span className={`block rounded-full border-2 animate-spin ${'h-[15px] w-[15px]'}`} style={{ borderColor: 'color-mix(in srgb, var(--primary) 30%, transparent)', borderTopColor: 'var(--primary)' }} />

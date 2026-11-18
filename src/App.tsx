@@ -296,8 +296,12 @@ export default function App() {
       </div>
       <BiasAlert />
       <OptionChainHost />
+      {/* The toast follows the app's theme (18 Nov 2026). It was always told
+          "dark" while its box takes the theme's colour — so in the light theme
+          its second line was the dark theme's pale grey on white (Martin's
+          picture of "Settings Saved Locally" with the line under it unreadable). */}
       <Toaster
-        theme="dark"
+        theme={resolvedTheme}
         position="top-center"
         visibleToasts={1}
         duration={2500}
