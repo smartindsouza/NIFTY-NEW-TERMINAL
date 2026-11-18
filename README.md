@@ -649,6 +649,18 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Everything coloured takes the accent colour (v348)
+
+Martin: "I want all the colorful things like icons, buttons, cards texts etc to be
+changed to my accent color from the app ... Don't change anything else except the
+colors. The once that use Red and Green (Buy/Sell) can be left as it is". Amber, blue,
+sky, cyan, indigo, pink, yellow and violet classes and the Lemonn-measured blues (bias
+button and sheet, TP & SL sheet, journal chips, option chain sheet, heatmap tick) are
+now `primary` / `var(--primary)`, which is Settings' Global Accent Color. Left alone:
+red and green everywhere, the lime Buy buttons, and what is drawn on charts (candles,
+indicator lines, zones, drawings, graph lines), which need to be told apart. New UI
+takes its colour from `primary`, not a literal.
+
 ## Home ends with a futures heatmap; a long press's lines stay with the +; seven screens retired (v347)
 
 - **Futures heatmap** (`src/components/FuturesHeatmap.tsx`, `server/futures_heatmap.ts`,
