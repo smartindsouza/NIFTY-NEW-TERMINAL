@@ -16530,7 +16530,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               </div>
             </div>
           </div>, document.body)}
-        <div data-layout="head" className={`items-center max-md:items-end max-md:h-11 gap-2 px-0 pb-0 shrink-0 border-b border-white/10 bg-background md:px-2 ${isFocusedChart || scalp ? 'hidden' : 'flex'}`}>
+        <div data-layout="head" /* The line under the tabs was white at 10% — there on the dark page, nothing on a white one (18 Nov 2026; Martin: "the horizontal line in dark theme is missing in the light theme"). In the light theme it is the tab's own outline colour, so the tab's edge runs on into it. */ className={`items-center max-md:items-end max-md:h-11 gap-2 px-0 pb-0 shrink-0 border-b border-foreground/15 dark:border-white/10 bg-background md:px-2 ${isFocusedChart || scalp ? 'hidden' : 'flex'}`}>
           {/* The option pane hides the header, so without this the spot pane would
               be exactly one header taller and the two chart boxes would never line
               up. Same reservation trick as the option-reality strip: identical
@@ -18149,42 +18149,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 so one left open on the chart page would otherwise sit on
                 ScalpPro's option chart with nothing to close it. The chart
                 page keeps both. */}
-            {isOptionView && !scalp && lev && !lev.error && (
-              <button
-                onClick={() => setLevInfoOpen(o => !o)}
-                title={levInfoOpen ? 'Hide greeks & gearing' : 'Show greeks & gearing'}
-                aria-label="Greeks and gearing"
-                className={`absolute top-11 right-2 z-[6] h-6 w-6 rounded-full border text-[11px] font-bold font-mono flex items-center justify-center transition-colors ${
-                  levInfoOpen ? 'bg-primary/25 border-primary/50 text-primary' : 'bg-background/80 border-border/60 text-muted-foreground hover:text-foreground'}`}
-              >
-                i
-              </button>
-            )}
-            {isOptionView && !scalp && levInfoOpen && lev && !lev.error && (
-              <div className="absolute top-11 left-2 z-[5] pointer-events-none rounded-md bg-background/80 border border-border/60 px-2.5 py-1.5 text-[11px] leading-snug font-mono max-w-[85%]">
-                <div className="text-foreground font-semibold">
-                  {lev.lambda != null ? `1% index ≈ ${lev.lambda}% premium` : 'gearing — solving…'}
-                  {/* The inputs behind the number, so it can be checked at a glance
-                      instead of inferred from the OHLC row — which shows the HOVERED
-                      candle, not the live premium, and misled us both once already. */}
-                  {lev.spot != null && lev.premium != null && (
-                    <span className="text-foreground/50 font-normal"> ({lev.spot} / {lev.premium})</span>
-                  )}
-                </div>
-                <div className="text-foreground/80">
-                  Δ {lev.delta ?? '—'} · +{lev.gammaPer50 ?? '—'}Δ/50pt · θ {lev.thetaPerDay ?? '—'}/day{lev.iv != null ? ` · IV ${lev.iv}%` : ''}
-                </div>
-                {lev.window?.text && (
-                  <div className={
-                    lev.window.tone === 'up' ? 'text-emerald-400'
-                    : lev.window.tone === 'down' ? 'text-primary'
-                    : 'text-foreground/60'
-                  }>
-                    {lev.window.text}{lev.stale ? ' · market closed' : ''}
-                  </div>
-                )}
-              </div>
-            )}
+            {/* GONE FROM THE CHART PAGE TOO (18 Nov 2026). Martin, with the "i"
+                ringed on the option chart: "The i button is back on the option
+                chart. Remove it." It had only ever been taken off ScalpPro. The
+                panel went with its button, as there: one left open would have
+                nothing to close it. Delta, theta and IV are on the option chain
+                (its Greeks switch). */}
             <div
               ref={chartContainerRef}
               onPointerDownCapture={handlePointerDown}
@@ -19716,7 +19686,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           sideways-scrolled row under every option chart — in the money / points to
           the strike, break even, time cost, and further along hope value and IV —
           fed by /api/option-analytics every 20 seconds; the request went with it.
-          Delta, theta a day and IV are still behind the "i" button on the chart.
+          Delta, theta a day and IV were behind the "i" button on the chart until 18 Nov 2026, when it went.
 
           On a phone the strip did one more job: its bottom margin, a fixed 3.25rem,
           was what held the chart clear of the fixed tool bar. This empty block is
