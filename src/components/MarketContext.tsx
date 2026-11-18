@@ -370,6 +370,26 @@ function StatusPill({ open }: { open?: boolean }) {
 
 export default function MarketContext({ tabHidden = false }: { tabHidden?: boolean }) {
   const [open, setOpen] = useState(false);
+  // A SWIPE TO THE RIGHT CLOSES IT (18 Nov 2026). Martin: "When the side bar is
+  // open, swiping right to close the side bar does not work". It opens by a
+  // swipe left on the bar at the screen's edge and had no way back but Close or
+  // a tap on the blur. Anywhere on the screen while it is open: a touch that
+  // moves 40px right, and at least twice as far sideways as up or down — the
+  // list scrolls up and down, and a scroll that drifts must not close it.
+  useEffect(() => {
+    if (!open) return;
+    let x0 = 0, y0 = 0, on = false;
+    const start = (e: TouchEvent) => { const t = e.touches[0]; if (!t || e.touches.length > 1) { on = false; return; } x0 = t.clientX; y0 = t.clientY; on = true; };
+    const move = (e: TouchEvent) => {
+      const t = e.touches[0]; if (!on || !t) return;
+      const dx = t.clientX - x0, dy = Math.abs(t.clientY - y0);
+      if (dy > 24 && dy > dx) { on = false; return; }           // it is a scroll
+      if (dx > 40 && dx > dy * 2) { on = false; setOpen(false); }
+    };
+    window.addEventListener('touchstart', start, { passive: true, capture: true });
+    window.addEventListener('touchmove', move, { passive: true, capture: true });
+    return () => { window.removeEventListener('touchstart', start, { capture: true } as any); window.removeEventListener('touchmove', move, { capture: true } as any); };
+  }, [open]);
   // The slide-out covers the chart; tell the chart page so its jump-to-latest
   // bubble steps aside instead of floating over this panel.
   useEffect(() => {
