@@ -649,6 +649,14 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## The bias icon is sparkles, centred in its corner (v366)
+
+Martin: "The bias button is still not centered at the top right between the screen edge
+and the options tab. Also you can change the bias icon to something else in the chart
+as well as the scalperX screen", and of eight offered, "Sparkles look good". `BiasIcon`
+is lucide's Sparkles everywhere it is drawn; on the phone chart's header it stands 4
+left of its box's middle, the middle of the corner between the option tab and the edge.
+
 ## Sidebar: Zerodha's live price keeps the feed's previous close, and its time is read right (v365)
 
 Found on the first live answer of v364: the Hang Seng's Zerodha figure was "-330 minutes

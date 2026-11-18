@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
+import { Sparkles } from 'lucide-react';
 import { istToday } from '../lib/bias';
 
 // THE BIAS BUTTON AND ITS SHEET (17 Nov 2026). Martin, with two pictures of
@@ -48,16 +49,11 @@ export type BiasNote = {
 
 const BLUE = 'var(--primary)', GREEN = '#5baa79', RED = '#e5505f';
 
-/** Lemonn's chart-line: an axis down the left and along the foot, and a line
- *  that leaves the axis, rises, dips and rises again. 20 x 18 with its stroke. */
+/** The bias mark: sparkles (18 Nov 2026). Martin, offered eight: "Sparkles
+ *  look good" — in place of Lemonn's chart-line, on the chart, on ScalperX and
+ *  in the sheet's header. */
 export function BiasIcon({ width = 16.3, color = 'currentColor' }: { width?: number; color?: string }) {
-  return (
-    <svg width={width} height={width * 0.9} viewBox="0 0 20 18" fill="none" stroke={color} strokeWidth={2}
-      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M1 1V17H19" />
-      <path d="M1 9.5L6 7.1L11.4 12.2L17.6 6.6" />
-    </svg>
-  );
+  return <Sparkles size={width} color={color} strokeWidth={2} aria-hidden="true" />;
 }
 
 const time12 = (iso?: string | null) => {

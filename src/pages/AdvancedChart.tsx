@@ -16681,7 +16681,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               screen's right edge (MarketContext.tsx). */}
           {!isPane && !phoneSearchOpen && (
             <span data-head="context" className="md:hidden shrink-0 h-11 w-9 mr-0.5 flex items-center justify-center">
-              <BiasButton plain className="h-9 w-9 translate-y-[3px]" />
+              {/* 4 left of its box's middle: the corner it stands in runs from
+                  the option tab's edge (374) to the screen's (430), middle 402,
+                  and the box's middle is 406 (18 Nov 2026; Martin: "The bias
+                  button is still not centered at the top right between the
+                  screen edge and the options tab"). */}
+              <BiasButton plain className="h-9 w-9 -translate-x-[4px] translate-y-[3px]" />
             </span>
           )}
 
