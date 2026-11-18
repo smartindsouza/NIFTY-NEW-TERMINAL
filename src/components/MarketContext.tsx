@@ -611,7 +611,12 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
 
       {/* Slide-out panel */}
       <div
-        className={`fixed top-0 right-0 h-full z-[9999] w-[290px] max-w-[85vw] transition-transform duration-300 flex flex-col ${open ? "translate-x-0" : "translate-x-full"}`}
+        // A background of its own again, the theme's (18 Nov 2026; Martin: "add a
+        // dark/light background to the side bar. Let's see how it looks"): the
+        // page's own colour, dark or light, with a hairline down its edge. The
+        // rest of the screen stays blurred behind it.
+        data-context-panel=""
+        className={`fixed top-0 right-0 h-full z-[9999] w-[290px] max-w-[85vw] bg-background border-l border-border transition-transform duration-300 flex flex-col ${open ? "translate-x-0" : "translate-x-full"}`}
       >
         <div className="flex items-center justify-between px-3 py-3">
           <div className="flex items-center gap-2">

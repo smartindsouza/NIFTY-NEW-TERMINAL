@@ -18054,10 +18054,20 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               className="flex-1 h-8 rounded-full border border-foreground/[0.2] text-[12px] leading-none font-medium text-foreground/90 flex items-center justify-center gap-2 active:bg-foreground/10">
               <Link2 size={15} /> Option Chain
             </button>
+            {/* ScalperX only when there is an option for its lower chart (18 Nov
+                2026). Martin: "Show scalperX button at the bottom only when an
+                option premium chart is added to list in the options tab. If no
+                option charts are available hid the button. Show the option
+                chain button in full fit at the button when ScalperX button is
+                hidden". The list is the options tab's own (tabCharts): the
+                options of the index on the spot tab. Option Chain is flex-1,
+                so alone it takes the row. */}
+            {tabCharts.length > 0 && (
             <button type="button" data-bar="scalp" onClick={openScalp}
               className="flex-1 h-8 rounded-full bg-primary text-primary-foreground text-[12px] leading-none font-medium flex items-center justify-center gap-2 active:opacity-80">
               <CandlestickChart size={15} /> ScalperX
             </button>
+            )}
           </div>
         )}
         </div>

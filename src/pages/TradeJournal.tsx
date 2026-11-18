@@ -373,7 +373,7 @@ export default function TradeJournal() {
     const out = open ? '' : ` → ${outDay !== inDay && t.exit_time ? `${dayMonth(outDay)} ` : ''}${timeOf(t.exit_time)}`;
     const details = 'text-[12px] leading-4 font-medium text-muted-foreground';
     return (
-      <div key={t.id} data-trade={t.id} data-trade-state={open ? 'open' : 'closed'} className="rounded-[12px] bg-foreground/[0.06]">
+      <div key={t.id} data-trade={t.id} data-trade-state={open ? 'open' : 'closed'} className="rounded-[12px] bg-card border border-border">
         <button type="button" onClick={() => { setOpenId(expanded ? null : t.id); setEditId(null); setCostOpen(null); }}
           className="relative block w-full text-left pl-[12.5px] pr-3 pt-[16px] pb-[13px] text-[12px] leading-none">
           <div data-trade-line="when" className="font-medium text-muted-foreground/80 pr-[150px] truncate">{t.product || 'NRML'} • {timeOf(t.entry_time)}{out}</div>
@@ -583,7 +583,7 @@ export default function TradeJournal() {
           )}
         </div>
         {eq && fundsMore && (
-          <div data-funds="rows" className="mx-4 mt-6 rounded-[12px] bg-foreground/[0.06] px-3 text-[12px] leading-none font-medium">
+          <div data-funds="rows" className="mx-4 mt-6 rounded-[12px] bg-card border border-border px-3 text-[12px] leading-none font-medium">
             {rows.filter(([, v]) => v !== null).map(([k, v], i) => (
               <div key={k} className={cn('flex items-center justify-between h-11', i > 0 && 'border-t border-border')}>
                 <span className="text-muted-foreground">{k}</span><span className="font-semibold text-foreground">{inr2(v)}</span>
@@ -665,12 +665,12 @@ export default function TradeJournal() {
               className={cn('pt-[2px] border-b-2', aPeriod === k ? 'border-foreground text-foreground font-semibold' : 'border-transparent text-muted-foreground font-medium')}>{label}</button>
           ))}
         </div>
-        <div className="bg-foreground/[0.05] pt-[30px] pb-[26px] flex items-center justify-center gap-[9px]">
+        <div className="bg-card pt-[30px] pb-[26px] flex items-center justify-center gap-[9px]">
           <button type="button" data-journal="prev" aria-label="Earlier" onClick={() => setAAnchor(shiftPeriod(aPeriod, aAnchor, -1))} className="h-6 w-6 rounded-full border border-foreground/[0.25] flex items-center justify-center text-foreground"><ChevronLeft size={11} strokeWidth={2.2} /></button>
           <span data-journal="period" className="text-[14px] leading-none font-semibold text-foreground">{r.label}</span>
           <button type="button" data-journal="next" aria-label="Later" disabled={r.to >= today} onClick={() => setAAnchor(shiftPeriod(aPeriod, aAnchor, 1))} className="h-6 w-6 rounded-full bg-foreground/[0.2] flex items-center justify-center text-foreground disabled:text-foreground/40"><ChevronRight size={11} strokeWidth={2.2} /></button>
         </div>
-        <div className="bg-foreground/[0.05]">
+        <div className="bg-card">
           <div className="rounded-t-[24px] bg-background px-4 pt-1 pb-8">
             {returnsCard(tally, r.from <= session && r.to >= session, aPeriod !== 'D' && (
               <div className="mx-3 mb-3 px-3 py-[11px] rounded-[8px] bg-foreground/[0.06] grid grid-cols-2 gap-y-[9px] text-[12px] leading-none font-medium text-muted-foreground text-left">
@@ -790,7 +790,14 @@ export default function TradeJournal() {
           (label, 21pt, figure, 38pt) for the three things it does not have —
           trades, win rate, charges. Everything in it is placed by where
           Lemonn's ink is, measured from the card's own top edge. */}
-      <div className="bg-foreground/[0.05] px-3 pt-[25px] pb-[14px]">
+      {/* THE APP'S OWN TWO COLOURS (18 Nov 2026). Martin: "maintain the same
+          colors for dark/light backgrounds in all the screens. I think the
+          background colors in the trade journal is different compared to other
+          screens". The journal's bands were a wash of the text colour over the
+          page (a neutral grey no other screen has) and its trade rows the
+          same; they are the theme's card colour now, as the chart's bars and
+          the home page's cards are, on the theme's background. */}
+      <div className="bg-card px-3 pt-[25px] pb-[14px]">
         <div data-journal-card="returns" className="relative h-[239px] rounded-[16px] border border-foreground/[0.18] bg-card">
           <button type="button" data-journal="basis" onClick={flipBasis} className="absolute left-3 top-[19px] flex items-center gap-[6px] text-[12px] leading-none font-semibold text-muted-foreground">
             {basis === 'net' ? 'Net Returns' : 'Total Returns'}<span className="text-foreground/90"><SortMark /></span>
@@ -832,7 +839,7 @@ export default function TradeJournal() {
       </div>
 
       {/* THE TRADES, on Lemonn's black sheet with its rounded shoulders. */}
-      <div className="bg-foreground/[0.05]">
+      <div className="bg-card">
         <div className="rounded-t-[24px] bg-background px-4 pt-6 pb-8">
           <div data-journal-tabs="" className="grid grid-cols-2 gap-4">
             {(['OPEN', 'HISTORY'] as const).map((k) => (
