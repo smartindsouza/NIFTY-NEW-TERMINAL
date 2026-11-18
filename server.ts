@@ -3574,9 +3574,20 @@ setInterval(() => {
             const d = syms[i] ? q?.[syms[i] as string] : null;
             const row = rows.find((m: any) => m.key === key);
             if (!d || !row || !(Number(d.last_price) > 0)) return;
-            const at = Math.max(stampMs(d.timestamp), stampMs(d.last_trade_time));
+            let at = Math.max(stampMs(d.timestamp), stampMs(d.last_trade_time));
+            // Zerodha's library hands the stamp over as a Date built from IST
+            // clock time as if it were UTC — five and a half hours ahead (the
+            // first live answer had the Hang Seng's figure "-330 minutes old",
+            // and a stamp in the future passes any freshness test). Put back.
+            if (at > Date.now() + 60 * 1000) at -= 5.5 * 3600 * 1000;
             if (!at || Date.now() - at > 5 * 60 * 1000) return;
-            const prev = Number(d.ohlc?.close) > 0 ? Number(d.ohlc.close) : Number(row.prev) > 0 ? Number(row.prev) : null;
+            // The previous close is the feed's own (its price less its change):
+            // the same reference the row had a moment ago, so only the price
+            // gets fresher. Zerodha's ohlc.close for these indices is not that
+            // close (the Hang Seng came out -1.12% against the feed's -2.1%
+            // at the same price); it is used only where the feed has none.
+            const feedPrev = Number(row.price) > 0 && Number.isFinite(Number(row.change)) ? Number(row.price) - Number(row.change) : 0;
+            const prev = feedPrev > 0 ? feedPrev : Number(row.prev) > 0 ? Number(row.prev) : Number(d.ohlc?.close) > 0 ? Number(d.ohlc.close) : null;
             if (!prev) return;
             row.price = d.last_price; row.prev = prev;
             row.change = +(d.last_price - prev).toFixed(2);

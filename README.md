@@ -649,6 +649,14 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Sidebar: Zerodha's live price keeps the feed's previous close, and its time is read right (v365)
+
+Found on the first live answer of v364: the Hang Seng's Zerodha figure was "-330 minutes
+old" (the library's stamp is IST clock time read as UTC, so it also passed the freshness
+test whatever its age) and its change was against Zerodha's `ohlc.close`, which is not
+the previous close for these indices. The stamp is put back five and a half hours when
+it is in the future, and the change is against the feed's own previous close.
+
 ## GIFT Nifty's change, live Zerodha prices for three global indices, Flow in the bottom bar (v364)
 
 - Martin: "Gift nifty percentage shows 0% in the side bar". Zerodha's `net_change` is 0
