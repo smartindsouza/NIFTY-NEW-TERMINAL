@@ -726,7 +726,7 @@ export default function TradeJournal() {
     if (c.from === today) return 'bg-primary/15 text-primary';
     return c.from < today ? 'bg-foreground/[0.09] text-muted-foreground' : 'bg-foreground/[0.18] text-muted-foreground';
   };
-  const option = (on: boolean) => cn('h-8 px-3.5 rounded-full text-[12px] leading-none font-medium', on ? 'bg-foreground text-background' : 'border border-foreground/[0.2] text-foreground/90');
+  const option = (on: boolean) => cn('h-8 px-3.5 rounded-full text-[12px] leading-none font-medium', on ? 'bg-primary text-primary-foreground' : 'border border-foreground/[0.2] text-foreground/90');
   const act = 'h-9 flex-1 rounded-[8px] border border-foreground/80 text-[12px] font-semibold text-foreground disabled:opacity-50 active:bg-foreground/10';
   return (
     <div data-journal-page="main" className="w-full md:max-w-[560px] mx-auto min-h-screen">
@@ -761,7 +761,7 @@ export default function TradeJournal() {
           <div data-journal-seg="period" className="absolute right-3 top-4 h-[34px] rounded-full border border-foreground/[0.2] p-1 flex">
             {(['D', 'W', 'M', 'Y'] as const).map((k) => (
               <button key={k} type="button" data-seg={k} aria-pressed={period === k} onClick={() => setPeriod(k)}
-                className={cn('h-6 w-6 rounded-full text-[9.5px] leading-none font-semibold', period === k ? 'bg-foreground text-background' : 'text-foreground/90')}>{k}</button>
+                className={cn('h-6 w-6 rounded-full text-[9.5px] leading-none font-semibold', period === k ? 'bg-primary text-primary-foreground' : 'text-foreground/90')}>{k}</button>
             ))}
           </div>
           <div className={cn(label, 'left-3 top-[82px]')}>Unrealised Returns</div>
@@ -799,7 +799,7 @@ export default function TradeJournal() {
           <div data-journal-tabs="" className="grid grid-cols-2 gap-4">
             {(['OPEN', 'HISTORY'] as const).map((k) => (
               <button key={k} type="button" data-tab={k} aria-pressed={tab === k} onClick={() => setTabPick(k)}
-                className={cn('h-8 rounded-full text-[12px] leading-none font-medium', tab === k ? 'bg-foreground text-background' : 'border border-foreground/[0.2] text-foreground/90')}>{k === 'OPEN' ? 'Open' : 'History'}</button>
+                className={cn('h-8 rounded-full text-[12px] leading-none font-medium', tab === k ? 'bg-primary text-primary-foreground' : 'border border-foreground/[0.2] text-foreground/90')}>{k === 'OPEN' ? 'Open' : 'History'}</button>
             ))}
           </div>
           <div className="mt-[24px] mb-[4px] flex items-center justify-between">
@@ -865,7 +865,7 @@ export default function TradeJournal() {
               <button type="button" data-journal="refresh" onClick={() => refetch()} disabled={isFetching} className={act}>{isFetching ? 'Refreshing…' : 'Refresh'}</button>
               <button type="button" data-journal="excel" onClick={() => downloadExcel(listFrom || firstDay, listTo || today)} className={act}>Excel</button>
             </div>
-            <button type="button" data-filter="done" onClick={() => setFilterOpen(false)} className="mt-3 h-10 w-full rounded-[10px] bg-foreground text-background text-[13px] font-semibold">Done</button>
+            <button type="button" data-filter="done" onClick={() => setFilterOpen(false)} className="mt-3 h-10 w-full rounded-[10px] bg-primary text-primary-foreground text-[13px] font-semibold">Done</button>
           </div>
         </div>
       )}

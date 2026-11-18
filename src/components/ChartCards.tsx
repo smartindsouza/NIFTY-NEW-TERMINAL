@@ -256,7 +256,7 @@ export function ChartCards({ chainSymbol, getDay, onOpenOption, onOpenPositions 
           <div className="mt-3 flex items-center gap-[3.5px]">
             {(['ALL', 'CE', 'PE'] as const).map((k) => (
               <button key={k} type="button" data-top-side={k} data-on={side === k ? '1' : '0'} onClick={() => setSide(k)}
-                className={`h-[26px] px-[17px] rounded-full text-[14px] leading-none font-medium border ${side === k ? 'bg-foreground text-background border-foreground' : 'bg-foreground/[0.03] text-foreground/75 border-foreground/20'}`}>
+                className={`h-[26px] px-[17px] rounded-full text-[14px] leading-none font-medium border ${side === k ? 'bg-primary text-primary-foreground border-primary' : 'bg-foreground/[0.03] text-foreground/75 border-foreground/20'}`}>
                 {k === 'ALL' ? 'All' : k === 'CE' ? 'Call' : 'Put'}
               </button>
             ))}

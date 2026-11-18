@@ -48,7 +48,7 @@ export function ChipBar<T extends string>({ toggleLabel, onToggle, chips, active
   return (
     <div className="flex items-center min-w-0" data-chipbar={name}>
       <button type="button" onClick={() => onToggle()} data-chipbar-toggle={toggleLabel}
-        className={`shrink-0 h-[34px] rounded-full border border-white ${L.toggle} flex items-center text-[12px] font-semibold text-white whitespace-nowrap active:bg-white/10`}>
+        className={`shrink-0 h-[34px] rounded-full border border-primary ${L.toggle} flex items-center text-[12px] font-semibold text-white whitespace-nowrap active:bg-white/10`}>
         {toggleLabel}
         <UpDownArrows scale={L.arrows} />
       </button>
@@ -58,7 +58,7 @@ export function ChipBar<T extends string>({ toggleLabel, onToggle, chips, active
           <button key={c} type="button" role="tab" aria-selected={c === active} data-chip={c}
             onClick={() => onPick(c)}
             className={`shrink-0 h-8 rounded-full ${L.chip} text-[12px] font-medium whitespace-nowrap border transition-colors ${
-              c === active ? 'bg-white text-black border-white' : `${L.edge} text-[#e8e8e8] active:bg-white/10`
+              c === active ? 'bg-primary text-primary-foreground border-primary' : `${L.edge} text-[#e8e8e8] active:bg-white/10`
             }`}>
             {c}
           </button>

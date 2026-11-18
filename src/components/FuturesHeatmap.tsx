@@ -180,7 +180,7 @@ export function FuturesHeatmap() {
       <div className="mt-4 flex items-center justify-between">
         <button type="button" data-heatmap-expiry={expiry || ''} disabled={!data?.expiries?.length}
           onClick={() => setSheet(true)}
-          className="h-[34px] rounded-full border border-white bg-[#191919] px-3 flex items-center gap-[5px] text-[12px] font-medium text-white whitespace-nowrap active:bg-white/10">
+          className="h-[34px] rounded-full border border-primary bg-[#191919] px-3 flex items-center gap-[5px] text-[12px] font-medium text-white whitespace-nowrap active:bg-white/10">
           <span className="relative top-px">{expiry ? expiryLabel(expiry) : 'Expiry'}</span>
           <svg width="10" height="5.3" viewBox="0 0 10 5.3" className="relative -top-[0.8px]" aria-hidden="true"><path d="M0 0H10L5 5.3Z" fill="currentColor" /></svg>
         </button>

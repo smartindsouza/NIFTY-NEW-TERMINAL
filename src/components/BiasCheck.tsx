@@ -145,7 +145,7 @@ function BiasSheet({ note, onClose }: { note: BiasNote; onClose: () => void }) {
         <div className="mt-[20px] h-px" aria-hidden="true"
           style={{ backgroundImage: 'linear-gradient(90deg, #262626 0 4px, transparent 4px 8px)', backgroundSize: '8px 1px' }} />
         <button type="button" data-bias="okay" onClick={() => onClose()}
-          className="mx-[16px] mt-[20px] h-[54px] w-[calc(100%-32px)] rounded-[12px] bg-white text-black text-[16px] font-bold active:opacity-80">
+          className="mx-[16px] mt-[20px] h-[54px] w-[calc(100%-32px)] rounded-[12px] bg-primary text-primary-foreground text-[16px] font-bold active:opacity-80">
           Okay
         </button>
       </div>

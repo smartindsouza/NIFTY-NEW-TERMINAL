@@ -72,3 +72,24 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 );
+
+// THE SCREEN STAYS ON (18 Nov 2026). Martin: "make sure my display remains on
+// and doesn't go to sleep whenever my web app is open". A screen wake lock,
+// held while the app is the visible page. The browser drops it whenever the
+// app is hidden (another tab, the home screen, the phone locked by hand), so it
+// is asked for again each time the app comes back; some browsers only grant it
+// after a touch, so the first touch asks too. Where the browser has no wake
+// lock (iPhone home-screen apps before iOS 18.4) nothing happens.
+(() => {
+  const nav: any = navigator;
+  if (!nav.wakeLock || typeof nav.wakeLock.request !== 'function') return;
+  let lock: any = null;
+  const hold = async () => {
+    if (document.visibilityState !== 'visible' || (lock && !lock.released)) return;
+    try { lock = await nav.wakeLock.request('screen'); } catch (e) { lock = null; }
+  };
+  document.addEventListener('visibilitychange', () => { void hold(); });
+  window.addEventListener('focus', () => { void hold(); });
+  window.addEventListener('pointerdown', () => { void hold(); }, { passive: true });
+  void hold();
+})();

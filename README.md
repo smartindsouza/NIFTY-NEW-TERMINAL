@@ -649,6 +649,18 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## White pills and buttons take the accent too; the screen stays on (v349)
+
+- Martin, with pictures of the journal's Open / History, the news chips and the heatmap's
+  bar: "Use the accent colors for these type of buttons as well". The chosen pill or chip
+  and the white buttons (Ok, Okay, Done, ScalperX, the TP & SL confirm) are filled with
+  the accent with white words; the white-edged pills (Category, Index, the expiry) have
+  an accent edge.
+- Martin: "make sure my display remains on and doesn't go to sleep whenever my web app
+  is open". `src/main.tsx` holds a screen wake lock while the app is the visible page,
+  and asks again whenever it comes back or is touched. Browsers without one (iPhone
+  home-screen apps before iOS 18.4) are unaffected.
+
 ## Everything coloured takes the accent colour (v348)
 
 Martin: "I want all the colorful things like icons, buttons, cards texts etc to be

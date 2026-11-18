@@ -907,13 +907,13 @@ function LineEditorModal({
         <div className="flex px-4 border-b border-0 mt-2 gap-4">
           <button 
             onClick={() => setTab('style')}
-            className={`pb-2 text-sm font-medium transition-colors ${tab === 'style' ? 'text-foreground border-b-2 border-white' : 'text-muted-foreground hover:text-foreground'}`}
+            className={`pb-2 text-sm font-medium transition-colors ${tab === 'style' ? 'text-foreground border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}
           >
             Style
           </button>
           <button 
             onClick={() => setTab('coordinates')}
-            className={`pb-2 text-sm font-medium transition-colors ${tab === 'coordinates' ? 'text-foreground border-b-2 border-white' : 'text-muted-foreground hover:text-foreground'}`}
+            className={`pb-2 text-sm font-medium transition-colors ${tab === 'coordinates' ? 'text-foreground border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}
           >
             Coordinates
           </button>
@@ -998,7 +998,7 @@ function LineEditorModal({
            </div>
            <div className="flex gap-2">
              <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
-             <button onClick={() => onApply(price, color, lineWidth, lineStyle, labelVisible, title, alertOn)} className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium">Ok</button>
+             <button onClick={() => onApply(price, color, lineWidth, lineStyle, labelVisible, title, alertOn)} className="px-4 py-1.5 text-sm bg-primary text-primary-foreground hover:bg-primary/90 rounded transition-colors font-medium">Ok</button>
            </div>
         </div>
       </div>
@@ -2419,7 +2419,7 @@ function BBEditorModal({
 
         <div className="flex items-center justify-end p-4 border-t border-0 bg-muted gap-2 mt-2">
           <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
-          <button onClick={() => onApply(period, stdDev, color)} className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium">Ok</button>
+          <button onClick={() => onApply(period, stdDev, color)} className="px-4 py-1.5 text-sm bg-primary text-primary-foreground hover:bg-primary/90 rounded transition-colors font-medium">Ok</button>
         </div>
       </div>
     </div>
@@ -2540,7 +2540,7 @@ function OiBarsEditorModal({
 
         <div className="flex items-center justify-end p-4 border-t border-0 bg-muted gap-2 mt-2">
           <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
-          <button onClick={() => onApply(maxBarWidth, gap, barThickness, callColor, putColor)} className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium">Ok</button>
+          <button onClick={() => onApply(maxBarWidth, gap, barThickness, callColor, putColor)} className="px-4 py-1.5 text-sm bg-primary text-primary-foreground hover:bg-primary/90 rounded transition-colors font-medium">Ok</button>
         </div>
       </div>
     </div>
@@ -2729,7 +2729,7 @@ function TpSlDefaultsModal({ onClose, initial, onApply, activeSymbol }: {
         <div className="mt-[20.3px] border-t border-foreground/10" />
         <div className="px-[16px] pt-[15.7px]">
           <button type="button" data-tpsl="save" disabled={!valid} onClick={save}
-            className="w-full h-[50px] rounded-[13px] text-[16px] font-bold bg-foreground text-background disabled:bg-foreground/50">
+            className="w-full h-[50px] rounded-[13px] text-[16px] font-bold bg-primary text-primary-foreground disabled:bg-primary/50">
             Save
           </button>
         </div>
@@ -2979,7 +2979,7 @@ function InstitutionalLevelsEditorModal({ value, onChange, onClose, onApply }: {
           <button onClick={() => onChange({ ...IL_DEFAULTS })} className="px-3 py-1.5 text-sm bg-transparent border border-border rounded text-foreground/80 hover:text-foreground">Defaults</button>
           <div className="flex gap-2">
             <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
-            <button onClick={onApply} className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium">Ok</button>
+            <button onClick={onApply} className="px-4 py-1.5 text-sm bg-primary text-primary-foreground hover:bg-primary/90 rounded transition-colors font-medium">Ok</button>
           </div>
         </div>
       </div>
@@ -3028,7 +3028,7 @@ function SessionBreaksEditorModal({ onClose, value, onChange, onApply }: {
         </div>
         <div className="flex items-center justify-end p-4 border-t border-0 bg-muted gap-2 mt-2">
           <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
-          <button onClick={onApply} className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium">Ok</button>
+          <button onClick={onApply} className="px-4 py-1.5 text-sm bg-primary text-primary-foreground hover:bg-primary/90 rounded transition-colors font-medium">Ok</button>
         </div>
       </div>
     </div>
@@ -3122,7 +3122,7 @@ function DirectionalZonesEditorModal({
 
         <div className="flex items-center justify-end p-4 border-t border-0 bg-muted gap-2 mt-2">
           <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
-          <button onClick={() => onApply(style)} className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium">Ok</button>
+          <button onClick={() => onApply(style)} className="px-4 py-1.5 text-sm bg-primary text-primary-foreground hover:bg-primary/90 rounded transition-colors font-medium">Ok</button>
         </div>
       </div>
     </div>
@@ -3343,7 +3343,7 @@ function RsiEditorModal({
           <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
           <button 
             onClick={() => onApply(color, lineWidth, lineStyle, smaLineWidth, smaLineStyle, overbought1, overbought2, oversold1, oversold2, smaColor, overboughtColor, oversoldColor)} 
-            className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium"
+            className="px-4 py-1.5 text-sm bg-primary text-primary-foreground hover:bg-primary/90 rounded transition-colors font-medium"
           >
             Ok
           </button>
@@ -3609,7 +3609,7 @@ function HLevelsEditorModal({
           <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors font-sans">Cancel</button>
           <button 
             onClick={() => onApply(levels, lineStyle, lineWidth, showFifty, fiftyColor)} 
-            className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium font-sans"
+            className="px-4 py-1.5 text-sm bg-primary text-primary-foreground hover:bg-primary/90 rounded transition-colors font-medium font-sans"
           >
             Ok
           </button>
@@ -3685,7 +3685,7 @@ function PdhPdlEditorModal({
 
         <div className="flex items-center justify-end p-4 border-t border-0 bg-muted gap-2 mt-2">
           <button onClick={onClose} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
-          <button onClick={() => onApply(pdhColor, pdlColor, lineWidth, lineStyle)} className="px-4 py-1.5 text-sm bg-white text-black hover:bg-gray-200 rounded transition-colors font-medium">Ok</button>
+          <button onClick={() => onApply(pdhColor, pdlColor, lineWidth, lineStyle)} className="px-4 py-1.5 text-sm bg-primary text-primary-foreground hover:bg-primary/90 rounded transition-colors font-medium">Ok</button>
         </div>
       </div>
     </div>
@@ -3766,7 +3766,7 @@ function SnREditorModal({
         <div className="flex bg-muted p-4 gap-2 border-t border-0 mt-2">
           <button onClick={onClose} className="flex-1 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
           <button 
-            className="flex-1 py-1.5 rounded bg-white text-black hover:bg-gray-200 font-medium text-sm transition-colors"
+            className="flex-1 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 font-medium text-sm transition-colors"
             onClick={() => onApply(supportColor, resistanceColor, lineWidth, lineStyle)}
           >
             Ok
@@ -17843,7 +17843,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               <Link2 size={15} /> Option Chain
             </button>
             <button type="button" data-bar="scalp" onClick={openScalp}
-              className="flex-1 h-10 rounded-lg bg-foreground text-background text-[13px] font-semibold flex items-center justify-center gap-2 active:opacity-80">
+              className="flex-1 h-10 rounded-lg bg-primary text-primary-foreground text-[13px] font-semibold flex items-center justify-center gap-2 active:opacity-80">
               <CandlestickChart size={15} /> ScalperX
             </button>
           </div>
@@ -18817,9 +18817,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               <div className="flex justify-center mb-0.5">
                 <div data-scalp="mode" className="inline-flex items-center h-[34px] rounded-[12px] border border-foreground/15 bg-card p-1 text-[12px] leading-none font-bold">
                   <button type="button" data-mode="market" aria-pressed={!atOn} onClick={() => { if (atOn) atOff(); }}
-                    className={`relative h-6 px-[9px] rounded-[9px] after:absolute after:inset-x-0 after:-inset-y-[5px] after:content-[''] ${!atOn ? 'bg-foreground text-background' : 'text-foreground'}`}>Market</button>
+                    className={`relative h-6 px-[9px] rounded-[9px] after:absolute after:inset-x-0 after:-inset-y-[5px] after:content-[''] ${!atOn ? 'bg-primary text-primary-foreground' : 'text-foreground'}`}>Market</button>
                   <button type="button" data-mode="at" aria-pressed={atOn} onClick={() => { if (!atOn) onScalpAt?.(() => ({ on: true, src: 'option', optPx: null, spotPx: null })); }}
-                    className={`relative h-6 px-[9px] rounded-[9px] after:absolute after:inset-x-0 after:-inset-y-[5px] after:content-[''] ${atOn ? 'bg-foreground text-background' : 'text-foreground'}`}>Limit/Trigger</button>
+                    className={`relative h-6 px-[9px] rounded-[9px] after:absolute after:inset-x-0 after:-inset-y-[5px] after:content-[''] ${atOn ? 'bg-primary text-primary-foreground' : 'text-foreground'}`}>Limit/Trigger</button>
                 </div>
               </div>
               <div className="flex items-center h-9">
