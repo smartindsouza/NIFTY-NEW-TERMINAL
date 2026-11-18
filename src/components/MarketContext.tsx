@@ -370,6 +370,14 @@ function StatusPill({ open }: { open?: boolean }) {
 
 export default function MarketContext({ tabHidden = false }: { tabHidden?: boolean }) {
   const [open, setOpen] = useState(false);
+  // The blurred backdrop: up with the list, fading out as it slides away.
+  const [shade, setShade] = useState<'off' | 'in' | 'out'>('off');
+  useEffect(() => {
+    if (open) { setShade('in'); return; }
+    setShade((v) => (v === 'in' ? 'out' : v));
+    const t = setTimeout(() => setShade('off'), 320);
+    return () => clearTimeout(t);
+  }, [open]);
   // A SWIPE TO THE RIGHT CLOSES IT (18 Nov 2026). Martin: "When the side bar is
   // open, swiping right to close the side bar does not work". It opens by a
   // swipe left on the bar at the screen's edge and had no way back but Close or
@@ -584,10 +592,18 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
       )}
 
       {/* Tap-anywhere backdrop to dismiss (reliable close on mobile + desktop) */}
-      {open && (
+      {/* IT LEAVES WITH THE LIST, NOT BEFORE IT (18 Nov 2026). Martin: "The
+          sidebar background disappears a lot quicker. Delay the background
+          disappearing a little so that the side bar is completely closed". It
+          was drawn only while `open`, so it was gone on the instant while the
+          list took 300ms to slide away over a bare chart. It now fades over
+          those same 300ms and is taken down when they are up; while fading it
+          takes no touches, so the chart under it is live at once. */}
+      {shade !== 'off' && (
         <div
           onClick={() => setOpen(false)}
-          className="fixed inset-0 z-[9998] bg-black/55 backdrop-blur-md touch-none"
+          data-context-shade={shade}
+          className={`fixed inset-0 z-[9998] bg-black/55 backdrop-blur-md touch-none transition-opacity duration-300 ${shade === 'in' ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
           onTouchMove={(e) => { e.stopPropagation(); }}
           aria-label="Close market context"
         />
