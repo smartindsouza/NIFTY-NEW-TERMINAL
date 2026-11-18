@@ -248,7 +248,12 @@ function ScalpScreen({ onClose }: { onClose: () => void }) {
         <div className="absolute inset-x-0 bottom-0 h-px bg-foreground/10" aria-hidden="true" />
         <button type="button" data-scalp="back" aria-label="Back" onClick={onClose}
           className="relative h-11 w-9 flex items-center justify-center text-foreground active:opacity-60">
-          <ArrowLeft size={27} strokeWidth={1.8} />
+          {/* Smaller, and in the middle of its corner, as the chart page's
+              search icon is (18 Nov 2026; Martin: "Reduce the size of the back
+              button and center it like the search icon in the scalperX screen").
+              The corner is 47 wide to the tab and the box 36, so the arrow is
+              shifted 5.5 right, and 3.5 down to the tab's middle. */}
+          <ArrowLeft size={18} strokeWidth={2} className="translate-x-[5.5px] translate-y-[3.5px]" />
         </button>
         <div data-scalp="tab" className="relative ml-[11px] h-[37px] px-[17px] flex items-center rounded-t-[13px] border border-b-0 border-foreground/15 bg-card text-[12px] font-[650] text-foreground">
           <span className="absolute -left-[10px] bottom-0 h-[10px] w-[10px]" aria-hidden="true" style={{ background: 'radial-gradient(circle at 0 0, transparent 9.5px, var(--card) 10px)' }} />

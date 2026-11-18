@@ -17937,7 +17937,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 <span ref={headPriceRef} data-head="price" className="text-[22px] leading-7 font-bold tracking-tight text-foreground tabular-nums">—</span>
                 <span ref={headChangeRef} data-head="change" className="text-[11px] font-semibold tabular-nums" />
               </div>
-              <div className="shrink-0 [&>span]:!text-xs"><IstSessionClock /></div>
+              {/* The clock ends where the price axis's figures end, 13.3 in from the
+                  screen's edge (18 Nov 2026; Martin: "move it a little inwards to
+                  align with the strike price but align it with the right edge of
+                  strike price"). Measured: the figures' ink ends at 402.7 of 430
+                  with five digits, and as far in with six in his picture. */}
+              <div className="shrink-0 mr-[13.3px] [&>span]:!text-xs"><IstSessionClock /></div>
               {/* THE BIAS BUTTON on the index chart (BiasCheck.tsx): Lemonn's
                   33pt square, centred on this line so the line keeps its height.
                   ABOVE THE PRICES (17 Nov 2026). Martin, with a picture of it

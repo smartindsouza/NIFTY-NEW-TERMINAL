@@ -649,6 +649,15 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Chart: the clock ends at the price axis's figures; ScalperX's back arrow is smaller and centred (v362)
+
+Martin: "Keep the time text right indented with the right edge of the bottom strike
+prices ... move it a little inwards to align with the strike price", and "Reduce the
+size of the back button and center it like the search icon in the scalperX screen".
+The phone chart's clock is 13.3 in from the screen's edge, where the price axis's
+figures end. ScalperX's back arrow is 18px (was 27) and stands in the middle of its
+corner.
+
 ## Sidebar: the picked tile is outlined in green or red (v361)
 
 Martin: "change the highlighted percentage text outline color to red or green based on
