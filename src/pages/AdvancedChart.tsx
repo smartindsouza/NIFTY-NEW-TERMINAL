@@ -10637,6 +10637,33 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     try { sessionStorage.setItem('openOptionCharts', JSON.stringify(openCharts)); } catch (e) {}
   }, [openCharts, isSpotPane]);
 
+  // THE OPTION TAB'S LIST IS THE INDEX'S OWN (18 Nov 2026). Martin: "show the
+  // Sensex options added to the list when Sensex is selected as spot". The list
+  // held every option chart opened, whatever its index, so with SENSEX on the
+  // spot tab the option tab still offered NIFTY's. It now lists the options of
+  // the index on the spot tab (read off each contract's name), plus the one on
+  // screen whatever it is, and anything that is not one of the three indices'.
+  // A reference chart (GIFT NIFTY, US30) has none of its own and lists all.
+  // And on the single-chart page, an option of another index put on screen (from
+  // search, the chain, a card) brings its index to the spot tab with it, so the
+  // two tabs are never about different indices.
+  const rootOfOption = (ts: any): 'NIFTY' | 'BANKNIFTY' | 'SENSEX' | null => {
+    const m = /^(BANKNIFTY|NIFTY|SENSEX)\d/.exec(String(ts || '').toUpperCase());
+    return m ? (m[1] as any) : null;
+  };
+  const tabCharts = openCharts
+    .filter((c, i, arr) => arr.findIndex(x => x.tradingsymbol === c.tradingsymbol) === i)
+    .filter((c) => {
+      const r = rootOfOption(c.tradingsymbol);
+      return isReferenceChart || !r || r === underlying || c.tradingsymbol === selectedInstrument?.tradingsymbol;
+    });
+  useEffect(() => {
+    if (isPane) return;
+    const r = rootOfOption(selectedInstrument?.tradingsymbol);
+    if (r && r !== underlying && (underlying === 'NIFTY' || underlying === 'BANKNIFTY' || underlying === 'SENSEX')) setUnderlying(r);
+  }, [selectedInstrument?.tradingsymbol]);
+
+
   // Whatever option chart gets shown joins the list. Capped (CHART_LIST_MAX) so
   // it cannot grow without end; the oldest goes first.
   useEffect(() => {
@@ -16559,11 +16586,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
             {/* Option charts. Hidden entirely when none are open rather than
                 showing an empty menu. */}
-            {openCharts.length > 0 && (() => {
+            {tabCharts.length > 0 && (() => {
               // What the tab jumps to: the contract on screen, else the one last
               // viewed if it is still open, else the most recently opened.
-              const stillOpen = lastOption && openCharts.some(c => c.tradingsymbol === lastOption.tradingsymbol) ? lastOption : null;
-              const optionTarget = selectedInstrument || stillOpen || openCharts[openCharts.length - 1];
+              const stillOpen = lastOption && tabCharts.some(c => c.tradingsymbol === lastOption.tradingsymbol) ? lastOption : null;
+              const optionTarget = selectedInstrument || stillOpen || tabCharts[tabCharts.length - 1];
               return (
               <div className="relative min-w-0 flex-1 basis-0 md:flex-none md:basis-auto">
                 <div data-head-tab={selectedInstrument ? 'on' : 'off'} className={`flex items-stretch rounded-md border overflow-hidden transition-colors ${
@@ -16578,7 +16605,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     className={`flex-1 min-w-0 truncate text-left px-2.5 max-md:pl-3 max-md:pr-1 h-8 max-md:h-full text-xs font-mono font-bold transition-colors ${
                       selectedInstrument ? 'text-primary max-md:text-foreground' : 'text-muted-foreground'}`}
                   >
-                    {optionTarget ? shortOptionName(optionTarget.tradingsymbol) : `Options (${openCharts.length})`}
+                    {optionTarget ? shortOptionName(optionTarget.tradingsymbol) : `Options (${tabCharts.length})`}
                   </button>
                   <button
                     onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(o => !o); }}
@@ -16591,8 +16618,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 </div>
                 {optionMenuOpen && (
                   <div className="absolute left-0 top-full mt-1 z-[60] min-w-[190px] max-h-[50vh] overflow-y-auto bg-card border border-white/10 rounded-md shadow-2xl">
-                    {openCharts
-                      .filter((c, i, arr) => arr.findIndex(x => x.tradingsymbol === c.tradingsymbol) === i)
+                    {tabCharts
                       .map((c) => {
                       const active = selectedInstrument?.tradingsymbol === c.tradingsymbol;
                       return (
@@ -16612,8 +16638,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                               dismissedChart.add(c.tradingsymbol);
                               setOpenCharts(prev => {
                                 const next = prev.filter(x => x.tradingsymbol !== c.tradingsymbol);
-                                if (active) setSelectedInstrument(next.length ? next[next.length - 1] : null);
-                                if (!next.length) setOptionMenuOpen(false);
+                                // The next one of THIS index's, not of the whole list.
+                                const mine = tabCharts.filter(x => x.tradingsymbol !== c.tradingsymbol);
+                                if (active) setSelectedInstrument(mine.length ? mine[mine.length - 1] : null);
+                                if (!mine.length) setOptionMenuOpen(false);
                                 return next;
                               });
                             }}
@@ -16636,7 +16664,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 I want it to remain the same". So when there is no option tab,
                 an empty box takes the half it would have had. Phone only — the
                 desktop's tabs are as wide as their names. */}
-            {openCharts.length === 0 && !isOptionPane && <div data-head="tab-room" className="md:hidden min-w-0 flex-1 basis-0" aria-hidden="true" />}
+            {tabCharts.length === 0 && !isOptionPane && <div data-head="tab-room" className="md:hidden min-w-0 flex-1 basis-0" aria-hidden="true" />}
 
             {/* Split view: close this half. On the option side that closes its
                 option charts (the split then goes back to one full chart); on

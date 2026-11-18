@@ -649,6 +649,19 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Search field smaller; the option list is the index's own; the heatmap's controls on one line (v367)
+
+- Martin: "Reduce the size of the search symbol, name text inside the search bar". The
+  field's icon is 13 (was 16) and its text 12px (was 14).
+- Martin: "show the Sensex options added to the list when Sensex is selected as spot".
+  The chart's option tab and its list show the options of the index on the spot tab
+  (`tabCharts` in AdvancedChart), not every option chart opened; on the single-chart
+  page an option of another index put on screen brings its index to the spot tab.
+- Martin: "Change the indices shown separately in a horizontal line to a list and bring
+  all the options in one single line including the Expiry and price/OI option below".
+  The heatmap's head is one row: Index ⇕, the index or sector in a pill that opens a
+  list, the expiry pill, Price ⇕. The chips are gone (ChipBar's heatmap look is unused).
+
 ## The bias icon is sparkles, centred in its corner (v366)
 
 Martin: "The bias button is still not centered at the top right between the screen edge

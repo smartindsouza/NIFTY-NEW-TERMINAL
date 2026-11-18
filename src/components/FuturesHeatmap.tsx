@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import axios from 'axios';
-import { ChipBar, UpDownArrows } from './ChipBar';
+import { UpDownArrows } from './ChipBar';
 
 // THE FUTURES HEATMAP (17 Nov 2026). Martin, with a screen recording of
 // Upstox's: "I want this exact futures heat map in my homepage below at the
@@ -87,7 +87,7 @@ function Tile({ r, view }: { r: Row; view: 'Price' | 'OI' }) {
   );
 }
 
-function ExpirySheet({ expiries, chosen, onPick, onClose }: { expiries: string[]; chosen: string | null; onPick: (e: string) => void; onClose: () => void }) {
+function ExpirySheet({ expiries, chosen, onPick, onClose, title = 'Expiry', label = expiryLabel }: { expiries: readonly string[]; chosen: string | null; onPick: (e: string) => void; onClose: () => void; /** The same sheet lists the indices or sectors (18 Nov 2026). */ title?: string; label?: (k: string) => string }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', k);
@@ -100,9 +100,9 @@ function ExpirySheet({ expiries, chosen, onPick, onClose }: { expiries: string[]
           the × 8.7 square, 19.7 in from the right; the expiries in 42-tall
           boxes with a 1pt #222 edge, the first 53.7 down, 16 apart; the
           chosen one white with a blue tick, the rest grey. */}
-      <div role="dialog" aria-label="Expiry"
-        className="heatmap-sheet absolute inset-x-0 bottom-0 rounded-t-[24px] bg-[#161616] pt-[53.7px] pb-[calc(67.7px+env(safe-area-inset-bottom))] md:inset-x-auto md:bottom-auto md:left-1/2 md:top-1/2 md:w-[430px] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-[24px] md:pb-6">
-        <div className="absolute left-4 top-[15.4px] text-[16px] leading-6 font-semibold text-[#ebebeb]">Expiry</div>
+      <div role="dialog" aria-label={title}
+        className="heatmap-sheet absolute inset-x-0 bottom-0 max-h-[82dvh] overflow-y-auto rounded-t-[24px] bg-[#161616] pt-[53.7px] pb-[calc(67.7px+env(safe-area-inset-bottom))] md:inset-x-auto md:bottom-auto md:left-1/2 md:top-1/2 md:w-[430px] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-[24px] md:pb-6">
+        <div className="absolute left-4 top-[15.4px] text-[16px] leading-6 font-semibold text-[#ebebeb]">{title}</div>
         <button type="button" aria-label="Close" onClick={() => onClose()}
           className="absolute right-[14px] top-[17px] h-5 w-5 flex items-center justify-center text-[#e6e6e6]">
           <svg width="8.7" height="8.7" viewBox="0 0 8.7 8.7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
@@ -114,7 +114,7 @@ function ExpirySheet({ expiries, chosen, onPick, onClose }: { expiries: string[]
             <button key={e} type="button" data-heatmap-option={e} aria-pressed={e === chosen}
               onClick={() => onPick(e)}
               className={`h-[42px] rounded-[12px] border border-[#222222] pl-3 pr-[14.3px] flex items-center justify-between text-[12px] font-medium active:bg-white/[0.04] ${e === chosen ? 'text-[#e8e8e8]' : 'text-[#b5b5b5]'}`}>
-              <span className="relative top-px">{expiryLabel(e)}</span>
+              <span className="relative top-px">{label(e)}</span>
               {e === chosen && (
                 <svg width="11.3" height="9.3" viewBox="0 0 11.3 9.3" fill="none" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M0.75 4.9 4 8.2 10.55 0.75" />
@@ -134,6 +134,7 @@ export function FuturesHeatmap() {
   const [view, setView] = useState<'Price' | 'OI'>('Price');
   const [asked, setAsked] = useState<string | null>(null);
   const [sheet, setSheet] = useState(false);
+  const [groupSheet, setGroupSheet] = useState(false);
 
   const { data, isError } = useQuery<Payload>({
     queryKey: ['futures-heatmap', asked || 'nearest'],
@@ -164,28 +165,35 @@ export function FuturesHeatmap() {
     // (tracking-wide); the recording's are at the face's own spacing.
     <section data-heatmap="" className="pt-2 tracking-normal">
       <h2 className="text-center text-[18px] leading-6 font-bold text-white">Futures Heatmap</h2>
-      <div className="mt-5">
-        <ChipBar name="heatmap" look="heatmap" toggleLabel={mode} chips={chips as readonly string[]} active={chip}
-          onToggle={() => {
+      {/* ONE LINE: Index ⇕ · the index (a list) · the expiry · Price ⇕ (18 Nov
+          2026). Martin, with a picture of the two rows: "Change the indices
+          shown separately in a horizontal line to a list and bring all the
+          options in one single line including the Expiry and price/OI option
+          below". The chips are gone; the chosen index or sector stands in a
+          pill that opens the same sheet the expiry's does. Pills 34 tall, as
+          measured for the expiry's; a long name is cut short in its pill. */}
+      <div className="mt-5 flex items-center gap-2">
+        <button type="button" data-chipbar-toggle={mode}
+          onClick={() => {
             const next = mode === 'Index' ? 'Sector' : 'Index';
             setMode(next);
             setChip(next === 'Index' ? INDEX_CHIPS[0] : SECTOR_CHIPS[0]);
           }}
-          onPick={(c) => setChip(c)} />
-      </div>
-      {/* The expiry pill: 34 tall, #191919 with a 1pt white edge; the date
-          12px Medium, 12 in and a point below the middle; its ▾ 10 x 5.3, 5
-          after it and a little above the middle, 12 from the end. "Price ⇕"
-          12px SemiBold at the right, its arrows 0.85 the chips'. */}
-      <div className="mt-4 flex items-center justify-between">
+          className="shrink-0 h-[34px] rounded-full border border-primary pl-3 pr-[13px] flex items-center gap-[7px] text-[12px] font-semibold text-white whitespace-nowrap active:bg-white/10">
+          {mode}
+          <UpDownArrows />
+        </button>
+        <button type="button" data-heatmap-group={chip} onClick={() => setGroupSheet(true)} className="h-[34px] min-w-0 rounded-full border border-primary bg-[#191919] px-3 flex items-center gap-[5px] text-[12px] font-medium text-white whitespace-nowrap active:bg-white/10">
+          <span className="relative top-px truncate">{chip}</span>
+          <svg width="10" height="5.3" viewBox="0 0 10 5.3" className="relative -top-[0.8px] shrink-0" aria-hidden="true"><path d="M0 0H10L5 5.3Z" fill="currentColor" /></svg>
+        </button>
         <button type="button" data-heatmap-expiry={expiry || ''} disabled={!data?.expiries?.length}
-          onClick={() => setSheet(true)}
-          className="h-[34px] rounded-full border border-primary bg-[#191919] px-3 flex items-center gap-[5px] text-[12px] font-medium text-white whitespace-nowrap active:bg-white/10">
+          onClick={() => setSheet(true)} className="shrink-0 h-[34px] min-w-0 rounded-full border border-primary bg-[#191919] px-3 flex items-center gap-[5px] text-[12px] font-medium text-white whitespace-nowrap active:bg-white/10">
           <span className="relative top-px">{expiry ? expiryLabel(expiry) : 'Expiry'}</span>
-          <svg width="10" height="5.3" viewBox="0 0 10 5.3" className="relative -top-[0.8px]" aria-hidden="true"><path d="M0 0H10L5 5.3Z" fill="currentColor" /></svg>
+          <svg width="10" height="5.3" viewBox="0 0 10 5.3" className="relative -top-[0.8px] shrink-0" aria-hidden="true"><path d="M0 0H10L5 5.3Z" fill="currentColor" /></svg>
         </button>
         <button type="button" data-heatmap-view={view} onClick={() => setView(view === 'Price' ? 'OI' : 'Price')}
-          className="h-[34px] flex items-center gap-[7px] pl-3 mr-[1.9px] text-[12px] font-semibold text-white">
+          className="shrink-0 ml-auto h-[34px] flex items-center gap-[7px] pl-1 mr-[1.9px] text-[12px] font-semibold text-white">
           {view}
           <UpDownArrows scale={0.85} />
         </button>
@@ -211,6 +219,10 @@ export function FuturesHeatmap() {
         <ExpirySheet expiries={data.expiries} chosen={expiry}
           onPick={(e) => { setAsked(e); setSheet(false); }}
           onClose={() => setSheet(false)} />, document.body) : null}
+      {groupSheet ? createPortal(
+        <ExpirySheet title={mode} label={(k) => k} expiries={chips as readonly string[]} chosen={chip}
+          onPick={(c) => { setChip(c); setGroupSheet(false); }}
+          onClose={() => setGroupSheet(false)} />, document.body) : null}
     </section>
   );
 }

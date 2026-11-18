@@ -209,7 +209,10 @@ export function SymbolSearch({ onSelect, currentSymbol, autoOpen, onClose, list 
           inputRef.current?.focus();
         }}
       >
-        <Search size={16} className={`mr-1.5 sm:mr-2 shrink-0 transition-colors ${isOpen ? 'text-muted-foreground' : 'text-muted-foreground group-hover:text-primary'}`} />
+        {/* Smaller icon and words in the field (18 Nov 2026; Martin: "Reduce the
+            size of the search symbol, name text inside the search bar"): the icon
+            13 (was 16), what is typed and "Search symbol, name..." 12px (was 14). */}
+        <Search size={13} className={`mr-1.5 sm:mr-2 shrink-0 transition-colors ${isOpen ? 'text-muted-foreground' : 'text-muted-foreground group-hover:text-primary'}`} />
         
         {isOpen ? (
           <div className="flex items-center w-full flex-1">
@@ -220,7 +223,7 @@ export function SymbolSearch({ onSelect, currentSymbol, autoOpen, onClose, list 
               onChange={e => setQuery(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Search symbol, name..."
-              className="bg-transparent border-none outline-none ring-0 focus:ring-0 focus:outline-none text-sm text-foreground w-full placeholder:text-muted-foreground p-0 m-0 !border-transparent !border-0 focus:!border-transparent focus:!ring-0 min-w-0"
+              className="bg-transparent border-none outline-none ring-0 focus:ring-0 focus:outline-none text-[12px] text-foreground w-full placeholder:text-muted-foreground p-0 m-0 !border-transparent !border-0 focus:!border-transparent focus:!ring-0 min-w-0"
               style={{ boxShadow: 'none' }}
               autoFocus
             />
