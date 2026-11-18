@@ -649,6 +649,13 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## News: smaller cards on a phone (v353)
+
+Martin: "Reduce the sizes of fonts inside the news cards to accommodate more news cards
+on the screen. Currently only 3 cards are available to read on the screen". On a phone
+the headline is 13px (was 16), the chips 9px, the time 10px, with tighter padding and
+gaps: 5 whole cards fit where 3 did. The desktop keeps its sizes.
+
 ## ScalperX: the order row is pills (v352)
 
 Martin, with a picture of ScalperX's order row: "Turn all these buttons and shapes to

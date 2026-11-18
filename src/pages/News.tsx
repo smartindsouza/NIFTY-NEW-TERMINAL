@@ -132,7 +132,7 @@ export function News() {
       </div>
 
       {/* Main Content Area */}
-      <div className="space-y-4">
+      <div className="space-y-2.5 md:space-y-4">
         {isLoading && (
           <div className="flex flex-col items-center justify-center p-20 gap-3">
             <Loader2 className="w-8 h-8 animate-spin text-rose-500" />
@@ -182,7 +182,7 @@ export function News() {
               key={item.id}
               onClick={() => window.open(item.link || '#', '_blank')}
               className={cn(
-                "p-5 md:p-6 border-0 rounded-xl transition-all duration-300 cursor-pointer hover:bg-white/[0.03] group flex flex-col gap-4 bg-card",
+                "px-3.5 py-3 md:p-6 border-0 rounded-xl transition-all duration-300 cursor-pointer hover:bg-white/[0.03] group flex flex-col gap-2 md:gap-4 bg-card",
                 isExtremeImpact 
                   ? "border-rose-500/20 bg-rose-500/[0.01] -4px_rgba(244,63,94,0.04)]" 
                   : "hover:border-0"
@@ -194,7 +194,7 @@ export function News() {
                   this row to stay on a single line instead of wrapping. */}
               <div className="flex items-center gap-1.5 flex-nowrap overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 <span className={cn(
-                  "shrink-0 px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider transition-colors whitespace-nowrap",
+                  "shrink-0 px-1.5 py-px md:px-2 md:py-0.5 rounded text-[9px] md:text-[10px] font-semibold uppercase tracking-wider transition-colors whitespace-nowrap",
                   item.category === 'India Market'
                     ? "bg-primary/15 text-primary border border-primary/30 font-bold"
                     : "bg-white/5 text-muted-foreground border border-white/5"
@@ -204,28 +204,28 @@ export function News() {
 
                 {isExtremeImpact && (
                   <span className="shrink-0 flex items-center gap-0.5 text-[9px] font-extrabold text-rose-500 tracking-wider uppercase animate-pulse whitespace-nowrap">
-                    <Flame className="w-3.5 h-3.5 fill-current" />
+                    <Flame className="w-3 h-3 md:w-3.5 md:h-3.5 fill-current" />
                     Critical
                   </span>
                 )}
 
                 {item.sentiment === 'bullish' && (
-                  <span className="shrink-0 flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 whitespace-nowrap">
-                    <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="shrink-0 flex items-center gap-1 px-1.5 py-px md:px-2.5 md:py-0.5 text-[9px] md:text-[10px] font-bold rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 whitespace-nowrap">
+                    <TrendingUp className="w-3 h-3 md:w-3.5 md:h-3.5 text-emerald-400" />
                     <span>BULLISH</span>
                   </span>
                 )}
 
                 {item.sentiment === 'bearish' && (
-                  <span className="shrink-0 flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 whitespace-nowrap">
-                    <TrendingDown className="w-3.5 h-3.5 text-rose-400" />
+                  <span className="shrink-0 flex items-center gap-1 px-1.5 py-px md:px-2.5 md:py-0.5 text-[9px] md:text-[10px] font-bold rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 whitespace-nowrap">
+                    <TrendingDown className="w-3 h-3 md:w-3.5 md:h-3.5 text-rose-400" />
                     <span>BEARISH</span>
                   </span>
                 )}
 
                 {item.sentiment === 'neutral' && (
-                  <span className="shrink-0 flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold rounded bg-primary/10 text-primary border border-primary/20 whitespace-nowrap">
-                    <Minus className="w-3.5 h-3.5 text-primary" />
+                  <span className="shrink-0 flex items-center gap-1 px-1.5 py-px md:px-2.5 md:py-0.5 text-[9px] md:text-[10px] font-bold rounded bg-primary/10 text-primary border border-primary/20 whitespace-nowrap">
+                    <Minus className="w-3 h-3 md:w-3.5 md:h-3.5 text-primary" />
                     <span>NEUTRAL</span>
                   </span>
                 )}
@@ -233,7 +233,7 @@ export function News() {
                 <Badge
                   variant="outline"
                   className={cn(
-                    "shrink-0 font-mono text-xs font-semibold px-2.5 py-0.5 border flex items-center gap-1 whitespace-nowrap",
+                    "shrink-0 font-mono text-[10px] md:text-xs font-semibold px-1.5 py-px md:px-2.5 md:py-0.5 border flex items-center gap-1 whitespace-nowrap",
                     isExtremeImpact
                       ? "bg-rose-950/20 text-rose-400 border-rose-500/30"
                       : "bg-background/40 text-foreground/80 border-0"
@@ -244,9 +244,14 @@ export function News() {
                 </Badge>
               </div>
 
+              {/* Smaller on a phone (18 Nov 2026). Martin: "Reduce the sizes of
+                  fonts inside the news cards to accommodate more news cards on the
+                  screen. Currently only 3 cards are available to read on the
+                  screen". Headline 13px, chips 9px, time 10px, tighter padding and
+                  gaps; the desktop (md:) keeps its sizes. */}
               {/* Headline */}
               <div className="space-y-2">
-                <h3 className="text-base md:text-lg font-medium text-foreground leading-snug group-hover:text-primary transition-colors">
+                <h3 className="text-[13px] leading-[18px] md:text-lg md:leading-snug font-medium text-foreground group-hover:text-primary transition-colors">
                   {item.headline}
                 </h3>
               </div>
@@ -260,13 +265,13 @@ export function News() {
                   bottom-RIGHT. The whole card is already clickable, so the icon is
                   an affordance rather than a separate control — hence a title
                   instead of a label, and no button that would swallow the click. */}
-              <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground mt-2">
-                <div className="flex items-center gap-1 text-[11px] min-w-0">
-                  <Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+              <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground md:mt-2">
+                <div className="flex items-center gap-1 text-[10px] md:text-[11px] min-w-0">
+                  <Clock className="w-3 h-3 md:w-3.5 md:h-3.5 text-muted-foreground shrink-0" />
                   <span className="truncate">{item.timeIST}</span>
                 </div>
                 <ExternalLink
-                  className="w-4 h-4 shrink-0 text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all"
+                  className="w-3.5 h-3.5 md:w-4 md:h-4 shrink-0 text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all"
                   aria-label="Open full coverage"
                 />
               </div>
