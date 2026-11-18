@@ -10977,6 +10977,64 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     if (r && r !== underlying && (underlying === 'NIFTY' || underlying === 'BANKNIFTY' || underlying === 'SENSEX')) setUnderlying(r);
   }, [selectedInstrument?.tradingsymbol]);
 
+  // A SWIPE ACROSS THE ROW OF FIVE CHANGES TAB (19 Nov 2026). Martin: "Swiping
+  // the bottom row with range, time frame etc to the right or left should
+  // switch between spot and option chart tabs" — "I mean swiping horizontally".
+  // The tabs are spot on the left and option on the right, so the row pages
+  // like them: swiped to the left (the finger going right to left) it brings up
+  // the option tab, to the right the spot tab — exactly what a tap on that tab
+  // does, the option tab going to the contract last viewed. A swipe towards a
+  // tab that is not there does nothing. The gesture itself: see the effect at
+  // THE ROW OF FIVE TAKES A SIDEWAYS SWIPE.
+  const swipeTabsRef = useRef<(dir: 'left' | 'right') => void>(() => {});
+  swipeTabsRef.current = (dir) => {
+    setIndexMenuOpen(false); setOptionMenuOpen(false);
+    if (dir === 'right') { if (selectedInstrument) setSelectedInstrument(null); return; }
+    if (selectedInstrument) return;
+    const stillOpen = lastOption && tabCharts.some((c) => c.tradingsymbol === lastOption.tradingsymbol) ? lastOption : null;
+    const target = stillOpen || tabCharts[tabCharts.length - 1];
+    if (target) setSelectedInstrument(target);
+  };
+  // THE ROW OF FIVE TAKES A SIDEWAYS SWIPE (phone): a finger that goes down on
+  // the row and travels at least 48pt across — mostly across (1.5 times as far
+  // as up or down) and within a second and a half — is a swipe. Listened for on the document,
+  // as the row is drawn with the chart and comes and goes with it. The row is
+  // touch-action pan-y, so a drag up or down still scrolls the page and a drag
+  // across is left to this. A swipe that ends on a button must not also press
+  // it: a click on the row within half a second of a swipe is dropped.
+  useEffect(() => {
+    if (isPane || scalp) return;
+    let start: { x: number; y: number; t: number } | null = null;
+    let swipedAt = 0;
+    const inRow = (n: EventTarget | null) => { const row = bottomBarRef.current; return !!row && n instanceof Node && row.contains(n); };
+    const onStart = (e: TouchEvent) => {
+      start = null;
+      if (window.innerWidth >= 768 || e.touches.length !== 1 || !inRow(e.target)) return;
+      start = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() };
+    };
+    const onEnd = (e: TouchEvent) => {
+      const st = start; start = null;
+      if (!st || !e.changedTouches.length) return;
+      const dx = e.changedTouches[0].clientX - st.x, dy = e.changedTouches[0].clientY - st.y;
+      if (Math.abs(dx) < 48 || Math.abs(dx) < 1.5 * Math.abs(dy) || Date.now() - st.t > 1500) return;
+      swipedAt = Date.now();
+      swipeTabsRef.current(dx < 0 ? 'left' : 'right');
+    };
+    const onCancel = () => { start = null; };
+    const onClick = (e: MouseEvent) => { if (Date.now() - swipedAt < 500 && inRow(e.target)) { e.preventDefault(); e.stopPropagation(); } };
+    document.addEventListener('touchstart', onStart, { capture: true, passive: true });
+    document.addEventListener('touchend', onEnd, { capture: true, passive: true });
+    document.addEventListener('touchcancel', onCancel, { capture: true, passive: true });
+    document.addEventListener('click', onClick, true);
+    return () => {
+      document.removeEventListener('touchstart', onStart, true);
+      document.removeEventListener('touchend', onEnd, true);
+      document.removeEventListener('touchcancel', onCancel, true);
+      document.removeEventListener('click', onClick, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPane, scalp]);
+
 
   // Whatever option chart gets shown joins the list. Capped (CHART_LIST_MAX) so
   // it cannot grow without end; the oldest goes first.
@@ -12800,14 +12858,16 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         // options.
         attributionLogo: false,
       },
-      // NO GRID ON THE SCALPPRO CHARTS (16 Nov 2026). Martin, of Lemonn's screen:
-      // "the scalp pro chart backgrounds does not have the repeating rectangles
-      // as in my app". Theirs is a plain surface with the candles on it, so the
-      // two charts of that screen draw no grid lines. Every other chart keeps
-      // its grid.
+      // NO GRID ON ANY CHART HERE. ScalpPro's went first (16 Nov 2026; Martin, of
+      // Lemonn's screen: "the scalp pro chart backgrounds does not have the
+      // repeating rectangles as in my app"); the chart screen's price and RSI
+      // charts followed (19 Nov 2026: "Also remove the grid lines from the
+      // charts in the chart screen"). A plain surface with the candles on it.
+      // The RSI's 65 / 60 / 40 / 38 levels are lines of its own, not the grid,
+      // and stay.
       grid: {
-        vertLines: { color: palette.grid, visible: !scalp },
-        horzLines: { color: palette.grid, visible: !scalp },
+        vertLines: { color: palette.grid, visible: false },
+        horzLines: { color: palette.grid, visible: false },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
@@ -17293,7 +17353,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             so the chart above ends where the row begins by ordinary layout, not
             by measuring the screen. Where the row sits at rest, and how it
             looks, is to the pixel what it was when it was fixed. */}
-        <div ref={bottomBarRef} className={`max-md:absolute md:static max-md:bottom-0 left-0 right-0 z-40 bg-card md:bg-transparent border-t border-border md:border-0 px-3 pt-1.5 pb-1 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-wrap justify-end md:shrink md:min-w-0 w-screen md:w-auto md:ml-auto md:mb-0 md:rounded-none md:border-0 md:bg-transparent max-w-[100vw] overflow-x-hidden md:overflow-visible`}>
+        <div ref={bottomBarRef} className={`max-md:touch-pan-y max-md:absolute md:static max-md:bottom-0 left-0 right-0 z-40 bg-card md:bg-transparent border-t border-border md:border-0 px-3 pt-1.5 pb-1 md:px-1.5 md:py-1 flex items-center gap-2 md:gap-1.5 flex-wrap justify-end md:shrink md:min-w-0 w-screen md:w-auto md:ml-auto md:mb-0 md:rounded-none md:border-0 md:bg-transparent max-w-[100vw] overflow-x-hidden md:overflow-visible`}>
           {/* ON A PHONE THIS IS THE ROW OF FIVE (see THE LEMONN LAYOUT ON A PHONE):
               Range, Interval, Indicators, Drawings, Settings — an icon or a value
               with its name under it, in that order whatever the order below (the
