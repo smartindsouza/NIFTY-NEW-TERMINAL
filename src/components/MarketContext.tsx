@@ -214,17 +214,20 @@ function WheelRow({ m, onOpen }: { m: Market; onOpen?: () => void }) {
     <div data-wheel-row={m.key}
       title={onOpen ? undefined : (m.reason || undefined)}
       style={{ height: WHEEL_ROW }}
-      className="group snap-center flex items-center justify-end gap-3 pl-3 pr-[52px] will-change-[opacity]">
+      className="group relative snap-center flex items-center justify-end gap-3 pl-3 pr-[60px] will-change-[opacity]">
       {/* THE ROW ITSELF OPENS NOTHING (18 Nov 2026). Martin: "when I tap an
           index by mistake, its chart opens up in the chart screen. So prevent
           it by adding a small chart open icon somewhere for every index". The
           whole row was the button, and the row is also what a thumb lands on
           while scrolling the list. The chart is opened by this icon alone,
-          before the name; a row with no chart to open has none. */}
+          a row with no chart to open has none. It stands past the line down
+          the right, at the screen's edge (Martin, the same day: "Move the
+          candlestick icons to the right on the other side of the straight
+          white line"); the line and its handle moved 8px in to give it room. */}
       {onOpen && (
         <button type="button" data-wheel="open" onClick={(e) => { e.stopPropagation(); onOpen(); }}
           aria-label={`Open the ${m.label} chart`} title={`Open the ${m.label} chart (Zerodha data)`}
-          className="shrink-0 -mr-1.5 h-8 w-8 flex items-center justify-center rounded-full text-foreground/50 group-data-[on]:text-primary active:bg-foreground/10">
+          className="absolute right-0 top-1/2 -translate-y-1/2 h-10 w-[34px] flex items-center justify-center pr-[3px] rounded-full text-foreground/50 group-data-[on]:text-primary active:bg-foreground/10">
           <ChartCandlestick size={14} />
         </button>
       )}
@@ -265,7 +268,7 @@ function WheelRow({ m, onOpen }: { m: Market; onOpen?: () => void }) {
 // the numbers are where the section says.
 function WheelHeader({ title, collapsed, onToggle, open, age }: { title: string; collapsed: boolean; onToggle: () => void; open?: boolean; age?: string }) {
   return (
-    <div className="h-11 pl-3 pr-[52px] flex items-center justify-end gap-2" data-wheel-head="">
+    <div className="h-11 pl-3 pr-[60px] flex items-center justify-end gap-2" data-wheel-head="">
       {age && <span className="text-[9px] font-mono text-foreground/45 whitespace-nowrap">{age}</span>}
       <StatusPill open={open} />
       <button type="button" onClick={onToggle} aria-expanded={!collapsed}
@@ -313,8 +316,8 @@ function Wheel({ active, children }: { active: boolean; children: ReactNode }) {
         {children}
       </div>
       {/* The line down the right and the handle at its middle. */}
-      <div className="pointer-events-none absolute right-[26px] inset-y-0 w-px bg-foreground/15" aria-hidden="true" />
-      <div className="pointer-events-none absolute right-[12px] top-1/2 -translate-y-1/2 h-[10px] w-[29px] rounded-full bg-foreground/70" aria-hidden="true" />
+      <div className="pointer-events-none absolute right-[34px] inset-y-0 w-px bg-foreground/15" aria-hidden="true" />
+      <div className="pointer-events-none absolute right-[20px] top-1/2 -translate-y-1/2 h-[10px] w-[29px] rounded-full bg-foreground/70" aria-hidden="true" />
     </div>
   );
 }
@@ -610,7 +613,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
               a slow one looked identical and the panel simply read nothing. If the
               server reported an error, say so instead. */}
           {!collapsed.us && us.length === 0 && (
-            <div className="pl-3 pr-[52px] py-3 text-right text-xs text-slate-500">
+            <div className="pl-3 pr-[60px] py-3 text-right text-xs text-slate-500">
               {data && (data as any).success === false
                 ? <span className="text-primary/80 font-mono text-[10px]">server error: {String((data as any).error || 'unknown').slice(0, 90)}</span>
                 : data ? 'no rows returned' : 'Loading…'}
@@ -620,7 +623,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
             <WheelRow key={m.key} m={m} onOpen={openChart(m)} />
           ))}
           {!collapsed.us && us.length > 0 && us.every((m) => !m.available) && (
-            <div className="pl-3 pr-[52px] py-2 text-right text-[10px] text-slate-500 leading-relaxed">
+            <div className="pl-3 pr-[60px] py-2 text-right text-[10px] text-slate-500 leading-relaxed">
               US data source unreachable from the server right now. Indian indices above are unaffected.
             </div>
           )}
@@ -632,13 +635,13 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
             open={status.uk}
           />
           {!collapsed.uk && uk.length === 0 && (
-            <div className="pl-3 pr-[52px] py-3 text-right text-xs text-slate-500">Loading…</div>
+            <div className="pl-3 pr-[60px] py-3 text-right text-xs text-slate-500">Loading…</div>
           )}
           {!collapsed.uk && uk.map((m) => (
             <WheelRow key={m.key} m={m} onOpen={openChart(m)} />
           ))}
           {!collapsed.uk && uk.length > 0 && uk.every((m) => !m.available) && (
-            <div className="pl-3 pr-[52px] py-2 text-right text-[10px] text-slate-500 leading-relaxed">
+            <div className="pl-3 pr-[60px] py-2 text-right text-[10px] text-slate-500 leading-relaxed">
               UK data source unreachable from the server right now. Sections above are unaffected.
             </div>
           )}
@@ -650,13 +653,13 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
             open={globalMkts.length ? globalMkts.some((m) => m.open === true) : undefined}
           />
           {!collapsed.global && globalMkts.length === 0 && (
-            <div className="pl-3 pr-[52px] py-3 text-right text-xs text-slate-500">Loading…</div>
+            <div className="pl-3 pr-[60px] py-3 text-right text-xs text-slate-500">Loading…</div>
           )}
           {!collapsed.global && globalMkts.map((m) => (
             <WheelRow key={m.key} m={m} onOpen={openChart(m)} />
           ))}
           {!collapsed.global && globalMkts.length > 0 && globalMkts.every((m) => !m.available) && (
-            <div className="pl-3 pr-[52px] py-2 text-right text-[10px] text-slate-500 leading-relaxed">
+            <div className="pl-3 pr-[60px] py-2 text-right text-[10px] text-slate-500 leading-relaxed">
               Global data source unreachable from the server right now. Sections above are unaffected.
             </div>
           )}
