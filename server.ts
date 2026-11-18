@@ -926,6 +926,18 @@ function activeWatchedTokens(): number[] {
   return Array.from(watchedTokens.keys());
 }
 let bankActiveUntil = 0;
+// Bank Nifty's chain from the ten-second loop, kept as SENSEX's is, so that the
+// chart, the option chain and the cards are answered from it (18 Nov 2026; see
+// /api/option-chain). Until then the loop read it and threw it away, and every
+// request read the broker again.
+let latestBankChainData: any = null;
+let latestBankChainAt = 0;
+// The funds, shared for a moment between everyone asking (see /api/margins).
+const MARGINS_SHARE_MS = 2000;
+let marginsKept: { at: number; body: any } | null = null;
+let marginsInFlight: Promise<any> | null = null;
+let marginsTouchedAt = 0;
+const marginsTouched = () => { marginsTouchedAt = Date.now(); };
 let lastBankChainTokens: number[] = [];
 let lastNiftyChainTokens: number[] = [256265];
 let lastSensexChainTokens: number[] = [];
@@ -1026,6 +1038,8 @@ async function refreshData() {
         if (Date.now() < bankActiveUntil) {
           const bn = await getLiveOptionChain('NSE:NIFTY BANK');
           if (bn && !bn.isMock) {
+            latestBankChainData = bn;
+            latestBankChainAt = Date.now();
             const btok: number[] = [];
             for (const k of (bn.strikes || [])) {
               if (bn.ceData?.[k]?.instrument_token) btok.push(bn.ceData[k].instrument_token);
@@ -1800,6 +1814,7 @@ setInterval(() => {
   }, 3000);
 
   app.post('/api/exit-position', express.json(), async (req, res) => {
+    marginsTouched(); res.on('finish', marginsTouched);      // the funds change with it: see /api/margins
     try {
       const { tradingsymbol, reason } = req.body || {};
       if (!tradingsymbol) return res.status(400).json({ success: false, error: 'Missing tradingsymbol' });
@@ -3638,8 +3653,20 @@ setInterval(() => {
     // SENSEX fast-path: the ticket polls this endpoint every 1.5s for the live
     // premium — serving the 10s server cache instead of a fresh Kite quote batch
     // per hit is what keeps that poll inside rate limits (mirrors NIFTY's path).
-    if (isSensex && !expiryParam && !spotParam && latestSensexChainData && (Date.now() - latestSensexChainAt < 30 * 1000)) {
+    // THE HINT OF THE SPOT PRICE NO LONGER SENDS A REQUEST TO THE BROKER (18 Nov
+    // 2026). The chart sends its own last price with every read (?spot=), and
+    // this fast path stood aside for it — so a SENSEX chart read the broker
+    // afresh every ten seconds, two quote requests each time, beside the loop
+    // doing the very same read: 1.1 to 2.9 seconds a request on the live app
+    // instead of a few milliseconds. The hint only shapes a SIMULATED chain;
+    // a real one quotes the index itself. So it is not looked at here.
+    if (isSensex && !expiryParam && latestSensexChainData && (Date.now() - latestSensexChainAt < 30 * 1000)) {
       return res.json(withAnalytics ? { ...latestSensexChainData, analytics: latestSensexAnalytics } : latestSensexChainData);
+    }
+    // Bank Nifty, the same way: the loop's copy while it is fresh.
+    const isBank = symbol === 'NIFTY BANK' || symbol === 'BANKNIFTY';
+    if (isBank && !expiryParam && latestBankChainData && (Date.now() - latestBankChainAt < 30 * 1000)) {
+      return res.json(withAnalytics ? { ...latestBankChainData, analytics: computeAnalytics(latestBankChainData) } : latestBankChainData);
     }
 
     if (symbol !== 'NIFTY 50' || expiryParam || !latestChainData) {
@@ -3658,10 +3685,14 @@ setInterval(() => {
         const chain = await getLiveOptionChain(spotSymbol, forcedSpot, expiryParam);
         // Seed the SENSEX cache from a default-shaped request so the very next
         // hit (e.g. the ticket's 1.5s poll) is already served from cache.
-        if (isSensex && !expiryParam && !spotParam && chain && !chain.isMock) {
+        if (isSensex && !expiryParam && chain && !chain.isMock) {
           latestSensexChainData = chain;
           latestSensexAnalytics = computeAnalytics(chain);
           latestSensexChainAt = Date.now();
+        }
+        if (isBank && !expiryParam && chain && !chain.isMock) {
+          latestBankChainData = chain;
+          latestBankChainAt = Date.now();
         }
         return res.json(withAnalytics ? { ...chain, analytics: computeAnalytics(chain) } : chain);
       } catch (e) {
@@ -4305,6 +4336,7 @@ setInterval(() => {
   });
 
   app.post('/api/orders', express.json(), async (req, res) => {
+    marginsTouched(); res.on('finish', marginsTouched);      // the funds change with it: see /api/margins
     try {
       const { 
         action, // BUY/SELL
@@ -4515,19 +4547,35 @@ setInterval(() => {
     }
   });
 
+  // ONE READ OF THE FUNDS FOR EVERYONE ASKING AT ONCE (18 Nov 2026). Every chart
+  // on screen asks for the funds every 15 s — two on the desktop's split view,
+  // and the journal's funds screen besides — and each ask was its own request
+  // to Zerodha. The answer is kept for MARGINS_SHARE_MS and a read on its way
+  // is waited for, so asks that land together cost one. An order placed or a
+  // position closed through this app makes the kept answer old at once
+  // (marginsTouched), so the funds read after a trade are never the funds from
+  // before it. This is what lets /api/margins off the app's frequency warning
+  // (SERVER_CACHED_ENDPOINTS in src/lib/apiInterceptor.ts names it).
   app.get('/api/margins', async (req, res) => {
     try {
       const kc = getKiteClient();
       // @ts-ignore
       if (kc && kc.access_token) {
-        const margins = await kc.getMargins();
+        if (marginsKept && marginsKept.at > marginsTouchedAt && Date.now() - marginsKept.at < MARGINS_SHARE_MS) return res.json(marginsKept.body);
+        const startedAt = Date.now();
+        if (!marginsInFlight) marginsInFlight = Promise.resolve(kc.getMargins()).finally(() => { marginsInFlight = null; });
+        const margins: any = await marginsInFlight;
         const balance = margins?.equity?.net ?? margins?.equity?.available?.cash ?? 0;
-        return res.json({
+        const body = {
           success: true,
           live: true,
           balance: typeof balance === 'string' ? parseFloat(balance) : balance,
           margins
-        });
+        };
+        // Kept as of when the read was ASKED for: a read that began before an
+        // order went in is older than the order however late it answers.
+        marginsKept = { at: startedAt, body };
+        return res.json(body);
       }
       return res.json({
         success: true,

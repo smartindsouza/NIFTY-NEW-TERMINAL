@@ -593,7 +593,51 @@ async function refreshAllStrikeOi(kc: any, key: string, symbols: string[]) {
   }
 }
 
-export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot?: number, expiry?: string) {
+// ONE READ OF THE BROKER FOR EVERYONE WHO ASKS AT THE SAME MOMENT (18 Nov 2026).
+// Martin: "High frequency api warnings still appear". The one still appearing
+// named /api/option-chain: the chart reads the chain every 10 s, the option
+// chain sheet every 5 while it is open, the cards under the chart every 15 —
+// three readers of one thing, and a change of expiry on top made six calls in
+// fifteen seconds. Each call that was not for the nearest NIFTY expiry came
+// here, and here it was two quote requests to Zerodha every time (the index,
+// then the options), 1.1 to 2.9 seconds each on the live app, one of them
+// timing out at 15. Zerodha allows about one quote request a second.
+// A chain read is now kept for CHAIN_SHARE_MS and shared: whoever asks for the
+// same index and expiry inside that time is given the same answer, and whoever
+// asks while a read is on its way waits for that read instead of starting
+// another. So any number of readers cost at most one read of the broker every
+// three seconds per index and expiry — that is what lets /api/option-chain off
+// the app's frequency warning (SERVER_CACHED_ENDPOINTS in
+// src/lib/apiInterceptor.ts names this). The server's own ten-second loop is
+// ten seconds apart and is never answered from here.
+// Not kept: a simulated chain (no session, or the broker failed) — nothing was
+// read from the broker for it, and a failure must not stand for three seconds.
+// The hint of the spot price is not part of the key: with a session it is not
+// used (the index is quoted), it only shapes the simulated chain.
+const CHAIN_SHARE_MS = 3000;
+const chainShared = new Map<string, { at: number; value: any }>();
+const chainInFlight = new Map<string, Promise<any>>();
+export async function getLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot?: number, expiry?: string): Promise<any> {
+  const kc0: any = getKiteClient();
+  if (!kc0 || !kc0.access_token) return buildLiveOptionChain(spotSymbol, forcedSpot, expiry);
+  const key = `${spotSymbol}|${expiry || ''}`;
+  const kept = chainShared.get(key);
+  if (kept && Date.now() - kept.at < CHAIN_SHARE_MS) return kept.value;
+  const running = chainInFlight.get(key);
+  if (running) return running;
+  const read: Promise<any> = buildLiveOptionChain(spotSymbol, forcedSpot, expiry).then((value: any) => {
+    if (value && !value.isMock) {
+      chainShared.set(key, { at: Date.now(), value });
+      // Old expiries and indices no longer asked for are let go.
+      for (const [k, v] of chainShared) if (Date.now() - v.at > 60000) chainShared.delete(k);
+    }
+    return value;
+  }).finally(() => { chainInFlight.delete(key); });
+  chainInFlight.set(key, read);
+  return read;
+}
+
+async function buildLiveOptionChain(spotSymbol = 'NSE:NIFTY 50', forcedSpot?: number, expiry?: string) {
   const kc = getKiteClient();
   
   // Try to determine a default spot if we need one

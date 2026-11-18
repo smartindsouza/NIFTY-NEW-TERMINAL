@@ -101,7 +101,11 @@ export const performanceTracker = {
   },
 
   // API Call Logging & Response Times
-  logApiCall(endpoint: string, durationMs: number, fromCache: boolean, serverMs?: number) {
+  // `freqKey` is what the call is counted under for the frequency warning when
+  // that is not the endpoint itself: a request that is not a GET is counted
+  // apart from the GETs of the same path (see COUNTED BY WHAT IT IS in
+  // apiInterceptor.ts). The latency list above is still by endpoint alone.
+  logApiCall(endpoint: string, durationMs: number, fromCache: boolean, serverMs?: number, freqKey?: string) {
     apiMetricsList.push({
       endpoint,
       timestamp: Date.now(),
@@ -116,12 +120,13 @@ export const performanceTracker = {
     }
 
     // Record call for frequency warning checks
-    const currentTimes = endpointCallTimestamps.get(endpoint) || [];
+    const countedAs = freqKey || endpoint;
+    const currentTimes = endpointCallTimestamps.get(countedAs) || [];
     currentTimes.push(Date.now());
     // Only keep calls within the last 15 seconds
     const cutoff = Date.now() - 15000;
     const filtered = currentTimes.filter(t => t > cutoff);
-    endpointCallTimestamps.set(endpoint, filtered);
+    endpointCallTimestamps.set(countedAs, filtered);
   },
 
   // Check if any endpoint is called too frequently (e.g., > 5 calls in 15 seconds)

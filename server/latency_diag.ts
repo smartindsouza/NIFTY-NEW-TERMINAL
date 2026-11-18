@@ -17,6 +17,7 @@ const srvLag: number[] = [];               // ms, exchange → server, NIFTY tic
 const gaps: number[] = [];                 // ms between NIFTY ticks at the server
 let lastNiftyAt = 0;
 const reports: any[] = [];
+const freqWarnings: any[] = [];
 
 export function noteServerTick(token: number, exTs: number | null, recvTs: number) {
   if (token !== 256265) return;
@@ -47,6 +48,24 @@ export function registerLatencyDiag(app: any, express: any) {
     if (reports.length > 500) reports.shift();
     res.json({ ok: true });
   });
+  // WHICH ENDPOINT THE APP'S "HIGH FREQUENCY API WARNING" NAMED, AND WHERE (18
+  // Nov 2026). Martin: "High frequency api warnings still appear" — and nothing
+  // recorded which one. The toast is raised in the phone's browser and was
+  // gone six seconds later; finding it meant walking every screen and counting.
+  // The app now tells the server each time it shows one: the endpoint, the
+  // count, the page. Written to the log and kept here (the last 100), read back
+  // at GET /api/diag/freq-warnings. Diagnostic only.
+  app.post('/api/diag/freq-warning', express.json({ limit: '2kb' }), (req: any, res: any) => {
+    const b = req.body || {};
+    const row = {
+      at: Date.now(), endpoint: String(b.endpoint || '').slice(0, 120), rate: Number(b.rate) || 0,
+      page: String(b.page || '').slice(0, 80), screen: String(b.screen || '').slice(0, 40), version: String(b.version || '').slice(0, 12),
+    };
+    freqWarnings.push(row); if (freqWarnings.length > 100) freqWarnings.shift();
+    console.warn(`[freq-warning] ${row.endpoint} x${row.rate} in 15s on ${row.page}${row.screen ? ` (${row.screen})` : ''} v${row.version}`);
+    res.json({ ok: true });
+  });
+  app.get('/api/diag/freq-warnings', (_req: any, res: any) => { res.setHeader('Cache-Control', 'no-store'); res.json({ ok: true, warnings: freqWarnings.slice(-100) }); });
   app.get('/api/diag/latency', (_req: any, res: any) => {
     res.setHeader('Cache-Control', 'no-store');
     res.json({ ok: true, note: 'ms; exchange timestamps are whole seconds, so read medians',
