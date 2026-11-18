@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronDown, TrendingUp, TrendingDown, Globe, X, LineChart } from "lucide-react";
@@ -181,6 +181,105 @@ function Row({ m, onOpen }: { m: Market; onOpen?: () => void }) {
           {up ? "+" : ""}{(m.change ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
         </div>
       </div>
+    </div>
+  );
+}
+
+// THE SIDEBAR IS A PICKER WHEEL, STRAIGHT (18 Nov 2026). Martin, with a picture
+// of a picker (a name on the left, a round-ended tile on the right, the one in
+// the middle picked out — its name in an outlined chip, its tile outlined in
+// colour — the rest fading away from it, a line down the right with a handle
+// at the middle): "I want to change my side bar to this exact design but in a
+// straight vertical scrolling instead of circular as shown. Each indices
+// should be shown separately also separated as Indian, US, UK etc as it's
+// currently. Use the same UI as it is except the circular scrolling".
+// So each market is one row of that picker: its name (and price) on the left,
+// and in the tile the day's change, green or red. The row at the middle of the
+// panel is the picked-out one (the accent colour stands in for the picture's
+// pink); the others fade with their distance from it; the list snaps a row to
+// the middle. The sections are still headed Indian, US, UK, Global, and a tap
+// on a heading still folds it. A tap on a row opens its chart, as before.
+const WHEEL_ROW = 58;
+function WheelRow({ m, onOpen }: { m: Market; onOpen?: () => void }) {
+  const ok = m.available;
+  const up = (m.changePct ?? 0) >= 0;
+  const why = !ok ? (m.reason === 'no_kite_session' ? 'no session'
+    : m.reason?.startsWith('blocked_by_yahoo') ? 'source blocked'
+    : m.reason === 'rate_limited_429' ? 'rate limited'
+    : m.reason === 'timeout' ? 'timed out'
+    : m.reason === 'no_price_in_response' ? 'no price'
+    : m.reason ? m.reason : 'unavailable') : '';
+  return (
+    <div data-wheel-row={m.key} onClick={onOpen} role={onOpen ? 'button' : undefined}
+      title={onOpen ? `Open the ${m.label} chart (Zerodha data)` : (m.reason || undefined)}
+      style={{ height: WHEEL_ROW }}
+      className={`group snap-center flex items-center justify-end gap-3 pl-3 pr-[52px] will-change-[opacity] ${onOpen ? 'cursor-pointer' : ''}`}>
+      <div className="min-w-0 flex flex-col items-end">
+        <span data-wheel="name" className="max-w-full truncate rounded-full border border-transparent px-2.5 py-[3px] text-[14px] leading-[18px] font-medium text-foreground/60 group-data-[on]:border-foreground/25 group-data-[on]:bg-foreground/[0.04] group-data-[on]:text-foreground group-data-[on]:font-semibold">
+          {m.label}
+        </span>
+        <span className="pr-2.5 text-[10px] leading-3 font-mono tabular-nums text-foreground/45 group-data-[on]:text-foreground/80">
+          {ok ? m.price?.toLocaleString(undefined, { maximumFractionDigits: 2 }) : why}
+          {ok && m.prevSrc === 'price' && <span className="ml-1 text-primary/70" title="No previous close available from the data source, so the change cannot be computed">no ref</span>}
+        </span>
+      </div>
+      <div data-wheel="tile"
+        className={`shrink-0 h-[42px] w-[62px] rounded-full border border-transparent bg-foreground/[0.06] flex items-center justify-center text-[11px] leading-none font-bold font-mono tabular-nums group-data-[on]:border-primary group-data-[on]:bg-primary/10 ${!ok ? 'text-foreground/35' : up ? 'text-emerald-400' : 'text-rose-400'}`}>
+        {ok ? `${up ? '+' : ''}${(m.changePct ?? 0).toFixed(2)}%` : '—'}
+      </div>
+    </div>
+  );
+}
+
+function WheelHeader({ title, collapsed, onToggle, right }: { title: string; collapsed: boolean; onToggle: () => void; right?: ReactNode }) {
+  return (
+    <button type="button" onClick={onToggle} aria-expanded={!collapsed} data-wheel-head=""
+      className="w-full h-9 pl-3 pr-[52px] flex items-center justify-end gap-1.5 text-[10px] uppercase tracking-wider font-bold text-foreground/45">
+      {right}
+      <span className="truncate">{title}</span>
+      <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${collapsed ? '-rotate-90' : ''}`} />
+    </button>
+  );
+}
+
+// The list itself: pads its ends so the first and last rows can reach the
+// middle, and after every scroll (once a frame) marks the row nearest the
+// middle and fades the rest by their distance from it. Written straight to
+// the rows, not through React: it runs on every scroll frame.
+function Wheel({ active, children }: { active: boolean; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const paint = () => {
+    const el = ref.current; if (!el) return;
+    const box = el.getBoundingClientRect(); const mid = box.top + box.height / 2; const reach = box.height / 2;
+    let best: HTMLElement | null = null, bestD = Infinity;
+    const rows = el.querySelectorAll<HTMLElement>('[data-wheel-row]');
+    rows.forEach((r) => {
+      const b = r.getBoundingClientRect(); const d = Math.abs(b.top + b.height / 2 - mid);
+      r.style.opacity = String(Math.max(0.28, 1 - (d / reach) * 0.8));
+      if (d < bestD) { bestD = d; best = r; }
+    });
+    rows.forEach((r) => { if (r === best) r.setAttribute('data-on', ''); else r.removeAttribute('data-on'); });
+  };
+  useEffect(() => {
+    if (!active) return;
+    const el = ref.current; if (!el) return;
+    let raf = 0;
+    const on = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(paint); };
+    el.addEventListener('scroll', on, { passive: true });
+    window.addEventListener('resize', on);
+    on();
+    return () => { cancelAnimationFrame(raf); el.removeEventListener('scroll', on); window.removeEventListener('resize', on); };
+  }, [active]);
+  // Rows come and go (a section folded, prices arriving): mark again.
+  useEffect(() => { if (active) paint(); });
+  return (
+    <div className="relative flex-1 min-h-0 [container-type:size]">
+      <div ref={ref} data-wheel="" className="h-full overflow-y-auto snap-y snap-proximity [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" style={{ paddingTop: 'calc(50cqh - 29px)', paddingBottom: 'calc(50cqh - 29px)' }}>
+        {children}
+      </div>
+      {/* The line down the right and the handle at its middle. */}
+      <div className="pointer-events-none absolute right-[26px] inset-y-0 w-px bg-foreground/15" aria-hidden="true" />
+      <div className="pointer-events-none absolute right-[12px] top-1/2 -translate-y-1/2 h-[10px] w-[29px] rounded-full bg-foreground/70" aria-hidden="true" />
     </div>
   );
 }
@@ -408,21 +507,19 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
           </button>
         </div>
 
-        <div className="overflow-y-auto flex-1">
-          <SectionHeader
+        <Wheel active={open}>
+          <WheelHeader
             title="Indian Indices"
-            count={indian.length}
             collapsed={!!collapsed.indian}
             onToggle={() => toggle("indian")}
             right={<StatusPill open={status.indian} />}
           />
           {!collapsed.indian && indian.map((m) => (
-            <Row key={m.key} m={m} onOpen={openChart(m)} />
+            <WheelRow key={m.key} m={m} onOpen={openChart(m)} />
           ))}
 
-          <SectionHeader
+          <WheelHeader
             title="US Futures"
-            count={us.length}
             collapsed={!!collapsed.us}
             onToggle={() => toggle("us")}
             right={usAsOf ? <span className="text-slate-600 normal-case font-mono">{freshnessLabel(usAsOf)}</span> : null}
@@ -431,62 +528,60 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
               a slow one looked identical and the panel simply read nothing. If the
               server reported an error, say so instead. */}
           {!collapsed.us && us.length === 0 && (
-            <div className="px-3 py-3 text-xs text-slate-500">
+            <div className="pl-3 pr-[52px] py-3 text-right text-xs text-slate-500">
               {data && (data as any).success === false
                 ? <span className="text-primary/80 font-mono text-[10px]">server error: {String((data as any).error || 'unknown').slice(0, 90)}</span>
                 : data ? 'no rows returned' : 'Loading…'}
             </div>
           )}
           {!collapsed.us && us.map((m) => (
-            <Row key={m.key} m={m} onOpen={openChart(m)} />
+            <WheelRow key={m.key} m={m} onOpen={openChart(m)} />
           ))}
           {!collapsed.us && us.length > 0 && us.every((m) => !m.available) && (
-            <div className="px-3 py-2 text-[10px] text-slate-500 leading-relaxed">
+            <div className="pl-3 pr-[52px] py-2 text-right text-[10px] text-slate-500 leading-relaxed">
               US data source unreachable from the server right now. Indian indices above are unaffected.
             </div>
           )}
 
-          <SectionHeader
+          <WheelHeader
             title="UK Markets"
-            count={uk.length}
             collapsed={!!collapsed.uk}
             onToggle={() => toggle("uk")}
             right={ukAsOf ? <span className="text-slate-600 normal-case font-mono">{freshnessLabel(ukAsOf)}</span> : null}
           />
           {!collapsed.uk && uk.length === 0 && (
-            <div className="px-3 py-3 text-xs text-slate-500">Loading…</div>
+            <div className="pl-3 pr-[52px] py-3 text-right text-xs text-slate-500">Loading…</div>
           )}
           {!collapsed.uk && uk.map((m) => (
-            <Row key={m.key} m={m} onOpen={openChart(m)} />
+            <WheelRow key={m.key} m={m} onOpen={openChart(m)} />
           ))}
           {!collapsed.uk && uk.length > 0 && uk.every((m) => !m.available) && (
-            <div className="px-3 py-2 text-[10px] text-slate-500 leading-relaxed">
+            <div className="pl-3 pr-[52px] py-2 text-right text-[10px] text-slate-500 leading-relaxed">
               UK data source unreachable from the server right now. Sections above are unaffected.
             </div>
           )}
 
-          <SectionHeader
+          <WheelHeader
             title="Global & Commodities"
-            count={globalMkts.length}
             collapsed={!!collapsed.global}
             onToggle={() => toggle("global")}
             right={globalAsOf ? <span className="text-slate-600 normal-case font-mono">{freshnessLabel(globalAsOf)}</span> : null}
           />
           {!collapsed.global && globalMkts.length === 0 && (
-            <div className="px-3 py-3 text-xs text-slate-500">Loading…</div>
+            <div className="pl-3 pr-[52px] py-3 text-right text-xs text-slate-500">Loading…</div>
           )}
           {!collapsed.global && globalMkts.map((m) => (
-            <Row key={m.key} m={m} onOpen={openChart(m)} />
+            <WheelRow key={m.key} m={m} onOpen={openChart(m)} />
           ))}
           {!collapsed.global && globalMkts.length > 0 && globalMkts.every((m) => !m.available) && (
-            <div className="px-3 py-2 text-[10px] text-slate-500 leading-relaxed">
+            <div className="pl-3 pr-[52px] py-2 text-right text-[10px] text-slate-500 leading-relaxed">
               Global data source unreachable from the server right now. Sections above are unaffected.
             </div>
           )}
-        </div>
+        </Wheel>
 
         <div className="px-3 py-2 border-t border-border text-[9px] text-slate-500 leading-tight">
-          Indian: live via Kite. US, UK, global &amp; commodities: via a free third-party feed (may lag or drop out) — context only, confirm before trading. Tap a row with the chart icon to open its chart from Zerodha data. Open/Closed reflects regular session hours; exchange holidays aren't tracked.
+          Indian: live via Kite. US, UK, global &amp; commodities: via a free third-party feed (may lag or drop out) — context only, confirm before trading. Tap a row to open its chart from Zerodha data. Open/Closed reflects regular session hours; exchange holidays aren't tracked.
         </div>
       </div>
     </>,

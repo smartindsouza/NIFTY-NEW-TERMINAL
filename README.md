@@ -649,6 +649,18 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Market Context sidebar is a straight picker wheel (v355)
+
+Martin, with a picture of a picker wheel: "I want to change my side bar to this exact
+design but in a straight vertical scrolling instead of circular as shown. Each indices
+should be shown separately also separated as Indian, US, UK etc as it's currently".
+Each market is one row (`WheelRow` in `src/components/MarketContext.tsx`): its name and
+price on the left, the day's change in a round-ended tile on the right. The row at the
+middle of the panel is picked out (name in an outlined chip, tile outlined in the
+accent), the rest fade with distance, and the list snaps a row to the middle; a line
+runs down the right with a handle at the middle. Sections (Indian, US, UK, Global) keep
+their headings, which still fold on a tap; a tap on a row still opens its chart.
+
 ## Chart: index menu, the chosen option survives ScalperX, Range and Interval lists (v354)
 
 - **Index menu.** Martin: "Remove the US 30 and Gift nifty from this list and move it to
