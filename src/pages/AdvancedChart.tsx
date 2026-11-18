@@ -13843,6 +13843,40 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
         ctx.clearRect(0, 0, cw, ch);
+        // LABELS THAT LINES DO NOT RUN THROUGH (18 Nov 2026; see THE LINES STOP
+        // SHORT OF THE CHART'S OWN LABELS, further down). The words this layer
+        // writes freely on the chart — CHoCH, BOS, FVG, Breaker, a grab, a signal
+        // — go through tag(): each is written with a thin edge of the chart's
+        // own background round its letters, so a line of the chart's beneath
+        // this layer (Bias, Invalidation, SL, TP, a line drawn by hand) stops at
+        // the word instead of crossing it; and each is remembered, so the lines
+        // this layer draws itself later are cut out round it too.
+        const textHoles: { x: number; y: number; w: number; h: number }[] = [];
+        let paneBg = '';
+        // The colour actually behind the chart: the first box under this canvas
+        // that has one (the phone's chart is on the card colour, the desktop's on
+        // the page's).
+        try {
+          for (let el: HTMLElement | null = canvas.parentElement; el; el = el.parentElement) {
+            const c = getComputedStyle(el).backgroundColor;
+            if (c && c !== 'transparent' && !/rgba\([^)]*,\s*0\)$/.test(c)) { paneBg = c; break; }
+          }
+        } catch (e) {}
+        const tag = (text: string, x: number, y: number) => {
+          try {
+            const m = ctx.measureText(text);
+            const l = m.actualBoundingBoxLeft || 0, r = m.actualBoundingBoxRight || m.width;
+            const a = m.actualBoundingBoxAscent || 8, d = m.actualBoundingBoxDescent || 2;
+            textHoles.push({ x: x - l - 2, y: y - a - 2, w: l + r + 4, h: a + d + 4 });
+            if (paneBg) {
+              ctx.save();
+              ctx.strokeStyle = paneBg; ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.setLineDash([]);
+              ctx.strokeText(text, x, y);
+              ctx.restore();
+            }
+          } catch (e) {}
+          ctx.fillText(text, x, y);
+        };
         // Refilled by the line-label pass further down, when it runs. Emptied
         // here so labels that are no longer drawn stop holding the trade chips
         // off the left edge.
@@ -14156,7 +14190,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   ctx.textAlign = 'left';
                   ctx.textBaseline = 'middle';
                   ctx.fillStyle = hexToRgba(fvgHex, 0.85);
-                  ctx.fillText(z.type === 'bull' ? 'FVG▲' : 'FVG▼', zx + 6, (yTop + yBot) / 2);
+                  tag(z.type === 'bull' ? 'FVG▲' : 'FVG▼', zx + 6, (yTop + yBot) / 2);
                 }
               }
 
@@ -14194,12 +14228,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     ctx.font = `bold 9px ${drawFontRef.current}`;
                     ctx.textAlign = 'center';
                     ctx.textBaseline = long ? 'top' : 'bottom';
-                    ctx.fillText(long ? 'BUY' : 'SELL', x, long ? yy + 2 : yy - 2);
+                    tag(long ? 'BUY' : 'SELL', x, long ? yy + 2 : yy - 2);
                     // Once graded, the arrow carries its result in option points —
                     // the signal and its consequence stay attached to each other.
                     if (s.status === 'GRADED' && s.option_pts != null) {
                       ctx.fillStyle = (s.option_pts || 0) > 0 ? 'rgba(52,211,153,0.9)' : 'rgba(251,113,133,0.9)';
-                      ctx.fillText(`${(s.option_pts || 0) > 0 ? '+' : ''}${s.option_pts}`, x, long ? yy + 13 : yy - 13);
+                      tag(`${(s.option_pts || 0) > 0 ? '+' : ''}${s.option_pts}`, x, long ? yy + 13 : yy - 13);
                     }
                   }
                 }
@@ -14296,7 +14330,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     ctx.moveTo(x, tip); ctx.lineTo(x - 5, base); ctx.lineTo(x + 5, base); ctx.closePath();
                     ctx.fill();
                     ctx.textBaseline = bear ? 'bottom' : 'top';
-                    ctx.fillText('SS', x, bear ? base - 2 : base + 2);
+                    tag('SS', x, bear ? base - 2 : base + 2);
                   }
                   ctx.restore();
                 } catch (e) { /* an indicator must never break the frame */ }
@@ -14339,7 +14373,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     ctx.fillStyle = col;
                     ctx.beginPath(); ctx.moveTo(x, tip); ctx.lineTo(x - 5, base); ctx.lineTo(x + 5, base); ctx.closePath(); ctx.fill();
                     ctx.textBaseline = onHigh ? 'bottom' : 'top';
-                    ctx.fillText('GIFT Div', x, onHigh ? far - 2 : far + 2);
+                    tag('GIFT Div', x, onHigh ? far - 2 : far + 2);
                   }
                   ctx.restore();
                 } catch (e) { /* an indicator must never break the frame */ }
@@ -14375,7 +14409,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       ctx.fillStyle = up ? upC : dnC;
                       ctx.beginPath(); ctx.moveTo(x, near); ctx.lineTo(x - 5, far); ctx.lineTo(x + 5, far); ctx.closePath(); ctx.fill();
                       ctx.textBaseline = up ? 'top' : 'bottom';
-                      ctx.fillText('GIFT Div', x, up ? far + 2 : far - 2);
+                      tag('GIFT Div', x, up ? far + 2 : far - 2);
                     }
                     ctx.restore();
                   }
@@ -14469,7 +14503,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   ctx.textAlign = 'left';
                   ctx.textBaseline = 'bottom';
                   ctx.fillStyle = hexToRgba(structHex, isChoch ? 1 : 0.8);
-                  ctx.fillText(isChoch ? 'CHoCH' : 'BOS', x1 + 4, y - 2);
+                  tag(isChoch ? 'CHoCH' : 'BOS', x1 + 4, y - 2);
                 }
               }
 
@@ -14589,10 +14623,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     const FONT = drawFontRef.current;
                     const label = (text: string, x: number, y: number, pos: 'above' | 'below' | 'right' | 'leftOfEdge', col: string, px: number) => {
                       ctx.font = `${px}px ${FONT}`; ctx.fillStyle = col;
-                      if (pos === 'right') { ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(text, x + 4, y); return; }
-                      if (pos === 'leftOfEdge') { ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(text, x - 4, y); return; }
+                      if (pos === 'right') { ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; tag(text, x + 4, y); return; }
+                      if (pos === 'leftOfEdge') { ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; tag(text, x - 4, y); return; }
                       ctx.textAlign = 'center'; ctx.textBaseline = pos === 'above' ? 'bottom' : 'top';
-                      ctx.fillText(text, x, pos === 'above' ? y - 2 : y + 2);
+                      tag(text, x, pos === 'above' ? y - 2 : y + 2);
                     };
                     const box = (left: number, right: number, top: number, bot: number, fill: { color: string; opacity: number }, border: boolean) => {
                       const yT = yOf(top), yB = yOf(bot); if (yT === null || yB === null) return;
@@ -14677,7 +14711,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                         ctx.beginPath(); ctx.moveTo(sx, y); ctx.lineTo(textAlignX, y); ctx.stroke();
                         ctx.font = `9px ${FONT}`; ctx.fillStyle = col; ctx.textAlign = 'right';
                         ctx.textBaseline = above ? 'bottom' : 'top';
-                        ctx.fillText(txt, textAlignX - 4, above ? y - 2 : y + 2);
+                        tag(txt, textAlignX - 4, above ? y - 2 : y + 2);
                       }
                     }
                     // DAILY / WEEKLY / MONTHLY previous high and low
@@ -14768,14 +14802,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       ctx.strokeStyle = hexToRgba(col, dead ? 0.3 : 0.75); ctx.lineWidth = 1; ctx.setLineDash([]); ctx.strokeRect(l, yA, r - l, h);   // a dead zone is fainter, not dashed
                       ctx.setLineDash([]);
                       ctx.font = `10px ${FONT}`; ctx.fillStyle = hexToRgba(col, dead ? 0.5 : 0.95); ctx.textBaseline = 'bottom'; ctx.textAlign = 'right';
-                      ctx.fillText(`${z.dir === 'bull' ? 'Bull' : 'Bear'} Breaker`, r - 3, yA - 1);
+                      tag(`${z.dir === 'bull' ? 'Bull' : 'Bear'} Breaker`, r - 3, yA - 1);
                       // the break: a short line at the swing that was broken
                       const xb = xOf(z.breakTime), ys = yOf(z.swingLevel);
                       if (xb !== null && ys !== null && x0 !== null) {
                         ctx.strokeStyle = hexToRgba(col, 0.6); ctx.setLineDash([]);
                         ctx.beginPath(); ctx.moveTo(Math.max(0, x0), ys); ctx.lineTo(Math.min(textAlignX, xb), ys); ctx.stroke(); ctx.setLineDash([]);
                         ctx.textAlign = 'left'; ctx.textBaseline = z.dir === 'bull' ? 'bottom' : 'top'; ctx.fillStyle = hexToRgba(col, 0.8);
-                        ctx.fillText('break', Math.min(textAlignX - 30, xb + 3), z.dir === 'bull' ? ys - 1 : ys + 1);
+                        tag('break', Math.min(textAlignX - 30, xb + 3), z.dir === 'bull' ? ys - 1 : ys + 1);
                       }
                       // first retest of the zone — the entry the explanation describes
                       if (S.showRetest && z.retestTime) {
@@ -14802,7 +14836,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       ctx.beginPath(); ctx.moveTo(Math.max(0, xl === null ? xg - 40 : xl), y); ctx.lineTo(xg + 6, y); ctx.stroke(); ctx.setLineDash([]);
                       ctx.font = `bold 9px ${FONT}`; ctx.fillStyle = col; ctx.textAlign = 'center';
                       ctx.textBaseline = gb.dir === 'bear' ? 'bottom' : 'top';
-                      ctx.fillText(gb.kind === 'prev-day' ? (gb.dir === 'bear' ? 'PDH grab' : 'PDL grab') : 'LG', xg, gb.dir === 'bear' ? yw - 3 : yw + 3);
+                      tag(gb.kind === 'prev-day' ? (gb.dir === 'bear' ? 'PDH grab' : 'PDL grab') : 'LG', xg, gb.dir === 'bear' ? yw - 3 : yw + 3);
                     }
                     ctx.restore();
                   }
@@ -14950,7 +14984,52 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                  });
               }
 
+              // THE LINES STOP SHORT OF THE CHART'S OWN LABELS (18 Nov 2026). Martin,
+              // with PDH's line running through the "Invalidation" label: "Make sure
+              // that the horizontal lines manually drawn or from the indicators do
+              // not overlap the texts like shown in the screenshot". These lines are
+              // drawn on a layer ABOVE the chart, and the chart's named price lines
+              // (Bias, Invalidation, the opening range, the trade's SL and TP, an
+              // armed order's level…) put their names in a box at the right edge of
+              // the chart — under this layer, so any of these lines at a nearby price
+              // was drawn straight through the name. The box of every named line on
+              // the chart is now cut out of where these lines may be drawn, with two
+              // pixels to spare: a line meeting one stops at its edge and carries on
+              // past it. The pills these lines carry on the left are drawn after the
+              // lines, filled, so a line never shows through one of those either.
+              const labelHoles: { x: number; y: number; w: number; h: number }[] = [];
+              try {
+                 const ser: any = mainSeriesRef.current;
+                 const opts: any = mainChartRef.current?.options?.() || {};
+                 const fs = Number(opts?.layout?.fontSize) || 12;
+                 const ff = String(opts?.layout?.fontFamily || drawFontRef.current);
+                 const pls: any[] = ser?.priceLines?.() || [];
+                 if (pls.length) {
+                    ctx.save();
+                    ctx.font = `${fs}px ${ff}`;
+                    for (const pl of pls) {
+                       const o = pl?.options?.() || {};
+                       const title = String(o.title || '');
+                       if (!title || o.lineVisible === false) continue;
+                       const y = ser.priceToCoordinate(Number(o.price));
+                       if (y === null || !Number.isFinite(y)) continue;
+                       const w = ctx.measureText(title).width + 16;
+                       const h = fs + 10;
+                       labelHoles.push({ x: textAlignX - w - 2, y: y - h / 2 - 2, w: w + 2, h: h + 4 });
+                    }
+                    ctx.restore();
+                 }
+              } catch (e) { /* no labels known: the lines are drawn whole, as before */ }
+
+              labelHoles.push(...textHoles);
               // Draw Lines
+              ctx.save();
+              if (labelHoles.length) {
+                 ctx.beginPath();
+                 ctx.rect(0, 0, cw, ch);
+                 for (const r of labelHoles) ctx.rect(r.x, r.y, r.w, r.h);
+                 ctx.clip('evenodd');
+              }
               linesToDraw.forEach(item => {
                  ctx.beginPath();
                  ctx.strokeStyle = item.color;
@@ -14961,6 +15040,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                  ctx.stroke();
                  ctx.setLineDash([]);
               });
+              ctx.restore();
 
               // Draw OI bars on top of the horizontal lines so they stay clearly visible
               drawOiBars();
