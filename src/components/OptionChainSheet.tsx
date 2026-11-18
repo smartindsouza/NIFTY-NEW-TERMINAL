@@ -539,15 +539,38 @@ export function OptionChainSheet({ onClose, start }: { onClose: () => void; star
     return () => { try { st.remove(); } catch (e) {} };
   }, [openTop]);
   const shown = openTop ? follow : start;
+  // NO STRIP OF CHART BETWEEN THE PRICE AND THE SHEET (18 Nov 2026). Martin,
+  // marking it in red: "There appears to be a small gap here ... Fill that up".
+  // The sheet began 152pt down whatever was above it, and on his phone the price
+  // line ends a few points higher: a sliver of the chart showed between them.
+  // With the top in use the sheet begins where the price line ends, measured
+  // (and again if the screen changes); the layer behind its rounded corners is
+  // the price line's own colour.
+  const [topPx, setTopPx] = useState<number | null>(null);
+  useEffect(() => {
+    if (!openTop) return;
+    const read = () => {
+      try {
+        const el = document.querySelector('[data-layout="price"]') as HTMLElement | null;
+        const b = el ? Math.round(el.getBoundingClientRect().bottom) : 0;
+        setTopPx(b > 60 && b < window.innerHeight * 0.4 ? b : null);
+      } catch (e) {}
+    };
+    read();
+    const t = [150, 600].map((ms) => setTimeout(read, ms));
+    window.addEventListener('resize', read);
+    return () => { t.forEach(clearTimeout); window.removeEventListener('resize', read); };
+  }, [openTop, follow]);
   return createPortal(
     <div data-chain-sheet={wide ? 'wide' : openTop ? 'open-top' : ''}
       className={openTop
-        ? 'fixed inset-x-0 bottom-0 z-[150] flex flex-col justify-end'
-        : 'fixed inset-0 z-[150] flex flex-col justify-end md:items-center md:justify-center bg-black/75'}
+        ? `chain-sheet-up fixed inset-x-0 bottom-0 z-[150] flex flex-col justify-end rounded-t-xl ${topPx != null ? 'bg-card' : ''}`
+        : 'chain-dim-in fixed inset-0 z-[150] flex flex-col justify-end md:items-center md:justify-center bg-black/75'}
+      style={openTop && topPx != null ? { top: topPx } : undefined}
       onClick={openTop ? undefined : onClose}>
-      <div className={wide
+      <div style={openTop && topPx != null ? { height: '100%', minHeight: 0 } : undefined} className={wide
         ? 'w-[min(1600px,calc(100vw-48px))] h-[calc(100dvh-48px)] rounded-xl overflow-hidden border border-foreground/10'
-        : `w-full md:w-[430px] h-[calc(100dvh-152px)] min-h-[60dvh] md:h-[min(780px,90dvh)] rounded-t-xl md:rounded-xl overflow-hidden ${openTop ? 'shadow-[0_-8px_24px_rgba(0,0,0,0.35)]' : ''}`} onClick={(e) => e.stopPropagation()}>
+        : `${openTop ? '' : 'chain-sheet-up '}w-full md:w-[430px] h-[calc(100dvh-152px)] min-h-[60dvh] md:h-[min(780px,90dvh)] rounded-t-xl md:rounded-xl overflow-hidden ${openTop ? 'shadow-[0_-8px_24px_rgba(0,0,0,0.35)]' : ''}`} onClick={(e) => e.stopPropagation()}>
         <OptionChainView key={`${wide ? 'wide' : 'narrow'}|${underlyingOf(shown?.underlying).name}`} onPicked={onClose} start={shown} wide={wide} onClose={onClose} />
       </div>
     </div>,
