@@ -16543,7 +16543,20 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   !selectedInstrument ? `border-primary/50 bg-primary/15 ${PHONE_TAB_ON}` : `border-border/60 bg-card ${PHONE_TAB_OFF}`}`}>
                 {!selectedInstrument && <PhoneTabFeet />}
                 <button
-                  onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(false); setSelectedInstrument(null); }}
+                  onClick={() => {
+                    // ONE TAP SWITCHES, THE NEXT OPENS THE LIST (18 Nov 2026). Martin:
+                    // "i want single tap to switch between tab and second tap to open
+                    // dropdown list. If the tab is already selected first tap should
+                    // only open the dropdown list on the chart screen. In the desktop
+                    // screen keep the entire area sensitive to click to open drop down
+                    // list instead of just the down arrow area only". So the name is
+                    // part of the arrow's button: on a phone a tap on the tab that is
+                    // not open brings it up, and a tap on the open one opens its list;
+                    // on the desktop a click anywhere on the tab opens its list.
+                    const desk = window.innerWidth >= 768;
+                    if (desk || !selectedInstrument) { setOptionMenuOpen(false); setIndexMenuOpen(o => !o); return; }
+                    setIndexMenuOpen(false); setOptionMenuOpen(false); setSelectedInstrument(null);
+                  }}
                   title={`Show ${indexLabel}`}
                   className={`flex-1 min-w-0 truncate text-left px-2.5 max-md:pl-3 max-md:pr-1 h-8 max-md:h-full text-xs font-mono font-bold transition-colors ${
                     !selectedInstrument ? 'text-primary max-md:text-foreground' : 'text-muted-foreground'}`}
@@ -16599,7 +16612,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   {/* Strike and side only — "24500CE". The full contract name never
                       fitted, and the underlying and expiry are on screen anyway. */}
                   <button
-                    onClick={() => { setIndexMenuOpen(false); setOptionMenuOpen(false); if (optionTarget) setSelectedInstrument(optionTarget); }}
+                    onClick={() => {
+                      // As the index tab: see ONE TAP SWITCHES, THE NEXT OPENS THE LIST.
+                      const desk = window.innerWidth >= 768;
+                      if (desk || selectedInstrument) { setIndexMenuOpen(false); setOptionMenuOpen(o => !o); return; }
+                      setIndexMenuOpen(false); setOptionMenuOpen(false); if (optionTarget) setSelectedInstrument(optionTarget);
+                    }}
                     title={optionTarget ? prettyOptionName(optionTarget.tradingsymbol,
                       contractExpiry?.symbol === optionTarget.tradingsymbol ? contractExpiry.expiry : null) : 'Option charts'}
                     className={`flex-1 min-w-0 truncate text-left px-2.5 max-md:pl-3 max-md:pr-1 h-8 max-md:h-full text-xs font-mono font-bold transition-colors ${

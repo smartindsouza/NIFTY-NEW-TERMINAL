@@ -649,6 +649,15 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## Chart tabs: one tap switches, the next opens the list (v368)
+
+Martin: "i want single tap to switch between tab and second tap to open dropdown list.
+If the tab is already selected first tap should only open the dropdown list on the
+chart screen. In the desktop screen keep the entire area sensitive to click to open drop
+down list instead of just the down arrow area only". On a phone a tap on the tab that
+is not open brings it up and a tap on the open tab opens its list; on the desktop a
+click anywhere on a tab opens its list.
+
 ## Search field smaller; the option list is the index's own; the heatmap's controls on one line (v367)
 
 - Martin: "Reduce the size of the search symbol, name text inside the search bar". The
