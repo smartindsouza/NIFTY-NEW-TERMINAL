@@ -376,7 +376,7 @@ export default function TradeJournal() {
       <div key={t.id} data-trade={t.id} data-trade-state={open ? 'open' : 'closed'} className="rounded-[12px] bg-card border border-border">
         <button type="button" onClick={() => { setOpenId(expanded ? null : t.id); setEditId(null); setCostOpen(null); }}
           className="relative block w-full text-left pl-[12.5px] pr-3 pt-[16px] pb-[13px] text-[12px] leading-none">
-          <div data-trade-line="when" className="font-medium text-muted-foreground/80 pr-[150px] truncate">{t.product || 'NRML'} • {timeOf(t.entry_time)}{out}</div>
+          <div data-trade-line="when" className="font-medium text-muted-foreground/80 pr-[150px] lg:pr-[112px] truncate">{t.product || 'NRML'} • {timeOf(t.entry_time)}{out}</div>
           <div className="absolute right-3 top-3 flex items-center gap-2">
             {t.test_mode ? <span className={cn(CHIP, CHIP_AMBER)}>Test</span> : null}
             {t.simulated ? <span className={cn(CHIP, CHIP_AMBER)}>Sim</span> : null}
@@ -542,7 +542,12 @@ export default function TradeJournal() {
                     it, so the row is as tall as the day's name and no taller. */}
                 <span className="absolute right-[1.7px] top-[17.8px] text-muted-foreground/80">{isOpen ? <ChevronUp size={20.5} strokeWidth={2} /> : <ChevronDown size={20.5} strokeWidth={2} />}</span>
               </button>
-              {isOpen && <div className="space-y-3 pb-3">{g.rows.map((t) => tradeCard(t))}{dayCapitalLine(g.day)}</div>}
+              {isOpen && (
+                <div className="space-y-3 pb-3 lg:space-y-0 lg:grid lg:grid-cols-2 lg:gap-3 lg:items-start">
+                  {g.rows.map((t) => tradeCard(t))}
+                  <div className="lg:col-span-2">{dayCapitalLine(g.day)}</div>
+                </div>
+              )}
             </div>
           );
         })}
@@ -568,8 +573,8 @@ export default function TradeJournal() {
       ['Option premium', num(ut.option_premium)], ['SPAN', num(ut.span)], ['Exposure', num(ut.exposure)], ['Collateral', num(av.collateral)],
     ];
     return (
-      <div data-journal-page="funds" className="w-full md:max-w-[560px] mx-auto min-h-screen">
-        <div className="relative h-[224px] rounded-b-[16px] border-b border-foreground/[0.2] overflow-hidden text-center text-foreground"
+      <div data-journal-page="funds" className="w-full md:max-w-[560px] lg:max-w-[880px] mx-auto min-h-screen lg:pt-6">
+        <div className="relative h-[224px] rounded-b-[16px] lg:rounded-[16px] border-b lg:border border-foreground/[0.2] overflow-hidden text-center text-foreground"
           style={{ backgroundImage: 'radial-gradient(60% 75% at 50% 38%, color-mix(in srgb, var(--foreground) 7%, transparent), transparent)' }}>
           <button type="button" data-journal="back" aria-label="Back" onClick={() => navigate('/journal')} className="absolute left-[14px] top-[22px] h-10 w-10 flex items-center justify-center active:opacity-60"><ArrowLeft size={24} strokeWidth={1.8} /></button>
           {data?.accountId && <span data-funds="account" className={cn('absolute right-4 top-[36px] text-[12px] leading-none font-semibold', LINK)}>{data.accountId}</span>}
@@ -583,9 +588,9 @@ export default function TradeJournal() {
           )}
         </div>
         {eq && fundsMore && (
-          <div data-funds="rows" className="mx-4 mt-6 rounded-[12px] bg-card border border-border px-3 text-[12px] leading-none font-medium">
+          <div data-funds="rows" className="mx-4 lg:mx-0 mt-6 rounded-[12px] bg-card border border-border px-3 lg:px-5 text-[12px] leading-none font-medium lg:grid lg:grid-cols-2 lg:gap-x-10">
             {rows.filter(([, v]) => v !== null).map(([k, v], i) => (
-              <div key={k} className={cn('flex items-center justify-between h-11', i > 0 && 'border-t border-border')}>
+              <div key={k} className={cn('flex items-center justify-between h-11', i > 0 && 'border-t border-border', i === 1 && 'lg:border-t-0')}>
                 <span className="text-muted-foreground">{k}</span><span className="font-semibold text-foreground">{inr2(v)}</span>
               </div>
             ))}
@@ -646,7 +651,7 @@ export default function TradeJournal() {
     const what = aPeriod === 'D' ? 'Daily' : aPeriod === 'W' ? 'Weekly' : aPeriod === 'M' ? 'Monthly' : 'Yearly';
     const round = 'h-7 w-7 rounded-full border border-foreground/[0.2] flex items-center justify-center text-foreground active:bg-foreground/10';
     return (
-      <div data-journal-page="analysis" className="w-full md:max-w-[560px] mx-auto min-h-screen">
+      <div data-journal-page="analysis" className="w-full md:max-w-[560px] lg:max-w-[1180px] mx-auto min-h-screen lg:px-6">
         <div className="h-12 pl-5 pr-4 flex items-center">
           <button type="button" data-journal="back" aria-label="Back" onClick={() => navigate('/journal')} className="h-10 w-10 -ml-3 flex items-center justify-center text-foreground active:opacity-60"><ArrowLeft size={24} strokeWidth={1.8} /></button>
           <h1 className="ml-[8px] flex-1 text-[18px] leading-none font-semibold text-foreground">Historical P&L</h1>
@@ -659,6 +664,13 @@ export default function TradeJournal() {
           </label>
           <button type="button" data-journal="excel" aria-label="Excel" title="Excel" onClick={() => downloadExcel(r.from, r.to > today ? today : r.to)} className={cn(round, 'ml-[6px]')}><Download size={13} strokeWidth={2} /></button>
         </div>
+        {/* ON A DESKTOP (18 Nov 2026; Martin: "Re work the option chain and trade
+            journal screens in the desktop version to fit the desktop screen"):
+            the period, its returns and its breakdown are a column at the left,
+            and the trades of the period — any period, not only a day — fill the
+            rest of the screen beside them. The phone is as it was. */}
+        <div className="lg:grid lg:grid-cols-[460px_minmax(0,1fr)] lg:gap-8 lg:items-start">
+        <div className="lg:sticky lg:top-4 lg:rounded-[16px] lg:overflow-hidden lg:border lg:border-border">
         <div data-journal-tabs="" className="h-12 grid grid-cols-4 text-[12px] leading-none">
           {([['D', "Today's"], ['W', 'Week'], ['M', 'Month'], ['Y', 'Year']] as const).map(([k, label]) => (
             <button key={k} type="button" data-tab={k} aria-pressed={aPeriod === k} onClick={() => setAPeriod(k)}
@@ -727,8 +739,17 @@ export default function TradeJournal() {
               </div>
             )}
 
-            {aPeriod === 'D' && <div data-journal-list="day" className="mt-1">{tradeList(inRange, 'a', 'No trades', false)}</div>}
+            {aPeriod === 'D' && <div data-journal-list="day" className="mt-1 lg:hidden">{tradeList(inRange, 'a', 'No trades', false)}</div>}
           </div>
+        </div>
+        </div>
+        <div data-journal-list="period" className="hidden lg:block">
+          <div className="flex items-center justify-between pt-1 pb-1">
+            <h2 className="text-[16px] leading-none font-[650] text-foreground/90">Trades · {r.label}</h2>
+            <span className="text-[12px] font-medium text-muted-foreground">{inRange.length} {inRange.length === 1 ? 'trade' : 'trades'}</span>
+          </div>
+          {tradeList(inRange, 'ad', 'No trades', false)}
+        </div>
         </div>
       </div>
     );
@@ -767,8 +788,8 @@ export default function TradeJournal() {
   const option = (on: boolean) => cn('h-8 px-3.5 rounded-full text-[12px] leading-none font-medium', on ? 'bg-primary text-primary-foreground' : 'border border-foreground/[0.2] text-foreground/90');
   const act = 'h-9 flex-1 rounded-[8px] border border-foreground/80 text-[12px] font-semibold text-foreground disabled:opacity-50 active:bg-foreground/10';
   return (
-    <div data-journal-page="main" className="w-full md:max-w-[560px] mx-auto min-h-screen">
-      <div className="flex items-center justify-between px-[17px] pt-4 pb-[17px]">
+    <div data-journal-page="main" className="w-full md:max-w-[560px] lg:max-w-[1180px] mx-auto min-h-screen lg:px-6">
+      <div className="flex items-center justify-between px-[17px] lg:px-0 pt-4 pb-[17px]">
         <h1 className="text-[18px] leading-none font-[650] text-foreground">Journal</h1>
         {/* SYNC POSITIONS, BESIDE THE WALLET (17 Nov 2026). Martin: "Move the
             refresh positions button to the journal screen beside the wallet icon
@@ -797,7 +818,11 @@ export default function TradeJournal() {
           page (a neutral grey no other screen has) and its trade rows the
           same; they are the theme's card colour now, as the chart's bars and
           the home page's cards are, on the theme's background. */}
-      <div className="bg-card px-3 pt-[25px] pb-[14px]">
+      {/* ON A DESKTOP the card is a column at the left, kept in view, and the
+          trades fill the rest of the screen beside it (see ON A DESKTOP in the
+          Historical P&L view). */}
+      <div className="lg:grid lg:grid-cols-[420px_minmax(0,1fr)] lg:gap-8 lg:items-start">
+      <div className="bg-card lg:bg-transparent px-3 lg:px-0 pt-[25px] lg:pt-0 pb-[14px] lg:sticky lg:top-4">
         <div data-journal-card="returns" className="relative h-[239px] rounded-[16px] border border-foreground/[0.18] bg-card">
           <button type="button" data-journal="basis" onClick={flipBasis} className="absolute left-3 top-[19px] flex items-center gap-[6px] text-[12px] leading-none font-semibold text-muted-foreground">
             {basis === 'net' ? 'Net Returns' : 'Total Returns'}<span className="text-foreground/90"><SortMark /></span>
@@ -839,8 +864,8 @@ export default function TradeJournal() {
       </div>
 
       {/* THE TRADES, on Lemonn's black sheet with its rounded shoulders. */}
-      <div className="bg-card">
-        <div className="rounded-t-[24px] bg-background px-4 pt-6 pb-8">
+      <div className="bg-card lg:bg-transparent">
+        <div className="rounded-t-[24px] bg-background px-4 lg:px-0 pt-6 lg:pt-0 pb-8">
           <div data-journal-tabs="" className="grid grid-cols-2 gap-4">
             {(['OPEN', 'HISTORY'] as const).map((k) => (
               <button key={k} type="button" data-tab={k} aria-pressed={tab === k} onClick={() => setTabPick(k)}
@@ -871,6 +896,7 @@ export default function TradeJournal() {
             </details>
           )}
         </div>
+      </div>
       </div>
 
       {/* FILTER: which of the history is listed, and the three things the old
