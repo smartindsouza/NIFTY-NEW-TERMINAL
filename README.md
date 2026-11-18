@@ -649,6 +649,13 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## The spot chart goes to a new trade's index (v369)
+
+Martin: "Whenever auto trade is taken switch the spot chart based on the option trade
+taken". When a position appears (auto-trade or by hand) the spot chart — the single
+chart, the split's spot half, ScalperX's upper chart — switches to that option's index
+(NIFTY 50, BANK NIFTY or SENSEX), once per position.
+
 ## Chart tabs: one tap switches, the next opens the list (v368)
 
 Martin: "i want single tap to switch between tab and second tap to open dropdown list.

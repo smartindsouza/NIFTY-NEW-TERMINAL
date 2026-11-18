@@ -8558,6 +8558,19 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     }
     lastPosSymRef.current = sym;
     if (autoOpenedForRef.current === sym) return;
+    // THE SPOT CHART GOES TO THE TRADE'S INDEX (18 Nov 2026). Martin: "Whenever
+    // auto trade is taken switch the spot chart based on the option trade
+    // taken". A position that appears — taken by auto-trade or by hand — puts
+    // its own index on the spot chart: a SENSEX option's trade brings SENSEX
+    // up where NIFTY 50 was. On the single chart, on the split's spot half and
+    // on ScalperX's upper chart; once as the position appears, so the spot can
+    // be changed back by hand while the trade runs. Not from a reference chart
+    // (GIFT NIFTY, US30), which is left as it is.
+    {
+      const m = /^(BANKNIFTY|NIFTY|SENSEX)\d/.exec(String(sym).toUpperCase());
+      const root = m ? (m[1] as 'NIFTY' | 'BANKNIFTY' | 'SENSEX') : null;
+      if (root && !isOptionPane && root !== underlying && (underlying === 'NIFTY' || underlying === 'BANKNIFTY' || underlying === 'SENSEX')) setUnderlying(root);
+    }
     // Closed on purpose: still resolve the contract (the trade tab, the exit
     // button and the premium rule all need it) but do NOT reopen the chart.
     const wasDismissed = dismissedChart.has(sym);
