@@ -169,7 +169,7 @@ export function ChartCards({ chainSymbol, getDay, onOpenOption, onOpenPositions 
   const dayFrac = day && day.high > day.low ? Math.max(0, Math.min(1, (day.ltp - day.low) / (day.high - day.low))) : null;
 
   return (
-    <div ref={rootRef} data-layout="cards" className="md:hidden px-4 pb-[calc(4rem+env(safe-area-inset-bottom)+50px+28px)] bg-background text-foreground">
+    <div ref={rootRef} data-layout="cards" className="cards-after-fade md:hidden px-4 pb-[calc(4rem+env(safe-area-inset-bottom)+50px+28px)] bg-background text-foreground">
       {/* YOUR POSITIONS */}
       <Heading gap={21} bright>Your Positions</Heading>
       <button type="button" data-card="positions" onClick={onOpenPositions}

@@ -146,6 +146,15 @@
    a fixed bar or sheet. */
 @keyframes page-fade-in { from { opacity: 0; } to { opacity: 1; } }
 .page-fade-in { animation: page-fade-in 0.5s ease-out; }
+/* THE CARDS UNDER THE CHART WAIT FOR THAT FADE (18 Nov 2026). Martin: "When I
+   open journal screen and return back to chart, Your Positions text appears at
+   the bottom for a while and disappears." The cards begin exactly where the
+   fixed Option Chain | ScalperX buttons are, and are hidden by them. But the
+   buttons are part of the chart page, which fades in for half a second, and the
+   cards are not part of it: until the fade ended the first heading showed
+   through the half-drawn buttons. So the cards are not drawn until it has. */
+@keyframes cards-after-fade { from { visibility: hidden; } to { visibility: visible; } }
+.cards-after-fade { animation: cards-after-fade 0.5s step-end; }
 
 /* Figures in columns. Manrope's figures are each as wide as they need to be (ten
    1s are two thirds the width of ten 0s), so a price that ticks would shuffle
