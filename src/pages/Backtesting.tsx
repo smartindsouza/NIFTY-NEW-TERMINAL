@@ -111,7 +111,7 @@ export default function Backtesting() {
           fixed numbers in this file and the daily P&L is Math.random(). They are
           labelled as such until they are rebuilt on real data or removed — a
           screen that looks like evidence and is not is worse than no screen. */}
-      <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-600">
+      <div className="rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-xs text-primary">
         <b>Simulated, not real data:</b> the option strategies below use fixed, assumed win rates and randomly generated
         daily results. They do not reflect market history — do not use them to make trading decisions.
       </div>

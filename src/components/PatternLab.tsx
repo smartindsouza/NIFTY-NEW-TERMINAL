@@ -114,7 +114,7 @@ function PatternTest() {
           </div>
           <div className="space-y-1">
             {res.rules.map((r) => (
-              <div key={r.key} className={`rounded-md border px-2 py-1.5 text-[11px] ${r.verdict === 'PASS' ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-600' : 'border-amber-500/40 bg-amber-500/10 text-amber-600'}`}>
+              <div key={r.key} className={`rounded-md border px-2 py-1.5 text-[11px] ${r.verdict === 'PASS' ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-600' : 'border-primary/40 bg-primary/10 text-primary'}`}>
                 <b>{r.label}: {r.verdict === 'PASS' ? 'passed' : r.verdict === 'TOO_FEW' ? 'too few signals to judge' : 'no proven edge'}.</b>{' '}
                 {r.verdict === 'PASS' ? 'It led to falls more often than ordinary candles and the short paid after costs, both beyond luck.'
                   : r.verdict === 'TOO_FEW' ? `Only ${r.signals} signals in the test period (needs 60).`
@@ -222,7 +222,7 @@ export default function PatternLab() {
                         <div className="font-semibold">{label}</div>
                         {a?.hit
                           ? <div className="text-xs text-emerald-500">✓ Caught: {data.labels[a.hit.kind || ''] || a.hit.kind}{a.hit.time ? ` — signal at the ${hhmm(a.hit.time)} candle's close` : ''}</div>
-                          : e.found ? <div className="text-xs text-amber-500">✗ Missed by the draft rules</div>
+                          : e.found ? <div className="text-xs text-primary">✗ Missed by the draft rules</div>
                           : data.error ? <div className="text-xs text-muted-foreground">Candles unavailable right now</div>
                           : <div className="text-xs text-red-500">No 5-minute candle at that time (holiday, or the time is off?)</div>}
                       </div>

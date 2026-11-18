@@ -5,7 +5,7 @@ import { Wind, RefreshCw, TrendingDown, TrendingUp, Minus } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
 function Card({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: 'pos' | 'neg' | 'warn' | 'neutral' }) {
-  const c = tone === 'pos' ? 'text-emerald-400' : tone === 'neg' ? 'text-rose-400' : tone === 'warn' ? 'text-amber-400' : 'text-foreground';
+  const c = tone === 'pos' ? 'text-emerald-400' : tone === 'neg' ? 'text-rose-400' : tone === 'warn' ? 'text-primary' : 'text-foreground';
   return (
     <div className="rounded-xl bg-card p-3">
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
@@ -33,7 +33,7 @@ export default function PremiumPulse() {
     <div className="max-w-3xl mx-auto px-4 py-5 pb-24">
       <div className="relative bg-card border border-border rounded-xl p-4 mb-4 overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/40 before:to-transparent">
         <div className="flex items-center gap-2 mb-1">
-          <Wind className="w-5 h-5 text-sky-400" />
+          <Wind className="w-5 h-5 text-primary" />
           <h1 className="text-lg font-bold text-foreground whitespace-nowrap">Premium Pulse</h1>
         </div>
         

@@ -46,7 +46,7 @@ export type BiasNote = {
   cached?: boolean;
 };
 
-const BLUE = '#7ba8f5', GREEN = '#5baa79', RED = '#e5505f';
+const BLUE = 'var(--primary)', GREEN = '#5baa79', RED = '#e5505f';
 
 /** Lemonn's chart-line: an axis down the left and along the foot, and a line
  *  that leaves the axis, rises, dips and rises again. 20 x 18 with its stroke. */
@@ -100,7 +100,7 @@ function BiasSheet({ note, onClose }: { note: BiasNote; onClose: () => void }) {
         style={{
           border: '1px solid transparent',
           // The glow at the top left and the blue edge that fades down the sides.
-          background: 'radial-gradient(190px 80px at 0 0, rgba(17,48,94,1), rgba(17,48,94,0)) padding-box, linear-gradient(#161616, #161616) padding-box, linear-gradient(180deg, #25489b 0px, rgba(37,72,155,0) 240px) border-box',
+          background: 'radial-gradient(190px 80px at 0 0, color-mix(in srgb, var(--primary) 30%, transparent), color-mix(in srgb, var(--primary) 0%, transparent)) padding-box, linear-gradient(#161616, #161616) padding-box, linear-gradient(180deg, color-mix(in srgb, var(--primary) 55%, #161616) 0px, color-mix(in srgb, var(--primary) 0%, transparent) 240px) border-box',
           paddingBottom: 'calc(15.7px + env(safe-area-inset-bottom))',
         }}>
         {/* Header: 81 tall, then a 1pt line the width of the sheet. */}
@@ -184,12 +184,12 @@ export function BiasButton({ className = '' }: { className?: string }) {
         onClick={() => { void run(); }}
         className={`flex items-center justify-center rounded-[6px] border active:opacity-80 ${className}`}
         style={{
-          background: 'linear-gradient(90deg, #04060f 0%, #11141c 8%, #1a2232 15%, #222d40 25%, #2b3a54 50%, #2e3d53 75%, #283142 100%)',
-          borderColor: '#4a5d80', borderLeftColor: '#303a4b',
+          background: 'linear-gradient(90deg, color-mix(in srgb, var(--primary) 3%, #06070c) 0%, color-mix(in srgb, var(--primary) 12%, #14161c) 15%, color-mix(in srgb, var(--primary) 26%, #1c1f26) 50%, color-mix(in srgb, var(--primary) 20%, #1c1f26) 100%)',
+          borderColor: 'color-mix(in srgb, var(--primary) 45%, #30333a)', borderLeftColor: 'color-mix(in srgb, var(--primary) 20%, #30333a)',
         }}>
         {busy
-          ? <span className="block h-[15px] w-[15px] rounded-full border-2 animate-spin" style={{ borderColor: 'rgba(126,169,240,0.3)', borderTopColor: '#7ea9f0' }} />
-          : <BiasIcon width={16.3} color="#7ea9f0" />}
+          ? <span className="block h-[15px] w-[15px] rounded-full border-2 animate-spin" style={{ borderColor: 'color-mix(in srgb, var(--primary) 30%, transparent)', borderTopColor: 'var(--primary)' }} />
+          : <BiasIcon width={16.3} color="var(--primary)" />}
       </button>
       {note && createPortal(<BiasSheet note={note} onClose={() => setNote(null)} />, document.body)}
     </>

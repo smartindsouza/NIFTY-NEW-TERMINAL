@@ -22,10 +22,10 @@ type Verdict = 'PASSED' | 'FAILED' | 'RUNNING' | 'PENDING' | 'TOO_EARLY' | 'ERRO
 const VERDICT_STYLE: Record<Verdict, { cls: string; Icon: any; word: string }> = {
   PASSED:    { cls: 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10', Icon: CheckCircle2, word: 'PASSED' },
   FAILED:    { cls: 'text-rose-400 border-rose-500/40 bg-rose-500/10',          Icon: XCircle,     word: 'FAILED' },
-  RUNNING:   { cls: 'text-sky-400 border-sky-500/40 bg-sky-500/10',             Icon: Clock,       word: 'RUNNING' },
+  RUNNING:   { cls: 'text-primary border-primary/40 bg-primary/10',             Icon: Clock,       word: 'RUNNING' },
   PENDING:   { cls: 'text-slate-400 border-slate-500/40 bg-slate-500/10',       Icon: Clock,       word: 'NOT RUN' },
-  TOO_EARLY: { cls: 'text-amber-400 border-amber-500/40 bg-amber-500/10',       Icon: Clock,       word: 'TOO EARLY' },
-  ERROR:     { cls: 'text-amber-400 border-amber-500/40 bg-amber-500/10',       Icon: AlertTriangle, word: 'UNAVAILABLE' },
+  TOO_EARLY: { cls: 'text-primary border-primary/40 bg-primary/10',       Icon: Clock,       word: 'TOO EARLY' },
+  ERROR:     { cls: 'text-primary border-primary/40 bg-primary/10',       Icon: AlertTriangle, word: 'UNAVAILABLE' },
 };
 
 const n1 = (v: any) => (typeof v === 'number' && isFinite(v) ? v.toFixed(1) : '—');
@@ -310,8 +310,8 @@ export default function Research() {
         })}
       </div>
 
-      <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-xs text-foreground/75 leading-relaxed">
-        <span className="font-semibold text-amber-400">What has not been tested. </span>
+      <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 text-xs text-foreground/75 leading-relaxed">
+        <span className="font-semibold text-primary">What has not been tested. </span>
         Two ideas cannot be judged from stored history: whether positioning data (OI bias, FII flows, premium pulse)
         leads price, and whether buying options when volatility is compressed pays. Neither has the recorded history a
         backtest needs, and the cost model prices a directional move but has no volatility term — so a volatility

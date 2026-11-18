@@ -116,7 +116,7 @@ function ExpirySheet({ expiries, chosen, onPick, onClose }: { expiries: string[]
               className={`h-[42px] rounded-[12px] border border-[#222222] pl-3 pr-[14.3px] flex items-center justify-between text-[12px] font-medium active:bg-white/[0.04] ${e === chosen ? 'text-[#e8e8e8]' : 'text-[#b5b5b5]'}`}>
               <span className="relative top-px">{expiryLabel(e)}</span>
               {e === chosen && (
-                <svg width="11.3" height="9.3" viewBox="0 0 11.3 9.3" fill="none" stroke="#63a1fd" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <svg width="11.3" height="9.3" viewBox="0 0 11.3 9.3" fill="none" stroke="var(--primary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M0.75 4.9 4 8.2 10.55 0.75" />
                 </svg>
               )}

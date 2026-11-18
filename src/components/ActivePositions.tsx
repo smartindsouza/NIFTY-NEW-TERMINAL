@@ -557,8 +557,8 @@ export function ActivePositions() {
     // because a failed position check must always be visible somewhere.
     if (!pollError) return null;
     return (
-      <div className="w-full mb-1.5 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 flex items-center justify-between gap-3">
-        <span className="text-xs text-amber-400">
+      <div className="w-full mb-1.5 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2 flex items-center justify-between gap-3">
+        <span className="text-xs text-primary">
           Position check failed — a trade taken in the Kite app may not be shown here. {pollError}
         </span>
         <button

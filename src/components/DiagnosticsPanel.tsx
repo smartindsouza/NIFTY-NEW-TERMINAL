@@ -148,7 +148,7 @@ export function DiagnosticsPanel() {
               <span className="text-[10px] font-semibold text-emerald-500">✓ Latest</span>
             )}
             {deployed && deployed.id !== __BUILD_ID__ && (
-              <span className="text-[10px] font-semibold text-amber-500">
+              <span className="text-[10px] font-semibold text-primary">
                 Update available{deployed.version ? ` → v${deployed.version}` : deployed.sha ? ` → ${deployed.sha}` : ''}
               </span>
             )}
@@ -161,7 +161,7 @@ export function DiagnosticsPanel() {
             disabled={updating}
             className={`shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-md border transition-colors disabled:opacity-50 ${
               deployed && deployed.id !== __BUILD_ID__
-                ? 'border-amber-500/60 bg-amber-500/15 text-amber-600 hover:bg-amber-500/25'
+                ? 'border-primary/60 bg-primary/15 text-primary hover:bg-primary/25'
                 : 'border-border text-foreground/80 hover:bg-muted'}`}
           >
             {updating ? 'Updating…' : 'Force update'}
@@ -209,7 +209,7 @@ export function DiagnosticsPanel() {
 
           <div className="bg-card p-3 rounded-lg border border-0 space-y-1 col-span-2">
             <span className="text-[10px] text-muted-foreground block font-medium">WS Subelement Subscription</span>
-            <span className="text-xs font-mono font-bold text-indigo-400 truncate block mt-1" title={metrics.wsSubscriptions.join(", ")}>
+            <span className="text-xs font-mono font-bold text-primary truncate block mt-1" title={metrics.wsSubscriptions.join(", ")}>
               {metrics.wsSubscriptions.join(", ") || "None"}
             </span>
           </div>
@@ -264,7 +264,7 @@ export function DiagnosticsPanel() {
             single cold chart load does not colour the whole picture. */}
         <div className="space-y-2">
           <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest flex items-center gap-1.5">
-            <HardDrive className="w-3.5 h-3.5 text-sky-400" /> Latency by endpoint
+            <HardDrive className="w-3.5 h-3.5 text-primary" /> Latency by endpoint
           </p>
           {(metrics as any).endpointBreakdown?.length ? (
             <div className="space-y-1">
@@ -280,8 +280,8 @@ export function DiagnosticsPanel() {
                   <span className="flex-1 truncate text-muted-foreground">{r.endpoint.replace('/api/', '')}</span>
                   <span className="w-8 text-right text-muted-foreground/70">{r.calls}</span>
                   <span className={`w-12 text-right font-bold ${r.totalMs > 800 ? 'text-primary' : 'text-foreground/80'}`}>{r.totalMs}</span>
-                  <span className="w-12 text-right text-amber-400">{r.serverMs === null ? '–' : r.serverMs}</span>
-                  <span className="w-12 text-right text-sky-400">{r.networkMs === null ? '–' : r.networkMs}</span>
+                  <span className="w-12 text-right text-primary">{r.serverMs === null ? '–' : r.serverMs}</span>
+                  <span className="w-12 text-right text-primary">{r.networkMs === null ? '–' : r.networkMs}</span>
                 </div>
               ))}
             </div>
@@ -293,7 +293,7 @@ export function DiagnosticsPanel() {
         {/* Slowest components performance profiles */}
         <div className="space-y-2">
           <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest flex items-center gap-1.5">
-            <Layers className="w-3.5 h-3.5 text-indigo-400" /> Active Frame Speeds
+            <Layers className="w-3.5 h-3.5 text-primary" /> Active Frame Speeds
           </p>
           <div className="space-y-1.5">
             {metrics.slowestComponents.length === 0 ? (

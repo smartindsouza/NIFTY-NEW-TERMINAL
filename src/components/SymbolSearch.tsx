@@ -209,7 +209,7 @@ export function SymbolSearch({ onSelect, currentSymbol, autoOpen, onClose, list 
           inputRef.current?.focus();
         }}
       >
-        <Search size={16} className={`mr-1.5 sm:mr-2 shrink-0 transition-colors ${isOpen ? 'text-muted-foreground' : 'text-muted-foreground group-hover:text-indigo-400'}`} />
+        <Search size={16} className={`mr-1.5 sm:mr-2 shrink-0 transition-colors ${isOpen ? 'text-muted-foreground' : 'text-muted-foreground group-hover:text-primary'}`} />
         
         {isOpen ? (
           <div className="flex items-center w-full flex-1">
@@ -224,7 +224,7 @@ export function SymbolSearch({ onSelect, currentSymbol, autoOpen, onClose, list 
               style={{ boxShadow: 'none' }}
               autoFocus
             />
-            {loading && <Loader2 size={14} className="text-indigo-400 animate-spin shrink-0 ml-2" />}
+            {loading && <Loader2 size={14} className="text-primary animate-spin shrink-0 ml-2" />}
             {/* THE × IS ALWAYS THERE (17 Nov 2026). Martin, with a picture of
                 the field open and empty: "there's no close button inside the
                 search to close the empty search bar." The × stood only while

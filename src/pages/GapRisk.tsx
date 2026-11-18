@@ -24,7 +24,7 @@ const moveIdx = (p: number | null) => (p == null ? -1 : p < 0.4 ? 0 : p <= 0.8 ?
 
 const STYLE: Record<Level, { text: string; bg: string; border: string; dot: string; blurb: string }> = {
   LOW: { text: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', dot: 'bg-emerald-500', blurb: 'Quiet setup — a small / flat-ish open is most likely.' },
-  MEDIUM: { text: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30', dot: 'bg-amber-500', blurb: 'Moderate gap risk — size overnight exposure with care.' },
+  MEDIUM: { text: 'text-primary', bg: 'bg-primary/10', border: 'border-primary/30', dot: 'bg-primary', blurb: 'Moderate gap risk — size overnight exposure with care.' },
   HIGH: { text: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/30', dot: 'bg-rose-500', blurb: 'Elevated gap risk — consider carrying less, hedging, or staying flat.' },
   UNKNOWN: { text: 'text-slate-400', bg: 'bg-slate-500/10', border: 'border-slate-500/30', dot: 'bg-slate-500', blurb: 'Not enough live data yet — check during market hours with Kite connected.' },
 };
@@ -165,7 +165,7 @@ export default function GapRisk() {
           This tells you <span className="text-foreground">how big</span> a gap is likely, never <span className="text-foreground">which way</span>. For direction, watch GIFT Nifty in the morning before 9:15.
         </p>
         {!sameDayExpiry && data?.expiry && (
-          <p className="text-amber-400/80">Note: nearest expiry isn't today, so the straddle covers more than just the overnight gap — treat it as an upper-bound on overnight magnitude.</p>
+          <p className="text-primary/80">Note: nearest expiry isn't today, so the straddle covers more than just the overnight gap — treat it as an upper-bound on overnight magnitude.</p>
         )}
         <p className="mt-2 opacity-70">Educational tool, not investment advice. When risk reads high, the safe play is managing exposure — not guessing direction.</p>
       </div>

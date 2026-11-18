@@ -109,11 +109,11 @@ const store = (key: string, v: string) => { try { localStorage.setItem(key, v); 
 // it, green for a buy, red for a sell; amber is this app's own, for a row that
 // is not what it seems (a test, a simulation, an estimated entry).
 const CHIP = 'h-[18px] px-2 rounded-[4px] text-[10px] leading-[18px] font-medium whitespace-nowrap';
-const CHIP_BLUE = 'bg-[#e3eeff] text-[#2563eb] dark:bg-[#192841] dark:text-[#6daafb]';
+const CHIP_BLUE = 'bg-primary/15 text-primary';
 const CHIP_RED = 'bg-[#fde8ea] text-[#c9364a] dark:bg-[#3f2124] dark:text-[#e5505f]';
 const CHIP_GREEN = 'bg-[#dff5ea] text-[#1f8a57] dark:bg-[#143023] dark:text-[#37ad75]';
-const CHIP_AMBER = 'bg-[#fdf0d8] text-[#a8690a] dark:bg-[#3a2c12] dark:text-[#e0a030]';
-const LINK = 'text-[#2563eb] dark:text-[#6daafb]';
+const CHIP_AMBER = 'bg-primary/15 text-primary';
+const LINK = 'text-primary';
 // Why a trade ended, in a word. KITE is a row built from Zerodha's own list of
 // fills (Import from Kite), which does not say why.
 const REASON: Record<string, string> = { MANUAL: 'Manual', TP: 'Target', TARGET: 'Target', SL: 'Stop', STOP: 'Stop', EOD: 'Day end', KITE: 'Kite' };
@@ -141,18 +141,18 @@ function BreakdownCell({ cell, basis, isToday, selected, onPick }: { cell: Cell;
       className={cn('relative h-[58px] rounded-[8px] border border-transparent text-[10px] leading-none font-medium',
         state === 'profit' ? 'bg-[#cdeedd] text-[#1f6f49] dark:bg-[#285a38] dark:text-[#d2f2df]'
           : state === 'loss' ? 'bg-[#fbdfe2] text-[#a82d3e] dark:bg-[#5a2529] dark:text-[#f8d0d4]'
-          : state === 'today' ? 'bg-[#dfe9ff] text-[#2563eb] dark:bg-[#15223e] dark:text-foreground/75 border-[#9dbcf5] dark:border-[#2a4686]'
+          : state === 'today' ? 'bg-primary/15 text-primary dark:text-foreground/75 border-primary/40'
           : 'bg-foreground/[0.1] text-muted-foreground',
         selected && 'ring-1 ring-foreground/70')}>
       <span className={cn('absolute inset-x-0', second ? 'top-[15.3px]' : 'top-[23px]')}>{cell.label}</span>
-      {second && <span className={cn('absolute inset-x-0 top-[31.3px] truncate px-0.5', state === 'today' && 'dark:text-[#7ba8f5]', traded && 'font-semibold')}>{second}</span>}
+      {second && <span className={cn('absolute inset-x-0 top-[31.3px] truncate px-0.5', state === 'today' && 'dark:text-primary', traded && 'font-semibold')}>{second}</span>}
     </button>
   );
 }
 
 const LEGEND: [string, string][] = [
   ['Profit', 'bg-[#3fa76a] dark:bg-[#285a38]'], ['Loss', 'bg-[#d9596a] dark:bg-[#5a2529]'],
-  ['No trades', 'bg-foreground/30 dark:bg-[#494949]'], ['Today', 'bg-[#8fb2f5] dark:bg-[#1c2f55]'],
+  ['No trades', 'bg-foreground/30 dark:bg-[#494949]'], ['Today', 'bg-primary/40'],
 ];
 
 type RangeKey = 'ALL' | 'TODAY' | '7' | '30' | 'CUSTOM';
@@ -539,7 +539,7 @@ export default function TradeJournal() {
           <div data-funds="balance" className="absolute inset-x-0 top-[110px] text-[32px] leading-none font-bold">{eq ? inr2(num(eq.net)) : fundsLoading ? '…' : '—'}</div>
           <div data-funds="used" className="absolute inset-x-0 top-[166px] text-[12px] leading-none font-bold">{eq ? `Used Margin ${inr2(num(ut.debits))}` : funds && !funds.live ? 'Log in to Zerodha' : ''}</div>
           {eq && (
-            <button type="button" data-funds="more" onClick={() => setFundsMore((m) => !m)} className="absolute left-1/2 -translate-x-1/2 top-[178px] h-7 px-3 text-[12px] leading-none font-medium text-[#3f6be9] dark:text-[#5b82f0]">
+            <button type="button" data-funds="more" onClick={() => setFundsMore((m) => !m)} className="absolute left-1/2 -translate-x-1/2 top-[178px] h-7 px-3 text-[12px] leading-none font-medium text-primary">
               {fundsMore ? 'Hide details' : 'View details'}
             </button>
           )}
@@ -723,7 +723,7 @@ export default function TradeJournal() {
     const v = valueOf(c.tally, basis);
     if (c.tally.closed > 0 && v > 0) return 'bg-[#cdeedd] text-[#1f6f49] dark:bg-[#285a38] dark:text-[#d2f2df]';
     if (c.tally.closed > 0 && v < 0) return 'bg-[#fbdfe2] text-[#a82d3e] dark:bg-[#5a2529] dark:text-[#f8d0d4]';
-    if (c.from === today) return 'bg-[#dfe9ff] text-[#2563eb] dark:bg-[#15223e] dark:text-[#7ba8f5]';
+    if (c.from === today) return 'bg-primary/15 text-primary';
     return c.from < today ? 'bg-foreground/[0.09] text-muted-foreground' : 'bg-foreground/[0.18] text-muted-foreground';
   };
   const option = (on: boolean) => cn('h-8 px-3.5 rounded-full text-[12px] leading-none font-medium', on ? 'bg-foreground text-background' : 'border border-foreground/[0.2] text-foreground/90');
@@ -816,12 +816,12 @@ export default function TradeJournal() {
           {rates && (
             <details data-journal="rates" className="mt-6 text-[11px] leading-relaxed text-muted-foreground">
               <summary className="cursor-pointer select-none">Charges{anyEstimate ? ' · some estimated' : ''}
-                {rates.changes && rates.changes.length > 0 && <span className="ml-1.5 text-[#a8690a] dark:text-[#e0a030]">Rates changed {dayMonth(rates.from)}</span>}</summary>
+                {rates.changes && rates.changes.length > 0 && <span className="ml-1.5 text-primary">Rates changed {dayMonth(rates.from)}</span>}</summary>
               <div className="mt-1.5">
                 Zerodha's own figure for each order; "est." is worked out from the rates instead.{' '}
                 {rates.checkedOn ? `Rates checked ${dayMonth(rates.checkedOn)}: ` : 'Rates not yet checked: '}
                 brokerage ₹{rates.brokerage} an order · STT {rates.sttSellPct}% of sell value · exchange {rates.exchangePct}% · SEBI ₹{rates.sebiPerCrore} a crore · stamp {rates.stampBuyPct}% of buy value · GST {rates.gstPct}%.
-                {rates.changes && rates.changes.length > 0 && <div className="mt-1 text-[#a8690a] dark:text-[#e0a030]">{rates.changes.join(' · ')}</div>}
+                {rates.changes && rates.changes.length > 0 && <div className="mt-1 text-primary">{rates.changes.join(' · ')}</div>}
               </div>
             </details>
           )}

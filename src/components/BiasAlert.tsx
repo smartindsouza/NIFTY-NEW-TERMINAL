@@ -16,7 +16,7 @@ import { useTodayBias, isRecord, istToday, fmtLevel, biasChime, BIAS_ALERTED_KEY
 const STYLE = {
   bullish: { Icon: TrendingUp, word: 'BULLISH', ring: 'border-emerald-500/60', head: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' },
   bearish: { Icon: TrendingDown, word: 'BEARISH', ring: 'border-rose-500/60', head: 'bg-rose-500/15 text-rose-700 dark:text-rose-300' },
-  neutral: { Icon: MoveHorizontal, word: 'NEUTRAL', ring: 'border-amber-500/60', head: 'bg-amber-500/15 text-amber-700 dark:text-amber-300' },
+  neutral: { Icon: MoveHorizontal, word: 'NEUTRAL', ring: 'border-primary/60', head: 'bg-primary/15 text-primary dark:text-primary' },
 } as const;
 
 export function BiasAlert() {
@@ -49,8 +49,8 @@ export function BiasAlert() {
   const L = shown.levels || {};
   return (
     <div className="fixed inset-0 z-[120] flex items-start md:items-center justify-center bg-black/40 px-3 pt-24 md:pt-0" role="dialog" aria-modal="true" aria-label="Today's bias">
-      <div className={cn('w-full max-w-md rounded-xl border-2 bg-card text-card-foreground shadow-2xl overflow-hidden', st ? st.ring : 'border-amber-500/40')}>
-        <div className={cn('flex items-center gap-2 px-4 py-2.5', st ? st.head : 'bg-amber-500/10 text-amber-800 dark:text-amber-200')}>
+      <div className={cn('w-full max-w-md rounded-xl border-2 bg-card text-card-foreground shadow-2xl overflow-hidden', st ? st.ring : 'border-primary/40')}>
+        <div className={cn('flex items-center gap-2 px-4 py-2.5', st ? st.head : 'bg-primary/10 text-primary dark:text-primary')}>
           {st ? <st.Icon size={16} /> : <TriangleAlert size={16} />}
           <span className="text-xs font-bold tracking-wider">
             TODAY'S BIAS · {st ? st.word : shown.status === 'no_session' ? 'NO SESSION' : 'ERROR'}{ok && shown.confidence ? ` · ${shown.confidence.toUpperCase()}` : ''}

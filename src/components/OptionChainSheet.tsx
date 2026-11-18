@@ -40,7 +40,7 @@ import { optionGreeks, yearsToExpiry, type Greeks } from '../lib/optionGreeks';
 // the one that is out of the money — the Call above the index, the Put below.
 
 const STRIKE_W = 88, ROW_H = 54, SPOT_H = 43;
-const GREEN = '#2EA068', RED = '#E24556', BLUE = '#2161EC', TREND_BLUE = '#61A0FC';
+const GREEN = '#2EA068', RED = '#E24556', BLUE = 'var(--primary)', TREND_BLUE = 'var(--primary)';
 const SIDE_COLS = ['ltp', 'oi', 'iv', 'delta', 'gamma', 'vega', 'theta', 'rho'] as const;
 type Col = typeof SIDE_COLS[number];
 const HEAD: Record<Col, [string, string]> = {
@@ -312,7 +312,7 @@ export function OptionChainView({ onPicked, start }: { onPicked?: () => void; st
         const len = max > 0 ? Math.min(1, (Number(leg?.oi) || 0) / max) * sideW : 0;
         return (
           <div key={k} data-chain-cell={put ? 'pe' : 'ce'} onClick={() => pick(k, put ? 'PE' : 'CE')}
-            className={`absolute inset-x-0 border-b border-foreground/[0.07] ${itm ? 'bg-[#eef1ff] dark:bg-[#161828]' : ''}`} style={{ top: rowTop(i), height: ROW_H }}>
+            className={`absolute inset-x-0 border-b border-foreground/[0.07] ${itm ? 'bg-primary/[0.08]' : ''}`} style={{ top: rowTop(i), height: ROW_H }}>
             {len > 1 && <div className="absolute bottom-[-1px] h-[2px] rounded-full z-[1]" style={{ width: len, ...(put ? { left: 0, background: `linear-gradient(to right, ${GREEN}55, ${GREEN})` } : { right: 0, background: `linear-gradient(to left, ${RED}55, ${RED})` }) }} />}
           </div>
         );

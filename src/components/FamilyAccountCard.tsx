@@ -82,7 +82,7 @@ export default function FamilyAccountCard({ pin }: { pin: string }) {
           {(['OFF', 'PRACTICE', 'LIVE'] as const).map(m => (
             <button key={m} disabled={busy || (m !== 'OFF' && !data.configured)} onClick={() => setMode(m)}
               className={cn('text-xs font-bold px-3 py-2 rounded-lg transition-colors disabled:opacity-40',
-                s?.mode === m ? (m === 'LIVE' ? 'bg-emerald-500 text-white' : m === 'PRACTICE' ? 'bg-sky-500 text-white' : 'bg-rose-500/80 text-white') : 'text-muted-foreground hover:text-foreground')}>
+                s?.mode === m ? (m === 'LIVE' ? 'bg-emerald-500 text-white' : m === 'PRACTICE' ? 'bg-primary text-white' : 'bg-rose-500/80 text-white') : 'text-muted-foreground hover:text-foreground')}>
               {m === 'OFF' && <Power className="w-3.5 h-3.5 inline mr-1 -mt-0.5" />}{m === 'PRACTICE' ? 'Practice' : m === 'LIVE' ? 'Live' : 'Off'}
             </button>
           ))}
@@ -90,7 +90,7 @@ export default function FamilyAccountCard({ pin }: { pin: string }) {
       </div>
 
       {!data.configured ? (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 text-xs p-3 space-y-1">
+        <div className="rounded-lg border border-primary/40 bg-primary/10 text-primary text-xs p-3 space-y-1">
           <div className="font-bold">Not set up yet</div>
           <div>1. In your Kite Connect developer console, create an app for her Zerodha client ID (the free "Personal" type is enough — prices come from your feed).</div>
           <div>2. Set that app's Redirect URL to <span className="font-mono break-all">{window.location.origin}/api/family/kite/callback</span></div>
@@ -111,7 +111,7 @@ export default function FamilyAccountCard({ pin }: { pin: string }) {
       {open.map(x => {
         const L = x.ladder || {}; const tps: number[] = L.tps || [];
         return (
-          <div key={x.id} className={cn('rounded-xl border-2 p-3 space-y-2', x.mode === 'LIVE' ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-sky-500/40 bg-sky-500/5')}>
+          <div key={x.id} className={cn('rounded-xl border-2 p-3 space-y-2', x.mode === 'LIVE' ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-primary/40 bg-primary/5')}>
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div>
                 <div className="font-bold text-sm">{x.tradingsymbol} <span className="text-[11px] font-semibold text-muted-foreground">{x.mode} · {x.qty} qty</span></div>
@@ -120,7 +120,7 @@ export default function FamilyAccountCard({ pin }: { pin: string }) {
               <div className="flex gap-2">
                 {L.stage >= 3 && L.decision === 'PENDING' && (
                   <button disabled={busy} onClick={() => post('/api/family/keep', { id: x.id }, false).then(d => d?.message && toast(d.message))}
-                    className="flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-lg bg-sky-500/20 text-sky-300"><TrendingUp className="w-3.5 h-3.5" /> Keep trailing</button>
+                    className="flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-lg bg-primary/20 text-primary"><TrendingUp className="w-3.5 h-3.5" /> Keep trailing</button>
                 )}
                 <button disabled={busy} onClick={() => { if (window.confirm(`Exit her ${x.tradingsymbol} now?`)) post('/api/family/exit', { id: x.id }, false); }}
                   className="flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-lg bg-rose-500 text-white"><DoorOpen className="w-3.5 h-3.5" /> Exit hers</button>

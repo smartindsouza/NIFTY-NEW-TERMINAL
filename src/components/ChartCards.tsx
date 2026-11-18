@@ -46,7 +46,7 @@ import { toast } from 'sonner';
 type Day = { low: number; high: number; ltp: number };
 type Leg = { tradingsymbol: string; instrument_token: number | string; ltp: number; chgLtp: number; volume: number; oi: number; strike: number; type: 'CE' | 'PE'; expiry: any; exchange?: string; lot_size?: number };
 
-const RED = '#db3a4c', GREEN = '#5baa79', CHANGE_RED = '#e5505f', OI_GREEN = '#68a146', LIME = '#bbe34a', BLUE = '#7390f4';
+const RED = '#db3a4c', GREEN = '#5baa79', CHANGE_RED = '#e5505f', OI_GREEN = '#68a146', LIME = 'var(--primary)', BLUE = 'var(--primary)';
 const inr = (v: number, dp = 2) => v.toLocaleString('en-IN', { minimumFractionDigits: dp, maximumFractionDigits: dp });
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 /** "17 Nov 26" from the expiry as the chain sends it (a date or an ISO string). */
@@ -233,7 +233,7 @@ export function ChartCards({ chainSymbol, getDay, onOpenOption, onOpenPositions 
               <span data-day="low">{inr(day.low)}</span><span data-day="high">{inr(day.high)}</span>
             </div>
             <div className="relative mt-[11.83px] h-[8.33px]">
-              <div className="absolute inset-0 rounded-full" style={{ background: 'linear-gradient(90deg, #8ea5f6, #1b33a3)' }} />
+              <div className="absolute inset-0 rounded-full" style={{ background: 'linear-gradient(90deg, color-mix(in srgb, var(--primary) 70%, #ffffff), color-mix(in srgb, var(--primary) 70%, #000000))' }} />
               <div className="absolute left-1/2 top-0 h-full w-[0.67px] -translate-x-1/2 bg-white" />
               {dayFrac !== null && (
                 <Zap data-day="bolt" size={19} strokeWidth={0} fill="#fff" className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 drop-shadow-[0_0_1px_rgba(0,0,0,0.55)] dark:drop-shadow-none" style={{ left: `${dayFrac * 100}%` }} />

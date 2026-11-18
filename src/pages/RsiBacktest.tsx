@@ -10,7 +10,7 @@ function Stat({ label, value, tone, hint }: { label: string; value: string; tone
     <div className="bg-card rounded-xl p-3.5 flex flex-col gap-0.5 min-w-0">
       <span className="text-[10px] uppercase tracking-wider text-muted-foreground truncate">{label}</span>
       <span className={cn('text-lg font-bold font-mono truncate',
-        tone === 'pos' ? 'text-emerald-400' : tone === 'neg' ? 'text-rose-400' : tone === 'warn' ? 'text-amber-400' : 'text-foreground')}>{value}</span>
+        tone === 'pos' ? 'text-emerald-400' : tone === 'neg' ? 'text-rose-400' : tone === 'warn' ? 'text-primary' : 'text-foreground')}>{value}</span>
       {hint && <span className="text-[10px] text-muted-foreground truncate">{hint}</span>}
     </div>
   );
@@ -100,7 +100,7 @@ export default function RsiBacktest() {
     if (s.eodExits > 0) insights.push({ tone: 'warn', text: `${s.eodExits} trades never reached the opposite zone and were squared off at day end — with no stop, these carried whatever the move was until the close.` });
     if (s.avgMae > 0) insights.push({ tone: 'warn', text: `Trades took on average ${s.avgMae} points of heat against them (max ${s.maxMae}) before resolving — the open risk you're carrying without a stop.` });
   }
-  const toneClass = (t: string) => t === 'good' ? 'text-emerald-400' : t === 'bad' ? 'text-rose-400' : 'text-amber-400';
+  const toneClass = (t: string) => t === 'good' ? 'text-emerald-400' : t === 'bad' ? 'text-rose-400' : 'text-primary';
 
   return (
     <div className="px-2 py-3 md:p-8 max-w-[1000px] w-full mx-auto pb-24 min-h-screen">
@@ -167,8 +167,8 @@ export default function RsiBacktest() {
           <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Divergence</span>
           <button onClick={() => setUseDiv((v) => !v)}
             className={cn('flex items-center gap-2 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-colors',
-              useDiv ? 'bg-violet-500/15 text-violet-400' : 'bg-card text-muted-foreground hover:text-foreground')}>
-            <span className={cn('relative w-7 h-4 rounded-full transition-colors', useDiv ? 'bg-violet-500' : 'bg-muted')}>
+              useDiv ? 'bg-primary/15 text-primary' : 'bg-card text-muted-foreground hover:text-foreground')}>
+            <span className={cn('relative w-7 h-4 rounded-full transition-colors', useDiv ? 'bg-primary' : 'bg-muted')}>
               <span className={cn('absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all', useDiv ? 'left-[14px]' : 'left-0.5')} />
             </span>
             RSI div ({divWindow}-bar)
@@ -190,8 +190,8 @@ export default function RsiBacktest() {
           <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Exit at cutoff</span>
           <button onClick={() => setExitAtCutoff((v) => !v)} disabled={!noEntryAfter}
             className={cn('flex items-center gap-2 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-40',
-              exitAtCutoff && noEntryAfter ? 'bg-amber-500/15 text-amber-400' : 'bg-card text-muted-foreground hover:text-foreground')}>
-            <span className={cn('relative w-7 h-4 rounded-full transition-colors', exitAtCutoff && noEntryAfter ? 'bg-amber-500' : 'bg-muted')}>
+              exitAtCutoff && noEntryAfter ? 'bg-primary/15 text-primary' : 'bg-card text-muted-foreground hover:text-foreground')}>
+            <span className={cn('relative w-7 h-4 rounded-full transition-colors', exitAtCutoff && noEntryAfter ? 'bg-primary' : 'bg-muted')}>
               <span className={cn('absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all', exitAtCutoff ? 'left-[14px]' : 'left-0.5')} />
             </span>
             square off open
@@ -262,7 +262,7 @@ export default function RsiBacktest() {
               <ul className="space-y-2">
                 {insights.map((ins, i) => (
                   <li key={i} className="flex items-start gap-2 text-[12.5px] leading-relaxed text-muted-foreground">
-                    <span className={cn('mt-1.5 w-1.5 h-1.5 rounded-full shrink-0', ins.tone === 'good' ? 'bg-emerald-500' : ins.tone === 'bad' ? 'bg-rose-500' : 'bg-amber-500')} />
+                    <span className={cn('mt-1.5 w-1.5 h-1.5 rounded-full shrink-0', ins.tone === 'good' ? 'bg-emerald-500' : ins.tone === 'bad' ? 'bg-rose-500' : 'bg-primary')} />
                     <span><span className={toneClass(ins.tone)}>•</span> {ins.text}</span>
                   </li>
                 ))}
@@ -286,7 +286,7 @@ export default function RsiBacktest() {
                     {worstReg && worstReg.net < 0 && <p><span className="text-rose-400">•</span> <span className="text-foreground">{REGIME_LABEL[worstReg.key]}</span> trades are the worst bucket: {worstReg.net} pts over {worstReg.n} trades ({worstReg.winRate}% win).{worstReg.key === 'counterTrend' ? ' These fight the prevailing trend — the prime candidate for a trend filter.' : ''}</p>}
                     {eod && tgt && <p><span className="text-rose-400">•</span> By exit: targets net {tgt.net >= 0 ? '+' : ''}{tgt.net} pts ({tgt.n}), but EOD square-offs net {eod.net} pts ({eod.n}) — the no-reversion trades are the leak.</p>}
                     {worstHour && worstHour.net < 0 && <p><span className="text-rose-400">•</span> Worst entry hour: {worstHour.key}:00 IST ({worstHour.net} pts, {worstHour.n} trades) — a time-of-day cutoff would target this.</p>}
-                    <p><span className="text-amber-400">•</span> Losers held ~{b.holding.avgBarsLoss} bars vs winners ~{b.holding.avgBarsWin} — {b.holding.avgBarsLoss > b.holding.avgBarsWin ? 'losers drag on longer, so a time-stop could help.' : 'holding times are similar.'}</p>
+                    <p><span className="text-primary">•</span> Losers held ~{b.holding.avgBarsLoss} bars vs winners ~{b.holding.avgBarsWin} — {b.holding.avgBarsLoss > b.holding.avgBarsWin ? 'losers drag on longer, so a time-stop could help.' : 'holding times are similar.'}</p>
                   </div>
                 );
               })()}
@@ -352,7 +352,7 @@ export default function RsiBacktest() {
                         <span className={cn('font-bold w-4 shrink-0', w.dir === 'LONG' ? 'text-emerald-400' : 'text-rose-400')}>{w.dir === 'LONG' ? 'L' : 'S'}</span>
                         <span className="flex-1 text-muted-foreground font-mono truncate">{fmtTime(w.entryTime)}</span>
                         <span className="text-[10px] text-muted-foreground/70 w-20 text-right truncate">{REGIME_LABEL[w.regime]}</span>
-                        <span className="text-[10px] w-12 text-right text-amber-400/80">{w.reason}</span>
+                        <span className="text-[10px] w-12 text-right text-primary/80">{w.reason}</span>
                         <span className="text-rose-400 font-bold font-mono w-14 text-right">{w.pnl}</span>
                       </div>
                     ))}
@@ -387,7 +387,7 @@ export default function RsiBacktest() {
                         <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{fmtTime(t.entryTime)}</td>
                         <td className="px-3 py-2 text-right text-muted-foreground">{t.entryRsi}→{t.exitRsi}</td>
                         <td className="px-3 py-2 text-right text-muted-foreground">{t.exitPrice}</td>
-                        <td className={cn('px-3 py-2', t.reason === 'TARGET' ? 'text-emerald-400/80' : t.reason === 'STOP' ? 'text-rose-400/80' : 'text-amber-400/80')}>{t.reason}</td>
+                        <td className={cn('px-3 py-2', t.reason === 'TARGET' ? 'text-emerald-400/80' : t.reason === 'STOP' ? 'text-rose-400/80' : 'text-primary/80')}>{t.reason}</td>
                         <td className={cn('px-3 py-2 text-right font-bold', t.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
                           <span className="inline-flex items-center gap-0.5 justify-end">{t.pnl >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}{t.pnl}</span>
                         </td>

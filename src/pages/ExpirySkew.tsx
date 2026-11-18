@@ -91,7 +91,7 @@ export default function ExpirySkew() {
         <div className="flex items-center gap-2.5 min-w-0">
           <Scale className="w-5 h-5 text-primary shrink-0" />
           <div className="min-w-0">
-            <h1 className="text-lg md:text-2xl font-bold tracking-tight">Expiry Skew <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 align-middle">PRACTICE ONLY</span></h1>
+            <h1 className="text-lg md:text-2xl font-bold tracking-tight">Expiry Skew <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary/20 text-primary align-middle">PRACTICE ONLY</span></h1>
             <div className="text-[11px] text-muted-foreground">Your own option-chain reading. It logs practice trades and never places an order.</div>
           </div>
         </div>
@@ -99,7 +99,7 @@ export default function ExpirySkew() {
           {[false, true].map(on => (
             <button key={String(on)} disabled={busy} onClick={() => setEnabled(on)}
               className={cn('text-xs font-bold px-3 py-2 rounded-lg transition-colors disabled:opacity-40',
-                s.enabled === on ? (on ? 'bg-sky-500 text-white' : 'bg-rose-500/80 text-white') : 'text-muted-foreground hover:text-foreground')}>
+                s.enabled === on ? (on ? 'bg-primary text-white' : 'bg-rose-500/80 text-white') : 'text-muted-foreground hover:text-foreground')}>
               {!on && <Power className="w-3.5 h-3.5 inline mr-1 -mt-0.5" />}{on ? 'Practice' : 'Off'}
             </button>
           ))}
@@ -124,11 +124,11 @@ export default function ExpirySkew() {
         </div>
         <ScoreBar comp={comp} />
         <div className="text-sm">{line}</div>
-        {histLine && s.state !== 'off' && <div className="text-xs text-amber-300 mt-1">{histLine}</div>}
-        {s.live?.note && s.state !== 'off' && s.trading && <div className="text-xs text-amber-300 mt-1">{s.live.note}</div>}
+        {histLine && s.state !== 'off' && <div className="text-xs text-primary mt-1">{histLine}</div>}
+        {s.live?.note && s.state !== 'off' && s.trading && <div className="text-xs text-primary mt-1">{s.live.note}</div>}
 
         {t && (t.status === 'OPEN' || t.status === 'CLOSED') && (
-          <div className={cn('mt-3 rounded-xl border-2 p-3 flex items-center justify-between gap-3 flex-wrap', 'border-sky-500/40 bg-sky-500/5')}>
+          <div className={cn('mt-3 rounded-xl border-2 p-3 flex items-center justify-between gap-3 flex-wrap', 'border-primary/40 bg-primary/5')}>
             <div className="min-w-0">
               <div className="font-bold text-base">{t.tradingsymbol} <span className="text-[11px] font-semibold text-muted-foreground">PRACTICE · {t.lot} qty</span></div>
               <div className="text-xs text-muted-foreground">Bought {px(t.entry_px)} at {t.time} (score {sg(t.comp)}){t.status === 'CLOSED' ? ` → sold ${px(t.exit_px)} at 3:15 PM` : t.ltp ? ` · now ${px(t.ltp)}` : ''}</div>
@@ -160,8 +160,8 @@ export default function ExpirySkew() {
           </ResponsiveContainer>
           <div className="flex gap-4 text-[11px] text-muted-foreground mt-1">
             <span><span className="inline-block w-3 h-0.5 bg-primary align-middle mr-1" />Score</span>
-            <span><span className="inline-block w-3 h-0.5 bg-amber-500 align-middle mr-1" />Skew</span>
-            <span><span className="inline-block w-3 h-0.5 bg-sky-400 align-middle mr-1" />Flow</span>
+            <span><span className="inline-block w-3 h-0.5 bg-primary align-middle mr-1" />Skew</span>
+            <span><span className="inline-block w-3 h-0.5 bg-primary align-middle mr-1" />Flow</span>
             <span className="ml-auto">dashed lines: ±{s.rule.threshold}</span>
           </div>
         </div>
@@ -170,7 +170,7 @@ export default function ExpirySkew() {
       {/* practice record */}
       <div className="bg-card border border-border rounded-xl p-4 space-y-3">
         <div className="flex items-center gap-2">
-          <FlaskConical className="w-4 h-4 text-sky-400" />
+          <FlaskConical className="w-4 h-4 text-primary" />
           <h2 className="font-bold">Practice record</h2>
           <span className="text-[11px] text-muted-foreground">since {dayLabel(rec.since)}</span>
         </div>
@@ -190,7 +190,7 @@ export default function ExpirySkew() {
           ))}
         </div>
         <div>
-          <div className="h-1.5 rounded-full bg-muted/60 overflow-hidden"><div className="h-full bg-sky-500" style={{ width: `${Math.min(100, (rec.closed / bt.tradesToJudge) * 100)}%` }} /></div>
+          <div className="h-1.5 rounded-full bg-muted/60 overflow-hidden"><div className="h-full bg-primary" style={{ width: `${Math.min(100, (rec.closed / bt.tradesToJudge) * 100)}%` }} /></div>
           <div className="text-[11px] text-muted-foreground mt-1">{rec.closed} of about {bt.tradesToJudge} practice trades needed before this record says anything about the rule. Until then a good or bad run is just a run.{rec.missed ? ` ${rec.missed} signal${rec.missed > 1 ? 's' : ''} missed (app not running).` : ''}</div>
         </div>
         {(s.trades || []).length === 0 && <div className="text-xs text-muted-foreground">No practice trades yet.</div>}

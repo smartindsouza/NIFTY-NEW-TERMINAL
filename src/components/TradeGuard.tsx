@@ -155,7 +155,7 @@ function TradeGuardSheet({ st, onSaved, onClose }: { st: Status | null; onSaved:
   const lossUsed = st && st.dayPnl !== null && st.dayPnl < 0 ? Math.min(100, Math.round((-st.dayPnl / (r?.maxLoss || 1)) * 100)) : 0;
   const tradesUsed = st && st.entriesToday !== null && r ? Math.min(100, Math.round((st.entriesToday / r.maxTrades) * 100)) : 0;
   const bar = (pct: number) => (
-    <div className="h-1.5 rounded-full bg-muted overflow-hidden"><div className={cn('h-full rounded-full', pct >= 100 ? 'bg-rose-500' : pct >= 75 ? 'bg-amber-500' : 'bg-emerald-500')} style={{ width: `${pct}%` }} /></div>
+    <div className="h-1.5 rounded-full bg-muted overflow-hidden"><div className={cn('h-full rounded-full', pct >= 100 ? 'bg-rose-500' : pct >= 75 ? 'bg-primary' : 'bg-emerald-500')} style={{ width: `${pct}%` }} /></div>
   );
   const pendingText = st?.pending && Object.keys(st.pending).length
     ? Object.entries(st.pending).map(([k, v]) => k === 'enabled' ? 'guard off' : k === 'startTime' ? `start ${v}` : k === 'maxTrades' ? `${v} trades` : `loss limit ₹${Number(v).toLocaleString('en-IN')}`).join(', ')
@@ -195,7 +195,7 @@ function TradeGuardSheet({ st, onSaved, onClose }: { st: Status | null; onSaved:
                 <div className="flex justify-between text-xs text-muted-foreground mb-1"><span>Day P&amp;L (whole account)</span><span className={cn('font-mono', (st.dayPnl ?? 0) < 0 ? 'text-rose-400' : 'text-emerald-400')}>{inr(st.dayPnl)} / −₹{r.maxLoss.toLocaleString('en-IN')}</span></div>
                 {bar(lossUsed)}
               </div>
-              {st.errors?.length ? <div className="text-[11px] text-amber-400">Could not read: {st.errors.join('; ')}. The time rule still applies.</div> : null}
+              {st.errors?.length ? <div className="text-[11px] text-primary">Could not read: {st.errors.join('; ')}. The time rule still applies.</div> : null}
             </div>
           )}
           <div className="border-t border-border pt-3 space-y-3">
@@ -234,7 +234,7 @@ function TradeGuardSheet({ st, onSaved, onClose }: { st: Status | null; onSaved:
           </div>
           <div className="text-[11px] text-muted-foreground leading-relaxed">
             Only new entries you place (order ticket, Quick Trade, ScalperX, waiting orders) are blocked — never an exit, SL, TP or Exit All. Telegram auto-trades keep their own limits. Stricter changes apply now; relaxed ones start the next trading day.
-            {pendingText && <div className="mt-1 text-amber-400">Waiting for {st?.pendingFrom}: {pendingText}.</div>}
+            {pendingText && <div className="mt-1 text-primary">Waiting for {st?.pendingFrom}: {pendingText}.</div>}
           </div>
         </div>
         <div data-guard-foot="" className="shrink-0 flex justify-end gap-2 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-border">

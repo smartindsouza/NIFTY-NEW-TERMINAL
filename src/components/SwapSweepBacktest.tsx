@@ -250,7 +250,7 @@ export default function SwapSweepBacktest() {
             <div className="text-[11px] text-muted-foreground">
               <b className="text-foreground">{res.tfLabel}</b> · NIFTY 50 · {fmtDay(res.first)} – {fmtDay(res.last)} · {res.days} trading days · {res.candles.toLocaleString('en-IN')} candles
             </div>
-            <div className={`text-[11px] font-semibold ${res.periodLabel.startsWith('HOLD') ? 'text-amber-600' : 'text-foreground/80'}`}>{res.periodLabel}</div>
+            <div className={`text-[11px] font-semibold ${res.periodLabel.startsWith('HOLD') ? 'text-primary' : 'text-foreground/80'}`}>{res.periodLabel}</div>
             {res.conf && (
               <div className="text-[11px] text-muted-foreground">
                 The 5-minute history is the shorter of the two, so only the days it covers are tested. Entry is at the close of the 15-min candle
@@ -258,7 +258,7 @@ export default function SwapSweepBacktest() {
               </div>
             )}
             {s.trades < 30 && (
-              <div className="text-[11px] rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-600 px-2.5 py-1.5">
+              <div className="text-[11px] rounded-md border border-primary/40 bg-primary/10 text-primary px-2.5 py-1.5">
                 Only {s.trades} trade{s.trades === 1 ? '' : 's'} — too few to tell an edge from luck.{' '}
                 {res.conf ? 'Both timeframes agreeing is rare and the 5-minute history is short, so treat this as a first look only.' : 'Use a shorter timeframe or more days before drawing conclusions.'}
               </div>

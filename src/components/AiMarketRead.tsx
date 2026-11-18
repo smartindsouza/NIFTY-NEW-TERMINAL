@@ -156,7 +156,7 @@ export default function AiMarketRead({
           setOpen(true);
           if (!read) runRead();
         }}
-        className="fixed top-[max(env(safe-area-inset-top),12px)] md:top-3 right-3 z-[90] w-9 h-9 flex items-center justify-center rounded-full text-base bg-indigo-500/90 text-white shadow-lg hover:bg-indigo-500"
+        className="fixed top-[max(env(safe-area-inset-top),12px)] md:top-3 right-3 z-[90] w-9 h-9 flex items-center justify-center rounded-full text-base bg-primary/90 text-white shadow-lg hover:bg-primary"
         title="AI market read"
         aria-label="AI market read"
         title="Claude's plain-English read of the current setup"
@@ -174,7 +174,7 @@ export default function AiMarketRead({
           <button
             onClick={runRead}
             disabled={loading}
-            className="px-2 py-1 rounded bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 disabled:opacity-50"
+            className="px-2 py-1 rounded bg-primary/20 text-primary hover:bg-primary/30 disabled:opacity-50"
           >
             {loading ? "…" : "↻"}
           </button>
@@ -225,7 +225,7 @@ export default function AiMarketRead({
               <div className="text-muted-foreground mb-0.5">Watch / risks:</div>
               <ul className="list-disc pl-4 flex flex-col gap-0.5">
                 {read.risks.map((r, i) => (
-                  <li key={i} className="text-amber-300/90">{r}</li>
+                  <li key={i} className="text-primary/90">{r}</li>
                 ))}
               </ul>
             </div>

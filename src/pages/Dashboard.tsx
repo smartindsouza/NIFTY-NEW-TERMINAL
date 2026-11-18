@@ -323,7 +323,7 @@ export function Dashboard() {
               live at {new Date().toLocaleTimeString()}
             </span>
             {!feedIssue && delaySec >= 30 && (
-              <span className="text-amber-500 ml-1 font-mono text-[9px] normal-case">· feed delayed {delaySec}s</span>
+              <span className="text-primary ml-1 font-mono text-[9px] normal-case">· feed delayed {delaySec}s</span>
             )}
           </div>
           <div className={cn("text-[10px] font-bold tracking-widest border px-3 py-1 rounded-full uppercase", signalColor, signalBorder, signalBgMuted)}>
@@ -375,7 +375,7 @@ export function Dashboard() {
                : pos <= 0.2 ? `Near support — long edge · ${(spot - sup).toFixed(0)} pts above ${sup}`
                : pos >= 0.8 ? `Near resistance — short edge · ${(res - spot).toFixed(0)} pts below ${res}`
                : `Mid-range — no edge · ${pct}% of the way from ${sup} to ${res}`;
-             const tone = pos < 0 || pos > 1 ? 'text-amber-400' : pos <= 0.2 ? 'text-emerald-400' : pos >= 0.8 ? 'text-rose-400' : 'text-muted-foreground';
+             const tone = pos < 0 || pos > 1 ? 'text-primary' : pos <= 0.2 ? 'text-emerald-400' : pos >= 0.8 ? 'text-rose-400' : 'text-muted-foreground';
              return (
                <div className="mt-6 mb-10">
                  <div className="relative h-2 w-full rounded-full overflow-visible bg-muted">

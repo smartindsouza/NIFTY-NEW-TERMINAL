@@ -54,7 +54,7 @@ export default function SwapSweepContinuation() {
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-lg">
           <Radar className="w-5 h-5 text-primary" /> SS continuation · forward test
-          <span className="text-[10px] font-semibold tracking-wide px-2 py-0.5 rounded border border-amber-500/50 text-amber-500">LOGS ONLY · NEVER TRADES</span>
+          <span className="text-[10px] font-semibold tracking-wide px-2 py-0.5 rounded border border-primary/50 text-primary">LOGS ONLY · NEVER TRADES</span>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">

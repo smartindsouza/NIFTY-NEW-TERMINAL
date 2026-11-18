@@ -128,7 +128,7 @@ export default function SwapSweepResearch() {
               ) : <div className="text-xs text-muted-foreground">No filter beat "no filter" on the choosing period, so there was nothing to check.</div>}
             </div>
 
-            <div className={`rounded-lg border px-3 py-2 text-xs ${res.verdict === 'PASS' ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-600' : 'border-amber-500/40 bg-amber-500/10 text-amber-600'}`}>
+            <div className={`rounded-lg border px-3 py-2 text-xs ${res.verdict === 'PASS' ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-600' : 'border-primary/40 bg-primary/10 text-primary'}`}>
               {res.verdict === 'PASS' && <><b>Passed.</b> "{res.chosen?.label}" beat no-filter on both win rate and average R on days it was never chosen on, and stayed profitable after costs. Worth adding to the chart as an option — then watch it live before trusting it with size.</>}
               {res.verdict === 'NOT_PROVEN' && <><b>Not proven.</b> "{res.chosen?.label}" looked best on the choosing period but did not beat no-filter on both win rate and average R (with a profit after costs) on the unseen days. That is what a filter that only fitted past noise looks like — do not add it.</>}
               {res.verdict === 'NONE_BETTER' && <><b>No filter helped.</b> None of the fixed filters did better than no filter on the choosing period.</>}

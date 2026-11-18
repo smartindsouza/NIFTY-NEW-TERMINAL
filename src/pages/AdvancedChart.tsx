@@ -624,7 +624,7 @@ function OrderTicketModal({ onClose, ticket, expiries, onExpiryChange, onSubmit,
 
           {/* Warning banner when instrument context is incomplete */}
           {missingContext && (
-            <div className="bg-amber-950/25 border border-primary/80 text-primary p-2.5 rounded-lg text-[10px] leading-relaxed">
+            <div className="bg-primary/10 border border-primary/80 text-primary p-2.5 rounded-lg text-[10px] leading-relaxed">
               <strong>Warning:</strong> Trading symbol or instrument token is missing. Real-time index feed is fallback or simulated. Order placement is restricted to simulated confirmation.
             </div>
           )}
@@ -951,7 +951,7 @@ function LineEditorModal({
                   type="checkbox" 
                   checked={labelVisible} 
                   onChange={e => setLabelVisible(e.target.checked)}
-                  className="rounded border-0 bg-muted/40 dark:bg-black/20 text-blue-500 focus:ring-0"
+                  className="rounded border-0 bg-muted/40 dark:bg-black/20 text-primary focus:ring-0"
                 />
                 <span className="text-sm text-full text-foreground hover:text-foreground">Price label</span>
               </label>
@@ -963,10 +963,10 @@ function LineEditorModal({
                   type="checkbox"
                   checked={alertOn}
                   onChange={e => setAlertOn(e.target.checked)}
-                  className="rounded border-0 bg-muted/40 dark:bg-black/20 text-blue-500 focus:ring-0"
+                  className="rounded border-0 bg-muted/40 dark:bg-black/20 text-primary focus:ring-0"
                 />
                 <span className="text-sm text-foreground flex items-center gap-1.5">
-                  <Bell className="w-3.5 h-3.5 text-amber-400" /> Alert when price touches this line
+                  <Bell className="w-3.5 h-3.5 text-primary" /> Alert when price touches this line
                 </span>
               </label>
               {alertOn && (
@@ -984,7 +984,7 @@ function LineEditorModal({
                 type="number" 
                 value={price}
                 onChange={e => setPrice(parseInt(e.target.value) || 0)}
-                className="bg-muted/50 text-sm text-foreground px-3 py-1.5 rounded border border-blue-500/50 focus:outline-none focus:ring-1 focus:ring-blue-500 w-[120px]"
+                className="bg-muted/50 text-sm text-foreground px-3 py-1.5 rounded border border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary w-[120px]"
                 step="1"
               />
             </div>
@@ -1689,7 +1689,7 @@ const TradePnl = ({ sync }: { sync: string }) => {
       title={sync === 'ACTIVE' ? 'Live P&L — SL/TP armed' : sync === 'ERROR' ? 'Live P&L — SL/TP NOT armed!' : 'Live P&L'}>
       {up ? '+' : ''}₹{pnl.toFixed(0)}
       <span className="opacity-70">({up ? '+' : ''}{pct.toFixed(1)}%)</span>
-      {sync === 'ERROR' && <span className="text-amber-400 font-bold" title="SL/TP rule failed to arm — drag a line to retry">!</span>}
+      {sync === 'ERROR' && <span className="text-primary font-bold" title="SL/TP rule failed to arm — drag a line to retry">!</span>}
       {sync === 'SYNCING' && <span className="opacity-60">…</span>}
     </span>
   );
@@ -2388,7 +2388,7 @@ function BBEditorModal({
                 const val = parseInt(e.target.value, 10);
                 if (!isNaN(val) && val >= 2 && val <= 100) setPeriod(val);
               }}
-              className="w-16 bg-background border border-0 rounded px-2.5 py-1 text-foreground text-right focus:outline-none focus:border-cyan-500 text-sm"
+              className="w-16 bg-background border border-0 rounded px-2.5 py-1 text-foreground text-right focus:outline-none focus:border-primary text-sm"
             />
           </div>
 
@@ -2404,7 +2404,7 @@ function BBEditorModal({
                 const val = parseFloat(e.target.value);
                 if (!isNaN(val) && val >= 0.1 && val <= 10) setStdDev(val);
               }}
-              className="w-16 bg-background border border-0 rounded px-2.5 py-1 text-foreground text-right focus:outline-none focus:border-cyan-500 text-sm"
+              className="w-16 bg-background border border-0 rounded px-2.5 py-1 text-foreground text-right focus:outline-none focus:border-primary text-sm"
             />
           </div>
 
@@ -2485,7 +2485,7 @@ function OiBarsEditorModal({
               step={5}
               value={gap}
               onChange={(e) => setGap(parseInt(e.target.value))}
-              className="w-full h-1.5 bg-gradient-to-r from-transparent to-cyan-500 rounded-full appearance-none cursor-pointer outline-none slider-thumb-ring"
+              className="w-full h-1.5 bg-gradient-to-r from-transparent to-primary rounded-full appearance-none cursor-pointer outline-none slider-thumb-ring"
             />
           </div>
 
@@ -2501,7 +2501,7 @@ function OiBarsEditorModal({
               step={10}
               value={maxBarWidth}
               onChange={(e) => setMaxBarWidth(parseInt(e.target.value))}
-              className="w-full h-1.5 bg-gradient-to-r from-transparent to-cyan-500 rounded-full appearance-none cursor-pointer outline-none slider-thumb-ring"
+              className="w-full h-1.5 bg-gradient-to-r from-transparent to-primary rounded-full appearance-none cursor-pointer outline-none slider-thumb-ring"
             />
           </div>
 
@@ -2517,7 +2517,7 @@ function OiBarsEditorModal({
               step={2}
               value={barThickness}
               onChange={(e) => setBarThickness(parseInt(e.target.value))}
-              className="w-full h-1.5 bg-gradient-to-r from-transparent to-cyan-500 rounded-full appearance-none cursor-pointer outline-none slider-thumb-ring"
+              className="w-full h-1.5 bg-gradient-to-r from-transparent to-primary rounded-full appearance-none cursor-pointer outline-none slider-thumb-ring"
             />
           </div>
 
@@ -2593,7 +2593,7 @@ function exitPricesFor(d: TpSlDefaults, entry: number, long: boolean): { sl: num
 // - "Trailing stop loss" is his trailing exit, as the box's switch was.
 // - Save keeps them for new trades and, with a trade open, applies them to it,
 //   as Ok did; the line under the title says which.
-const TPSL_BLUE = '#6DAAFB', TPSL_GREEN = '#37AD75', TPSL_RED = '#E5505F';
+const TPSL_BLUE = 'var(--primary)', TPSL_GREEN = '#37AD75', TPSL_RED = '#E5505F';
 const TpSlUpDown = ({ color }: { color: string }) => (
   <svg width="11" height="12" viewBox="0 0 11 12" aria-hidden="true" className="shrink-0"><path d="M5.5 0 L11 5 H0 Z M5.5 12 L0 7 H11 Z" fill={color} /></svg>
 );
@@ -2679,14 +2679,14 @@ function TpSlDefaultsModal({ onClose, initial, onApply, activeSymbol }: {
           <span className="flex-1" />
           <div data-tpsl={`${which}-stepper`} className="w-[104px] h-[27px] rounded-[6px] bg-background flex items-center justify-between px-[6px]">
             <button type="button" aria-label="Less" disabled={!on} onClick={() => step(which, -1)}
-              className="h-[19.7px] w-[19.7px] rounded-[3px] flex items-center justify-center" style={{ background: '#122340' }}>
+              className="h-[19.7px] w-[19.7px] rounded-[3px] flex items-center justify-center" style={{ background: 'color-mix(in srgb, var(--primary) 18%, transparent)' }}>
               <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 5 H9" stroke={TPSL_BLUE} strokeWidth="1.5" strokeLinecap="round" /></svg>
             </button>
             <input data-tpsl={`${which}-value`} type="text" inputMode="decimal" disabled={!on} value={valOf(which)}
               onChange={(e) => setVal(which, e.target.value)} onFocus={(e) => e.target.select()}
               className="w-[48px] bg-transparent text-center text-[12px] leading-4 text-foreground outline-none border-0 p-0" />
             <button type="button" aria-label="More" disabled={!on} onClick={() => step(which, 1)}
-              className="h-[19.7px] w-[19.7px] rounded-[3px] flex items-center justify-center" style={{ background: '#122340' }}>
+              className="h-[19.7px] w-[19.7px] rounded-[3px] flex items-center justify-center" style={{ background: 'color-mix(in srgb, var(--primary) 18%, transparent)' }}>
               <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 5 H9 M5 1 V9" stroke={TPSL_BLUE} strokeWidth="1.5" strokeLinecap="round" /></svg>
             </button>
           </div>
@@ -3238,7 +3238,7 @@ function RsiEditorModal({
                     const val = parseInt(e.target.value, 10);
                     if (!isNaN(val) && val >= 50 && val <= 95) setOverbought1(val);
                   }}
-                  className="w-full bg-background border border-0 rounded px-2.5 py-1.5 text-foreground text-right focus:outline-none focus:border-cyan-500 text-sm"
+                  className="w-full bg-background border border-0 rounded px-2.5 py-1.5 text-foreground text-right focus:outline-none focus:border-primary text-sm"
                 />
               </div>
               <div className="flex flex-col gap-1">
@@ -3252,7 +3252,7 @@ function RsiEditorModal({
                     const val = parseInt(e.target.value, 10);
                     if (!isNaN(val) && val >= 50 && val <= 95) setOverbought2(val);
                   }}
-                  className="w-full bg-background border border-0 rounded px-2.5 py-1.5 text-foreground text-right focus:outline-none focus:border-cyan-500 text-sm"
+                  className="w-full bg-background border border-0 rounded px-2.5 py-1.5 text-foreground text-right focus:outline-none focus:border-primary text-sm"
                 />
               </div>
             </div>
@@ -3273,7 +3273,7 @@ function RsiEditorModal({
                     const val = parseInt(e.target.value, 10);
                     if (!isNaN(val) && val >= 5 && val <= 50) setOversold1(val);
                   }}
-                  className="w-full bg-background border border-0 rounded px-2.5 py-1.5 text-foreground text-right focus:outline-none focus:border-cyan-500 text-sm"
+                  className="w-full bg-background border border-0 rounded px-2.5 py-1.5 text-foreground text-right focus:outline-none focus:border-primary text-sm"
                 />
               </div>
               <div className="flex flex-col gap-1">
@@ -3287,7 +3287,7 @@ function RsiEditorModal({
                     const val = parseInt(e.target.value, 10);
                     if (!isNaN(val) && val >= 5 && val <= 50) setOversold2(val);
                   }}
-                  className="w-full bg-background border border-0 rounded px-2.5 py-1.5 text-foreground text-right focus:outline-none focus:border-cyan-500 text-sm"
+                  className="w-full bg-background border border-0 rounded px-2.5 py-1.5 text-foreground text-right focus:outline-none focus:border-primary text-sm"
                 />
               </div>
             </div>
@@ -3458,7 +3458,7 @@ function HLevelsEditorModal({
             </div>
 
             {/* Trap zones */}
-            <div className="rounded-lg bg-yellow-950/10 border border-primary/25 p-3 space-y-2.5">
+            <div className="rounded-lg bg-primary/5 border border-primary/25 p-3 space-y-2.5">
               <div className="text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-1.5 font-sans">
                 <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
                 Trap Zones (Intraday ranges)
@@ -3886,7 +3886,7 @@ function OrderDiagnosticsPanel({ testMode, setTestMode }: { testMode: boolean, s
         ) : d.lastApiStatus === 'Failed' ? (
           <span className="text-[9px] bg-rose-500/20 text-rose-400 px-1.5 py-0.5 rounded font-bold uppercase">Failed</span>
         ) : d.lastApiStatus === 'Calling' ? (
-          <span className="text-[9px] bg-sky-500/20 text-sky-400 px-1.5 py-0.5 rounded font-bold uppercase">Calling</span>
+          <span className="text-[9px] bg-primary/20 text-primary px-1.5 py-0.5 rounded font-bold uppercase">Calling</span>
         ) : (
           <span className="text-[9px] bg-slate-500/20 text-muted-foreground px-1.5 py-0.5 rounded font-bold uppercase">Not Called</span>
         )}
@@ -3966,7 +3966,7 @@ function MarginDiagnosticsPanel({ ticketData, kiteDiagnosticsData }: { ticketDat
         ) : getMarginDiagnostics().lastApiStatus === 'Failed' ? (
           <span className="text-[9px] bg-rose-500/20 text-rose-400 px-1.5 py-0.5 rounded font-bold uppercase">Failed</span>
         ) : getMarginDiagnostics().lastApiStatus === 'Calling' ? (
-          <span className="text-[9px] bg-sky-500/20 text-sky-400 px-1.5 py-0.5 rounded font-bold uppercase">Calling</span>
+          <span className="text-[9px] bg-primary/20 text-primary px-1.5 py-0.5 rounded font-bold uppercase">Calling</span>
         ) : (
           <span className="text-[9px] bg-slate-500/20 text-muted-foreground px-1.5 py-0.5 rounded font-bold uppercase">Not Called</span>
         )}
@@ -3995,11 +3995,11 @@ function MarginDiagnosticsPanel({ ticketData, kiteDiagnosticsData }: { ticketDat
       
       <div className="flex justify-between mt-1">
          <span className="text-muted-foreground">Cache Hit/Miss</span>
-         <span className="text-purple-400">{getMarginDiagnostics().hits} / {getMarginDiagnostics().misses}</span>
+         <span className="text-primary">{getMarginDiagnostics().hits} / {getMarginDiagnostics().misses}</span>
       </div>
       <div className="flex justify-between">
          <span className="text-muted-foreground">Resp Time / Size</span>
-         <span className="text-sky-400">
+         <span className="text-primary">
            {getMarginDiagnostics().lastApiTime > 0 ? `${getMarginDiagnostics().lastApiTime}ms / ${getMarginDiagnostics().lastResponseSize}B` : 'N/A'}
          </span>
       </div>
@@ -4031,7 +4031,7 @@ function MarginDiagnosticsPanel({ ticketData, kiteDiagnosticsData }: { ticketDat
         </div>
         {getMarginDiagnostics().totalCharges > 0 && getMarginDiagnostics().localCharges > 0 && (
            <div className="text-[9px] text-center mt-1.5 pt-1 border-t border-0/60 text-muted-foreground">
-             Diff: <span className="font-mono text-cyan-400">₹{Math.abs(getMarginDiagnostics().totalCharges - getMarginDiagnostics().localCharges).toFixed(2)}</span>
+             Diff: <span className="font-mono text-primary">₹{Math.abs(getMarginDiagnostics().totalCharges - getMarginDiagnostics().localCharges).toFixed(2)}</span>
            </div>
         )}
       </div>
@@ -4110,7 +4110,7 @@ function MarginDiagnosticsPanel({ ticketData, kiteDiagnosticsData }: { ticketDat
               // alert(`Test Failed: ${e.message}`);
             }
           }}
-          className="w-full bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300 text-[10px] py-1.5 rounded transition-colors uppercase font-bold tracking-wider"
+          className="w-full bg-primary/16 hover:bg-primary/24 text-primary text-[10px] py-1.5 rounded transition-colors uppercase font-bold tracking-wider"
         >
            Test Kite Margin API
         </button>
@@ -4180,13 +4180,13 @@ function MarginDiagnosticsPanel({ ticketData, kiteDiagnosticsData }: { ticketDat
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Kite API Total Margin</span>
-          <span className="font-mono text-cyan-400">
+          <span className="font-mono text-primary">
             {getMarginDiagnostics().totalMargin > 0 ? `₹${getMarginDiagnostics().totalMargin.toFixed(2)}` : 'N/A'}
           </span>
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Kite API Total Charges</span>
-          <span className="font-mono text-cyan-400">
+          <span className="font-mono text-primary">
             {getMarginDiagnostics().totalCharges > 0 ? `₹${getMarginDiagnostics().totalCharges.toFixed(2)}` : 'N/A'}
           </span>
         </div>
@@ -15927,11 +15927,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               <span className="text-muted-foreground font-semibold uppercase mb-1">Backend Connectivity</span>
               <div className="flex justify-between">
                  <span className="text-muted-foreground">Req / Min</span>
-                 <span className="text-sky-400">{serverStats.requestCountPerMinute} req/min</span>
+                 <span className="text-primary">{serverStats.requestCountPerMinute} req/min</span>
               </div>
               <div className="flex justify-between">
                  <span className="text-muted-foreground">Cache Hit/Miss</span>
-                 <span className="text-purple-400">{serverStats.cacheHits} / {serverStats.cacheMisses}</span>
+                 <span className="text-primary">{serverStats.cacheHits} / {serverStats.cacheMisses}</span>
               </div>
               <div className="flex justify-between">
                  <span className="text-muted-foreground">Total 429 Errors</span>
@@ -15965,7 +15965,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Symbol</span>
-              <span className="text-cyan-400">{selectedInstrument?.tradingsymbol || 'NIFTY 50'}</span>
+              <span className="text-primary">{selectedInstrument?.tradingsymbol || 'NIFTY 50'}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Exchange</span>
@@ -16004,15 +16004,15 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               <>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Latest Upper</span>
-                  <span className="text-cyan-400 font-mono">{bbData[bbData.length - 1].upper.toFixed(2)}</span>
+                  <span className="text-primary font-mono">{bbData[bbData.length - 1].upper.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Latest Basis</span>
-                  <span className="text-purple-400 font-mono">{bbData[bbData.length - 1].middle.toFixed(2)}</span>
+                  <span className="text-primary font-mono">{bbData[bbData.length - 1].middle.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Latest Lower</span>
-                  <span className="text-cyan-400 font-mono">{bbData[bbData.length - 1].lower.toFixed(2)}</span>
+                  <span className="text-primary font-mono">{bbData[bbData.length - 1].lower.toFixed(2)}</span>
                 </div>
               </>
             ) : showBB && (
@@ -16023,15 +16023,15 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 <div className="w-full h-px bg-muted my-1" />
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Max Hist Vol</span>
-                  <span className="text-pink-400">{taInfo.rawVolumeStats.max}</span>
+                  <span className="text-primary">{taInfo.rawVolumeStats.max}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Min Hist Vol</span>
-                  <span className="text-pink-400">{taInfo.rawVolumeStats.min}</span>
+                  <span className="text-primary">{taInfo.rawVolumeStats.min}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Avg Hist Vol</span>
-                  <span className="text-pink-400">{taInfo.rawVolumeStats.avg}</span>
+                  <span className="text-primary">{taInfo.rawVolumeStats.avg}</span>
                 </div>
               </>
             )}
@@ -16199,7 +16199,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           {breakoutInfo && (() => {
             const v = breakoutInfo.verdict;
             const color = v === 'STRONG' ? (breakoutInfo.direction === 'up' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400')
-              : v === 'FAKEOUT_RISK' ? 'bg-amber-500/20 text-amber-400'
+              : v === 'FAKEOUT_RISK' ? 'bg-primary/20 text-primary'
               : 'bg-slate-500/20 text-slate-300';
             const word = v === 'STRONG' ? `BREAKOUT ✓ ${breakoutInfo.direction === 'up' ? 'UP' : 'DOWN'}` : v === 'FAKEOUT_RISK' ? 'FAKEOUT RISK' : 'BREAKOUT ?';
             return (
@@ -16391,7 +16391,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                    ['drawings', 'Drawings', <DrawingsIcon size={20} key="i" />], ['settings', 'Settings', <SettingsIcon size={20} key="i" />]] as const).map(([k, label, icon]) => (
                   <button key={k} type="button" data-menu-tile={k} aria-pressed={scalpMenu === k} onClick={() => setScalpMenu(k)}
                     className={`shrink-0 h-[78.8px] rounded-[8px] flex flex-col items-center justify-center gap-3 text-[12px] leading-none font-medium ${scalpMenu === k
-                      ? 'bg-[#dfe9ff] text-[#1d3f8f] dark:bg-[#0f1f3d] dark:text-foreground' : 'border border-foreground/15 text-foreground/85 active:bg-foreground/10'}`}>
+                      ? 'bg-primary/15 text-primary dark:text-foreground' : 'border border-foreground/15 text-foreground/85 active:bg-foreground/10'}`}>
                     {icon}<span>{label}</span>
                   </button>
                 ))}
@@ -16970,7 +16970,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('PreviousDayHighLow'); }}
                       title={isFav('PreviousDayHighLow') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('PreviousDayHighLow') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('PreviousDayHighLow') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('PreviousDayHighLow') ? 'currentColor' : 'none'} />
                     </button>
@@ -17003,7 +17003,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('15minHighLow'); }}
                       title={isFav('15minHighLow') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('15minHighLow') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('15minHighLow') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('15minHighLow') ? 'currentColor' : 'none'} />
                     </button>
@@ -17036,7 +17036,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('BOSCHoCH'); }}
                       title={isFav('BOSCHoCH') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('BOSCHoCH') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('BOSCHoCH') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('BOSCHoCH') ? 'currentColor' : 'none'} />
                     </button>
@@ -17069,7 +17069,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('InstitutionalLevels'); }}
                       title={isFav('InstitutionalLevels') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('InstitutionalLevels') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('InstitutionalLevels') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('InstitutionalLevels') ? 'currentColor' : 'none'} />
                     </button>
@@ -17091,7 +17091,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                     ) : (<span className="p-1 w-[22px] shrink-0" aria-hidden="true" />)}
                     <button onClick={(e) => { e.stopPropagation(); toggleFav('BreakersGrabs'); }}
                       title={isFav('BreakersGrabs') ? 'Remove from favourites' : 'Mark as favourite'} aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('BreakersGrabs') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}>
+                      className={`p-1 transition-colors ${isFav('BreakersGrabs') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}>
                       <Star size={14} fill={isFav('BreakersGrabs') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
@@ -17121,7 +17121,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                         aria-label={`FVG with zones ${dzFvg.on ? 'on' : 'off'}`}
                         title={dzFvg.on ? 'FVG shown with each zone — tap to hide' : 'Show the FVG that created each zone'}
                         className={`shrink-0 px-1.5 py-0.5 rounded border text-[10px] font-bold leading-none transition-colors ${
-                          dzFvg.on ? 'border-amber-500/60 bg-amber-500/20 text-amber-500' : 'border-border text-muted-foreground hover:text-foreground'}`}
+                          dzFvg.on ? 'border-primary/60 bg-primary/20 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}
                       >
                         FVG
                       </button>
@@ -17147,7 +17147,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('DirectionalZones'); }}
                       title={isFav('DirectionalZones') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('DirectionalZones') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('DirectionalZones') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('DirectionalZones') ? 'currentColor' : 'none'} />
                     </button>
@@ -17185,7 +17185,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('FairValueGaps'); }}
                       title={isFav('FairValueGaps') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('FairValueGaps') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('FairValueGaps') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('FairValueGaps') ? 'currentColor' : 'none'} />
                     </button>
@@ -17218,7 +17218,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('DemandSupplyZones'); }}
                       title={isFav('DemandSupplyZones') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('DemandSupplyZones') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('DemandSupplyZones') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('DemandSupplyZones') ? 'currentColor' : 'none'} />
                     </button>
@@ -17251,7 +17251,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('LevelTouchAlerts'); }}
                       title={isFav('LevelTouchAlerts') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('LevelTouchAlerts') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('LevelTouchAlerts') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('LevelTouchAlerts') ? 'currentColor' : 'none'} />
                     </button>
@@ -17284,7 +17284,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('ZoneTapAlerts'); }}
                       title={isFav('ZoneTapAlerts') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('ZoneTapAlerts') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('ZoneTapAlerts') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('ZoneTapAlerts') ? 'currentColor' : 'none'} />
                     </button>
@@ -17317,7 +17317,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('BreakoutFakeouts'); }}
                       title={isFav('BreakoutFakeouts') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('BreakoutFakeouts') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('BreakoutFakeouts') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('BreakoutFakeouts') ? 'currentColor' : 'none'} />
                     </button>
@@ -17337,7 +17337,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('ReversalPinBars'); }}
                       title={isFav('ReversalPinBars') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('ReversalPinBars') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('ReversalPinBars') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('ReversalPinBars') ? 'currentColor' : 'none'} />
                     </button>
@@ -17368,7 +17368,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('SwapSweepReversal'); }}
                       title={isFav('SwapSweepReversal') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('SwapSweepReversal') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('SwapSweepReversal') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('SwapSweepReversal') ? 'currentColor' : 'none'} />
                     </button>
@@ -17401,7 +17401,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('GiftDivergence'); }}
                       title={isFav('GiftDivergence') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('GiftDivergence') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('GiftDivergence') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('GiftDivergence') ? 'currentColor' : 'none'} />
                     </button>
@@ -17428,7 +17428,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('BiasLevels'); }}
                       title={isFav('BiasLevels') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('BiasLevels') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('BiasLevels') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('BiasLevels') ? 'currentColor' : 'none'} />
                     </button>
@@ -17466,7 +17466,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('SessionBreaks'); }}
                       title={isFav('SessionBreaks') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('SessionBreaks') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('SessionBreaks') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('SessionBreaks') ? 'currentColor' : 'none'} />
                     </button>
@@ -17500,7 +17500,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('Volume'); }}
                       title={isFav('Volume') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('Volume') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('Volume') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('Volume') ? 'currentColor' : 'none'} />
                     </button>
@@ -17535,7 +17535,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('SupportResistanceLines'); }}
                       title={isFav('SupportResistanceLines') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('SupportResistanceLines') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('SupportResistanceLines') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('SupportResistanceLines') ? 'currentColor' : 'none'} />
                     </button>
@@ -17573,7 +17573,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('OIBars'); }}
                       title={isFav('OIBars') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('OIBars') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('OIBars') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('OIBars') ? 'currentColor' : 'none'} />
                     </button>
@@ -17610,7 +17610,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('RSI'); }}
                       title={isFav('RSI') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('RSI') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('RSI') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('RSI') ? 'currentColor' : 'none'} />
                     </button>
@@ -17647,7 +17647,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('BollingerBands'); }}
                       title={isFav('BollingerBands') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('BollingerBands') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('BollingerBands') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('BollingerBands') ? 'currentColor' : 'none'} />
                     </button>
@@ -17684,7 +17684,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={(e) => { e.stopPropagation(); toggleFav('HLevels'); }}
                       title={isFav('HLevels') ? 'Remove from favourites' : 'Mark as favourite'}
                       aria-label="Toggle favourite"
-                      className={`p-1 transition-colors ${isFav('HLevels') ? 'text-amber-400' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
+                      className={`p-1 transition-colors ${isFav('HLevels') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}
                     >
                       <Star size={14} fill={isFav('HLevels') ? 'currentColor' : 'none'} />
                     </button>
@@ -17951,7 +17951,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 {lev.window?.text && (
                   <div className={
                     lev.window.tone === 'up' ? 'text-emerald-400'
-                    : lev.window.tone === 'down' ? 'text-amber-400'
+                    : lev.window.tone === 'down' ? 'text-primary'
                     : 'text-foreground/60'
                   }>
                     {lev.window.text}{lev.stale ? ' · market closed' : ''}
@@ -17980,8 +17980,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             {paneRole !== 'option' && !scalp && armedTriggers.length > 0 && (
               <div className="absolute top-12 left-2 z-40 flex flex-col gap-1.5 pointer-events-auto">
                 {armedTriggers.map((t: any) => (
-                  <div key={t.id} className="flex items-center gap-2 bg-amber-500/15 border border-amber-500/40 rounded-lg px-2.5 py-1.5 backdrop-blur-sm">
-                    <span className="text-[10px] font-mono font-bold text-amber-300">
+                  <div key={t.id} className="flex items-center gap-2 bg-primary/15 border border-primary/40 rounded-lg px-2.5 py-1.5 backdrop-blur-sm">
+                    <span className="text-[10px] font-mono font-bold text-primary">
                       {t.side} {prettyOptionName(t.tradingsymbol)} @ {Number(t.watch_token) > 0 ? `${t.watch_name || 'index'} ` : ''}{Number(t.trigger_price).toFixed(2)}
                       <span className="opacity-70"> · {t.direction === 'UP' ? 'on rise' : 'on fall'}</span>
                     </span>
@@ -17991,7 +17991,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                         if (r?.ok) { toast.success('Trigger cancelled'); } else { toast.error(r?.error || 'Could not cancel'); }
                         refetchTriggers();
                       }}
-                      className="text-[10px] font-bold text-amber-200 hover:text-white px-2 py-1 rounded bg-black/30"
+                      className="text-[10px] font-bold text-primary hover:text-white px-2 py-1 rounded bg-black/30"
                     >
                       CANCEL
                     </button>
@@ -18076,7 +18076,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       title={tradeRowCollapsed ? 'Show Exit' : 'Tuck Exit away'}
                       className="pointer-events-auto h-[22px] pl-1.5 pr-1 rounded-md border border-border bg-background/90 text-[11px] leading-none flex items-center gap-1.5"
                     >
-                      <span className="font-semibold text-sky-500">{name} <span className="font-normal opacity-70">· {size}</span></span>
+                      <span className="font-semibold text-primary">{name} <span className="font-normal opacity-70">· {size}</span></span>
                       <span ref={chipPnlRef} className="font-mono font-bold" />
                       <ChevronRight size={12} className={`text-muted-foreground transition-transform ${tradeRowCollapsed ? '' : 'rotate-180'}`} />
                     </button>
@@ -18304,7 +18304,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 // over the chart. It was a purple disc with a double chevron at
                 // the right edge. (On the desktop it keeps its place by the
                 // price axis.) The phone's axis is 26px tall, ScalpPro's 30.
-                className={`absolute z-[55] h-[26px] w-[26px] rounded-[7px] border border-[#dcdcdc] bg-white text-[#4f6bd5] shadow-md flex items-center justify-center active:bg-[#f0f0f0] animate-in fade-in duration-200 left-1/2 -translate-x-1/2 md:left-auto md:translate-x-0 md:right-[60px] md:bottom-3 ${scalp ? 'bottom-[38px]' : 'bottom-[34px]'}`}
+                className={`absolute z-[55] h-[26px] w-[26px] rounded-[7px] border border-[#dcdcdc] bg-white text-primary shadow-md flex items-center justify-center active:bg-[#f0f0f0] animate-in fade-in duration-200 left-1/2 -translate-x-1/2 md:left-auto md:translate-x-0 md:right-[60px] md:bottom-3 ${scalp ? 'bottom-[38px]' : 'bottom-[34px]'}`}
               >
                 <RotateCw size={14} strokeWidth={2.4} />
               </button>
@@ -18435,7 +18435,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
 
                 {slArmedRule ? (
                   <div className="flex gap-1">
-                    <button disabled={slSaving} onClick={armSlRule} className="flex-1 py-1.5 rounded bg-amber-500/90 hover:bg-amber-500 text-black font-bold disabled:opacity-50">Update</button>
+                    <button disabled={slSaving} onClick={armSlRule} className="flex-1 py-1.5 rounded bg-primary/90 hover:bg-primary text-black font-bold disabled:opacity-50">Update</button>
                     <button disabled={slSaving} onClick={cancelSlRule} className="flex-1 py-1.5 rounded bg-rose-500/90 hover:bg-rose-500 text-white font-bold disabled:opacity-50">Cancel</button>
                   </div>
                 ) : (
@@ -18665,7 +18665,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               <div ref={atRowRef} data-at-row={atMine} data-at-lit={atLit ? '1' : '0'} className="absolute inset-x-0 top-0 h-0 z-[43] pointer-events-none" style={{ display: 'none' }}>
                 <div className="absolute left-0 right-[var(--axw,56px)] h-px -translate-y-1/2 text-foreground/65" style={SCALP_DASH} />
                 <div data-at-chip="" onPointerDown={startAtDrag} style={{ touchAction: 'none' }}
-                  className={`pointer-events-auto absolute left-[var(--chipx,52px)] -translate-y-1/2 h-6 pr-2 rounded-[4px] border bg-background flex items-center text-[10px] leading-none select-none cursor-ns-resize ${atLit ? 'border-blue-400 text-foreground' : 'border-foreground/15 text-foreground/60'}`}>
+                  className={`pointer-events-auto absolute left-[var(--chipx,52px)] -translate-y-1/2 h-6 pr-2 rounded-[4px] border bg-background flex items-center text-[10px] leading-none select-none cursor-ns-resize ${atLit ? 'border-primary text-foreground' : 'border-foreground/15 text-foreground/60'}`}>
                   <button type="button" data-at="close" aria-label="Back to Market" onPointerDown={(e) => e.stopPropagation()} onClick={atOff} className="h-6 w-6 -my-px flex items-center justify-center"><X size={18} strokeWidth={1.4} /></button>
                   <span className="whitespace-nowrap">At Price{isSpotPane && scalpShared?.current.optShort ? ` · ${scalpShared.current.optShort}` : ''}</span>
                   <GripVertical size={16} className="ml-[2.5px] -mr-[4.5px]" />
@@ -18676,13 +18676,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             {scalp && scalpOrders.map((t: any) => (
               <div key={t.id} data-order-row={t.id} ref={(el) => { if (el) scalpOrderEls.current.set(String(t.id), el); else scalpOrderEls.current.delete(String(t.id)); }}
                 className="absolute inset-x-0 top-0 h-0 z-[42] pointer-events-none" style={{ display: 'none' }}>
-                <div className={`absolute left-0 right-[var(--axw,56px)] h-px -translate-y-1/2 ${t.side === 'BUY' ? 'text-sky-400/80' : 'text-rose-400/80'}`} style={SCALP_DASH} />
+                <div className={`absolute left-0 right-[var(--axw,56px)] h-px -translate-y-1/2 ${t.side === 'BUY' ? 'text-primary/80' : 'text-rose-400/80'}`} style={SCALP_DASH} />
                 <div className="pointer-events-auto absolute left-[var(--chipx,52px)] -translate-y-1/2 h-6 pl-1.5 rounded-[4px] border border-foreground/15 bg-background flex items-center gap-1.5 text-[10px] leading-none text-foreground select-none">
-                  <span className={`h-4 w-4 rounded-[3px] flex items-center justify-center text-[9px] font-bold text-white ${t.side === 'BUY' ? 'bg-sky-600' : 'bg-rose-600'}`}>{t.side === 'BUY' ? 'B' : 'S'}</span>
+                  <span className={`h-4 w-4 rounded-[3px] flex items-center justify-center text-[9px] font-bold text-white ${t.side === 'BUY' ? 'bg-primary' : 'bg-rose-600'}`}>{t.side === 'BUY' ? 'B' : 'S'}</span>
                   <span className="whitespace-nowrap">0/{t.quantity} {orderKind(t)}{isSpotPane ? ` · ${prettyOptionName(t.tradingsymbol).split(' ').slice(1, 3).join(' ')}` : ''}</span>
                   <button type="button" data-order="cancel" aria-label="Cancel this order" onClick={() => cancelScalpOrder(String(t.id))} className="h-6 w-6 -my-px -ml-1 flex items-center justify-center text-foreground/60"><X size={18} strokeWidth={1.4} /></button>
                 </div>
-                <span className={`absolute right-0 -translate-y-1/2 w-[var(--axw,56px)] h-5 flex items-center justify-center rounded-l-[4px] border border-r-0 bg-background text-[10px] leading-none font-medium ${t.side === 'BUY' ? 'border-sky-400/80 text-sky-300' : 'border-rose-400/80 text-rose-300'}`}>{Number(t.trigger_price).toFixed(2)}</span>
+                <span className={`absolute right-0 -translate-y-1/2 w-[var(--axw,56px)] h-5 flex items-center justify-center rounded-l-[4px] border border-r-0 bg-background text-[10px] leading-none font-medium ${t.side === 'BUY' ? 'border-primary/80 text-primary' : 'border-rose-400/80 text-rose-300'}`}>{Number(t.trigger_price).toFixed(2)}</span>
               </div>
             ))}
             {/* SCALPPRO: the interval in the corner where the two axes meet — each
@@ -18776,7 +18776,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               className="bg-card border border-0 rounded-none overflow-hidden w-full h-full absolute inset-0"
             />
             {rsiHoverValue && (
-               <div className="absolute top-2 left-2 z-10 text-xs font-mono font-medium text-cyan-400">
+               <div className="absolute top-2 left-2 z-10 text-xs font-mono font-medium text-primary">
                   RSI: {rsiHoverValue}
                </div>
             )}
@@ -19501,8 +19501,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           when the level arrives and the order is rejected. */}
       {marginWarn && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-amber-500/50 bg-card p-4">
-            <div className="text-sm font-bold text-amber-300">Not enough margin for this order</div>
+          <div className="w-full max-w-sm rounded-xl border border-primary/50 bg-card p-4">
+            <div className="text-sm font-bold text-primary">Not enough margin for this order</div>
             <div className="mt-2 text-xs text-foreground/80 leading-relaxed">
               {marginWarn.side} {marginWarn.qty} {prettyOptionName(marginWarn.symbol)} at {Number(marginWarn.level).toFixed(2)}
             </div>
@@ -19525,7 +19525,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               <button
                 onClick={() => { setMarginWarn(null); armTrigger(true); }}
                 disabled={armingTrigger}
-                className="flex-1 h-9 rounded-lg bg-amber-500/20 border border-amber-500/50 text-xs font-bold text-amber-200 disabled:opacity-50"
+                className="flex-1 h-9 rounded-lg bg-primary/20 border border-primary/50 text-xs font-bold text-primary disabled:opacity-50"
               >
                 Arm anyway
               </button>
@@ -19680,7 +19680,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               Margin:{' '}
               {triggerMargin === 'loading' ? <span className="text-muted-foreground">checking…</span>
                 : triggerMargin === 'unavailable' || !triggerMargin
-                  ? <span className="text-amber-400">unavailable from Zerodha — arm only if you know the requirement</span>
+                  ? <span className="text-primary">unavailable from Zerodha — arm only if you know the requirement</span>
                   : <span className="text-foreground font-bold font-mono">₹{Math.round(triggerMargin.total).toLocaleString('en-IN')}</span>}
             </div>
 

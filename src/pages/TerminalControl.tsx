@@ -195,10 +195,10 @@ export default function TerminalControl() {
           
           {/* Kite IP Whitelisting card */}
           <Card className="bg-card border-0 backdrop-blur-xl relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-1 h-full bg-cyan-400"></div>
+            <div className="absolute top-0 left-0 w-1 h-full bg-primary"></div>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold tracking-wide text-foreground/90 flex items-center gap-1.5">
-                <Globe className="w-4 h-4 text-cyan-400" /> Kite Developer Portal Whitelist IP
+                <Globe className="w-4 h-4 text-primary" /> Kite Developer Portal Whitelist IP
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 pt-1">
@@ -219,7 +219,7 @@ export default function TerminalControl() {
                 </div>
                 
                 <div className="flex items-center justify-between gap-2 overflow-hidden">
-                  <div className="font-mono text-sm font-bold text-cyan-400 bg-background/65 px-3 py-2.5 rounded-lg border border-border/10 flex-1 truncate select-all flex items-center justify-between">
+                  <div className="font-mono text-sm font-bold text-primary bg-background/65 px-3 py-2.5 rounded-lg border border-border/10 flex-1 truncate select-all flex items-center justify-between">
                     {loadingIp ? (
                       <span className="text-muted-foreground animate-pulse text-xs">Fetching Outbound IP...</span>
                     ) : (
@@ -343,7 +343,7 @@ export default function TerminalControl() {
                   <select
                     value={settings.refreshInterval}
                     onChange={(e) => updateSetting("refreshInterval", Number(e.target.value))}
-                    className="w-full bg-card border border-0 rounded-lg py-2 px-3 text-xs text-foreground focus:outline-none focus:border-indigo-500 transition-colors"
+                    className="w-full bg-card border border-0 rounded-lg py-2 px-3 text-xs text-foreground focus:outline-none focus:border-primary transition-colors"
                   >
                     <option value={5000}>Extremely Fast (5 Seconds)</option>
                     <option value={10000}>Balanced Option Default (10 Seconds)</option>
@@ -358,7 +358,7 @@ export default function TerminalControl() {
                   <select
                     value={settings.strikeBuffer}
                     onChange={(e) => updateSetting("strikeBuffer", Number(e.target.value))}
-                    className="w-full bg-card border border-0 rounded-lg py-2 px-3 text-xs text-foreground focus:outline-none focus:border-indigo-500 transition-colors"
+                    className="w-full bg-card border border-0 rounded-lg py-2 px-3 text-xs text-foreground focus:outline-none focus:border-primary transition-colors"
                   >
                     <option value={3}>Super Dense (± 3 Strikes)</option>
                     <option value={5}>Ideal View Range (± 5 Strikes)</option>
@@ -594,21 +594,21 @@ export default function TerminalControl() {
 
             {/* Box 2 */}
             <div className="bg-card p-4 rounded-xl border border-0 space-y-2">
-              <div className="w-8 h-8 rounded-lg bg-sky-500/10 flex items-center justify-center text-sky-400 text-xs font-bold font-mono">02</div>
+              <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary text-xs font-bold font-mono">02</div>
               <p className="text-xs font-semibold text-foreground">Websocket Stream</p>
               <p className="text-[11px] text-muted-foreground">Isolated 3s Client-Safe multi-socket feeding option ticks directly to active curves.</p>
             </div>
 
             {/* Box 3 */}
             <div className="bg-card p-4 rounded-xl border border-0 space-y-2">
-              <div className="w-8 h-8 rounded-lg bg-pink-500/10 flex items-center justify-center text-pink-400 text-xs font-bold font-mono">03</div>
+              <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary text-xs font-bold font-mono">03</div>
               <p className="text-xs font-semibold text-foreground">Express API Backend</p>
               <p className="text-[11px] text-muted-foreground">Proxy layer protecting secret broker parameters & conducting Black-Scholes risk models.</p>
             </div>
 
             {/* Box 4 */}
             <div className="bg-card p-4 rounded-xl border border-0 space-y-2">
-              <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400 text-xs font-bold font-mono">04</div>
+              <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary text-xs font-bold font-mono">04</div>
               <p className="text-xs font-semibold text-foreground">Kite Integration</p>
               <p className="text-[11px] text-muted-foreground">Automated SQLITE session management & authenticated broker socket handshakes.</p>
             </div>

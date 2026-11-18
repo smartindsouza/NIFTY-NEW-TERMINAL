@@ -145,9 +145,9 @@ export default function GapScorecard() {
               <div className="text-xs text-muted-foreground">{snap.date} · snapshot {fmtBoth(snap.ts)}</div>
             </div>
             <div className="flex flex-wrap gap-1.5 mb-4">
-              {snap.eventFlag && <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">EVENT WINDOW</span>}
-              {snap.cautionFlag && <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">VIX CAUTION</span>}
-              {snap.lowMagnitude && <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-sky-500/15 text-sky-400 border border-sky-500/30" title="Implied move under 0.15% of spot">LOW MAGNITUDE — capture may not beat costs</span>}
+              {snap.eventFlag && <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary border border-primary/30">EVENT WINDOW</span>}
+              {snap.cautionFlag && <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary border border-primary/30">VIX CAUTION</span>}
+              {snap.lowMagnitude && <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary border border-primary/30" title="Implied move under 0.15% of spot">LOW MAGNITUDE — capture may not beat costs</span>}
               {snap.staleData && <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-500/20 text-slate-300 border border-slate-500/30">STALE / OFF-HOURS DATA</span>}
               {snap.dataGaps?.length > 0 && <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-500/20 text-slate-300 border border-slate-500/30" title={snap.dataGaps.join('\n')}>{snap.dataGaps.length} DATA GAP{snap.dataGaps.length > 1 ? 'S' : ''}</span>}
             </div>
@@ -283,7 +283,7 @@ export default function GapScorecard() {
 
       {/* Events editor */}
       <div className="rounded-2xl border border-border bg-card overflow-hidden">
-        <div className="px-4 py-3 text-sm font-bold border-b border-border flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-amber-400" /> Gap events (FOMC, CPI, RBI, Budget…)</div>
+        <div className="px-4 py-3 text-sm font-bold border-b border-border flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-primary" /> Gap events (FOMC, CPI, RBI, Budget…)</div>
         <div className="p-4 space-y-2">
           {events.map((e: any) => (
             <div key={e.id} className="flex items-center gap-2 text-sm">

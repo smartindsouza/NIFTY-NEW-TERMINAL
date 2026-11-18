@@ -13,9 +13,9 @@ export default function GoldenSweepCard() {
   return (
     <div className="bg-card border border-border rounded-xl p-4 space-y-2">
       <div className="flex items-center gap-2">
-        <Eye className="w-5 h-5 text-amber-400" />
+        <Eye className="w-5 h-5 text-primary" />
         <div>
-          <h2 className="font-bold">Golden-zone Swap-Sweep <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 align-middle">WATCH ONLY</span></h2>
+          <h2 className="font-bold">Golden-zone Swap-Sweep <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary/20 text-primary align-middle">WATCH ONLY</span></h2>
           <div className="text-[11px] text-muted-foreground">NIFTY 15-min Swap-Sweep whose sweep lands in the 50–61.8% zone of the last 24 candles' swing. Alerts only — no orders.</div>
         </div>
       </div>

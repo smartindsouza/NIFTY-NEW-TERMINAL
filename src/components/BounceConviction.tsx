@@ -10,7 +10,7 @@ const fmt = (v: any, d = 1) => (typeof v === "number" && isFinite(v) ? v.toFixed
 
 function Bar({ label, value }: { label: string; value: number }) {
   const v = Math.max(0, Math.min(100, value || 0));
-  const color = v >= 70 ? "bg-emerald-500" : v >= 40 ? "bg-amber-500" : "bg-slate-500";
+  const color = v >= 70 ? "bg-emerald-500" : v >= 40 ? "bg-primary" : "bg-slate-500";
   return (
     <div className="flex items-center gap-2">
       <span className="w-20 text-muted-foreground">{label}</span>
@@ -41,7 +41,7 @@ export default function BounceConviction({ taInfo, oiData, pulseBias }: Props) {
   const label = b?.label || "NO SETUP";
   const scoreColor =
     label === "STRONG" ? "text-emerald-400 bg-emerald-500/20"
-    : label === "BUILDING" ? "text-amber-400 bg-amber-500/20"
+    : label === "BUILDING" ? "text-primary bg-primary/20"
     : "text-slate-300 bg-slate-500/20";
 
   // Live-only options confirmation (never part of the backtested score).

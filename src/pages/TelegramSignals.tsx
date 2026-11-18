@@ -23,8 +23,8 @@ const PIN_KEY = 'signalsPin';
 const readPin = () => { try { return localStorage.getItem(PIN_KEY) || ''; } catch { return ''; } };
 
 const STATUS_STYLE: Record<string, string> = {
-  ENTERED: 'bg-emerald-500/15 text-emerald-400', WATCHING: 'bg-amber-500/15 text-amber-400',
-  WAITING_LEVELS: 'bg-amber-500/15 text-amber-400', ORDERED: 'bg-sky-500/15 text-sky-400',
+  ENTERED: 'bg-emerald-500/15 text-emerald-400', WATCHING: 'bg-primary/15 text-primary',
+  WAITING_LEVELS: 'bg-primary/15 text-primary', ORDERED: 'bg-primary/15 text-primary',
   SKIPPED: 'bg-muted text-muted-foreground', FAILED: 'bg-rose-500/15 text-rose-400',
 };
 const STATUS_WORD: Record<string, string> = {
@@ -97,7 +97,7 @@ export default function TelegramSignals() {
             <button key={m} disabled={busy || (m !== 'OFF' && !ready)} onClick={() => setMode(m)}
               className={cn('text-xs font-bold px-3 py-2 rounded-lg transition-colors disabled:opacity-40',
                 s?.mode === m
-                  ? (m === 'LIVE' ? 'bg-emerald-500 text-white' : m === 'PRACTICE' ? 'bg-sky-500 text-white' : 'bg-rose-500/80 text-white')
+                  ? (m === 'LIVE' ? 'bg-emerald-500 text-white' : m === 'PRACTICE' ? 'bg-primary text-white' : 'bg-rose-500/80 text-white')
                   : 'text-muted-foreground hover:text-foreground')}>
               {m === 'OFF' && <Power className="w-3.5 h-3.5 inline mr-1 -mt-0.5" />}{m === 'PRACTICE' ? 'Practice' : m === 'LIVE' ? 'Live' : 'Off'}
             </button>
@@ -107,7 +107,7 @@ export default function TelegramSignals() {
 
       {/* PIN */}
       {data && !data.pinConfigured && (
-        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-300 text-sm p-3">
+        <div className="rounded-xl border border-primary/40 bg-primary/10 text-primary text-sm p-3">
           Add a <b>SIGNALS_PIN</b> variable in Railway (any 6 digits) and redeploy — it protects setup and the Live switch.
         </div>
       )}
@@ -127,7 +127,7 @@ export default function TelegramSignals() {
         const L = x.ladder || {};
         const tps: number[] = L.tps || [];
         return (
-          <div key={x.id} className={cn('rounded-xl border-2 p-4 space-y-3', x.mode === 'LIVE' ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-sky-500/40 bg-sky-500/5')}>
+          <div key={x.id} className={cn('rounded-xl border-2 p-4 space-y-3', x.mode === 'LIVE' ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-primary/40 bg-primary/5')}>
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div>
                 <div className="font-bold text-base">{x.tradingsymbol} <span className="text-[11px] font-semibold text-muted-foreground">{x.mode === 'LIVE' ? 'LIVE' : 'PRACTICE'} · {x.qty} qty</span></div>
@@ -137,7 +137,7 @@ export default function TelegramSignals() {
               <div className="flex gap-2">
                 {L.stage >= 3 && L.decision === 'PENDING' && x.status === 'OPEN' && (
                   <button disabled={busy} onClick={() => post('/api/signals/keep', { id: x.id }, false).then(d => d?.message && toast(d.message))}
-                    className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg bg-sky-500/20 text-sky-300 hover:bg-sky-500/30">
+                    className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg bg-primary/20 text-primary hover:bg-primary/30">
                     <TrendingUp className="w-3.5 h-3.5" /> Keep trailing
                   </button>
                 )}
@@ -156,7 +156,7 @@ export default function TelegramSignals() {
                 </div>
               ))}
             </div>
-            {L.decision === 'KEEP' && <div className="text-[11px] text-sky-300">Trailing above TP3 in steps of {inr(tps[2] - tps[1])}.</div>}
+            {L.decision === 'KEEP' && <div className="text-[11px] text-primary">Trailing above TP3 in steps of {inr(tps[2] - tps[1])}.</div>}
           </div>
         );
       })}

@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import { Zap, TrendingUp, TrendingDown, RefreshCw, AlertTriangle, Clock } from 'lucide-react';
 
 function Card({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: 'pos' | 'neg' | 'warn' | 'neutral' }) {
-  const c = tone === 'pos' ? 'text-emerald-400' : tone === 'neg' ? 'text-rose-400' : tone === 'warn' ? 'text-amber-400' : 'text-foreground';
+  const c = tone === 'pos' ? 'text-emerald-400' : tone === 'neg' ? 'text-rose-400' : tone === 'warn' ? 'text-primary' : 'text-foreground';
   return (
     <div className="rounded-xl bg-card p-3">
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
@@ -91,8 +91,8 @@ export default function GammaBlast() {
 
   const ok = data?.success;
   const lvl = ok ? data.level : 'OFF';
-  const banner = lvl === 'SETUP' ? 'bg-amber-500/15 border-amber-500/40' : lvl === 'WATCH' ? 'bg-sky-500/10 border-sky-500/30' : 'bg-card border-border';
-  const bannerText = lvl === 'SETUP' ? 'text-amber-400' : lvl === 'WATCH' ? 'text-sky-400' : 'text-muted-foreground';
+  const banner = lvl === 'SETUP' ? 'bg-primary/15 border-primary/40' : lvl === 'WATCH' ? 'bg-primary/10 border-primary/30' : 'bg-card border-border';
+  const bannerText = lvl === 'SETUP' ? 'text-primary' : lvl === 'WATCH' ? 'text-primary' : 'text-muted-foreground';
   const blast = ok ? data.blast : null;
   const plain = ok ? plainWords(data, blast) : null;
 
@@ -100,7 +100,7 @@ export default function GammaBlast() {
     <div className="max-w-3xl mx-auto px-4 py-5 pb-24">
       <div className="relative bg-card border border-border rounded-xl p-4 mb-4 overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/40 before:to-transparent">
         <div className="flex items-center gap-2 mb-1">
-          <Zap className="w-5 h-5 text-amber-400" />
+          <Zap className="w-5 h-5 text-primary" />
           <h1 className="text-lg font-bold text-foreground whitespace-nowrap">Gamma Blast</h1>
         </div>
         
@@ -124,12 +124,12 @@ export default function GammaBlast() {
       {/* In plain words — no-greeks translation of the whole screen */}
       {plain && (
         <div className={cn('rounded-xl border p-4 mb-4',
-          plain.tone === 'high' ? 'bg-amber-500/10 border-amber-500/40' : plain.tone === 'mod' ? 'bg-sky-500/10 border-sky-500/30' : 'bg-card border-border')}>
+          plain.tone === 'high' ? 'bg-primary/10 border-primary/40' : plain.tone === 'mod' ? 'bg-primary/10 border-primary/30' : 'bg-card border-border')}>
           <div className={cn('text-xs font-bold uppercase tracking-wider mb-2',
-            plain.tone === 'high' ? 'text-amber-400' : plain.tone === 'mod' ? 'text-sky-400' : 'text-muted-foreground')}>
+            plain.tone === 'high' ? 'text-primary' : plain.tone === 'mod' ? 'text-primary' : 'text-muted-foreground')}>
             In plain words
           </div>
-          <div className={cn('text-sm font-semibold mb-2', plain.tone === 'high' ? 'text-amber-300' : plain.tone === 'mod' ? 'text-sky-300' : 'text-foreground')}>
+          <div className={cn('text-sm font-semibold mb-2', plain.tone === 'high' ? 'text-primary' : plain.tone === 'mod' ? 'text-primary' : 'text-foreground')}>
             {plain.headline}
           </div>
           <div className="space-y-1.5">
@@ -168,7 +168,7 @@ export default function GammaBlast() {
             <div className="flex items-center gap-2 mb-3">
               <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Gamma regime</span>
               <span className={cn('text-xs font-bold px-2 py-0.5 rounded-md',
-                data.gammaRegime === 'LOADED' ? 'bg-amber-500/20 text-amber-400' : data.gammaRegime === 'ELEVATED' ? 'bg-sky-500/15 text-sky-400' : 'bg-muted text-muted-foreground')}>
+                data.gammaRegime === 'LOADED' ? 'bg-primary/20 text-primary' : data.gammaRegime === 'ELEVATED' ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground')}>
                 {data.gammaRegime}
               </span>
             </div>
@@ -208,7 +208,7 @@ export default function GammaBlast() {
               </div>
               <div className="text-[11px] leading-relaxed text-muted-foreground">
                 {data.pinning.pinned
-                  ? <>Index is <span className="text-amber-400 font-semibold">pinned</span> near max-pain {data.pinning.maxPain} — OI is holding it here. The blast comes when price breaks <span className="text-foreground">away</span> from this level.</>
+                  ? <>Index is <span className="text-primary font-semibold">pinned</span> near max-pain {data.pinning.maxPain} — OI is holding it here. The blast comes when price breaks <span className="text-foreground">away</span> from this level.</>
                   : data.pinning.breakingAway
                     ? <>Price is <span className="text-emerald-400 font-semibold">breaking away</span> from max-pain {data.pinning.maxPain} — momentum unopposed by the OI pin.</>
                     : <>Max-pain {data.pinning.maxPain} is {Math.abs(data.pinning.pinDistPts ?? 0)} pts away; watch whether price drifts back toward it (pin) or breaks the walls.</>}

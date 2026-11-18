@@ -162,7 +162,7 @@ function Row({ m, onOpen }: { m: Market; onOpen?: () => void }) {
             // Flat by ARITHMETIC, not by market: no prior close was obtainable,
             // so the change is the price minus itself. Better to say so than to
             // render a convincing 0.00% that looks like an unchanged market.
-            <span className="text-[9px] font-mono text-amber-500/70 shrink-0"
+            <span className="text-[9px] font-mono text-primary/70 shrink-0"
                   title="No previous close available from the data source, so the change cannot be computed">
               no ref
             </span>
@@ -417,7 +417,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
           {!collapsed.us && us.length === 0 && (
             <div className="px-3 py-3 text-xs text-slate-500">
               {data && (data as any).success === false
-                ? <span className="text-amber-400/80 font-mono text-[10px]">server error: {String((data as any).error || 'unknown').slice(0, 90)}</span>
+                ? <span className="text-primary/80 font-mono text-[10px]">server error: {String((data as any).error || 'unknown').slice(0, 90)}</span>
                 : data ? 'no rows returned' : 'Loading…'}
             </div>
           )}

@@ -20,15 +20,15 @@ export function MetricSourceBadge({ type, lastUpdated, source, formula }: Metric
       icon = <Activity className="w-3 h-3 mr-1" />;
       break;
     case "CALCULATED":
-      color = "bg-indigo-500/10 text-indigo-400 border-indigo-500/20";
+      color = "bg-primary/10 text-primary border-primary/20";
       icon = <Cpu className="w-3 h-3 mr-1" />;
       break;
     case "STORED SNAPSHOT":
-      color = "bg-sky-500/10 text-sky-400 border-sky-500/20";
+      color = "bg-primary/10 text-primary border-primary/20";
       icon = <Database className="w-3 h-3 mr-1" />;
       break;
     case "GEMINI EXPLANATION":
-      color = "bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20";
+      color = "bg-primary/10 text-primary border-primary/20";
       icon = <Brain className="w-3 h-3 mr-1" />;
       break;
     case "LOCAL RULES":

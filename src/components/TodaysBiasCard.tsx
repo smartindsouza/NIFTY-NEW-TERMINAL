@@ -12,8 +12,8 @@ const TONE: Record<BiasRead, { word: string; Icon: any; pill: string; border: st
     border: 'border-l-emerald-500', text: 'text-emerald-700 dark:text-emerald-300', tint: 'from-emerald-500/10' },
   bearish: { word: 'BEARISH', Icon: TrendingDown, pill: 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/40',
     border: 'border-l-rose-500', text: 'text-rose-700 dark:text-rose-300', tint: 'from-rose-500/10' },
-  neutral: { word: 'NEUTRAL', Icon: MoveHorizontal, pill: 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/40',
-    border: 'border-l-amber-500', text: 'text-amber-700 dark:text-amber-300', tint: 'from-amber-500/10' },
+  neutral: { word: 'NEUTRAL', Icon: MoveHorizontal, pill: 'bg-primary/15 text-primary dark:text-primary border-primary/40',
+    border: 'border-l-primary', text: 'text-primary dark:text-primary', tint: 'from-primary/10' },
 };
 const CHIP: Record<BiasRead, string> = {
   bullish: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30',
@@ -143,7 +143,7 @@ export function TodaysBiasCard() {
     <Card
       data-testid="todays-bias"
       className={cn('relative overflow-hidden border border-border border-l-4 p-0 gap-0',
-        tone ? tone.border : warn ? 'border-l-amber-500/60' : 'border-l-muted-foreground/30')}>
+        tone ? tone.border : warn ? 'border-l-primary/60' : 'border-l-muted-foreground/30')}>
       {tone && <div className={cn('pointer-events-none absolute inset-0 bg-gradient-to-r to-transparent', tone.tint)} />}
       <button
         onClick={() => setCollapsed((c) => !c)}
@@ -160,7 +160,7 @@ export function TodaysBiasCard() {
           <span className="shrink-0 hidden sm:inline px-1.5 py-0.5 rounded border border-border text-[10px] font-semibold uppercase text-muted-foreground">{rec!.confidence}</span>
         )}
         {stale && <span className="shrink-0 px-1.5 py-0.5 rounded border border-border text-[10px] font-bold text-muted-foreground">STALE · {dayLabel(rec!.date)}</span>}
-        {warn && <span className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 text-[10px] font-bold text-amber-700 dark:text-amber-300"><TriangleAlert size={11} /> {rec!.status === 'no_session' ? 'NO SESSION' : 'ERROR'}</span>}
+        {warn && <span className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-primary/40 bg-primary/10 text-[10px] font-bold text-primary dark:text-primary"><TriangleAlert size={11} /> {rec!.status === 'no_session' ? 'NO SESSION' : 'ERROR'}</span>}
         <span className={cn('min-w-0 flex-1 text-sm', collapsed ? 'truncate' : 'hidden md:block md:truncate')}>{title}</span>
         {rec && !stale && (
           <span className="shrink-0 inline-flex items-center gap-1 text-[11px] text-muted-foreground font-mono" title={`Received ${rec.received_at}`}>
@@ -180,7 +180,7 @@ export function TodaysBiasCard() {
           )}
           {stale && <p className="text-xs text-muted-foreground">This is the note from {dayLabel(rec!.date)}, not today's. Today's has not arrived yet.</p>}
           {warn && (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+            <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-primary dark:text-primary">
               {rec!.error || (rec!.status === 'no_session' ? 'No trading session today.' : 'The analysis could not complete.')}
             </div>
           )}
