@@ -619,7 +619,9 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
         <div
           onClick={() => setOpen(false)}
           data-context-shade={shade}
-          className={`fixed inset-0 z-[9998] bg-background touch-none transition-opacity duration-300 ${shade === 'in' ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+          // On a desktop it is clear (see ON A DESKTOP IT IS A SIDEBAR, below):
+          // it is still there to be clicked, which closes the list.
+          className={`fixed inset-0 z-[9998] bg-background md:bg-transparent touch-none transition-opacity duration-300 ${shade === 'in' ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
           onTouchMove={(e) => { e.stopPropagation(); }}
           aria-label="Close market context"
         />
@@ -637,6 +639,21 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
         data-context-panel=""
         className={`fixed top-0 right-0 h-full z-[9999] w-[340px] max-w-full bg-background transition-transform duration-300 flex flex-col ${open ? "translate-x-0" : "translate-x-full"}`}
       >
+        {/* ON A DESKTOP IT IS A SIDEBAR, NOT A SCREEN (18 Nov 2026). Martin: "in
+            the desktop version the full screen background in not required for
+            the sidebar. Just keep the background as a sidebar but with a
+            gradient fade on the chart". A phone is all sidebar, so there the
+            whole screen takes its colour; on a desktop that blanked a chart
+            1,000px wide to show a list 340px wide. There the layer behind is
+            clear, the list keeps its own background, and this strip to its
+            left carries that colour out over the chart and lets it go — so the
+            chart runs into the sidebar instead of stopping at an edge. It is
+            the panel's child, so it slides with it; it fades with it too, or it
+            would stand at the screen's edge while the panel is put away. It
+            takes no clicks: a click on the chart through it closes the list. */}
+        <div data-context-fade="" aria-hidden="true"
+          className={`hidden md:block pointer-events-none absolute right-full top-0 h-full w-[220px] transition-opacity duration-300 ${open ? 'opacity-100' : 'opacity-0'}`}
+          style={{ background: 'linear-gradient(to left, var(--background) 0%, color-mix(in srgb, var(--background) 72%, transparent) 30%, color-mix(in srgb, var(--background) 32%, transparent) 65%, transparent 100%)' }} />
         <div className="flex items-center justify-between px-3 py-3">
           <div className="flex items-center gap-2">
             <Globe className="w-4 h-4 text-primary" />
