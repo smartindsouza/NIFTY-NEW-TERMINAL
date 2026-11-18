@@ -18795,7 +18795,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 the switch is 34pt tall with a 1pt outline and 12pt corners, its
                   lit half a 24pt pill with 9pt corners, 9pt of space either side
                   of the word;
-                2pt under it, Buy is 36pt tall, lime (#bbe44a) with dark words;
+                2pt under it, Buy is 36pt tall, in the accent colour (lime #bbe44a
+                in Lemonn's; Martin, 18 Nov 2026: "change the buy at market button
+                color to accent color");
                   Sell is 34pt with a 1pt outline; both run to 4pt from the
                   screen's edge and stop 8pt short of the stepper;
                 the stepper's circles are 32pt with a 2pt ring, 44pt apart;
@@ -18825,7 +18827,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               <div className="flex items-center h-9">
                 {atOn ? (
                   <button type="button" data-scalp="buy-at" disabled={!!scalpBusy || !(scalpLot > 0) || atLevel === null} onClick={() => scalpArm('BUY')}
-                    className={`${SCALP_BTN_FILL} bg-[#bbe44a] text-black`}>
+                    className={`${SCALP_BTN_FILL} bg-primary text-primary-foreground`}>
                     {scalpBusy === 'BUY' ? <Loader2 size={16} className="animate-spin" /> : atBuyLabel}
                   </button>
                 ) : scalpPos && scalpPos.side === 'SELL' ? (
@@ -18835,7 +18837,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   </button>
                 ) : (
                   <button type="button" data-scalp="buy" disabled={!!scalpBusy || !(scalpLot > 0)} onClick={() => scalpPlace('BUY')}
-                    className={`${SCALP_BTN_FILL} bg-[#bbe44a] text-black`}>
+                    className={`${SCALP_BTN_FILL} bg-primary text-primary-foreground`}>
                     {scalpBusy === 'BUY' ? <Loader2 size={16} className="animate-spin" /> : 'Buy at Mkt'}
                   </button>
                 )}

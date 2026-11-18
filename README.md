@@ -649,6 +649,12 @@ made to happen on the test copy.
   reported: the blink needs that one geometry, which did not come back while it
   was watching.
 
+## ScalperX: Buy at Mkt is the accent colour (v351)
+
+Martin: "Also change the buy at market button color to accent color". ScalperX's Buy
+at Mkt (and its "Buy at" form when a price is set) was Lemonn's lime with black words;
+it is the accent with white words. Exit stays red.
+
 ## Chart: Option Chain and ScalperX are the journal's pill size (v350)
 
 Martin, with a picture of the journal's Open / History: "Use this size for buttons Option
