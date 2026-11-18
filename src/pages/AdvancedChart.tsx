@@ -6140,57 +6140,74 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     if (!bottomCardUp) return;
     try { if (window.innerWidth >= 768) return; } catch (e) { return; }
     const html = document.documentElement, body = document.body;
-    const prev = [html.style.overflow, body.style.overflow, html.style.overscrollBehavior];
-    html.style.overflow = 'hidden'; body.style.overflow = 'hidden'; html.style.overscrollBehavior = 'none';
+    const prev = [html.style.overflow, body.style.overflow];
+    html.style.overflow = 'hidden'; body.style.overflow = 'hidden';
     const CARDS = '[data-range-sheet],[data-interval-sheet],[data-ind-list],[data-draw-sheet],[data-settings-sheet="open"]';
     const onMove = (e: TouchEvent) => {
       const t = e.target as Element | null;
       const card = t && t.closest ? t.closest(CARDS) as HTMLElement | null : null;
-      if (!card) { e.preventDefault(); return; }
+      if (!card) { if (e.cancelable) e.preventDefault(); return; }
       let el: HTMLElement | null = t as HTMLElement;
       while (el && el !== card.parentElement) {
         if (el.scrollHeight > el.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(el).overflowY)) return;
         el = el.parentElement;
       }
-      e.preventDefault();
+      if (e.cancelable) e.preventDefault();
     };
-    // A finger that goes down OUTSIDE the card closes it (the see-through layer),
-    // and the same finger then drags on: the page must not start moving under
-    // it once the card is gone. So the hold is let go when that finger lifts,
-    // not the moment the card closes.
-    let fingers = 0;
-    const onStart = (e: TouchEvent) => { fingers = e.touches.length; };
-    // The layer closes the card on pointerdown, which comes BEFORE touchstart:
-    // counting from touchstart alone, the card was gone with "no finger down".
-    const onDown = (e: PointerEvent) => { if (e.pointerType === 'touch' && fingers === 0) fingers = 1; };
-    document.addEventListener('pointerdown', onDown, true);
-    const onEnd = (e: TouchEvent) => { fingers = e.touches.length; if (gone && fingers === 0) release(); };
-    let gone = false, released = false;
+    // A finger that goes down OUTSIDE the card closes it, and the same finger
+    // then drags on: the page must not start moving under it once the card is
+    // gone. Two ways a card closes on a touch outside it, and each needs its own
+    // answer (both found by running it):
+    // - Range, Interval, Indicators and Settings close through a see-through
+    //   layer, on pointerdown, and the layer is then taken off the page with the
+    //   finger still on it. The rest of that touch goes to a node no longer in
+    //   the document — no listener here ever hears its moves or its lift, and
+    //   nothing can cancel them. So the layers are `touch-none`: a touch that
+    //   begins on one is never a scroll, whatever happens to the layer after.
+    // - Drawings closes on a touchstart anywhere outside it, and the touch stays
+    //   where it landed: its moves still reach this document, so they are
+    //   cancelled until that finger lifts.
+    // The hold ends when the finger lifts, when a new touch begins (that one
+    // must scroll as normal), or after 1.5 s at most — a lift that is never
+    // heard (the first case) must not leave the page stuck. Pointer events are
+    // no use for the lift: the browser sends pointercancel the moment it starts
+    // a pan, which is exactly the moment the hold has to go on holding.
+    let down = false, released = false;
+    const onDown = () => { down = true; };
+    const onLift = (e: TouchEvent) => { if (e.touches.length === 0) down = false; };
     const release = () => {
       if (released) return; released = true;
       document.removeEventListener('touchmove', onMove);
-      document.removeEventListener('touchstart', onStart, true);
+      document.removeEventListener('touchmove', onHeldMove);
       document.removeEventListener('pointerdown', onDown, true);
-      document.removeEventListener('touchend', onEnd, true);
-      document.removeEventListener('touchcancel', onEnd, true);
-      html.style.overflow = prev[0]; body.style.overflow = prev[1]; html.style.overscrollBehavior = prev[2];
+      document.removeEventListener('touchstart', onDown, true);
+      document.removeEventListener('touchend', onLift, true);
+      document.removeEventListener('touchcancel', onLift, true);
+      document.removeEventListener('touchstart', onNewTouch, true);
+      document.removeEventListener('touchend', onHeldLift, true);
+      document.removeEventListener('touchcancel', onHeldLift, true);
+      if (timer) clearTimeout(timer);
+      html.style.overflow = prev[0]; body.style.overflow = prev[1];
     };
-    const onMoveHeld = (e: TouchEvent) => { if (gone) { e.preventDefault(); return; } onMove(e); };
-    document.addEventListener('touchmove', onMoveHeld, { passive: false });
-    document.addEventListener('touchstart', onStart, true);
-    document.addEventListener('touchend', onEnd, true);
-    document.addEventListener('touchcancel', onEnd, true);
+    const onHeldMove = (e: TouchEvent) => { if (e.cancelable) e.preventDefault(); };
+    const onHeldLift = (e: TouchEvent) => { if (e.touches.length === 0) release(); };
+    const onNewTouch = () => release();
+    let timer: any = null;
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('pointerdown', onDown, true);
+    document.addEventListener('touchstart', onDown, true);
+    document.addEventListener('touchend', onLift, true);
+    document.addEventListener('touchcancel', onLift, true);
     return () => {
-      gone = true;
-      document.removeEventListener('touchmove', onMoveHeld);
-      if (fingers === 0) { release(); return; }
-      // Still down: keep holding the page until it lifts (2 s at most).
-      document.addEventListener('touchmove', onMoveHeld, { passive: false });
-      const lift = () => { document.removeEventListener('touchmove', onMoveHeld); release(); };
-      const once = (e: TouchEvent) => { if (e.touches.length === 0) { document.removeEventListener('touchend', once, true); document.removeEventListener('touchcancel', once, true); lift(); } };
-      document.addEventListener('touchend', once, true);
-      document.addEventListener('touchcancel', once, true);
-      setTimeout(lift, 2000);
+      if (!down) { release(); return; }
+      document.removeEventListener('touchmove', onMove);
+      document.addEventListener('touchmove', onHeldMove, { passive: false });
+      document.addEventListener('touchend', onHeldLift, true);
+      document.addEventListener('touchcancel', onHeldLift, true);
+      // Registered after this touch's own touchstart has passed, so only a
+      // touch that begins later ends the hold.
+      setTimeout(() => { if (!released) document.addEventListener('touchstart', onNewTouch, true); }, 0);
+      timer = setTimeout(release, 1500);
     };
   }, [bottomCardUp]);
   // Panels rendered outside this page still cover the chart. Each one announces
@@ -15692,6 +15709,24 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     window.addEventListener('scroll', on, { passive: true });
     return () => window.removeEventListener('scroll', on);
   }, [isPane, scalp]);
+  // NO BOUNCE PAST THE TOP (18 Nov 2026). Martin, with a recording: "when the
+  // chart screen is scrolled to the top, the bottom menu gets half or fully
+  // hidden for sometime and then appears fully." The recording shows the page
+  // arriving at the top and carrying on past it — the phone's own rubber band,
+  // the header a hundred points down the screen — and coming back over the
+  // next half second. The row of five is the foot of the page and moves with
+  // it; the Option Chain | ScalperX buttons are fixed and do not; so for as
+  // long as the page was below its rest the row was under the buttons. The
+  // page is told not to overscroll while this screen is up (a class on <html>,
+  // see chart-no-bounce in index.css; taken off again on leaving, so every
+  // other screen keeps its bounce). Pull to refresh is the app's own gesture
+  // and never depended on the bounce.
+  useEffect(() => {
+    if (isPane || scalp) return;
+    const html = document.documentElement;
+    html.classList.add('chart-no-bounce');
+    return () => html.classList.remove('chart-no-bounce');
+  }, [isPane, scalp]);
   // The page opens at rest, whatever the screen he came from had been scrolled to.
   useEffect(() => { if (!isPane && !scalp) { try { window.scrollTo(0, 0); } catch (e) {} } }, [isPane, scalp]);
   /** Back to rest. A sheet of the row of five opens just above where the row
@@ -17067,7 +17102,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               </button>
               {rangeOpen && (
                 <>
-                  <div className="fixed inset-0 z-[88]" aria-hidden="true" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); sheetClosedAtRef.current = Date.now(); setRangeOpen(false); }} />
+                  <div className="touch-none fixed inset-0 z-[88]" aria-hidden="true" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); sheetClosedAtRef.current = Date.now(); setRangeOpen(false); }} />
                   <div data-range-sheet="" className="fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+8px)] z-[90] bg-card border border-foreground/15 dark:border-white/10 rounded-xl shadow-2xl overflow-hidden">
                     {([['1D', '1D'], ['2D', '2D'], ['5D', '5D'], ['1M', '1M'], ['ALL', 'All']] as const).map(([k, label]) => (
                       <button key={k} type="button" data-range-pick={k} onClick={() => applyRange(k)}
@@ -17209,7 +17244,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               }} />
             {tfOpen && !scalp && (
               <>
-                <div className="md:hidden fixed inset-0 z-[88]" aria-hidden="true" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); sheetClosedAtRef.current = Date.now(); setTfOpen(false); }} />
+                <div className="touch-none md:hidden fixed inset-0 z-[88]" aria-hidden="true" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); sheetClosedAtRef.current = Date.now(); setTfOpen(false); }} />
                 <div data-interval-sheet="" className="md:hidden fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+8px)] z-[90] bg-card border border-foreground/15 dark:border-white/10 rounded-xl shadow-2xl overflow-hidden">
                   {([['1', '1m'], ['3', '3m'], ['5', '5m'], ['15', '15m'], ['60', '1h'], ['240', '4h'], ['1440', '1D'], ['10080', '1W'], ['43200', '1M']] as const).map(([k, label]) => (
                     <button key={k} type="button" data-interval-pick={k} onClick={() => { setTimeframe(k); setTfOpen(false); }}
@@ -17268,7 +17303,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   something. Desktop is unchanged (the mousedown handler works
                   there, and a click outside should still reach what it hit). */}
               {isIndicatorsOpen && (
-                <div className="fixed inset-0 z-[44] md:hidden" aria-hidden="true"
+                <div className="touch-none fixed inset-0 z-[44] md:hidden" aria-hidden="true"
                   onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); indClosedAtRef.current = Date.now(); setIsIndicatorsOpen(false); }}
                   onClick={(e) => { e.preventDefault(); e.stopPropagation(); }} />
               )}
@@ -18094,7 +18129,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               A see-through layer behind the sheet closes it on a tap elsewhere.
               On a desktop none of this applies: md:contents, as before. */}
           {phoneSettingsOpen && !isPane && (
-            <div className="md:hidden fixed inset-0 z-[88]" aria-hidden="true"
+            <div className="touch-none md:hidden fixed inset-0 z-[88]" aria-hidden="true"
               onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); settingsClosedAtRef.current = Date.now(); setPhoneSettingsOpen(false); }} />
           )}
           <MenuPortal to={menuTo('settings')}>
@@ -19095,7 +19130,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               </button>
               {tfOpen && (
                 <>
-                  <div className="fixed inset-0 z-[88]" aria-hidden="true" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); sheetClosedAtRef.current = Date.now(); setTfOpen(false); }} />
+                  <div className="touch-none fixed inset-0 z-[88]" aria-hidden="true" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); sheetClosedAtRef.current = Date.now(); setTfOpen(false); }} />
                   <div data-interval-sheet="" className="absolute right-1 bottom-[32px] z-[90] min-w-[96px] bg-card border border-white/10 rounded-xl shadow-2xl overflow-hidden">
                     {([['1', '1m'], ['3', '3m'], ['5', '5m'], ['15', '15m'], ['60', '1h'], ['240', '4h'], ['1440', '1D']] as const).map(([k, label]) => (
                       <button key={k} type="button" data-interval-pick={k} onClick={() => { setTimeframe(k); setTfOpen(false); }}

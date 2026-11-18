@@ -257,6 +257,12 @@ body[data-search-open] [data-sonner-toaster] { display: none !important; }
 
 /* The bias sheet comes up from the foot of the screen, as Lemonn's does (see
    BiasCheck.tsx). On a desktop it is a box in the middle and simply appears. */
+/* The phone's chart page does not rubber-band past its ends: see NO BOUNCE PAST
+   THE TOP in AdvancedChart.tsx. Both the page and the body, since which of the
+   two scrolls is the browser's choice. */
+@media (max-width: 767px) {
+  html.chart-no-bounce, html.chart-no-bounce body { overscroll-behavior-y: none; }
+}
 /* THE OPTION CHAIN COMES UP FROM THE BOTTOM (18 Nov 2026). Martin: "add a smooth
    animation so that the option chain slides up from the bottom of the screen."
    It appeared at once. On a phone the sheet rises from below the screen, quick
