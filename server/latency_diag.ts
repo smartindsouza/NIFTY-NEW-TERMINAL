@@ -78,6 +78,19 @@ export function registerLatencyDiag(app: any, express: any) {
     res.json({ ok: true });
   });
   app.get('/api/diag/card-notes', (_req: any, res: any) => { res.setHeader('Cache-Control', 'no-store'); res.json({ ok: true, notes: cardNotes.slice(-200) }); });
+  // What the indicator sharing on a device found wrong (src/lib/indicatorSync.ts:
+  // a device new to it or with emptied storage, a whole set refused, the same
+  // send repeating). Kept in memory and logged; GET /api/diag/sync-notes.
+  const syncNotes: any[] = [];
+  app.post('/api/diag/sync-note', express.json({ limit: '4kb' }), (req: any, res: any) => {
+    const b = req.body || {};
+    const row = { at: Date.now(), kind: String(b.kind || '').slice(0, 30), n: Number(b.n) || 0, keys: Array.isArray(b.keys) ? b.keys.slice(0, 14).map((k: any) => String(k).slice(0, 40)) : [],
+      chars: Number(b.chars) || 0, entries: Number(b.entries) || 0, canWrite: !!b.canWrite, seenKept: !!b.seenKept, device: String(b.device || '').slice(0, 12), standalone: !!b.standalone };
+    syncNotes.push(row); if (syncNotes.length > 200) syncNotes.shift();
+    console.warn(`[sync-note] ${row.kind} n=${row.n} ${row.device}${row.standalone ? ' (home-screen app)' : ''} storage ${row.chars} chars in ${row.entries} entries, canWrite=${row.canWrite} seenKept=${row.seenKept} :: ${row.keys.join(',')}`);
+    res.json({ ok: true });
+  });
+  app.get('/api/diag/sync-notes', (_req: any, res: any) => { res.setHeader('Cache-Control', 'no-store'); res.json({ ok: true, notes: syncNotes.slice(-200) }); });
   app.get('/api/diag/freq-warnings', (_req: any, res: any) => { res.setHeader('Cache-Control', 'no-store'); res.json({ ok: true, warnings: freqWarnings.slice(-100) }); });
   app.get('/api/diag/latency', (_req: any, res: any) => {
     res.setHeader('Cache-Control', 'no-store');

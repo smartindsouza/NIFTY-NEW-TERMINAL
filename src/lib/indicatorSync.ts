@@ -233,6 +233,41 @@ export function mergeForMend(doc: SyncDoc | null, store: KV, keys: string[]): Sy
   return next;
 }
 
+// A DEVICE THAT HAS LOST ITS SETTINGS DOES NOT SEND ITS DEFAULTS TO EVERYONE
+// (19 Nov 2026). Martin, 5:16 PM: "My app settings somehow got reset to how it
+// was couple of months ago. It shows RSI and the indicators I marked as
+// favorites are now unmarked." Then: "I was using the web app like always in
+// my iPhone and suddenly it happened. Make sure it does not happen again."
+// The server's log: at 5:14:10 PM one device wrote 73 of the 75 shared values
+// in a single send, each the app's default (RSI on, no stars), stamped newest —
+// and every other device took them, as it is built to. A send of that size is
+// what a device with EMPTY storage makes: this sharing took its baseline ("what
+// is here is not a change") the moment the page started, before the chart —
+// which is fetched separately and arrives later — had written its defaults
+// into the empty storage; two seconds on, every default looked like a change
+// made here, and a change made here is never overwritten by what arrives.
+// (Why the iPhone's storage was empty is not known: he had done nothing, and
+// nothing in the app clears it. iOS can discard a web app's storage.)
+// Two things now stand in the way, whichever way a device comes to it:
+//   - on a device that has never run the sharing (no record of what it has
+//     seen), nothing is sent until the server's copy has been read and taken
+//     once — a new or emptied device RECEIVES;
+//   - a send of WHOLE_PUSH values or more at once is never made. No list he
+//     taps changes that many in two seconds. Those values are given up to the
+//     server's instead (yieldToServer): the device takes the shared copy.
+// The phone's set sent once, on purpose (seedOnce), is not a `push` and is not
+// stopped by this.
+export const WHOLE_PUSH = 20;
+/** Gives up this device's claim to have changed `keys`: they count as seen and as never dated, so the server's values are taken for them by the next applyRemote. */
+export function yieldToServer(store: KV, keys: string[]) {
+  const seen = ensureBaseline(store);
+  const at = readJson<Record<string, number>>(store, AT_KEY) || {};
+  const now = snapshot(store);
+  for (const k of keys) { seen[k] = now[k] ?? null; at[k] = 0; }
+  writeJson(store, SEEN_KEY, seen);
+  writeJson(store, AT_KEY, at);
+}
+
 /** The device whose set is the one to copy: his phone, which is an iPhone. */
 export const isSeedDevice = (userAgent: string) => /iPhone/i.test(userAgent || '');
 
@@ -386,7 +421,40 @@ export function startIndicatorSync(idle: () => boolean): () => void {
       if (r.ok) { const j = await r.json(); off = !!(j && j.value === true); }
     } catch { /* offline: as it was */ }
   };
-  ensureBaseline(store);
+  // A device with no record of what it has seen is new to the sharing, or has
+  // lost its storage: it sends nothing until the server's copy has been read
+  // and taken once (see A DEVICE THAT HAS LOST ITS SETTINGS…). Its baseline is
+  // then taken at that moment, by applyRemote, with the chart's defaults
+  // already written — not here, where the storage may still be empty.
+  let firstRun = false;
+  try { firstRun = store.getItem(SEEN_KEY) === null; } catch { firstRun = false; }
+  let ready = !firstRun;
+  if (!firstRun) ensureBaseline(store);
+  // A line to the server's log when something here is not as it should be, so
+  // that the next time it can be read and not guessed (GET /api/diag/sync-notes).
+  // Says what, how many names, and whether this device's storage can be
+  // written at all. Ten a page at most. Changes nothing.
+  let notes = 0;
+  const note = (kind: string, keys: string[] = []) => {
+    if (notes >= 10) return; notes++;
+    try {
+      let bytes = 0, canWrite = false, seenKept = false;
+      try { for (let i = 0; i < window.localStorage.length; i++) { const k = window.localStorage.key(i) || ''; bytes += k.length + (window.localStorage.getItem(k) || '').length; } } catch { /* closed */ }
+      try { window.localStorage.setItem('indSync:probe', String(Date.now())); canWrite = true; window.localStorage.removeItem('indSync:probe'); } catch { canWrite = false; }
+      try { seenKept = window.localStorage.getItem(SEEN_KEY) !== null; } catch { seenKept = false; }
+      const ua = window.navigator.userAgent || '';
+      const device = /iPhone/i.test(ua) ? 'iPhone' : /iPad/i.test(ua) ? 'iPad' : /Android/i.test(ua) ? 'Android' : /Mac/i.test(ua) ? 'Mac' : /Windows/i.test(ua) ? 'Windows' : 'other';
+      const standalone = !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || (window.navigator as any).standalone === true;
+      void fetch('/api/diag/sync-note', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind, n: keys.length, keys: keys.slice(0, 14), chars: bytes, entries: window.localStorage.length, canWrite, seenKept, device, standalone }) }).catch(() => {});
+    } catch { /* no note */ }
+  };
+  if (firstRun) note('first-run');
+  // The same names sent over and over means a send that is not being recorded
+  // here (seen 19 Nov 2026: two names sent every two seconds for five
+  // minutes). After four in a row they are left alone for this page, and said.
+  let lastSent = '', sameSends = 0;
+  const stuck = new Set<string>();
   // Whatever is taken from the server goes through here, so that a whole set
   // arriving is noticed and what it replaces is kept (keepBefore).
   const take = (doc: SyncDoc | null): string[] => {
@@ -427,10 +495,24 @@ export function startIndicatorSync(idle: () => boolean): () => void {
   const push = async () => {
     if (stopped || busy || off !== false) return;
     let keys: string[] = [];
-    try { keys = pendingChanges(store); } catch { return; }
+    if (!ready) return;                                   // a new or emptied device receives first
+    try { keys = pendingChanges(store).filter((k) => !stuck.has(k)); } catch { return; }
     if (!keys.length) return;
     busy = true;
     try {
+      if (keys.length >= WHOLE_PUSH) {
+        // Not something tapped in a list: this device's storage has been
+        // replaced under it. The shared copy is taken; nothing is sent.
+        const d0 = await readDoc(true);
+        if (!d0) return;                                   // not read: looked at again in two seconds, still nothing sent
+        note('whole-set-refused', keys);
+        yieldToServer(store, keys);
+        if (take(d0).length) waiting = true;
+        return;
+      }
+      const sig = keys.map((k) => `${k}=${store.getItem(k)}`).join('|');
+      if (sig === lastSent) { if (++sameSends >= 4) { keys.forEach((k) => stuck.add(k)); note('same-send-repeating', keys); return; } }
+      else { lastSent = sig; sameSends = 0; }
       const doc = await readDoc(true);
       // Something newer may have arrived for other names: take it before sending.
       const got = take(doc);
@@ -448,6 +530,7 @@ export function startIndicatorSync(idle: () => boolean): () => void {
       if (off !== false) return;
       const doc = await readDoc(false);
       if (take(doc).length) waiting = true;
+      if (!ready && doc) ready = true;                     // the shared copy has been read and taken: this device may send from now on
       // A send of this device's that another device's send wrote over: put back.
       // Looked for again in the document as the server has it NOW before
       // anything is written — the one just read may be the app's five-second-old

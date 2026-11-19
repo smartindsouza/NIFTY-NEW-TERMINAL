@@ -1,7 +1,7 @@
 // npx tsx src/lib/indicatorSync.test.ts
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { BEFORE_KEY, WHOLE_SET, isSeedDevice, mergeForSeed, keepBefore, SYNC_KEYS, SEEN_KEY, AT_KEY, SPOT_HALF_COPY, type KV, type SyncDoc, snapshot, ensureBaseline, pendingChanges, mergeForPush, commitPushed, applyRemote, adoptSpotHalfCopy, halfCopyStorageName, serverBehind, mergeForMend } from './indicatorSync';
+import { BEFORE_KEY, WHOLE_SET, isSeedDevice, mergeForSeed, keepBefore, SYNC_KEYS, SEEN_KEY, AT_KEY, SPOT_HALF_COPY, type KV, type SyncDoc, snapshot, ensureBaseline, pendingChanges, mergeForPush, commitPushed, applyRemote, adoptSpotHalfCopy, halfCopyStorageName, serverBehind, mergeForMend, yieldToServer, WHOLE_PUSH } from './indicatorSync';
 
 // A device: storage, and the two steps the browser part performs.
 class Device implements KV {
@@ -311,6 +311,42 @@ assert.ok(!SYNC_KEYS.includes('indicatorLinesThin'), 'a device\'s own bookkeepin
   const mac = new Device(); mac.setItem('showRsi', 'false'); mac.setItem('showDsZones', 'true'); ensureBaseline(mac);
   mac.pull(server);
   for (const k of SYNC_KEYS) assert.equal(mac.getItem(k), phone.getItem(k), `${k}: a new device has the phone's too`);
+}
+
+// ── a device that has lost its settings does not send its defaults to everyone (19 Nov 2026) ──
+{
+  class Mem implements KV { m = new Map<string, string>(); getItem(k: string) { return this.m.has(k) ? this.m.get(k)! : null; } setItem(k: string, v: string) { this.m.set(k, v); } removeItem(k: string) { this.m.delete(k); } }
+  // the shared copy: his set
+  const server: SyncDoc = {};
+  for (const k of SYNC_KEYS) server[k] = { v: `his:${k}`, at: 1000 };
+  server.showRsi = { v: 'false', at: 1000 }; server.favIndicators = { v: '["showFvg","showBos"]', at: 1000 };
+  // what happened: the baseline taken on EMPTY storage, then the chart writes its defaults
+  const lost = new Mem();
+  ensureBaseline(lost);
+  for (const k of SYNC_KEYS) lost.setItem(k, `default:${k}`);
+  lost.setItem('showRsi', 'true'); lost.setItem('favIndicators', '[]');
+  const pend = pendingChanges(lost);
+  assert.equal(pend.length, SYNC_KEYS.length, 'every default looks like a change made here');
+  assert.ok(pend.length >= WHOLE_PUSH, 'and that is a whole set');
+  // before: applyRemote would leave them all (changed here), and they would be sent. Now they are given up:
+  assert.deepEqual(applyRemote(lost, server), [], 'as it was: nothing taken while they count as changes here');
+  yieldToServer(lost, pend);
+  assert.deepEqual(pendingChanges(lost), [], 'given up: nothing left to send');
+  const got = applyRemote(lost, server);
+  assert.equal(got.length, SYNC_KEYS.length, 'the shared copy is taken for every name');
+  assert.equal(lost.getItem('showRsi'), 'false'); assert.equal(lost.getItem('favIndicators'), '["showFvg","showBos"]');
+  assert.deepEqual(pendingChanges(lost), [], 'and taking it is not a change either');
+  // a change he then makes there is still sent as one change
+  lost.setItem('showRsi', 'true');
+  assert.deepEqual(pendingChanges(lost), ['showRsi']);
+  const next = mergeForPush(server, lost, ['showRsi'], 5000);
+  assert.equal(next.showRsi.v, 'true'); assert.equal(next.favIndicators.v, '["showFvg","showBos"]', 'the rest of the shared copy is untouched');
+  // the first-run order now used: baseline taken only as the shared copy is first read, defaults already written
+  const fresh = new Mem();
+  for (const k of SYNC_KEYS) fresh.setItem(k, `default:${k}`);
+  assert.equal(applyRemote(fresh, server).length, SYNC_KEYS.length, 'a new device takes the shared copy');
+  assert.deepEqual(pendingChanges(fresh), []);
+  assert.equal(fresh.getItem('showRsi'), 'false');
 }
 
 console.log('indicatorSync: all checks passed');
