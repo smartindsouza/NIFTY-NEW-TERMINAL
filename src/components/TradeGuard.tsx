@@ -151,7 +151,7 @@ function TradeGuardSheet({ st, onSaved, onClose }: { st: Status | null; onSaved:
     try {
       let d: any = null;
       try { d = JSON.parse(localStorage.getItem('tpSlDefaults') || 'null'); } catch (e) { d = null; }
-      if (!d || typeof d !== 'object') d = { slPct: 10, tpPct: 20, trail: true, tpOn: true };
+      if (!d || typeof d !== 'object') d = { slPct: 10, tpPct: 20, trail: false, tpOn: true };
       const next = { ...d, slOn: on, trail: on ? d.trail : false };
       localStorage.setItem('tpSlDefaults', JSON.stringify(next));
       window.dispatchEvent(new CustomEvent('terminal:tpsl-defaults', { detail: next }));

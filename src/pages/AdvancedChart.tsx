@@ -1549,6 +1549,25 @@ const manropeReady = () => { try { return !!(document as any).fonts?.check?.("10
 // the index chart's is touched, and no setting (a colour, a period) of either.
 // After this the switches are his again: what he turns on for option charts
 // stays on.
+// TRAILING IS OFF FOR TRADES HE TAKES HIMSELF, UNTIL HE TICKS IT (19 Nov 2026).
+// Martin: "Use trailing SL only for Telegram auto trades. For manually taken
+// trades disable it by default. Let me enable it if needed."
+// The tick in "Set Auto TP/SL" was on unless he had taken it off (it was his
+// method from the first), and his saved choice on each device says on. So,
+// ONCE on each device, the saved choice is set to off — at his word, which is
+// the one thing a release may change a saved trading setting for — and from
+// then on it is whatever he ticks. A Telegram trade is not touched by this: its
+// stop is the server's own ladder (TP1 -> stop to entry, and on up), which
+// never read this tick.
+(function trailingOffOnce() {
+  try {
+    if (typeof localStorage === 'undefined' || localStorage.getItem('trailOffByDefault') === '1') return;
+    const raw = localStorage.getItem('tpSlDefaults');
+    if (raw) { const d = JSON.parse(raw); if (d && typeof d === 'object') { d.trail = false; localStorage.setItem('tpSlDefaults', JSON.stringify(d)); } }
+    localStorage.setItem('trailOffByDefault', '1');
+  } catch (e) { /* left as it is; the tick is still his to take off */ }
+})();
+
 (function optionIndicatorsClearedOnce() {
   try {
     if (typeof localStorage === 'undefined' || localStorage.getItem('optIndicatorsCleared') === '1') return;
@@ -6398,7 +6417,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       if (raw) {
         const p = JSON.parse(raw);
         const sl = Number(p?.slPct), tp = Number(p?.tpPct);
-        const trail = p?.trail === undefined ? true : !!p.trail;   // absent = ON: it is Martin's method
+        const trail = !!p?.trail;   // absent = OFF since 19 Nov 2026 (TRAILING IS OFF FOR TRADES HE TAKES HIMSELF)
         const pts = (v: any) => { const n = Number(v); return Number.isFinite(n) && n >= 0 ? n : 0; };
         if (Number.isFinite(sl) && sl > 0 && sl < 100 && Number.isFinite(tp) && tp > 0) return {
           slPct: sl, tpPct: tp, trail, slOn: p?.slOn !== false, tpOn: p?.tpOn !== false,
@@ -6408,7 +6427,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         };
       }
     } catch (e) {}
-    return { slPct: 10, tpPct: 20, trail: true, slOn: true, tpOn: true };
+    return { slPct: 10, tpPct: 20, trail: false, slOn: true, tpOn: true };
   });
   useEffect(() => {
     try { localStorage.setItem('tpSlDefaults', JSON.stringify(tpSlDefaults)); } catch (e) {}
@@ -18482,6 +18501,43 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               {confirmClose ? <Check size={13} strokeWidth={3} /> : null}
             </span>
             <span className="text-left text-[13px] font-medium text-foreground">Activate on candle close</span>
+          </button>
+          ) : null}
+          {/* TRAILING STOP LOSS, ON SCALPPRO'S OPTION CHART (19 Nov 2026). Martin:
+              "Add this trailing stoploss check box to the option chart settings
+              in scalperX screen. Link it to the chart screen setting as well so
+              that it works overall in the app". It IS the tick of "Set Auto
+              TP/SL": the same saved choice, told to every chart the moment it
+              changes (terminal:tpsl-defaults), so the sheet shows what was
+              ticked here and the other way round. With Auto SL off there is no
+              stop to trail, and it cannot be ticked, as in the sheet. With a
+              trade of his own open it is applied to that trade too, at the
+              levels its stop and target are at now — not to a Telegram trade,
+              whose stop is the server's ladder. */}
+          {scalp && menuTo('settings') && isOptionView ? (
+          <button type="button" role="checkbox" data-settings="trail-sl" disabled={tpSlDefaults.slOn === false}
+            aria-checked={tpSlDefaults.slOn !== false && !!tpSlDefaults.trail}
+            onClick={() => {
+              const next = !tpSlDefaults.trail;
+              const d = { ...tpSlDefaults, trail: next };
+              tpSlDefaultsRef.current = d;      // pushPremiumRule reads the ref
+              setTpSlDefaults(d);
+              try { toast(next ? 'Trailing stop loss on' : 'Trailing stop loss off'); } catch (e) {}
+              const pos = slActivePosRef.current;
+              if (pos?.symbol) void (async () => {
+                try {
+                  const r = (await fetchArmedRule(pos.symbol, true))?.rule;
+                  if (!r || r.status !== 'ACTIVE' || r.managed || /telegram/i.test(String(r.detail || ''))) return;
+                  const sl = Number(r.sl), tp = Number(r.tp);
+                  if (Number.isFinite(sl) && Number.isFinite(tp)) await pushPremiumRule(sl, tp);
+                } catch (e) { /* the choice is saved for the next trade; this one is as it was */ }
+              })();
+            }}
+            className={`flex items-center h-11 w-full justify-start gap-3 px-2.5 rounded-md text-muted-foreground ${tpSlDefaults.slOn === false ? 'opacity-40' : ''}`}>
+            <span className={`flex h-[17px] w-[17px] shrink-0 items-center justify-center rounded-[4px] border ${tpSlDefaults.slOn !== false && tpSlDefaults.trail ? 'bg-primary border-primary text-primary-foreground' : 'border-foreground/40'}`}>
+              {tpSlDefaults.slOn !== false && tpSlDefaults.trail ? <Check size={13} strokeWidth={3} /> : null}
+            </span>
+            <span className="text-left text-[13px] font-medium text-foreground">Trailing stop loss</span>
           </button>
           ) : null}
           {isOptionView && slActivePos ? (
