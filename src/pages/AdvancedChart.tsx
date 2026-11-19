@@ -11067,6 +11067,50 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     if (r && r !== underlying && (underlying === 'NIFTY' || underlying === 'BANKNIFTY' || underlying === 'SENSEX')) setUnderlying(r);
   }, [selectedInstrument?.tradingsymbol]);
 
+  // A SETTINGS BOX SAVES ON OK, AND ONLY ON OK (19 Nov 2026). Martin: "some of
+  // the indicator settings like OI bars save the changes no matter I close the
+  // settings screen, tap cancel or tap Ok. It doesn't matter it saves anyhow.
+  // That shouldn't happen. It should save only when I hit OK after I make
+  // changes."
+  // These boxes show a change on the chart as it is made (a colour, a width),
+  // by setting the indicator's own value — which is also what is saved. Four of
+  // them (Directional Zones, Breakers, Institutional Levels, Session Breaks)
+  // put the values back on Cancel; OI Bars and RSI did not; and eight had no
+  // Ok at all, only a cross (15 min High-Low, BOS / CHoCH, Fair Value Gaps,
+  // Demand / Supply, the three alerts, Volume). Now, for all ten: what the
+  // values were as the box opened is kept here, and the cross, a tap outside
+  // and Cancel put them back; Ok closes and leaves them. The eight have a
+  // Cancel and an Ok like the rest (BoxFooter).
+  const editSnapRef = useRef<Record<string, any[]>>({});
+  const editBoxes: Record<string, { open: boolean; vals: any[]; put: ((v: any) => void)[]; close: () => void }> = {
+    OpeningRange: { open: isEditingOpeningRange, vals: [orHighColor, orLowColor], put: [setOrHighColor, setOrLowColor], close: () => setIsEditingOpeningRange(false) },
+    Struct: { open: isEditingStruct, vals: [showBos, structBearColor, structBullColor, structDays], put: [setShowBos, setStructBearColor, setStructBullColor, setStructDays], close: () => setIsEditingStruct(false) },
+    Fvg: { open: isEditingFvg, vals: [fvgBearColor, fvgBullColor, fvgOpacity], put: [setFvgBearColor, setFvgBullColor, setFvgOpacity], close: () => setIsEditingFvg(false) },
+    DsZones: { open: isEditingDsZones, vals: [dsZoneOpacity], put: [setDsZoneOpacity], close: () => setIsEditingDsZones(false) },
+    LevelAlerts: { open: isEditingLevelAlerts, vals: [levelAlertCooldown, levelAlertRearm], put: [setLevelAlertCooldown, setLevelAlertRearm], close: () => setIsEditingLevelAlerts(false) },
+    ZoneTapAlerts: { open: isEditingZoneTapAlerts, vals: [zoneTapMinSize], put: [setZoneTapMinSize], close: () => setIsEditingZoneTapAlerts(false) },
+    BreakoutAlerts: { open: isEditingBreakoutAlerts, vals: [breakoutAlertMode], put: [setBreakoutAlertMode], close: () => setIsEditingBreakoutAlerts(false) },
+    Volume: { open: isEditingVolume, vals: [settings.candleUpColor, settings.candleDownColor], put: [(v: any) => updateSetting('candleUpColor', v), (v: any) => updateSetting('candleDownColor', v)], close: () => setIsEditingVolume(false) },
+    OiBars: { open: isEditingOiBars, vals: [oiMaxBarWidth, oiBarGap, oiBarThickness, oiCallColor, oiPutColor], put: [setOiMaxBarWidth, setOiBarGap, setOiBarThickness, setOiCallColor, setOiPutColor], close: () => setIsEditingOiBars(false) },
+    Rsi: { open: isEditingRsi, vals: [rsiColor, rsiLineWidth, rsiLineStyle, rsiSmaLineWidth, rsiSmaLineStyle, rsiOverbought1, rsiOverbought2, rsiOversold1, rsiOversold2, rsiSmaColor, rsiOverboughtColor, rsiOversoldColor], put: [setRsiColor, setRsiLineWidth, setRsiLineStyle, setRsiSmaLineWidth, setRsiSmaLineStyle, setRsiOverbought1, setRsiOverbought2, setRsiOversold1, setRsiOversold2, setRsiSmaColor, setRsiOverboughtColor, setRsiOversoldColor], close: () => setIsEditingRsi(false) },
+  };
+  useEffect(() => {
+    const S = editSnapRef.current;
+    for (const [name, b] of Object.entries(editBoxes)) { if (b.open && !S[name]) S[name] = b.vals; if (!b.open) delete S[name]; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditingOpeningRange, isEditingStruct, isEditingFvg, isEditingDsZones, isEditingLevelAlerts, isEditingZoneTapAlerts, isEditingBreakoutAlerts, isEditingVolume, isEditingOiBars, isEditingRsi]);
+  const cancelEdit = (name: string) => {
+    const b = editBoxes[name], was = editSnapRef.current[name];
+    if (b && was) b.put.forEach((put, i) => { try { put(was[i]); } catch (e) {} });
+    b?.close();
+  };
+  const BoxFooter = ({ name }: { name: string }) => (
+    <div data-box-footer={name} className="mt-4 flex justify-end gap-2">
+      <button type="button" onClick={() => cancelEdit(name)} className="px-4 py-1.5 text-sm bg-transparent border border-0 hover:bg-accent hover:text-accent-foreground rounded text-foreground transition-colors">Cancel</button>
+      <button type="button" onClick={() => editBoxes[name]?.close()} className="px-4 py-1.5 text-sm bg-primary text-primary-foreground hover:bg-primary/90 rounded transition-colors font-medium">Ok</button>
+    </div>
+  );
+
   // THE PILLS BESIDE THE SCALPERX TAB (19 Nov 2026). Martin: "display all the
   // other options that are listed in chart screen but not the one open in
   // scalperX screen in a pill shaped outline button with an x button to close
@@ -20078,7 +20122,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           initialBarThickness={oiBarThickness}
           initialCallColor={oiCallColor}
           initialPutColor={oiPutColor}
-          onClose={() => setIsEditingOiBars(false)}
+          onClose={() => cancelEdit('OiBars')}
           onApply={(maxBarWidth, gap, barThickness, callColor, putColor) => {
             setOiMaxBarWidth(maxBarWidth);
             setOiBarGap(gap);
@@ -20111,7 +20155,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           initialSmaColor={rsiSmaColor}
           initialOverboughtColor={rsiOverboughtColor}
           initialOversoldColor={rsiOversoldColor}
-          onClose={() => setIsEditingRsi(false)}
+          onClose={() => cancelEdit('Rsi')}
           onApply={(color, lineWidth, lineStyle, smaLineWidth, smaLineStyle, overbought1, overbought2, oversold1, oversold2, smaColor, overboughtColor, oversoldColor) => {
             setRsiColor(color);
             setRsiLineWidth(lineWidth);
@@ -20170,12 +20214,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           own box now, like the older indicators already did. */}
       {isEditingOpeningRange && (
         <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 p-0 md:p-4"
-             onClick={() => setIsEditingOpeningRange(false)}>
+             onClick={() => cancelEdit('OpeningRange')}>
           <div className="w-full md:max-w-sm rounded-t-2xl md:rounded-xl border border-border bg-card p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-4 max-h-[75vh] overflow-y-auto"
                onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-bold text-foreground">15 min High-Low Settings</span>
-              <button onClick={() => setIsEditingOpeningRange(false)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+              <button onClick={() => cancelEdit('OpeningRange')} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
                 <X size={16} />
               </button>
             </div>
@@ -20202,17 +20246,18 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                   <span className="text-[10px] text-muted-foreground">Low</span>
                 </label>
             </div>
+            <BoxFooter name="OpeningRange" />
           </div>
         </div>
       )}
       {isEditingStruct && (
         <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 p-0 md:p-4"
-             onClick={() => setIsEditingStruct(false)}>
+             onClick={() => cancelEdit('Struct')}>
           <div className="w-full md:max-w-sm rounded-t-2xl md:rounded-xl border border-border bg-card p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-4 max-h-[75vh] overflow-y-auto"
                onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-bold text-foreground">BOS / CHoCH Settings</span>
-              <button onClick={() => setIsEditingStruct(false)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+              <button onClick={() => cancelEdit('Struct')} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
                 <X size={16} />
               </button>
             </div>
@@ -20262,17 +20307,18 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 <span className="text-[10px] text-muted-foreground">Bearish</span>
               </label>
             </div>
+            <BoxFooter name="Struct" />
           </div>
         </div>
       )}
       {isEditingFvg && (
         <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 p-0 md:p-4"
-             onClick={() => setIsEditingFvg(false)}>
+             onClick={() => cancelEdit('Fvg')}>
           <div className="w-full md:max-w-sm rounded-t-2xl md:rounded-xl border border-border bg-card p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-4 max-h-[75vh] overflow-y-auto"
                onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-bold text-foreground">Fair Value Gaps Settings</span>
-              <button onClick={() => setIsEditingFvg(false)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+              <button onClick={() => cancelEdit('Fvg')} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
                 <X size={16} />
               </button>
             </div>
@@ -20311,17 +20357,18 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               />
               <span className="text-[10px] text-muted-foreground">% opacity (1-100)</span>
             </div>
+            <BoxFooter name="Fvg" />
           </div>
         </div>
       )}
       {isEditingDsZones && (
         <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 p-0 md:p-4"
-             onClick={() => setIsEditingDsZones(false)}>
+             onClick={() => cancelEdit('DsZones')}>
           <div className="w-full md:max-w-sm rounded-t-2xl md:rounded-xl border border-border bg-card p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-4 max-h-[75vh] overflow-y-auto"
                onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-bold text-foreground">Demand / Supply Zones Settings</span>
-              <button onClick={() => setIsEditingDsZones(false)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+              <button onClick={() => cancelEdit('DsZones')} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
                 <X size={16} />
               </button>
             </div>
@@ -20337,17 +20384,18 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               />
               <span className="text-[10px] text-muted-foreground">% opacity (1-100)</span>
             </div>
+            <BoxFooter name="DsZones" />
           </div>
         </div>
       )}
       {isEditingLevelAlerts && (
         <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 p-0 md:p-4"
-             onClick={() => setIsEditingLevelAlerts(false)}>
+             onClick={() => cancelEdit('LevelAlerts')}>
           <div className="w-full md:max-w-sm rounded-t-2xl md:rounded-xl border border-border bg-card p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-4 max-h-[75vh] overflow-y-auto"
                onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-bold text-foreground">Level Touch Alerts Settings</span>
-              <button onClick={() => setIsEditingLevelAlerts(false)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+              <button onClick={() => cancelEdit('LevelAlerts')} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
                 <X size={16} />
               </button>
             </div>
@@ -20375,17 +20423,18 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               />
               <span className="text-[10px] text-muted-foreground">% away before re-arming</span>
             </div>
+            <BoxFooter name="LevelAlerts" />
           </div>
         </div>
       )}
       {isEditingZoneTapAlerts && (
         <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 p-0 md:p-4"
-             onClick={() => setIsEditingZoneTapAlerts(false)}>
+             onClick={() => cancelEdit('ZoneTapAlerts')}>
           <div className="w-full md:max-w-sm rounded-t-2xl md:rounded-xl border border-border bg-card p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-4 max-h-[75vh] overflow-y-auto"
                onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-bold text-foreground">Zone Tap Alerts Settings</span>
-              <button onClick={() => setIsEditingZoneTapAlerts(false)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+              <button onClick={() => cancelEdit('ZoneTapAlerts')} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
                 <X size={16} />
               </button>
             </div>
@@ -20401,17 +20450,18 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               />
               <span className="text-[10px] text-muted-foreground">points (0 = alert on all)</span>
             </div>
+            <BoxFooter name="ZoneTapAlerts" />
           </div>
         </div>
       )}
       {isEditingBreakoutAlerts && (
         <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 p-0 md:p-4"
-             onClick={() => setIsEditingBreakoutAlerts(false)}>
+             onClick={() => cancelEdit('BreakoutAlerts')}>
           <div className="w-full md:max-w-sm rounded-t-2xl md:rounded-xl border border-border bg-card p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-4 max-h-[75vh] overflow-y-auto"
                onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-bold text-foreground">Breakout-Fakeouts Settings</span>
-              <button onClick={() => setIsEditingBreakoutAlerts(false)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+              <button onClick={() => cancelEdit('BreakoutAlerts')} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
                 <X size={16} />
               </button>
             </div>
@@ -20428,17 +20478,18 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 >{o.label}</button>
               ))}
             </div>
+            <BoxFooter name="BreakoutAlerts" />
           </div>
         </div>
       )}
       {isEditingVolume && (
         <div className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 p-0 md:p-4"
-             onClick={() => setIsEditingVolume(false)}>
+             onClick={() => cancelEdit('Volume')}>
           <div className="w-full md:max-w-sm rounded-t-2xl md:rounded-xl border border-border bg-card p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:pb-4 max-h-[75vh] overflow-y-auto"
                onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-bold text-foreground">Volume Settings</span>
-              <button onClick={() => setIsEditingVolume(false)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+              <button onClick={() => cancelEdit('Volume')} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
                 <X size={16} />
               </button>
             </div>
@@ -20463,6 +20514,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             {/* Shared with the candles by design: a green candle and its
                 bar must never disagree. Same pair as Control Center. */}
             <p className="text-[9px] text-muted-foreground/70 mt-1">Shared with candle colours</p>
+            <BoxFooter name="Volume" />
           </div>
         </div>
       )}
