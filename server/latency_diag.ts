@@ -65,6 +65,19 @@ export function registerLatencyDiag(app: any, express: any) {
     console.warn(`[freq-warning] ${row.endpoint} x${row.rate} in 15s on ${row.page}${row.screen ? ` (${row.screen})` : ''} v${row.version}`);
     res.json({ ok: true });
   });
+  // Which code put a trade into the phone's saved copy of open trades, or
+  // emptied it (src/lib/positionCardLog.ts). Kept in memory and logged; read at
+  // GET /api/diag/card-notes. Diagnostic only: nothing acts on it.
+  const cardNotes: any[] = [];
+  app.post('/api/diag/card-note', express.json({ limit: '2kb' }), (req: any, res: any) => {
+    const b = req.body || {};
+    const row = { at: Date.now(), what: String(b.what || '').slice(0, 10), symbol: String(b.symbol || '').slice(0, 40), id: String(b.id || '').slice(0, 40),
+      entry: Number(b.entry) || 0, cardAgeS: Number(b.cardAgeS), cards: Number(b.cards) || 0, stack: String(b.stack || '').slice(0, 420), version: String(b.version || '').slice(0, 12) };
+    cardNotes.push(row); if (cardNotes.length > 200) cardNotes.shift();
+    console.warn(`[card-note] ${row.what} ${row.symbol} id=${row.id} entry=${row.entry} cardAge=${row.cardAgeS}s cards=${row.cards} v${row.version} :: ${row.stack}`);
+    res.json({ ok: true });
+  });
+  app.get('/api/diag/card-notes', (_req: any, res: any) => { res.setHeader('Cache-Control', 'no-store'); res.json({ ok: true, notes: cardNotes.slice(-200) }); });
   app.get('/api/diag/freq-warnings', (_req: any, res: any) => { res.setHeader('Cache-Control', 'no-store'); res.json({ ok: true, warnings: freqWarnings.slice(-100) }); });
   app.get('/api/diag/latency', (_req: any, res: any) => {
     res.setHeader('Cache-Control', 'no-store');

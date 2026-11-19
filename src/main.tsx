@@ -3,9 +3,12 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { initializeInterceptor } from './lib/apiInterceptor';
+import { initPositionCardLog } from './lib/positionCardLog';
 
 // Initialize global performance trackers for API speeds and frequency warnings
 initializeInterceptor();
+// A note to the server each time a trade is put into, or emptied from, the saved copy of open trades.
+initPositionCardLog();
 
 // Self-heal after a deploy: if a lazily-imported chunk 404s because the build
 // changed underneath an open tab (the "Failed to fetch dynamically imported

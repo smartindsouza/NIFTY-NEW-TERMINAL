@@ -1461,6 +1461,12 @@ const indSet = (key: string, opt: boolean, value: string) => { try { localStorag
 // would have had to remember. `own` is the list of names to leave alone, filled
 // in where the copy's list is (paneInd); null for every other chart.
 // Reads are never held back, and neither is any other name.
+// Cards the server refused to arm because Zerodha has no such trade, and when.
+// Outside the component: every chart on the page shares it, and a chart that
+// is taken down and put up again (ScalpPro's two) must still know.
+const refusedCards = new Map<string, number>();
+const cardKey = (c: any) => `${c?.id}|${c?.symbol}|${c?.entryPrice}|${c?.timestamp}`;
+
 type ChartStore = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 const chartStore = (own: { current: Set<string> } | null): ChartStore => ({
   getItem: (k) => window.localStorage.getItem(k),
@@ -2802,7 +2808,8 @@ function TpSlDefaultsModal({ onClose, initial, onApply, activeSymbol }: {
       // a percentage of 0 is not a level: the last good one is kept for the unit not in use
       tpPct: f('tpPct') > 0 ? f('tpPct') : (initial.tpPct || 20),
       slPct: f('slPct') > 0 && f('slPct') < 100 ? f('slPct') : (initial.slPct || 10),
-      tpPts: f('tpPts'), slPts: f('slPts'), tpUnit, slUnit, tpOn, slOn, trail,
+      // no stop, nothing to trail (see TRAILING GOES WITH THE STOP, at the tick box)
+      tpPts: f('tpPts'), slPts: f('slPts'), tpUnit, slUnit, tpOn, slOn, trail: slOn && trail,
     });
   };
   // A function, not a component made here: one made inside this one would be a new
@@ -2857,11 +2864,16 @@ function TpSlDefaultsModal({ onClose, initial, onApply, activeSymbol }: {
         {which === 'sl' && (
           <>
             <div className="mt-[12.4px] border-t border-dashed border-foreground/10" />
-            <button type="button" data-tpsl="trail" role="checkbox" aria-checked={trail} onClick={() => setTrail((v) => !v)}
-              className="mt-[13px] h-[13.7px] flex items-center gap-[8.6px] text-[12px] leading-4 text-foreground">
-              <span className={`h-[13.7px] w-[13.7px] rounded-[3px] border flex items-center justify-center ${trail ? 'border-transparent' : 'border-foreground/35'}`}
-                style={trail ? { background: TPSL_BLUE } : undefined}>
-                {trail && <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 5.2 L4 7.6 L8.6 2.6" stroke="currentColor" strokeWidth="1.6" fill="none" className="text-background" /></svg>}
+            {/* TRAILING GOES WITH THE STOP (19 Nov 2026). Martin: "when I disable SL,
+                trailing Stoploss checkbox does not disable automatically." With
+                the stop switched off the box is unticked and cannot be tapped,
+                and it is saved off. Switched back on before Save, his tick is
+                as he left it. */}
+            <button type="button" data-tpsl="trail" role="checkbox" aria-checked={slOn && trail} disabled={!slOn} onClick={() => setTrail((v) => !v)}
+              className={`mt-[13px] h-[13.7px] flex items-center gap-[8.6px] text-[12px] leading-4 text-foreground ${slOn ? '' : 'opacity-40'}`}>
+              <span className={`h-[13.7px] w-[13.7px] rounded-[3px] border flex items-center justify-center ${slOn && trail ? 'border-transparent' : 'border-foreground/35'}`}
+                style={slOn && trail ? { background: TPSL_BLUE } : undefined}>
+                {slOn && trail && <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 5.2 L4 7.6 L8.6 2.6" stroke="currentColor" strokeWidth="1.6" fill="none" className="text-background" /></svg>}
               </span>
               Trailing stop loss
             </button>
@@ -6400,7 +6412,25 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   });
   useEffect(() => {
     try { localStorage.setItem('tpSlDefaults', JSON.stringify(tpSlDefaults)); } catch (e) {}
+    try { window.dispatchEvent(new CustomEvent('terminal:tpsl-defaults', { detail: tpSlDefaults })); } catch (e) {}
   }, [tpSlDefaults]);
+  // EVERY CHART HOLDS THE SAME AUTO TP/SL (19 Nov 2026). Martin: "I had disabled
+  // SL in the settings and it also disabled it. But when I went back to the same
+  // settings it was enabled automatically even though the chart didn't show any
+  // SL." Each chart on the page (the index chart, an option tab, ScalpPro's two)
+  // read these once, when it was put up, and kept its own copy: switched off on
+  // one, the others still held "on" — and showed it in this sheet, and would
+  // have armed a new trade with it. A save on any chart is now told to all of
+  // them. (Same values: nothing is set, so it does not go round.)
+  useEffect(() => {
+    const onSaved = (ev: Event) => {
+      const d = (ev as CustomEvent).detail;
+      if (!d || typeof d !== 'object') return;
+      setTpSlDefaults((cur) => (JSON.stringify(cur) === JSON.stringify(d) ? cur : d));
+    };
+    window.addEventListener('terminal:tpsl-defaults', onSaved);
+    return () => window.removeEventListener('terminal:tpsl-defaults', onSaved);
+  }, []);
   const tpSlDefaultsRef = useRef(tpSlDefaults);
   tpSlDefaultsRef.current = tpSlDefaults;
   // Snapshot taken when the editor opens, so Cancel can undo a live preview.
@@ -7831,7 +7861,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       // Ask for the positions to be checked now, so it is cleared in a second
       // instead of at the next poll. The warning below still shows: if this is
       // a real order that has not reached Zerodha yet, it is true.
-      if (d && !d.success && d.noPosition) { try { window.dispatchEvent(new Event('positions_reconcile_request')); } catch (e) {} }
+      if (d && !d.success && d.noPosition) {
+        try { window.dispatchEvent(new Event('positions_reconcile_request')); } catch (e) {}
+        // ...and this very card is not armed again for a minute (see NOT THE SAME
+        // LEFTOVER EVERY FOUR SECONDS, at the arming effect).
+        const p0 = slActivePosRef.current;
+        if (p0) refusedCards.set(cardKey(p0), Date.now());
+      }
       if (d && !d.success && d.error) {
         console.warn('[premium-exit] not armed:', d.error);
         // Said OUT LOUD. A refusal used to be a console line plus a small status
@@ -8909,6 +8945,15 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     const pos = slActivePos;
     if (!pos || !pos.entryPrice) { setPremSync('OFF'); premSyncedForRef.current = ''; return; }
     if (premSyncedForRef.current === pos.symbol) return;
+    // NOT THE SAME LEFTOVER EVERY FOUR SECONDS (19 Nov 2026). Martin, after
+    // version 402: "It was showing me this again and again". A card Zerodha
+    // had no trade for kept coming back into the saved copy, and each return
+    // was a new attempt to arm it: the warning banner again, and the
+    // high-frequency one after it. A card the server has just refused for
+    // that reason — the same order, entry and time, so never a new trade — is
+    // left alone for a minute.
+    const refusedAt = refusedCards.get(cardKey(pos));
+    if (refusedAt && Date.now() - refusedAt < 60000) { setPremSync('OFF'); return; }
     premSyncedForRef.current = pos.symbol;
     let cancelled = false;
     (async () => {
