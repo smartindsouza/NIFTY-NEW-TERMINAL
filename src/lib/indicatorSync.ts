@@ -126,6 +126,22 @@ const readJson = <T,>(store: KV, key: string): T | null => {
 };
 const writeJson = (store: KV, key: string, v: unknown) => { try { store.setItem(key, JSON.stringify(v)); } catch { /* storage full or closed */ } };
 
+// Every write of this device's record of what it has seen goes through here,
+// and one that leaves many names unset says so, with who wrote it (19 Nov
+// 2026: his iPhone's record is all unset at every start, right during the
+// session before — so something writes it that way, and this names it). The
+// hook is set by the part that needs a browser; in the tests it is not there.
+let seenHook: ((line: string) => void) | null = null;
+const seenWrite = (store: KV, seen: Values, who: string) => {
+  writeJson(store, SEEN_KEY, seen);
+  try {
+    if (!seenHook) return;
+    const unset = SYNC_KEYS.filter((k) => (seen[k] ?? null) === null).length;
+    let kept = false; try { kept = store.getItem(SEEN_KEY) === JSON.stringify(seen); } catch { kept = false; }
+    if (unset >= 10 || !kept) seenHook(`record written by ${who}: ${unset} of ${SYNC_KEYS.length} unset${kept ? '' : ' — AND NOT KEPT'}`);
+  } catch { /* said nothing */ }
+};
+
 /** Every shared value as it stands in storage now (null: not set). */
 export function snapshot(store: KV): Values {
   const out: Values = {};
@@ -141,12 +157,12 @@ export function snapshot(store: KV): Values {
 export function ensureBaseline(store: KV): Values {
   const seen = readJson<Values>(store, SEEN_KEY);
   const now = snapshot(store);
-  if (!seen) { writeJson(store, SEEN_KEY, now); return now; }
+  if (!seen) { seenWrite(store, now, 'baseline:none-found'); return now; }
   // A name added to the list in a later version is new to this record, not a
   // change made on this device: it starts as read, like the rest did.
   let added = false;
   for (const k of SYNC_KEYS) { if (!(k in seen)) { seen[k] = now[k] ?? null; added = true; } }
-  if (added) writeJson(store, SEEN_KEY, seen);
+  if (added) seenWrite(store, seen, 'baseline:name-added');
   return seen;
 }
 
@@ -183,7 +199,7 @@ export function commitPushed(store: KV, keys: string[], sent: SyncDoc) {
     if ((now[k] ?? null) === null) { seen[k] = null; continue; }   // unset here: not sent, and not a change left waiting
     if (sent[k]) { seen[k] = sent[k].v; at[k] = sent[k].at; }
   }
-  writeJson(store, SEEN_KEY, seen);
+  seenWrite(store, seen, 'recorded-after-send');
   writeJson(store, AT_KEY, at);
 }
 
@@ -219,7 +235,7 @@ export function applyRemote(store: KV, doc: SyncDoc | null): string[] {
     }
     seen[k] = v; at[k] = Number(e.at); touched = true;
   }
-  if (touched) { writeJson(store, SEEN_KEY, seen); writeJson(store, AT_KEY, at); }
+  if (touched) { seenWrite(store, seen, 'taken-from-server'); writeJson(store, AT_KEY, at); }
   return changed;
 }
 
@@ -288,7 +304,7 @@ export function yieldToServer(store: KV, keys: string[]) {
   const at = readJson<Record<string, number>>(store, AT_KEY) || {};
   const now = snapshot(store);
   for (const k of keys) { seen[k] = now[k] ?? null; at[k] = 0; }
-  writeJson(store, SEEN_KEY, seen);
+  seenWrite(store, seen, 'given-up-to-server');
   writeJson(store, AT_KEY, at);
 }
 
@@ -435,7 +451,16 @@ export function syncNote(kind: string, keys: string[] = []) {
 const trace: string[] = [];
 let traceSent = 0, loops = 0;
 const short = (v: string | null | undefined) => (v === null || v === undefined ? 'unset' : v.length > 26 ? `${v.slice(0, 12)}…${v.slice(-10)}(${v.length})` : v);
-const tr = (line: string) => { const t = new Date(); trace.push(`${t.getMinutes()}:${String(t.getSeconds()).padStart(2, '0')}.${String(t.getMilliseconds()).padStart(3, '0')} ${line}`.slice(0, 900)); if (trace.length > 400) trace.shift(); };
+const TRACE_KEY = 'indSync:trace';
+const tr = (line: string) => {
+  const t = new Date();
+  trace.push(`${t.getHours()}:${String(t.getMinutes()).padStart(2, '0')}:${String(t.getSeconds()).padStart(2, '0')}.${String(t.getMilliseconds()).padStart(3, '0')} ${line}`.slice(0, 900));
+  if (trace.length > 400) trace.shift();
+  // The last forty lines are kept on the device too, so that the next start
+  // can say how the one before it ended.
+  try { window.localStorage.setItem(TRACE_KEY, JSON.stringify(trace.slice(-40).map((l) => l.slice(0, 260)))); } catch { /* not kept */ }
+};
+seenHook = (line) => tr(line);
 const flushTrace = () => { if (trace.length <= traceSent) return; const part = trace.slice(traceSent, traceSent + 60); traceSent += part.length; pageNotes = Math.min(pageNotes, 30); syncNote('trace', part); };
 
 /** Once a page: how full this device's storage is, whether it can still grow, and what fills it. */
@@ -518,7 +543,17 @@ export function startIndicatorSync(idle: () => boolean): () => void {
   let ready = !firstRun;
   if (!firstRun) ensureBaseline(store);
   const loopId = ++loops;
-  tr(`L${loopId} start firstRun=${firstRun}`);
+  // How the page before this one ended, and what the record looks like now —
+  // read before anything here touches it.
+  if (loopId === 1) {
+    try {
+      const prev = JSON.parse(window.localStorage.getItem(TRACE_KEY) || '[]');
+      if (Array.isArray(prev) && prev.length) syncNote('trace-of-last-page', prev.slice(-40).map((l: any) => String(l)));
+    } catch { /* none */ }
+  }
+  { let raw: string | null = null; try { raw = store.getItem(SEEN_KEY); } catch { raw = null; }
+    const sn = readJson<Values>(store, SEEN_KEY) || {}; const here = snapshot(store);
+    tr(`L${loopId} start firstRun=${firstRun}; record ${raw === null ? 'absent' : `${raw.length} chars`}, ${SYNC_KEYS.filter((k) => (sn[k] ?? null) === null).length} unset in it; storage has ${SYNC_KEYS.filter((k) => here[k] === null).length} unset; differ ${SYNC_KEYS.filter((k) => (sn[k] ?? null) !== (here[k] ?? null)).length}`); }
   // A line to the server's log when something here is not as it should be, so
   // that the next time it can be read and not guessed (GET /api/diag/sync-notes).
   // Says what, how many names, and whether this device's storage can be
