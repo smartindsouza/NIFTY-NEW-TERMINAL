@@ -19843,6 +19843,18 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             setTpSlDefaults(d);
             setIsEditingTpSl(false);
             applySwitchesToLiveTrade(d);
+            // ONE SWITCH IN TWO PLACES (19 Nov 2026). Martin: "link them so that
+            // the auto SL is disabled, the structure SL also disables and vice
+            // versa". Auto SL here carries the Trade Guard's Structure SL with
+            // it, for new trades and — as this sheet's Save does for its own
+            // stop — for the open one (applyOpen; see server/reversal_watch).
+            // If it cannot be saved he is told: the two would differ.
+            {
+              const on = d.slOn !== false;
+              fetch('/api/reversal-watch/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ structureSl: on, applyOpen: true }) })
+                .then((r) => r.json()).then((j) => { if (!j?.success) throw new Error(j?.error || 'not saved'); })
+                .catch(() => { toast.error(`Structure SL could not be switched ${on ? 'on' : 'off'}`, { description: 'Auto SL is saved. Set Structure SL in Trade Guard.' }); });
+            }
           }}
           activeSymbol={slActivePos?.symbol || null}
         />

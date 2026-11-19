@@ -131,14 +131,33 @@ function TradeGuardSheet({ st, onSaved, onClose }: { st: Status | null; onSaved:
   const [ssl, setSsl] = useState<boolean | null>(null);
   const [sslTf, setSslTf] = useState<5 | 15>(15);
   useEffect(() => { fetch('/api/reversal-watch/status').then(r => r.json()).then(j => { setSsl(j?.structureSl !== false); setSslTf(j?.timeframe === 5 ? 5 : 15); }).catch(() => setSsl(null)); }, []);
-  const saveSsl = async (body: any, ok: string, undo: () => void) => {
+  const saveSsl = async (body: any, ok: string, undo: () => void, after?: () => void) => {
     try {
       const r = await fetch('/api/reversal-watch/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const j = await r.json(); if (!j?.success) throw new Error(j?.error || 'Could not save');
       toast.success(ok);
+      after?.();
     } catch (e: any) { undo(); toast.error(e?.message || 'Could not save'); }
   };
-  const toggleSsl = (on: boolean) => { setSsl(on); saveSsl({ structureSl: on }, on ? 'Structure SL on for new trades' : 'Structure SL off — alerts only for new trades', () => setSsl(!on)); };
+  // ONE SWITCH IN TWO PLACES (19 Nov 2026). Martin: "link them so that the auto
+  // SL is disabled, the structure SL also disables and vice versa". This switch
+  // carries the Auto SL of the chart's "Set Auto TP/SL" sheet with it — the
+  // saved choice for new trades, on this device, told to every chart that is
+  // up (the same event the sheet's own Save sends). Off takes the trailing
+  // tick off with it, as in the sheet. Like this switch itself, it is for new
+  // trades: an open trade's stop is changed from the sheet. The sheet's Save
+  // does the same the other way (see AdvancedChart, onApply).
+  const linkAutoSl = (on: boolean) => {
+    try {
+      let d: any = null;
+      try { d = JSON.parse(localStorage.getItem('tpSlDefaults') || 'null'); } catch (e) { d = null; }
+      if (!d || typeof d !== 'object') d = { slPct: 10, tpPct: 20, trail: true, tpOn: true };
+      const next = { ...d, slOn: on, trail: on ? d.trail : false };
+      localStorage.setItem('tpSlDefaults', JSON.stringify(next));
+      window.dispatchEvent(new CustomEvent('terminal:tpsl-defaults', { detail: next }));
+    } catch (e) { /* the structure switch is saved; the sheet can still be set by hand */ }
+  };
+  const toggleSsl = (on: boolean) => { setSsl(on); saveSsl({ structureSl: on }, on ? 'Structure SL and Auto SL on for new trades' : 'Structure SL and Auto SL off for new trades', () => setSsl(!on), () => linkAutoSl(on)); };
   const pickTf = (tf: 5 | 15) => { const was = sslTf; setSslTf(tf); saveSsl({ timeframe: tf }, `Structure SL uses ${tf}-min swings for new trades`, () => setSslTf(was)); };
   const save = async () => {
     const maxTrades = parseInt(maxTradesText, 10), maxLoss = parseInt(maxLossText, 10);

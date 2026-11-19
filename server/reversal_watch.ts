@@ -242,7 +242,22 @@ export function registerReversalWatch(app: any, express: any, deps: Deps) {
       const up = (k: string, v: string) => deps.db.prepare("INSERT INTO reversal_watch_kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(k, v);
       if (req.body?.structureSl !== undefined) { lastSetting = !!req.body.structureSl; up('structure_sl', lastSetting ? '1' : '0'); }
       if (req.body?.timeframe !== undefined) { lastTf = Number(req.body.timeframe) === 5 ? 5 : 15; up('structure_sl_tf', String(lastTf)); }
-      // applies to positions opened from now on; ones already watched keep what they started with
+      // applies to positions opened from now on; ones already watched keep what they started with —
+      // UNLESS IT CAME WITH THE AUTO SL SWITCH (19 Nov 2026). Martin: "link them so
+      // that the auto SL is disabled, the structure SL also disables and vice
+      // versa". The Auto TP/SL sheet's Save applies to the open trade as well
+      // as to new ones (it says so under its title), so the structure stop it
+      // now carries with it does too: applyOpen switches it for the trades
+      // being watched now. Off must mean off — a trade he has just taken the
+      // stop off must not be sold by the other stop. A Telegram auto-trade
+      // never has a structure stop, linked or not. The next look (within 30 s)
+      // says in the alerts what each open trade now has.
+      if (req.body?.applyOpen && req.body?.structureSl !== undefined) {
+        for (const w of watched.values()) {
+          const want = lastSetting && !(deps.isAutoTrade?.(w.sym));
+          if (w.slOn !== want && !w.exiting) { w.slOn = want; w.slTf = lastTf; if (!want) w.slLevel = null; w.announced = false; }
+        }
+      }
       res.json({ success: true, structureSl: lastSetting, timeframe: lastTf });
     } catch (e: any) { res.status(500).json({ success: false, error: e?.message || String(e) }); }
   });
