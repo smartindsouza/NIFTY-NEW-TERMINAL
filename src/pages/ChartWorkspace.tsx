@@ -265,6 +265,18 @@ function ScalpScreen({ onClose }: { onClose: () => void }) {
               names for it (scalp, ScalpScreen, openInScalpPro) are not. */}
           ScalperX
         </div>
+        {/* THE OTHER OPTIONS ON THE LIST, BESIDE THE TAB (19 Nov 2026). Martin,
+            with this stretch of the row marked: "display all the other options
+            that are listed in chart screen but not the one open in scalperX
+            screen in a pill shaped outline button with an x button to close it
+            as well. I want horizontal swiping to swipe through the list".
+            Only the place is made here. The pills are drawn into it by the
+            option chart below (see THE PILLS BESIDE THE SCALPERX TAB in
+            AdvancedChart), which owns the list. It is the one part of this
+            screen a finger may scroll: sideways only (the root is
+            touch-action none; see THE SCREEN DOES NOT SCROLL). */}
+        <div data-scalp-pills="" className="relative flex-1 min-w-0 h-[37px] ml-[19px] flex items-center gap-[6px] pr-3 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          style={{ touchAction: 'pan-x', overscrollBehaviorX: 'contain' }} />
       </div>
       <div ref={bodyRef} className="flex flex-col flex-1 min-h-0">
         {/* Neither pane is ever squeezed below what it must keep: its two lines

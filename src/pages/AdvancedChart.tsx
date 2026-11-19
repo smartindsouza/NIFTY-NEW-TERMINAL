@@ -5,6 +5,7 @@ import { Loader2, X, Plus, ChevronDown, Check, Eye, Settings, Edit2, Zap, Slider
 import { navigate } from "wouter/use-browser-location";
 import { TradeGuardButton } from "../components/TradeGuard";
 import { ChartCards } from "../components/ChartCards";
+import { parseContract } from "../lib/optionName";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { useUserSettings, useResolvedTheme } from "../hooks/useUserSettings";
@@ -11064,6 +11065,54 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     if (r && r !== underlying && (underlying === 'NIFTY' || underlying === 'BANKNIFTY' || underlying === 'SENSEX')) setUnderlying(r);
   }, [selectedInstrument?.tradingsymbol]);
 
+  // THE PILLS BESIDE THE SCALPERX TAB (19 Nov 2026). Martin: "display all the
+  // other options that are listed in chart screen but not the one open in
+  // scalperX screen in a pill shaped outline button with an x button to close
+  // it as well. I want horizontal swiping to swipe through the list if it has
+  // many options in the list. Show options for the index selected in the top
+  // part of the screen only."
+  // Drawn by ScalperX's option chart, which owns the list (the same one the
+  // chart page's option tab lists), into the place the screen's top row keeps
+  // for them (data-scalp-pills in ChartWorkspace). A pill is an option on the
+  // list that is not the one on this chart and is of the index on the chart
+  // above — told here when it changes (terminal:chart-underlying), read from
+  // the saved choice until then. Tapped, it is put on this chart, and the one
+  // it replaces becomes a pill. Its x takes it off the list, as the list's own
+  // x does (remembered as closed on purpose, so an open trade's chart is not
+  // brought straight back).
+  const [pillSlot, setPillSlot] = useState<HTMLElement | null>(null);
+  const [topIndex, setTopIndex] = useState<string>(() => { try { return String(localStorage.getItem('chartUnderlying') || 'NIFTY'); } catch (e) { return 'NIFTY'; } });
+  useEffect(() => {
+    if (!scalp || !isOptionPane) return;
+    setPillSlot(document.querySelector('[data-scalp-pills]') as HTMLElement | null);
+    const onIdx = (e: Event) => { const u = (e as CustomEvent).detail; if (typeof u === 'string' && u) setTopIndex(u); };
+    window.addEventListener('terminal:chart-underlying', onIdx);
+    return () => window.removeEventListener('terminal:chart-underlying', onIdx);
+  }, [scalp, isOptionPane]);
+  const pillCharts = scalp && isOptionPane
+    ? openCharts.filter((c, i, arr) => arr.findIndex((x) => x.tradingsymbol === c.tradingsymbol) === i)
+        .filter((c) => c.tradingsymbol !== selectedInstrument?.tradingsymbol && rootOfOption(c.tradingsymbol) === topIndex)
+    : [];
+  const pillLabel = (ts: string) => {
+    const p = parseContract(ts), cur = parseContract(String(selectedInstrument?.tradingsymbol || ''));
+    if (!p || p.strike == null) return ts;
+    // the expiry only where it is not the one on the chart below
+    return `${p.strike} ${p.optionType}${p.expiryLabel && p.expiryLabel !== cur?.expiryLabel ? ` · ${p.expiryLabel}` : ''}`;
+  };
+  const scalpPills = pillSlot && pillCharts.length ? createPortal(
+    <>
+      {pillCharts.map((c) => (
+        <span key={c.tradingsymbol} data-scalp-pill={c.tradingsymbol}
+          className="shrink-0 h-[26px] flex items-center rounded-full border border-foreground/20 text-[11.5px] leading-none font-medium text-foreground/90 whitespace-nowrap">
+          <button type="button" aria-label={`Open ${c.tradingsymbol}`} onClick={() => setSelectedInstrument(c)}
+            className="h-full pl-[11px] pr-[5px] flex items-center active:opacity-60">{pillLabel(c.tradingsymbol)}</button>
+          <button type="button" aria-label={`Remove ${c.tradingsymbol} from the list`}
+            onClick={() => { try { dismissedChart.add(c.tradingsymbol); } catch (e) {} setOpenCharts((prev) => prev.filter((x) => x.tradingsymbol !== c.tradingsymbol)); }}
+            className="h-full pl-[3px] pr-[9px] flex items-center text-foreground/55 active:text-foreground"><X size={12} strokeWidth={2.2} /></button>
+        </span>
+      ))}
+    </>, pillSlot) : null;
+
   // A SWIPE ACROSS THE ROW OF FIVE CHANGES TAB (19 Nov 2026). Martin: "Swiping
   // the bottom row with range, time frame etc to the right or left should
   // switch between spot and option chart tabs" — "I mean swiping horizontally".
@@ -16949,6 +16998,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             shade under bold with a hairline under it, "Call" and the change
             regular, the price medium; a pair of solid triangles after what can
             be changed. */}
+        {scalpPills}
         {scalp && (
           <div data-scalp-head={paneRole} className="relative shrink-0 px-[15px] pt-[13.5px] pb-2 bg-card" onPointerDown={(e) => e.stopPropagation()}>
             {/* THE MENU BUTTON, top right, as Lemonn's is: a 33pt square with 6pt
@@ -16977,8 +17027,15 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             <div className="flex items-center gap-1 h-[18px] text-[12px] leading-[18px] font-[650] text-foreground">
               {isSpotPane ? (
                 <span className="flex items-center">
-                  <button type="button" data-scalp="index-name" aria-label={`${indexLabel} option chain`}
-                    onClick={() => { setIndexMenuOpen(false); try { window.dispatchEvent(new CustomEvent('terminal:option-chain', { detail: { underlying } })); } catch (e) {} }}
+                  {/* THE INDEX'S NAME OPENS THE LIST OF INDICES (19 Nov 2026). Martin:
+                      "when I tap on the up down arrow it shows me the list of
+                      index. And when I tap on the text(sensex) it opens the
+                      option chain. I want both of them to open the list and not
+                      the option chain. In the option chart below it can work as
+                      it is." From 17 Nov the name had opened the chain; the
+                      option's name, below, still does. */}
+                  <button type="button" data-scalp="index-name" aria-label="Change index"
+                    onClick={() => setIndexMenuOpen(o => !o)}
                     className="flex -my-2 py-2 active:opacity-60">
                     <span className="block h-[18px]" style={SCALP_NAME_LINE}>{indexLabel}</span>
                   </button>
