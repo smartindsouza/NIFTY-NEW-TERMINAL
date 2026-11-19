@@ -11091,6 +11091,42 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     window.addEventListener('terminal:chart-underlying', onIdx);
     return () => window.removeEventListener('terminal:chart-underlying', onIdx);
   }, [scalp, isOptionPane]);
+  // THE OPTION BELOW FOLLOWS THE INDEX ABOVE (19 Nov 2026). Martin, with NIFTY 50
+  // chosen above a SENSEX option: "When I change it to nifty from sensex. The
+  // bottom chart still remains as Sensex option chart. So I can't open nifty
+  // option chain." (The chain opens from the option's name, on the option's own
+  // index — so with the index's name now opening the list of indices, a SENSEX
+  // option below left no way to NIFTY's chain.) When the index above is
+  // changed, this chart moves to an option of it: the newest one of that index
+  // on the list, or, with none there, the at-the-money Call of its nearest
+  // expiry from the app's own chain — the option ScalperX opens on when it has
+  // none (see AN OPTION TO SHOW in ChartWorkspace). Only on a change made
+  // above: an option of another index he puts here himself (from the chain or
+  // a search) stays.
+  const topIndexSeenRef = useRef(topIndex);
+  useEffect(() => {
+    if (!scalp || !isOptionPane) return;
+    if (topIndexSeenRef.current === topIndex) return;
+    topIndexSeenRef.current = topIndex;
+    if (topIndex !== 'NIFTY' && topIndex !== 'BANKNIFTY' && topIndex !== 'SENSEX') return;
+    if (rootOfOption(selectedInstrument?.tradingsymbol) === topIndex) return;
+    const same = openCharts.filter((c) => isOptionInstr(c) && rootOfOption(c.tradingsymbol) === topIndex);
+    if (same.length) { setSelectedInstrument(same[same.length - 1]); return; }
+    let dead = false;
+    const q = topIndex === 'SENSEX' ? '?symbol=SENSEX' : topIndex === 'BANKNIFTY' ? `?symbol=${encodeURIComponent('NIFTY BANK')}` : '';
+    fetch(`/api/option-chain${q}`).then((r) => (r.ok ? r.json() : null)).then((d) => {
+      if (dead || !d) return;
+      const strikes: number[] = Array.isArray(d.strikes) ? d.strikes : [];
+      const spot = Number(d.spot);
+      if (!strikes.length || !(spot > 0)) return;
+      const atm = strikes.reduce((x, y) => (Math.abs(y - spot) < Math.abs(x - spot) ? y : x), strikes[0]);
+      const c = d.ceData?.[atm];
+      if (!c?.tradingsymbol || !c?.instrument_token || rootOfOption(c.tradingsymbol) !== topIndex) return;
+      setSelectedInstrument({ tradingsymbol: c.tradingsymbol, instrument_token: String(c.instrument_token), exchange: c.exchange || (topIndex === 'SENSEX' ? 'BFO' : 'NFO'), lot_size: c.lot_size, instrument_type: 'CE', strike: atm, expiry: c.expiry } as any);
+    }).catch(() => {});
+    return () => { dead = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topIndex, scalp, isOptionPane]);
   const pillCharts = scalp && isOptionPane
     ? openCharts.filter((c, i, arr) => arr.findIndex((x) => x.tradingsymbol === c.tradingsymbol) === i)
         .filter((c) => c.tradingsymbol !== selectedInstrument?.tradingsymbol && rootOfOption(c.tradingsymbol) === topIndex)
@@ -16154,11 +16190,16 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     const ts = String(selectedInstrument?.tradingsymbol || '').toUpperCase();
     const m = ts.match(/^(.*\d)(CE|PE)$/);
     if (!m) return null;
-    const w = prettyOptionName(ts).split(' ');                 // "NIFTY 25200 CE 17 NOV"
     // "NIFTY 17NOV 25200": the day and month run together, as Lemonn writes a
     // weekly. A monthly ("NOV 2026" — a year, not a day) keeps its space.
-    const exp = w.slice(3);
-    const base = w.length >= 4 ? `${w[0]} ${exp.join(/^\d+$/.test(exp[0] || '') ? '' : ' ')} ${w[1]}` : ts;
+    // From the contract's parts, not from its written name cut at the spaces
+    // (19 Nov 2026): cut that way, an index whose name is two words came out
+    // in the wrong order — "BANK CE 24 NOV NIFTY" for a BANK NIFTY Call (seen
+    // while trying THE OPTION BELOW FOLLOWS THE INDEX ABOVE).
+    const pc = parseContract(ts);
+    const base = pc && pc.strike != null
+      ? `${pc.underlying}${pc.expiryLabel ? ` ${/^\d/.test(pc.expiryLabel) ? pc.expiryLabel.replace(' ', '') : pc.expiryLabel}` : ''} ${pc.strike}`
+      : ts;
     return { base, side: m[2] as 'CE' | 'PE', sibling: m[1] + (m[2] === 'CE' ? 'PE' : 'CE') };
   })();
   const [flipBusy, setFlipBusy] = useState(false);
