@@ -95,15 +95,21 @@ assert.ok(!SYNC_KEYS.includes('indicatorLinesThin'), 'a device\'s own bookkeepin
   assert.deepEqual(desk.pull(server), ['showVolume']); assert.equal(desk.getItem('showVolume'), 'true');
 }
 
-// ── a value taken away travels too, and two names changed at once go together ──
+// ── two names changed at once go together; a value taken away does NOT travel (19 Nov 2026: UNSET NEVER TRAVELS) ──
 {
   const phone = new Device(), desk = new Device(); const server = { doc: null as SyncDoc | null };
   phone.setItem('favIndicators', '["RSI"]'); desk.setItem('favIndicators', '["RSI"]');
   ensureBaseline(phone); ensureBaseline(desk);
   phone.removeItem('favIndicators'); phone.setItem('bbPeriod', '34');
   assert.deepEqual(phone.push(server, 3000).sort(), ['bbPeriod', 'favIndicators']);
-  assert.deepEqual(desk.pull(server).sort(), ['bbPeriod', 'favIndicators']);
-  assert.equal(desk.getItem('favIndicators'), null); assert.equal(desk.getItem('bbPeriod'), '34');
+  assert.ok(!('favIndicators' in server.doc!), 'the unset name is not in what was sent');
+  assert.deepEqual(pendingChanges(phone), [], 'and it is not left waiting to be sent');
+  assert.deepEqual(desk.pull(server).sort(), ['bbPeriod']);
+  assert.equal(desk.getItem('favIndicators'), '["RSI"]', 'the desk keeps its stars'); assert.equal(desk.getItem('bbPeriod'), '34');
+  // an unset entry already in the shared copy (the 5:40 PM document) removes nothing either
+  const d2 = new Device(); d2.setItem('showRsi', 'false'); d2.setItem('fvgOpacity', '33'); ensureBaseline(d2);
+  assert.deepEqual(applyRemote(d2, { showRsi: { v: null, at: 9e12 }, fvgOpacity: { v: null, at: 9e12 }, bbPeriod: { v: '21', at: 9e12 } }), ['bbPeriod']);
+  assert.equal(d2.getItem('showRsi'), 'false'); assert.equal(d2.getItem('fvgOpacity'), '33');
 }
 
 // ── names that are not shared never travel, whatever the document says ──
@@ -276,9 +282,11 @@ assert.ok(!SYNC_KEYS.includes('indicatorLinesThin'), 'a device\'s own bookkeepin
   // the phone sends its whole set
   const before = snapshot(phone);
   const seed = mergeForSeed(server.doc, phone, 5000);
-  assert.equal(Object.keys(seed).length, SYNC_KEYS.length, 'every name is in it');
-  for (const k of SYNC_KEYS) { assert.equal(seed[k].v, before[k] ?? null, `${k}: as it stands on the phone`); assert.ok(seed[k].at >= 5000, `${k}: newer than anything`); }
-  assert.equal(seed.showFvg.v, null, 'what the phone has never set goes as unset');
+  for (const k of SYNC_KEYS) {
+    if ((before[k] ?? null) === null) { assert.ok(!(k in seed), `${k}: unset on the phone, so not in the set`); continue; }
+    assert.equal(seed[k].v, before[k], `${k}: as it stands on the phone`); assert.ok(seed[k].at >= 5000, `${k}: newer than anything`);
+  }
+  assert.ok(!('showFvg' in seed), 'what the phone has never set is not sent as unset');
   server.doc = seed; commitPushed(phone, [...SYNC_KEYS], seed);
   assert.deepEqual(snapshot(phone), before, 'nothing on the phone itself changes');
   assert.deepEqual(pendingChanges(phone), [], 'and it has nothing left to send');
@@ -287,15 +295,15 @@ assert.ok(!SYNC_KEYS.includes('indicatorLinesThin'), 'a device\'s own bookkeepin
   const deskWas = snapshot(desk);
   const got = desk.pull(server);
   assert.ok(got.length >= WHOLE_SET, 'a whole set, not one switch');
-  for (const k of SYNC_KEYS) { if (k === 'rsiLineWidth') continue; assert.equal(desk.getItem(k), phone.getItem(k), `${k}: the desk now has the phone's`); }
-  assert.equal(desk.getItem('showFvg'), null, 'set on the desk, never on the phone: unset again');
+  for (const k of SYNC_KEYS) { if (k === 'rsiLineWidth' || phone.getItem(k) === null) continue; assert.equal(desk.getItem(k), phone.getItem(k), `${k}: the desk now has the phone's`); }
+  assert.equal(desk.getItem('showFvg'), 'true', 'set on the desk, never on the phone: the desk keeps it');
   assert.equal(desk.getItem('bbPeriod'), '34', 'the desk\'s own change since the sharing began was the phone\'s too by then');
   assert.equal(desk.getItem('rsiLineWidth'), '4', 'a change made on the desk and not yet sent is not written over');
   assert.deepEqual(pendingChanges(desk), ['rsiLineWidth']);
   // what the desk held is kept, once
   assert.equal(keepBefore(desk, deskWas, got, 6000), true);
   const kept = JSON.parse(desk.getItem(BEFORE_KEY)!);
-  assert.equal(kept.at, 6000); assert.equal(kept.was.showRsi, 'false'); assert.equal(kept.was.rsiColor, '#00ff00'); assert.equal(kept.was.showFvg, 'true'); assert.equal(kept.was.showBreakers, null);
+  assert.equal(kept.at, 6000); assert.equal(kept.was.showRsi, 'false'); assert.equal(kept.was.rsiColor, '#00ff00'); assert.ok(!('showFvg' in kept.was), 'the desk kept it, so it is not among what changed'); assert.equal(kept.was.showBreakers, null);
   assert.ok(!('showVolume' in kept.was), 'only what changed');
   assert.equal(keepBefore(desk, snapshot(desk), got, 7000), false, 'never written a second time');
   assert.equal(JSON.parse(desk.getItem(BEFORE_KEY)!).at, 6000);
@@ -310,7 +318,8 @@ assert.ok(!SYNC_KEYS.includes('indicatorLinesThin'), 'a device\'s own bookkeepin
   // a device that opens for the first time afterwards gets the whole set
   const mac = new Device(); mac.setItem('showRsi', 'false'); mac.setItem('showDsZones', 'true'); ensureBaseline(mac);
   mac.pull(server);
-  for (const k of SYNC_KEYS) assert.equal(mac.getItem(k), phone.getItem(k), `${k}: a new device has the phone's too`);
+  for (const k of SYNC_KEYS) { if (phone.getItem(k) === null) continue; assert.equal(mac.getItem(k), phone.getItem(k), `${k}: a new device has the phone's too`); }
+  assert.equal(mac.getItem('showDsZones'), 'true', 'what the phone never set, the new device keeps as it has it');
 }
 
 // ── a device that has lost its settings does not send its defaults to everyone (19 Nov 2026) ──

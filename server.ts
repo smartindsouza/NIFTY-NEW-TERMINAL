@@ -28,6 +28,7 @@ import { registerCalendar, isNseHoliday as calIsNseHoliday, holidayName } from '
 import { registerMarketSnapshot } from './server/market_snapshot';
 import { registerBias, getTodayBias } from './server/bias';
 import { candlesToday } from './server/reversal_watch';
+import { guardIndicatorDoc, withHistory } from './server/indicator_doc';
 import { buildMarketSnapshot } from './server/market_snapshot';
 // "Check bias" (on-demand Claude note). A CommonJS module: imported the ESM way
 // its README gives, which works under both tsx (dev) and the esbuild bundle.
@@ -1563,7 +1564,21 @@ setInterval(() => {
 
   app.put('/api/settings/:key', express.json({ limit: '256kb' }), (req, res) => {
     try {
-      const value = (req.body && typeof req.body === 'object' && 'value' in req.body) ? req.body.value : req.body;
+      let value = (req.body && typeof req.body === 'object' && 'value' in req.body) ? req.body.value : req.body;
+      // The shared indicator settings are not written as they come: see
+      // THE SHARED INDICATOR SETTINGS ARE GUARDED WHERE THEY ARE KEPT, in
+      // server/indicator_doc.ts.
+      if (req.params.key === 'chart_indicators') {
+        const read = (k: string) => { try { const r: any = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(k); return r ? JSON.parse(r.value) : null; } catch (e) { return null; } };
+        const current = read('chart_indicators');
+        const seed = String(req.get('x-indicator-seed') || '') === '1';
+        const g = guardIndicatorDoc(current, value, seed);
+        if (g.refused || g.unsetDropped) console.warn(`[indicators] ${g.refused ? 'REFUSED a send that would replace ' + g.replaced + ' values at once' : 'accepted'}${g.unsetDropped ? `; ${g.unsetDropped} "unset" dropped (values kept)` : ''}${seed ? ' [whole set, deliberate]' : ''}`);
+        if (g.refused) return res.json({ ok: true, refused: true, replaced: g.replaced });   // ok: an old page must not keep trying
+        const hist = withHistory(read('chart_indicators_hist'), guardIndicatorDoc(current, {}, false).doc, Date.now(), seed);
+        if (hist) db.prepare(`INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run('chart_indicators_hist', JSON.stringify(hist), Date.now());
+        value = g.doc;
+      }
       const serialized = JSON.stringify(value);
       db.prepare(`
         INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)

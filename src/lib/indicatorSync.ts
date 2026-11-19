@@ -97,11 +97,21 @@ export const SYNC_OFF_SETTING = 'chart_indicators_off';
  * ONCE, at the top). Unset: not yet. To have a phone send its set again, clear
  * it:  curl -X PUT -H 'Content-Type: application/json' -d '{"value":null}' <app>/api/settings/chart_indicators_seed
  */
-export const SYNC_SEED_SETTING = 'chart_indicators_seed';
+// 'chart_indicators_seed' was the mark of the first sending (17 Nov 2026). The
+// mark is a new name from 19 Nov 2026: after that evening's two wipes the
+// shared copy held nothing, and his phone — where he had set everything again
+// by hand ("Go ahead and sync them pls") — sends its set once more, under the
+// rules that now guard it (never from storage that holds too little to be a
+// set, and said to the server to be the deliberate one).
+export const SYNC_SEED_SETTING = 'chart_indicators_seed2';
+/** A whole set is sent only from a device holding at least this many of the shared values. */
+export const SEED_MIN_VALUES = 15;
 /** What this device last saw in its own storage, to tell a change made here. */
 export const SEEN_KEY = 'indSync:seen';
 /** What this device held before it took a whole set from another: { at, was: { name: value } }. Written once, never sent. */
 export const BEFORE_KEY = 'indSync:before';
+/** The newest three of the same, each dated: [{ at, was }]. */
+export const BEFORE_LIST_KEY = 'indSync:beforeList';
 /** A change of this many values at once is another device's whole set, not something switched in a list. */
 export const WHOLE_SET = 5;
 /** When each value was last changed here or taken from the server. */
@@ -158,6 +168,7 @@ export function mergeForPush(doc: SyncDoc | null, store: KV, keys: string[], at:
     // Never older than what is already there: a device whose clock runs behind
     // would otherwise send a change that every other device then ignores.
     const floor = next[k] ? next[k].at + 1 : 0;
+    if ((now[k] ?? null) === null) continue;             // unset here: nothing to say about it (UNSET NEVER TRAVELS)
     next[k] = { v: now[k] ?? null, at: Math.max(at, floor) };
   }
   return next;
@@ -167,7 +178,11 @@ export function mergeForPush(doc: SyncDoc | null, store: KV, keys: string[], at:
 export function commitPushed(store: KV, keys: string[], sent: SyncDoc) {
   const seen = ensureBaseline(store);
   const at = readJson<Record<string, number>>(store, AT_KEY) || {};
-  for (const k of keys) { if (sent[k]) { seen[k] = sent[k].v; at[k] = sent[k].at; } }
+  const now = snapshot(store);
+  for (const k of keys) {
+    if ((now[k] ?? null) === null) { seen[k] = null; continue; }   // unset here: not sent, and not a change left waiting
+    if (sent[k]) { seen[k] = sent[k].v; at[k] = sent[k].at; }
+  }
   writeJson(store, SEEN_KEY, seen);
   writeJson(store, AT_KEY, at);
 }
@@ -190,8 +205,16 @@ export function applyRemote(store: KV, doc: SyncDoc | null): string[] {
     if (Number(e.at) <= (at[k] || 0)) continue;                      // nothing newer than what is known here
     if ((now[k] ?? null) !== (seen[k] ?? null)) continue;            // changed here and not yet sent: that is the newer one
     const v = e.v === null || e.v === undefined ? null : String(e.v);
+    // UNSET NEVER TRAVELS (19 Nov 2026). "Unset" in the shared copy used to be
+    // taken like any value: the name was removed here and its chart went back
+    // to the default. That is how one send of 74 unset values from a phone
+    // whose storage had not answered turned every device's indicators back
+    // (5:40 PM that day). An unset entry is now passed over: what this device
+    // holds stays, and nothing here is removed because another device had
+    // nothing. (The server drops such entries too: server/indicator_doc.ts.)
+    if (v === null) continue;
     if ((now[k] ?? null) !== v) {
-      try { if (v === null) store.removeItem(k); else store.setItem(k, v); } catch { continue; }
+      try { store.setItem(k, v); } catch { continue; }
       changed.push(k);
     }
     seen[k] = v; at[k] = Number(e.at); touched = true;
@@ -228,6 +251,7 @@ export function mergeForMend(doc: SyncDoc | null, store: KV, keys: string[]): Sy
   const now = snapshot(store);
   for (const k of keys) {
     const mine = Number(at[k] || 0);
+    if ((now[k] ?? null) === null) continue;             // unset here: not put back
     if (mine > (next[k] ? next[k].at : 0)) next[k] = { v: now[k] ?? null, at: mine };
   }
   return next;
@@ -287,6 +311,16 @@ export function mergeForSeed(doc: SyncDoc | null, store: KV, at: number): SyncDo
  */
 export function keepBefore(store: KV, before: Record<string, string | null>, changed: string[], at: number): boolean {
   if (changed.length < WHOLE_SET) return false;
+  // A dated copy as well, every time, the newest three kept (19 Nov 2026): the
+  // single copy below is written once and was used up on 17 Nov, so what a
+  // device held before that evening's sets arrived would otherwise be gone.
+  try {
+    const all = readJson<{ at: number; was: Record<string, string | null> }[]>(store, BEFORE_LIST_KEY);
+    const list = Array.isArray(all) ? all : [];
+    const was2: Record<string, string | null> = {};
+    for (const k of changed) was2[k] = before[k] ?? null;
+    writeJson(store, BEFORE_LIST_KEY, [{ at, was: was2 }, ...list].slice(0, 3));
+  } catch { /* not kept */ }
   try { if (store.getItem(BEFORE_KEY) !== null) return false; } catch { return false; }
   const was: Record<string, string | null> = {};
   for (const k of changed) was[k] = before[k] ?? null;
@@ -482,8 +516,12 @@ export function startIndicatorSync(idle: () => boolean): () => void {
       // and is already on its way here: taken first, so the set sent includes it.
       if (take(doc).length) waiting = true;
       const keys = [...SYNC_KEYS];
+      // Storage that holds almost none of the shared values is not his set
+      // (it has not answered yet, or was emptied): asked again on a later pull.
+      const held = Object.values(snapshot(store)).filter((v) => v !== null).length;
+      if (held < SEED_MIN_VALUES) { note('seed-held-back', [String(held)]); return; }
       const next = mergeForSeed(doc, store, Date.now());
-      const w = await fetch(`/api/settings/${SYNC_SETTING}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: next }) });
+      const w = await fetch(`/api/settings/${SYNC_SETTING}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Indicator-Seed': '1' }, body: JSON.stringify({ value: next }) });
       if (!w.ok) return;                                 // asked again on the next pull
       commitPushed(store, keys, next);
       const m = await fetch(`/api/settings/${SYNC_SEED_SETTING}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: { at: Date.now(), names: keys.length } }) });
@@ -544,6 +582,7 @@ export function startIndicatorSync(idle: () => boolean): () => void {
     if (take(doc).length) waiting = true;
     const keys = serverBehind(store, doc);
     if (!keys.length) return;
+    if (keys.length >= WHOLE_PUSH) { note('mend-refused', keys); return; }   // putting back a whole set is not a mend
     await fetch(`/api/settings/${SYNC_SETTING}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: mergeForMend(doc, store, keys) }) });
   };
   const settle = () => { if (!stopped && off === false && waiting && idle()) { waiting = false; bump(); } };
