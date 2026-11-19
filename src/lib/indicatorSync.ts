@@ -424,9 +424,20 @@ export function syncNote(kind: string, keys: string[] = []) {
     const device = /iPhone/i.test(ua) ? 'iPhone' : /iPad/i.test(ua) ? 'iPad' : /Android/i.test(ua) ? 'Android' : /Mac/i.test(ua) ? 'Mac' : /Windows/i.test(ua) ? 'Windows' : 'other';
     const standalone = !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || (window.navigator as any).standalone === true;
     void fetch('/api/diag/sync-note', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ kind, n: keys.length, keys: keys.slice(0, 14), device, standalone, canWrite: true, seenKept: true }) }).catch(() => {});
+      body: JSON.stringify({ kind, n: keys.length, keys: keys.slice(0, 60), device, standalone, canWrite: true, seenKept: true }) }).catch(() => {});
   } catch { /* no note */ }
 }
+// What the sharing did, step by step, on this page: a short line for each send,
+// record, take and refusal, sent to the server's log every twenty seconds while
+// there is something new (19 Nov 2026: his phone's sends were repeating and one
+// switch was never sent, and what the page did in between could only be
+// guessed). Changes nothing.
+const trace: string[] = [];
+let traceSent = 0, loops = 0;
+const short = (v: string | null | undefined) => (v === null || v === undefined ? 'unset' : v.length > 26 ? `${v.slice(0, 12)}…${v.slice(-10)}(${v.length})` : v);
+const tr = (line: string) => { const t = new Date(); trace.push(`${t.getMinutes()}:${String(t.getSeconds()).padStart(2, '0')}.${String(t.getMilliseconds()).padStart(3, '0')} ${line}`.slice(0, 200)); if (trace.length > 400) trace.shift(); };
+const flushTrace = () => { if (trace.length <= traceSent) return; const part = trace.slice(traceSent, traceSent + 60); traceSent += part.length; pageNotes = Math.min(pageNotes, 30); syncNote('trace', part); };
+
 /** Once a page: how full this device's storage is, whether it can still grow, and what fills it. */
 export function noteStorageOnce() {
   if (typeof window === 'undefined' || (window as any).__indStorageNoted) return; (window as any).__indStorageNoted = true;
@@ -506,6 +517,8 @@ export function startIndicatorSync(idle: () => boolean): () => void {
   try { firstRun = store.getItem(SEEN_KEY) === null; } catch { firstRun = false; }
   let ready = !firstRun;
   if (!firstRun) ensureBaseline(store);
+  const loopId = ++loops;
+  tr(`L${loopId} start firstRun=${firstRun}`);
   // A line to the server's log when something here is not as it should be, so
   // that the next time it can be read and not guessed (GET /api/diag/sync-notes).
   // Says what, how many names, and whether this device's storage can be
@@ -590,8 +603,9 @@ export function startIndicatorSync(idle: () => boolean): () => void {
         if (take(d0).length) waiting = true;
         return;
       }
+      { const sn = readJson<Values>(store, SEEN_KEY) || {}; tr(`L${loopId} pending ${keys.map((k) => `${k}[here ${short(store.getItem(k))} | seen ${short(sn[k])}]`).join(' ')}`); }
       const sig = keys.map((k) => `${k}=${store.getItem(k)}`).join('|');
-      if (sig === lastSent) { if (++sameSends >= 4) { keys.forEach((k) => stuck.add(k)); note('same-send-repeating', keys); return; } }
+      if (sig === lastSent) { if (++sameSends >= 4) { keys.forEach((k) => stuck.add(k)); note('same-send-repeating', keys); tr(`L${loopId} STUCK ${keys.join(',')}`); return; } }
       else { lastSent = sig; sameSends = 0; }
       const doc = await readDoc(true);
       // Something newer may have arrived for other names: take it before sending.
@@ -599,7 +613,10 @@ export function startIndicatorSync(idle: () => boolean): () => void {
       if (got.length) waiting = true;
       const next = mergeForPush(doc, store, keys, Date.now());
       const r = await fetch(`/api/settings/${SYNC_SETTING}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: next }) });
+      let ans = ''; try { ans = JSON.stringify(await r.clone().json()).slice(0, 60); } catch { ans = '?'; }
       if (r.ok) commitPushed(store, keys, next);          // not accepted: left as a change, and tried again in two seconds
+      { const sn = readJson<Values>(store, SEEN_KEY) || {}; const left = pendingChanges(store);
+        tr(`L${loopId} sent ${keys.length} -> ${r.status} ${ans}; took ${got.length}; recorded ${keys.map((k) => `${k}:${(sn[k] ?? null) === (store.getItem(k) ?? null) ? 'ok' : `NOT (seen ${short(sn[k])})`}`).join(' ')}; still pending ${left.join(',') || 'none'}`); }
     } catch { /* offline: tried again */ } finally { busy = false; }
   };
   const pull = async () => {
@@ -609,7 +626,7 @@ export function startIndicatorSync(idle: () => boolean): () => void {
       await readOff();
       if (off !== false) return;
       const doc = await readDoc(false);
-      if (take(doc).length) waiting = true;
+      { const got2 = take(doc); if (got2.length) { waiting = true; tr(`L${loopId} pull took ${got2.map((k) => `${k}=${short(store.getItem(k))}`).join(' ')}`); } }
       if (!ready && doc) ready = true;                     // the shared copy has been read and taken: this device may send from now on
       // A send of this device's that another device's send wrote over: put back.
       // Looked for again in the document as the server has it NOW before
@@ -625,18 +642,19 @@ export function startIndicatorSync(idle: () => boolean): () => void {
     const keys = serverBehind(store, doc);
     if (!keys.length) return;
     if (keys.length >= WHOLE_PUSH) { note('mend-refused', keys); return; }   // putting back a whole set is not a mend
+    { const at0 = readJson<Record<string, number>>(store, AT_KEY) || {}; tr(`L${loopId} mend ${keys.map((k) => `${k}[mine ${at0[k]} theirs ${doc && doc[k] ? doc[k].at : '-'} here ${short(store.getItem(k))} theirs ${short(doc && doc[k] ? doc[k].v : null)}]`).join(' ')}`); }
     await fetch(`/api/settings/${SYNC_SETTING}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: mergeForMend(doc, store, keys) }) });
   };
-  const settle = () => { if (!stopped && off === false && waiting && idle()) { waiting = false; bump(); } };
+  const settle = () => { if (!stopped && off === false && waiting && idle()) { waiting = false; tr(`L${loopId} chart put up again (values arrived)`); bump(); } };
 
   const pushIv = window.setInterval(() => { push(); settle(); }, PUSH_EVERY_MS);
-  const pullIv = window.setInterval(pull, PULL_EVERY_MS);
+  const pullIv = window.setInterval(() => { pull(); flushTrace(); }, PULL_EVERY_MS);
   const onFront = () => { if (!document.hidden) pull(); };
   document.addEventListener('visibilitychange', onFront);
   window.addEventListener('focus', onFront);
   pull();
   return () => {
-    stopped = true;
+    stopped = true; tr(`L${loopId} stopped`);
     window.clearInterval(pushIv); window.clearInterval(pullIv);
     document.removeEventListener('visibilitychange', onFront);
     window.removeEventListener('focus', onFront);
