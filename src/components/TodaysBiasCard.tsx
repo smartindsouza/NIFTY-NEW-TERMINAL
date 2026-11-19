@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Compass, ChevronDown, TrendingUp, TrendingDown, MoveHorizontal, Bell, BellRing, BellOff, TriangleAlert, History, Clock } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import { useTodayBias, useBiasHistory, isRecord, istToday, hhmmIST, fmtLevel, type BiasRecord, type BiasRead } from '../lib/bias';
+import { useTodayBias, useBiasHistory, isRecord, istToday, hhmmIST, time12IST, fmtLevel, type BiasRecord, type BiasRead } from '../lib/bias';
 
 // "Today's Bias" — the morning note posted by the scheduled task at ~09:33 IST.
 // Top of the Home screen, collapsible. Display only: it never trades.
@@ -66,6 +66,7 @@ function PastBiasesList() {
             : <span className="shrink-0 w-[64px] text-center px-1.5 py-0.5 rounded border border-border text-[10px] font-bold text-muted-foreground">{r.status === 'no_session' ? 'NO SESSION' : 'ERROR'}</span>}
           <span className="shrink-0 w-[64px] text-muted-foreground capitalize">{r.confidence ?? '—'}</span>
           <span className="min-w-0 flex-1 truncate" title={r.headline}>{r.headline}</span>
+          {r.reversal?.to && <span className="shrink-0 text-[10px] font-semibold text-muted-foreground" title={`Reversed at ${time12IST(r.reversal.at)}`}>→ {r.reversal.to}</span>}
           {r.outcome && <span className="shrink-0 text-[10px] text-muted-foreground">{r.outcome}</span>}
         </div>
       ))}
@@ -130,13 +131,22 @@ export function TodaysBiasCard() {
   const stale = !!rec && rec.date !== today;
   const live = !!rec && !stale && rec.status === 'ok' && !!rec.bias;
   const warn = !!rec && !stale && rec.status !== 'ok';
-  const tone = live ? TONE[rec!.bias!] : null;
+  // THE CARD SHOWS WHAT THE BIAS IS NOW (19 Nov 2026). Martin: "The bias card
+  // on the homepage still shows bearish can you make it update the bias when
+  // it gets a signal of reversal". When the server has recorded a reversal
+  // (a 15-min NIFTY candle closed beyond the note's own invalidation level —
+  // see server/bias.ts), the badge, the colour and the line beside it are the
+  // side it reversed TO, with when and on what; the morning's note stays under
+  // it, marked as the morning's.
+  const rev = live && rec!.reversal && rec!.reversal.to ? rec!.reversal : null;
+  const tone = live ? TONE[rev ? rev.to : rec!.bias!] : null;
 
   // Header line, whatever the state.
   let title: React.ReactNode, sub: React.ReactNode = null;
   if (isLoading) title = <span className="text-muted-foreground">Loading today's bias…</span>;
   else if (isError) title = <span className="text-muted-foreground">Bias unavailable — could not reach the terminal.</span>;
   else if (!rec) title = <span className="text-muted-foreground">Awaiting 9:32 bias…</span>;
+  else if (rev) title = <span data-bias-reversed="" className="font-semibold">Reversed to {rev.to} at {time12IST(rev.at)} — NIFTY's 15-min candle closed {fmtLevel(rev.close)}, {rev.to === 'bullish' ? 'above' : 'below'} the morning's invalidation level {fmtLevel(rev.level)}.</span>;
   else title = <span className={cn('font-semibold', (stale || warn) && 'text-muted-foreground')}>{rec.headline}</span>;
 
   return (
@@ -156,7 +166,8 @@ export function TodaysBiasCard() {
             <tone.Icon size={12} /> {tone!.word}
           </span>
         )}
-        {live && rec!.confidence && (
+        {rev && <span className="shrink-0 px-1.5 py-0.5 rounded border border-border text-[10px] font-bold uppercase text-muted-foreground">Reversed</span>}
+        {live && !rev && rec!.confidence && (
           <span className="shrink-0 hidden sm:inline px-1.5 py-0.5 rounded border border-border text-[10px] font-semibold uppercase text-muted-foreground">{rec!.confidence}</span>
         )}
         {stale && <span className="shrink-0 px-1.5 py-0.5 rounded border border-border text-[10px] font-bold text-muted-foreground">STALE · {dayLabel(rec!.date)}</span>}
@@ -174,6 +185,12 @@ export function TodaysBiasCard() {
         <div className="relative px-3 md:px-4 pb-3 space-y-3">
           {/* Headline in full on phones (the header row truncates it). */}
           <div className="md:hidden text-sm">{title}</div>
+          {rev && (
+            <div className="rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              <span className="font-semibold text-foreground/80">Morning note, {time12IST(rec!.generated_at)} ({rev.from}{rec!.confidence ? `, ${rec!.confidence}` : ''}):</span> {rec!.headline}
+              <span className="block mt-1">The levels below are that note's. The reversal is a rule on its invalidation level, not a new reading of the market.</span>
+            </div>
+          )}
 
           {!rec && !isLoading && !isError && (
             <p className="text-xs text-muted-foreground">The scheduled analysis posts here at about 09:33 IST on trading days. You'll get an alert when it arrives.</p>
@@ -188,7 +205,7 @@ export function TodaysBiasCard() {
           {live && (
             <>
               <div className="grid grid-cols-3 md:grid-cols-5 gap-1.5">
-                <Level label="Trigger" value={rec!.levels?.trigger} tone={tone!.text} />
+                <Level label="Trigger" value={rec!.levels?.trigger} tone={rev ? undefined : tone!.text} />
                 <Level label="Invalidation" value={rec!.levels?.invalidation} />
                 <Level label="Next ref" value={rec!.levels?.next_reference} />
                 <Level label="OR high" value={rec!.levels?.or_high} />

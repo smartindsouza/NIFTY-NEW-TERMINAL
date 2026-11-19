@@ -27,6 +27,7 @@ import { registerGapScorecard, toISTString } from './server/gap_scorecard';
 import { registerCalendar, isNseHoliday as calIsNseHoliday, holidayName } from './server/calendar_service';
 import { registerMarketSnapshot } from './server/market_snapshot';
 import { registerBias, getTodayBias } from './server/bias';
+import { candlesToday } from './server/reversal_watch';
 import { buildMarketSnapshot } from './server/market_snapshot';
 // "Check bias" (on-demand Claude note). A CommonJS module: imported the ESM way
 // its README gives, which works under both tsx (dev) and the esbuild bundle.
@@ -3827,7 +3828,16 @@ setInterval(() => {
   // started: if it did not, they go on unguarded, exactly as they were.
   try { registerTradeGuard(app, express, { db, getKiteClient }); setTriggerGuard(guardOrderBlock); } catch (e) { console.error('[guard] failed to start — orders are unaffected', e); }
   // Today's Bias: the 09:33 IST note posted by the scheduled task (same key).
-  registerBias(app, db);
+  registerBias(app, db, {
+    // NIFTY's completed 15-minute candles of today, for the bias's reversal
+    // (see THE BIAS REVERSES… in server/bias.ts). The same reader the
+    // Structure SL uses.
+    niftyCandles15: async (now: number) => {
+      const kc: any = getKiteClient();
+      if (!kc || !kc.access_token) return [];
+      return (await candlesToday(kc, 256265, now, 15)).map((k: any) => ({ t: k.t, c: k.c }));
+    },
+  });
 
   // TELEGRAM SIGNAL AUTO-TRADER. Everything it does to an open position goes
   // through the same premium_exit_rules row, tick path and exit function as a

@@ -16,7 +16,17 @@ export type BiasRecord = {
   us30: { close: number | null; change_pts: number | null; change_pct: number | null; driver: string | null } | null;
   error: string | null;
   received_at: string; outcome: string | null; outcome_note: string | null;
+  /** Set by the server when a 15-min NIFTY candle closes beyond the note's own
+   *  invalidation level (see THE BIAS REVERSES… in server/bias.ts). */
+  reversal?: { to: 'bullish' | 'bearish'; from: 'bullish' | 'bearish'; level: number; close: number; at: string; candle_start: string } | null;
 };
+/** 12-hour IST time of an ISO time: "10:45 AM". */
+export function time12IST(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  return new Date(t).toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true });
+}
 export type BiasToday = BiasRecord | { status: 'pending'; date: string };
 
 /** IST calendar date, YYYY-MM-DD. */

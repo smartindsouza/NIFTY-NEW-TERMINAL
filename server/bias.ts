@@ -111,8 +111,42 @@ export function validateBias(b: any): { ok: true; value: BiasPayload; warnings: 
   };
 }
 
+// THE BIAS REVERSES WHEN ITS OWN INVALIDATION LEVEL IS CLOSED THROUGH (19 Nov
+// 2026). Martin: "today's bias at 9.32 was bearish. Market has been bullish
+// ever since. The bias card on the homepage still shows bearish can you make
+// it update the bias when it gets a signal of reversal".
+// The note is written once, at about 09:33, and nothing looked at it again.
+// It does carry the level at which its own view is wrong — levels.invalidation
+// ("invalidation 25256" that morning, the opening range's high) — so that is
+// the signal, and nothing new is invented: the first completed 15-minute NIFTY
+// candle after the note that CLOSES beyond that level (above it for a bearish
+// note, below it for a bullish one) reverses the bias to the other side, at
+// that candle's close. A wick through the level is not a close. 15 minutes,
+// not 5, so that one sharp candle does not turn the card over — the same
+// timeframe his Structure SL reads by default. It happens once in a day: the
+// card then says what it reversed to, when, and on what, with the morning's
+// note under it as it was written. A neutral note, or one with no
+// invalidation level, never reverses. This is arithmetic on the note's own
+// level, not a second reading of the market, and it places no order.
+export type BiasReversal = { to: 'bullish' | 'bearish'; from: 'bullish' | 'bearish'; level: number; close: number; at: string; candle_start: string; timeframe: 15 };
+export function biasReversal(note: { bias: string | null; status: string; generated_at: string; levels: Record<string, number | null> | null },
+  candles: { t: number; c: number }[], tfMin = 15): BiasReversal | null {
+  if (!note || note.status !== 'ok' || (note.bias !== 'bullish' && note.bias !== 'bearish')) return null;
+  const level = note.levels?.invalidation;
+  const since = Date.parse(note.generated_at);
+  if (typeof level !== 'number' || !Number.isFinite(level) || Number.isNaN(since)) return null;
+  for (const k of candles) {
+    const end = k.t + tfMin * 60000;
+    if (end <= since) continue;                       // closed before the note was written: the note had seen it
+    const hit = note.bias === 'bearish' ? k.c > level : k.c < level;
+    if (hit) return { to: note.bias === 'bearish' ? 'bullish' : 'bearish', from: note.bias, level, close: k.c, at: istIso(end), candle_start: istIso(k.t), timeframe: 15 };
+  }
+  return null;
+}
+
 const rowToRecord = (r: any) => ({
   ...JSON.parse(r.payload),
+  reversal: (() => { try { return r.reversal ? JSON.parse(r.reversal) : null; } catch (e) { return null; } })(),
   received_at: istIso(r.received_at),
   outcome: r.outcome ?? null,
   outcome_note: r.outcome_note ?? null,
@@ -127,7 +161,7 @@ export function getTodayBias(db: any): any | null {
   } catch (e) { return null; }
 }
 
-export function registerBias(app: any, db: any) {
+export function registerBias(app: any, db: any, deps?: { niftyCandles15?: (now: number) => Promise<{ t: number; c: number }[]> }) {
   db.exec(`CREATE TABLE IF NOT EXISTS daily_bias (
     date TEXT PRIMARY KEY,
     status TEXT NOT NULL,
@@ -143,11 +177,14 @@ export function registerBias(app: any, db: any) {
     outcome_note TEXT
   );`);
 
+  try { db.exec('ALTER TABLE daily_bias ADD COLUMN reversal TEXT'); } catch (e) { /* column exists */ }
+
   const upsert = db.prepare(`INSERT INTO daily_bias (date, status, bias, confidence, headline, generated_at, payload, received_at, updated_at)
     VALUES (@date, @status, @bias, @confidence, @headline, @generated_at, @payload, @now, @now)
     ON CONFLICT(date) DO UPDATE SET status = excluded.status, bias = excluded.bias, confidence = excluded.confidence,
       headline = excluded.headline, generated_at = excluded.generated_at, payload = excluded.payload,
-      received_at = excluded.received_at, updated_at = excluded.updated_at, post_count = daily_bias.post_count + 1`);
+      received_at = excluded.received_at, updated_at = excluded.updated_at, post_count = daily_bias.post_count + 1, reversal = NULL`);
+  // reversal IS cleared by a re-post: it belonged to the note that was replaced, and is worked out again for the new one.
   // outcome / outcome_note are deliberately NOT in the update list: a re-post
   // replaces the note, never a score already given to that day.
 
@@ -188,6 +225,30 @@ export function registerBias(app: any, db: any) {
     const rows = db.prepare('SELECT * FROM daily_bias WHERE date >= ? ORDER BY date DESC').all(from);
     res.json({ days, from, records: rows.map(rowToRecord) });
   });
+
+  // The look for a reversal: once a minute in market hours, while today's note
+  // has none recorded. One candle request a minute at most, and none once the
+  // day's reversal is written or when there is nothing that could reverse.
+  if (deps?.niftyCandles15) {
+    let busy = false;
+    setInterval(async () => {
+      if (busy) return; busy = true;
+      try {
+        const now = Date.now();
+        const d = new Date(now + 5.5 * 3600 * 1000), mins = d.getUTCHours() * 60 + d.getUTCMinutes(), day = d.getUTCDay();
+        if (day === 0 || day === 6 || mins < 9 * 60 + 30 || mins > 15 * 60 + 35) return;
+        const r: any = db.prepare('SELECT * FROM daily_bias WHERE date = ?').get(istToday(now));
+        if (!r || r.reversal || r.status !== 'ok' || (r.bias !== 'bullish' && r.bias !== 'bearish')) return;
+        const note = JSON.parse(r.payload);
+        if (typeof note?.levels?.invalidation !== 'number') return;
+        const rev = biasReversal(note, await deps.niftyCandles15!(now));
+        if (!rev) return;
+        db.prepare('UPDATE daily_bias SET reversal = ?, updated_at = ? WHERE date = ? AND reversal IS NULL').run(JSON.stringify(rev), now, r.date);
+        console.log(`[bias] REVERSED ${r.date} ${rev.from} -> ${rev.to}: 15-min candle closed ${rev.close}, ${rev.to === 'bullish' ? 'above' : 'below'} ${rev.level}, at ${rev.at}`);
+      } catch (e: any) { /* the next minute looks again */ }
+      finally { busy = false; }
+    }, 60000);
+  }
 
   console.log('[bias] registered: POST /api/bias, GET /api/bias/today, /api/bias/history');
 }

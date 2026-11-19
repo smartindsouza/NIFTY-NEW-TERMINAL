@@ -119,7 +119,7 @@ function underlyingOf(sym: string): Watched['under'] | null {
   return null;
 }
 
-async function candlesToday(kc: any, token: number, now: number, tf: 5 | 15 = 5): Promise<C[]> {
+export async function candlesToday(kc: any, token: number, now: number, tf: 5 | 15 = 5): Promise<C[]> {
   const { date } = istParts(now);
   const open = Date.parse(`${date}T09:15:00+05:30`);
   const raw: any[] = (await kc.getHistoricalData(token, tf === 15 ? '15minute' : '5minute', kiteTime(open), kiteTime(now))) || [];

@@ -112,6 +112,33 @@ async function main() {
   srv.close(); db.close();
   try { fs.unlinkSync(file); } catch {}
 
+  // ── the reversal rule ──
+  {
+    const { biasReversal } = await import('./bias');
+    const D = '2026-11-19';
+    const note = (bias: any, inval: any) => ({ bias, status: 'ok', generated_at: `${D}T09:34:00+05:30`, levels: { invalidation: inval } as any });
+    const k = (hhmm: string, c: number) => ({ t: Date.parse(`${D}T${hhmm}:00+05:30`), c });
+    // bearish: closes at or under the level do nothing, a wick is not known here (closes only), the first close above reverses
+    const day = [k('09:15', 25200), k('09:30', 25130), k('09:45', 25256), k('10:00', 25240), k('10:15', 25262.5), k('10:30', 25300)];
+    const r = biasReversal(note('bearish', 25256), day)!;
+    assert.equal(r.to, 'bullish'); assert.equal(r.from, 'bearish'); assert.equal(r.close, 25262.5); assert.equal(r.level, 25256);
+    assert.equal(r.at, `${D}T10:30:00+05:30`, 'at the close of the 10:15 candle');
+    assert.equal(r.candle_start, `${D}T10:15:00+05:30`);
+    // a candle that had closed before the note was written is not counted, however far beyond
+    assert.equal(biasReversal(note('bearish', 25256), [k('09:15', 25400)]), null, '09:15-09:30 closed before 09:34');
+    // ...but the one the note was written inside is (09:30-09:45 closes after 09:34)
+    assert.equal(biasReversal(note('bearish', 25256), [k('09:30', 25300)])!.at, `${D}T09:45:00+05:30`);
+    // bullish mirrors it
+    const b = biasReversal(note('bullish', 25100), [k('09:45', 25100), k('10:00', 25099.9)])!;
+    assert.equal(b.to, 'bearish'); assert.equal(b.at, `${D}T10:15:00+05:30`);
+    assert.equal(biasReversal(note('bullish', 25100), [k('09:45', 25100.1), k('10:00', 25500)]), null);
+    // nothing to reverse
+    assert.equal(biasReversal(note('neutral', 25256), day), null);
+    assert.equal(biasReversal(note('bearish', null), day), null);
+    assert.equal(biasReversal({ ...note('bearish', 25256), status: 'error' }, day), null);
+    assert.equal(biasReversal(note('bearish', 25256), []), null);
+  }
+
   console.log('bias: all checks passed');
 }
 
