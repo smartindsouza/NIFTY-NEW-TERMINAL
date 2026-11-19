@@ -13232,19 +13232,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             return;
           }
 
-          // Check PDH/PDL click
-          if (showPdhPdl && intradayLevelsAllowed && pdhPrice !== null && pdlPrice !== null) {
-            const pdhY = mainSeries.priceToCoordinate(pdhPrice);
-            if (pdhY !== null && Math.abs(pdhY - y) < 10) {
-              setIsEditingPdhPdl(true);
-              return;
-            }
-            const pdlY = mainSeries.priceToCoordinate(pdlPrice);
-            if (pdlY !== null && Math.abs(pdlY - y) < 10) {
-              setIsEditingPdhPdl(true);
-              return;
-            }
-          }
+          // PDH AND PDL ARE NOT TAPPED OPEN (19 Nov 2026). Martin: "When I tap the
+          // PDH and PDL lines, its settings appear on the chart. I want to access
+          // its settings only from the indicators list and not directly on the
+          // chart." A tap within 10px of either line used to open their settings
+          // card and end there — so it also swallowed taps meant for the chart
+          // near those levels, which is where price often is. The gear beside
+          // PDH/PDL in the Indicators list is the only way in now; a tap on the
+          // lines is a tap on the chart like any other.
 
           // GIFT NIFTY is a reference chart. Nothing here is tradeable through this
           // terminal — it is a USD-denominated NSE IX future — so the tap stops
