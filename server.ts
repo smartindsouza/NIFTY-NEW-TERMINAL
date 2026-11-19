@@ -2615,6 +2615,19 @@ setInterval(() => {
   app.post('/api/order-margin', express.json(), async (req, res) => {
     try {
       const b = req.body || {};
+      // BOTH SIDES IN ONE ASK (19 Nov 2026). ScalperX shows what a buy and a
+      // sell of the option on its chart each need, and asked twice for it —
+      // so three options looked at within fifteen seconds (a tap on each of
+      // three of its new pills) was six requests and the app's own
+      // high-frequency warning. `both` answers the two together.
+      if (b.both) {
+        const one = (side: 'BUY' | 'SELL') => getOrderMargin({
+          tradingsymbol: String(b.tradingsymbol || '').toUpperCase(), exchange: String(b.exchange || 'NFO'), transaction_type: side,
+          quantity: parseInt(String(b.quantity), 10) || 0, product: String(b.product || 'NRML').toUpperCase(), price: parseFloat(String(b.price)) || 0,
+        }).then((x: any) => (x && Number.isFinite(Number(x.total)) ? Number(x.total) : null)).catch(() => null);
+        const [buy, sell] = await Promise.all([one('BUY'), one('SELL')]);
+        return res.json({ both: true, buy, sell });
+      }
       const m = await getOrderMargin({
         tradingsymbol: String(b.tradingsymbol || '').toUpperCase(),
         exchange: String(b.exchange || 'NFO'),

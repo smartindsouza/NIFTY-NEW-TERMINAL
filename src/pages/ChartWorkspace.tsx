@@ -275,7 +275,12 @@ function ScalpScreen({ onClose }: { onClose: () => void }) {
             AdvancedChart), which owns the list. It is the one part of this
             screen a finger may scroll: sideways only (the root is
             touch-action none; see THE SCREEN DOES NOT SCROLL). */}
-        <div data-scalp-pills="" className="relative flex-1 min-w-0 h-[37px] ml-[19px] flex items-center gap-[6px] pr-3 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        {/* IN THE MIDDLE OF THE ROW, NOT OF THE TAB (19 Nov 2026). Martin, with a
+            picture: "move the pill shaped options a little upward because it's
+            not centered between the line above and below it". The place was
+            the tab's height (37 of the row's 44, at its foot), so the pills sat
+            3.5pt low between the row's two lines. It is the row's height now. */}
+        <div data-scalp-pills="" className="relative flex-1 min-w-0 h-11 ml-[19px] flex items-center gap-[6px] pr-3 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           style={{ touchAction: 'pan-x', overscrollBehaviorX: 'contain' }} />
       </div>
       <div ref={bodyRef} className="flex flex-col flex-1 min-h-0">

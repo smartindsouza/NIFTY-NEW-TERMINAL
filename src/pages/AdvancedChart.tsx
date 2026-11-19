@@ -1462,6 +1462,8 @@ const indSet = (key: string, opt: boolean, value: string) => { try { localStorag
 // would have had to remember. `own` is the list of names to leave alone, filled
 // in where the copy's list is (paneInd); null for every other chart.
 // Reads are never held back, and neither is any other name.
+// What a buy and a sell of one lot need, by contract, and when it was asked (ScalperX's bar).
+const scalpMarginCache = new Map<string, { at: number; lot: number; buy: number | null; sell: number | null }>();
 // Cards the server refused to arm because Zerodha has no such trade, and when.
 // Outside the component: every chart on the page shares it, and a chart that
 // is taken down and put up again (ScalpPro's two) must still know.
@@ -16204,11 +16206,28 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     let dead = false;
     const ask = () => {
       const px = Number(lastCandleDataRef.current?.close) || 0;
-      const one = (side: 'BUY' | 'SELL') => fetch('/api/order-margin', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tradingsymbol: scalpSym, exchange: scalpInfo?.exchange || 'NFO', side, quantity: scalpLot, product: 'NRML', price: px }),
-      }).then(r => (r.ok ? r.json() : null)).then(m => (m && Number.isFinite(Number(m.total)) ? Number(m.total) : null)).catch(() => null);
-      Promise.all([one('BUY'), one('SELL')]).then(([buy, sell]) => {
+      // ONE ASK FOR BOTH SIDES, AND NOT AGAIN WITHIN 25 SECONDS (19 Nov 2026).
+      // Martin, minutes after the pills beside the ScalperX tab went in: "High
+      // frequency api warning again" — the server's log: /api/order-margin six
+      // times in 15 s on ScalperX. Each option put on this chart asked twice
+      // (buy, sell), so three pills tapped was six. Now the two are one request
+      // (`both`, see the server), and an option looked at again within 25
+      // seconds — back and forth between two pills — uses the answer it had.
+      // The figure still follows the premium between asks (see "Req" UNDER BUY
+      // FOLLOWS THE PREMIUM), and is asked for afresh every 30 seconds.
+      const had = scalpMarginCache.get(scalpSym);
+      const both: Promise<[number | null, number | null]> = had && had.lot === scalpLot && Date.now() - had.at < 25000
+        ? Promise.resolve([had.buy, had.sell])
+        : fetch('/api/order-margin', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tradingsymbol: scalpSym, exchange: scalpInfo?.exchange || 'NFO', both: true, quantity: scalpLot, product: 'NRML', price: px }),
+          }).then(r => (r.ok ? r.json() : null)).then((m) => {
+            const num = (v: any) => (v !== null && v !== undefined && Number.isFinite(Number(v)) ? Number(v) : null);
+            const buy = num(m?.buy), sell = num(m?.sell);
+            if (buy !== null || sell !== null) scalpMarginCache.set(scalpSym, { at: Date.now(), lot: scalpLot, buy, sell });
+            return [buy, sell] as [number | null, number | null];
+          }).catch(() => [null, null] as [number | null, number | null]);
+      both.then(([buy, sell]) => {
         if (dead) return;
         // THE PRICE THE BUY FIGURE IS FOR. It is what "Req" is scaled from as the
         // premium moves (see "Req" UNDER BUY FOLLOWS THE PREMIUM). In v320 it was
