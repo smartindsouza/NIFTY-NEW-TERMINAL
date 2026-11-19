@@ -7826,6 +7826,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         try { if (prevRule) window.dispatchEvent(new CustomEvent('terminal:rule-changed', { detail: { symbol: pos.symbol, sl: prevRule.sl, tp: prevRule.tp, slOn: prevRule.slOn !== false, tpOn: prevRule.tpOn !== false } })); } catch (e) {}
         return;
       }
+      // Zerodha has no such trade: the card this chart is drawing is a leftover
+      // (19 Nov 2026 — see THE SAVED COPY IS CHECKED TOO in ActivePositions).
+      // Ask for the positions to be checked now, so it is cleared in a second
+      // instead of at the next poll. The warning below still shows: if this is
+      // a real order that has not reached Zerodha yet, it is true.
+      if (d && !d.success && d.noPosition) { try { window.dispatchEvent(new Event('positions_reconcile_request')); } catch (e) {} }
       if (d && !d.success && d.error) {
         console.warn('[premium-exit] not armed:', d.error);
         // Said OUT LOUD. A refusal used to be a console line plus a small status
@@ -18545,7 +18551,18 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         {barRowShown && (
           <div ref={setFixedRow} data-bar-row="scalp" data-scrolled={pageScrolled ? '1' : '0'}
             className={`md:hidden fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] left-0 right-0 z-40 bg-card px-3 pt-[3px] pb-1.5 flex items-center gap-2 border-t ${pageScrolled ? 'border-border' : 'border-transparent'} box-content h-10`}>
-            <button type="button" data-bar="chain" onClick={() => { try { window.dispatchEvent(new CustomEvent('terminal:option-chain')); } catch (e) {} }}
+            {/* THE CHAIN OF THE INDEX ON THIS CHART (19 Nov 2026). Martin: "I switched
+                to nifty and tried to open option chain. But it's still shows option
+                chain for Sensex." The button said only "open the chain", and the
+                chain then read the index from the phone's saved copy — which every
+                chart on the page writes, so a second chart still on SENSEX (the
+                one behind a SENSEX trade that morning) could have written last.
+                The button now names the index its own chart is showing, as the
+                desktop's button always has. */}
+            <button type="button" data-bar="chain" onClick={() => {
+              const u = underlying === 'NIFTY' || underlying === 'BANKNIFTY' || underlying === 'SENSEX' ? underlying : undefined;
+              try { window.dispatchEvent(new CustomEvent('terminal:option-chain', { detail: u ? { underlying: u } : {} })); } catch (e) {}
+            }}
               className="flex-1 h-8 rounded-full border border-foreground/[0.2] text-[12px] leading-none font-medium text-foreground/90 flex items-center justify-center gap-2 active:bg-foreground/10">
               <Link2 size={15} /> Option Chain
             </button>

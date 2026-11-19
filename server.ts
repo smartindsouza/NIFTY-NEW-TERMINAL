@@ -1601,7 +1601,7 @@ setInterval(() => {
       let positions: any;
       try { positions = await kc.getPositions(); } catch (e: any) { return res.json({ success: false, error: 'Could not read positions: ' + (e?.message || e) }); }
       const pos = ((positions && positions.net) || []).find((p: any) => p.tradingsymbol === tradingsymbol && p.quantity !== 0);
-      if (!pos) return res.json({ success: false, error: `No open position for ${tradingsymbol} on Zerodha.` });
+      if (!pos) return res.json({ success: false, noPosition: true, error: `No open position for ${tradingsymbol} on Zerodha.` });
       // SENSEX (BFO) auto SL/TP enabled 21 Oct 2026 at Martin's request, same as
       // NIFTY. The July guard that refused BFO arms is gone: the exit order, the
       // position check and the 3s poll all use the position's own exchange, the

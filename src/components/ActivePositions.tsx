@@ -153,7 +153,7 @@ export function ActivePositions() {
             // or if it's an old stale card (>25s) — but keep freshly-placed cards still lagging into Kite.
             const ageMs = Date.now() - new Date(pos.timestamp).getTime();
             const wasOpen = confirmedOpenRef.current.has(pos.symbol);
-            if (wasOpen || ageMs > 25000) {
+            if (wasOpen || !(ageMs <= 25000)) {
               confirmedOpenRef.current.delete(pos.symbol);
               removed.push(pos.symbol);
               changed = true;
@@ -244,6 +244,42 @@ export function ActivePositions() {
           }
           return changed ? updated : prevPositions;
         });
+
+        // THE SAVED COPY IS CHECKED TOO, NOT ONLY THE LIST ON SCREEN (19 Nov 2026).
+        // Martin, with a picture taken ten minutes after a SENSEX trade was sold by
+        // its stop: "I took a trade and it hit SL in sensex but the app still shows
+        // this." The chart's Exit pill, its SL/TP lines and the arming of the
+        // automatic exit all read the copy saved on the phone, and that copy is
+        // only rewritten above when the list in memory changes. That morning the
+        // list in memory was already empty (the server's log shows this phone
+        // polling at the flat pace) while the saved copy still held the closed
+        // trade — so nothing "changed", nothing was written, and the chart went on
+        // drawing a trade Zerodha no longer had and shouting that its stop was
+        // not armed. Now every answer from Zerodha is also held against the saved
+        // copy itself: a real trade saved there that Zerodha does not report is
+        // dropped, by the same rule as above (an exit in flight is left alone,
+        // and so is a card under 25 seconds old, which may be an order still
+        // reaching Zerodha; a card with no readable time counts as old).
+        try {
+          const raw = localStorage.getItem('active_positions');
+          const saved: any[] = raw ? JSON.parse(raw) : [];
+          if (Array.isArray(saved) && saved.length) {
+            const gone: string[] = [];
+            const left = saved.filter((c: any) => {
+              if (!c || c.testMode || exitingIds.has(c.id) || bySymbol[c.symbol]) return true;
+              const age = Date.now() - new Date(c.timestamp).getTime();
+              if (isFinite(age) && age <= 25000 && !confirmedOpenRef.current.has(c.symbol)) return true;
+              gone.push(c.symbol);
+              return false;
+            });
+            if (gone.length) {
+              gone.forEach((sym) => confirmedOpenRef.current.delete(sym));
+              localStorage.setItem('active_positions', JSON.stringify(left));
+              window.dispatchEvent(new Event('active_positions_updated'));
+              gone.forEach((sym) => toast.info(`${sym} is no longer open on Zerodha — cleared from the banner.`, { id: `closed-${sym}` }));
+            }
+          }
+        } catch (e) { /* the saved copy is unreadable: the next poll tries again */ }
       } catch (err: any) {
         // This catch used to be bare. Anything that threw inside the poll — a bad
         // response, an exception in the adoption block — vanished silently, and the
@@ -284,6 +320,10 @@ export function ActivePositions() {
     // iOS suspends timers in the background, which left closed trades looking open.
     const onVisible = () => { retime(); if (document.visibilityState === 'visible') pollReal(); };
     document.addEventListener('visibilitychange', onVisible);
+    // The chart asks for a check the moment the server tells it that a trade it
+    // is drawing is not open on Zerodha (see pushPremiumRule in AdvancedChart).
+    const onReconcile = () => { pollReal(true); };
+    window.addEventListener('positions_reconcile_request', onReconcile);
 
     // Simulation strictly for test-mode cards
     const simTimer = setInterval(() => {
@@ -307,7 +347,7 @@ export function ActivePositions() {
       });
     }, 2000);
 
-    return () => { if (realTimer) clearInterval(realTimer); clearInterval(retimeTicker); clearInterval(simTimer); document.removeEventListener('visibilitychange', onVisible); };
+    return () => { if (realTimer) clearInterval(realTimer); clearInterval(retimeTicker); clearInterval(simTimer); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('positions_reconcile_request', onReconcile); };
   }, [exitingIds]);
 
   // Manual sync. Whatever the automatic cadence is doing, one click forces a read
