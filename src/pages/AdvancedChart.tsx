@@ -31,7 +31,7 @@ import MarketContext from "../components/MarketContext";
 import BounceConviction from "../components/BounceConviction";
 import { DownloadCloud, Globe, ListPlus } from 'lucide-react';
 import { createPortal } from 'react-dom';
-import { setChartBusy, halfCopyStorageName } from '../lib/indicatorSync';
+import { setChartBusy, halfCopyStorageName, syncNote } from '../lib/indicatorSync';
 import { Instrument } from "../hooks/useSymbolSearch";
 import { 
   createChart, 
@@ -1442,7 +1442,21 @@ const indGet = (key: string, opt: boolean): string | null => {
     return v !== null ? v : (key === 'sessionBreaks' || key === 'showBos') ? null : 'false';
   } catch (e) { return opt && key !== 'sessionBreaks' && key !== 'showBos' ? 'false' : null; }
 };
-const indSet = (key: string, opt: boolean, value: string) => { try { localStorage.setItem(opt ? IND_OPT(key) : key, value); } catch (e) {} };
+// Says what it did, when it changed something (see WHAT HIS PHONE ACTUALLY DOES
+// WHEN HE TAPS A SWITCH, in lib/indicatorSync): the name it wrote under, and
+// whether the value was there to be read back. A write that throws is said too
+// — it used to be swallowed here without a word.
+const indSet = (key: string, opt: boolean, value: string) => {
+  const name = opt ? IND_OPT(key) : key;
+  let was: string | null = null;
+  try { was = localStorage.getItem(name); } catch (e) {}
+  if (was === value) return;
+  try {
+    localStorage.setItem(name, value);
+    let back: string | null = null; try { back = localStorage.getItem(name); } catch (e) {}
+    syncNote('switch-saved', [name, `${was}->${value}`, back === value ? 'kept' : `NOT KEPT (reads ${back})`]);
+  } catch (e: any) { syncNote('switch-NOT-saved', [name, `${was}->${value}`, String(e?.name || e)]); }
+};
 
 // THE STORAGE A CHART SAVES ITS SETTINGS TO (17 Nov 2026). Inside the chart
 // component `localStorage` is one of these, not the browser's own — the same

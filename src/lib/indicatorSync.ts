@@ -402,6 +402,48 @@ export function adoptSpotHalfCopy(store: KV, halvesShown: boolean): string[] {
   return wrote;
 }
 
+// WHAT HIS PHONE ACTUALLY DOES WHEN HE TAPS A SWITCH (19 Nov 2026). Martin,
+// 6:10 PM, with the list as he had just set it: "These are the only ones I'm
+// trying to keep as default since 5pm. I don't understand why it doesn't save
+// and sync it" — and after reopening the app, the list was the old one again.
+// The server's log for those minutes: his phone read the shared copy every
+// twenty seconds and SENT NOTHING, so the switches he tapped never changed the
+// values this sharing reads; and they were not there after a restart either.
+// The same taps on a phone-sized page here are saved and sent. So the phone
+// says what happens: each switch saved (indSet in AdvancedChart) reports the
+// name, whether it went to the index chart's name or the option chart's, and
+// whether the value could be read back; and each page start reports how much
+// the storage holds, whether it can still grow, and its largest entries.
+// Lines in the server's log ([sync-note], GET /api/diag/sync-notes). Forty a
+// page at most. It changes nothing.
+let pageNotes = 0;
+export function syncNote(kind: string, keys: string[] = []) {
+  if (typeof window === 'undefined' || pageNotes >= 40) return; pageNotes++;
+  try {
+    const ua = window.navigator.userAgent || '';
+    const device = /iPhone/i.test(ua) ? 'iPhone' : /iPad/i.test(ua) ? 'iPad' : /Android/i.test(ua) ? 'Android' : /Mac/i.test(ua) ? 'Mac' : /Windows/i.test(ua) ? 'Windows' : 'other';
+    const standalone = !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || (window.navigator as any).standalone === true;
+    void fetch('/api/diag/sync-note', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind, n: keys.length, keys: keys.slice(0, 14), device, standalone, canWrite: true, seenKept: true }) }).catch(() => {});
+  } catch { /* no note */ }
+}
+/** Once a page: how full this device's storage is, whether it can still grow, and what fills it. */
+export function noteStorageOnce() {
+  if (typeof window === 'undefined' || (window as any).__indStorageNoted) return; (window as any).__indStorageNoted = true;
+  try {
+    const ls = window.localStorage; const sizes: [string, number][] = []; let total = 0;
+    for (let i = 0; i < ls.length; i++) { const k = ls.key(i) || ''; const n = k.length + (ls.getItem(k) || '').length; total += n; sizes.push([k, n]); }
+    sizes.sort((a, b) => b[1] - a[1]);
+    let grow = 'yes';
+    try { ls.setItem('indSync:grow', 'x'.repeat(200000)); ls.removeItem('indSync:grow'); } catch (e: any) { grow = `NO (${e?.name || 'error'})`; try { ls.removeItem('indSync:grow'); } catch { /* */ } }
+    // groups: the same kind of entry counted together (a prefix up to the first colon)
+    const groups: Record<string, number> = {};
+    for (const [k, n] of sizes) { const g = k.includes(':') ? k.slice(0, k.indexOf(':') + 1) + '*' : k; groups[g] = (groups[g] || 0) + n; }
+    const top = Object.entries(groups).sort((a, b) => b[1] - a[1]).slice(0, 9).map(([g, n]) => `${g}=${n}`);
+    syncNote('storage', [`total=${total}`, `entries=${ls.length}`, `canGrow200k=${grow}`, ...top]);
+  } catch { /* no note */ }
+}
+
 // ───────────────────────── the part that needs a browser ─────────────────────────
 
 const PUSH_EVERY_MS = 2000;

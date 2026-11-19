@@ -2,7 +2,7 @@ import { FolderTabFeet } from "../components/FolderTabFeet";
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { AdvancedChart, type ScalpAt, type ScalpShared } from './AdvancedChart';
-import { startIndicatorSync, indicatorEpoch, onIndicatorEpoch, anyChartBusy, adoptSpotHalfCopy } from '../lib/indicatorSync';
+import { startIndicatorSync, indicatorEpoch, onIndicatorEpoch, anyChartBusy, adoptSpotHalfCopy, noteStorageOnce } from '../lib/indicatorSync';
 
 // THE INDEX CHART IS PUT ON THE PAGE AGAIN WHEN ITS INDICATORS CHANGE ELSEWHERE.
 // The number this returns goes up each time a switch or a setting has arrived
@@ -383,6 +383,7 @@ export function ChartWorkspace() {
     const touched = () => { last = Date.now(); };
     const evs = ['pointerdown', 'pointermove', 'touchstart', 'touchmove', 'keydown', 'wheel'] as const;
     evs.forEach((e) => window.addEventListener(e, touched, { capture: true, passive: true }));
+    noteStorageOnce();
     const stop = startIndicatorSync(() => Date.now() - last > 4000 && !anyChartBusy() && !document.hidden);
     return () => { stop(); evs.forEach((e) => window.removeEventListener(e, touched, { capture: true } as any)); };
   }, []);
