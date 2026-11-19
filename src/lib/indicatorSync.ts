@@ -435,7 +435,7 @@ export function syncNote(kind: string, keys: string[] = []) {
 const trace: string[] = [];
 let traceSent = 0, loops = 0;
 const short = (v: string | null | undefined) => (v === null || v === undefined ? 'unset' : v.length > 26 ? `${v.slice(0, 12)}…${v.slice(-10)}(${v.length})` : v);
-const tr = (line: string) => { const t = new Date(); trace.push(`${t.getMinutes()}:${String(t.getSeconds()).padStart(2, '0')}.${String(t.getMilliseconds()).padStart(3, '0')} ${line}`.slice(0, 200)); if (trace.length > 400) trace.shift(); };
+const tr = (line: string) => { const t = new Date(); trace.push(`${t.getMinutes()}:${String(t.getSeconds()).padStart(2, '0')}.${String(t.getMilliseconds()).padStart(3, '0')} ${line}`.slice(0, 900)); if (trace.length > 400) trace.shift(); };
 const flushTrace = () => { if (trace.length <= traceSent) return; const part = trace.slice(traceSent, traceSent + 60); traceSent += part.length; pageNotes = Math.min(pageNotes, 30); syncNote('trace', part); };
 
 /** Once a page: how full this device's storage is, whether it can still grow, and what fills it. */
@@ -599,6 +599,12 @@ export function startIndicatorSync(idle: () => boolean): () => void {
         const d0 = await readDoc(true);
         if (!d0) return;                                   // not read: looked at again in two seconds, still nothing sent
         note('whole-set-refused', keys);
+        // What differed, name by name, before it is given up (19 Nov 2026: his
+        // phone does this at every start, and which side is wrong — what it
+        // holds or what it recorded as seen — is the thing to find out).
+        { const sn = readJson<Values>(store, SEEN_KEY) || {}; const at0 = readJson<Record<string, number>>(store, AT_KEY) || {};
+          for (let i = 0; i < keys.length; i += 6) tr(`L${loopId} whole-set ${keys.slice(i, i + 6).map((k) => `${k}[here ${short(store.getItem(k))} | seen ${short(sn[k])} | theirs ${short(d0[k] ? d0[k].v : null)} | at ${at0[k] ? new Date(at0[k]).toISOString().slice(11, 19) : '-'}]`).join(' ')}`);
+          window.setTimeout(flushTrace, 1500); }
         yieldToServer(store, keys);
         if (take(d0).length) waiting = true;
         return;
@@ -617,6 +623,7 @@ export function startIndicatorSync(idle: () => boolean): () => void {
       if (r.ok) commitPushed(store, keys, next);          // not accepted: left as a change, and tried again in two seconds
       { const sn = readJson<Values>(store, SEEN_KEY) || {}; const left = pendingChanges(store);
         tr(`L${loopId} sent ${keys.length} -> ${r.status} ${ans}; took ${got.length}; recorded ${keys.map((k) => `${k}:${(sn[k] ?? null) === (store.getItem(k) ?? null) ? 'ok' : `NOT (seen ${short(sn[k])})`}`).join(' ')}; still pending ${left.join(',') || 'none'}`); }
+      window.setTimeout(flushTrace, 3000);
     } catch { /* offline: tried again */ } finally { busy = false; }
   };
   const pull = async () => {
