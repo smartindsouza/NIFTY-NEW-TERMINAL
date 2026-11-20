@@ -196,8 +196,8 @@ function Row({ m, onOpen }: { m: Market; onOpen?: () => void }) {
 // So each market is one row of that picker: its name (and price) on the left,
 // and in the tile the day's change, green or red. The row at the middle of the
 // panel is the picked-out one (the accent colour stands in for the picture's
-// pink); the others fade with their distance from it; the list snaps a row to
-// the middle. The sections are still headed Indian, US, UK, Global, and a tap
+// pink); the others fade with their distance from it; at rest the nearest row
+// eases to the middle (see SMOOTHER SCROLLING). The sections are still headed Indian, US, UK, Global, and a tap
 // on a heading still folds it. A row's chart is opened by the small icon
 // before its name (see WheelRow), not by the row.
 const WHEEL_ROW = 58;
@@ -214,7 +214,7 @@ function WheelRow({ m, onOpen }: { m: Market; onOpen?: () => void }) {
     <div data-wheel-row={m.key}
       title={onOpen ? undefined : (m.reason || undefined)}
       style={{ height: WHEEL_ROW }}
-      className="group relative snap-center flex items-center justify-end gap-3 pl-3 pr-[78px] will-change-[opacity]">
+      className="group relative flex items-center justify-end gap-3 pl-3 pr-[78px] will-change-[opacity] [contain:layout_paint]">
       {/* THE ROW ITSELF OPENS NOTHING (18 Nov 2026). Martin: "when I tap an
           index by mistake, its chart opens up in the chart screen. So prevent
           it by adding a small chart open icon somewhere for every index". The
@@ -286,30 +286,74 @@ function WheelHeader({ title, collapsed, onToggle, open, age }: { title: string;
 // the rows, not through React: it runs on every scroll frame.
 function Wheel({ active, startKey, children }: { active: boolean; startKey?: string; children: ReactNode }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  // SMOOTHER SCROLLING (20 Nov 2026). Martin: "Make the global market side bar
+  // scrolling more smoother". Two things made it rough on a phone:
+  //  - every scroll frame measured every row on the screen (getBoundingClientRect
+  //    for each, about forty) and set the opacity of every one, even where it
+  //    had not changed. The rows' middles are now measured once, when rows come
+  //    and go, and each frame is arithmetic on scrollTop; an opacity is written
+  //    only when it changes by a visible step, and the picked row only when it
+  //    is a different row.
+  //  - the list snapped with CSS scroll-snap, which on an iPhone pulls the list
+  //    up short as a fling slows. It now scrolls freely, and when it has come
+  //    to rest (no scroll for 140ms, no finger on it) it eases the nearest row
+  //    to the middle.
+  const geo = useRef<{ rows: HTMLElement[]; mids: number[]; op: number[] }>({ rows: [], mids: [], op: [] });
+  const best = useRef<HTMLElement | null>(null);
+  const measure = () => {
+    const el = ref.current; if (!el) return;
+    const rows = Array.from(el.querySelectorAll<HTMLElement>('[data-wheel-row]'));
+    const top = el.getBoundingClientRect().top - el.scrollTop;
+    geo.current = { rows, mids: rows.map((r) => { const b = r.getBoundingClientRect(); return b.top - top + b.height / 2; }), op: rows.map(() => -1) };
+    best.current = null;
+  };
   const paint = () => {
     const el = ref.current; if (!el) return;
-    const box = el.getBoundingClientRect(); const mid = box.top + box.height / 2; const reach = box.height / 2;
-    let best: HTMLElement | null = null, bestD = Infinity;
-    const rows = el.querySelectorAll<HTMLElement>('[data-wheel-row]');
-    rows.forEach((r) => {
-      const b = r.getBoundingClientRect(); const d = Math.abs(b.top + b.height / 2 - mid);
-      r.style.opacity = String(Math.max(0.28, 1 - (d / reach) * 0.8));
-      if (d < bestD) { bestD = d; best = r; }
-    });
-    rows.forEach((r) => { if (r === best) r.setAttribute('data-on', ''); else r.removeAttribute('data-on'); });
+    const g = geo.current; if (!g.rows.length) return;
+    const h = el.clientHeight; const mid = el.scrollTop + h / 2; const reach = h / 2 || 1;
+    let bi = -1, bestD = Infinity;
+    for (let i = 0; i < g.rows.length; i++) {
+      const d = Math.abs(g.mids[i] - mid);
+      const o = Math.round(Math.max(0.28, 1 - (d / reach) * 0.8) * 50) / 50;
+      if (o !== g.op[i]) { g.op[i] = o; g.rows[i].style.opacity = String(o); }
+      if (d < bestD) { bestD = d; bi = i; }
+    }
+    const b = bi >= 0 ? g.rows[bi] : null;
+    if (b !== best.current) { best.current?.removeAttribute('data-on'); b?.setAttribute('data-on', ''); best.current = b; }
+  };
+  // Eases the row nearest the middle to the middle, once the list is at rest.
+  const settle = () => {
+    const el = ref.current; const g = geo.current; if (!el || !g.rows.length) return;
+    const mid = el.scrollTop + el.clientHeight / 2;
+    let bi = 0; for (let i = 1; i < g.mids.length; i++) if (Math.abs(g.mids[i] - mid) < Math.abs(g.mids[bi] - mid)) bi = i;
+    const by = g.mids[bi] - mid;
+    if (Math.abs(by) > 1) el.scrollBy({ top: by, behavior: 'smooth' });
   };
   useEffect(() => {
     if (!active) return;
     const el = ref.current; if (!el) return;
-    let raf = 0;
-    const on = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(paint); };
+    let raf = 0, idle = 0, touching = false;
+    const on = () => {
+      cancelAnimationFrame(raf); raf = requestAnimationFrame(paint);
+      window.clearTimeout(idle); if (!touching) idle = window.setTimeout(settle, 140);
+    };
+    const down = () => { touching = true; window.clearTimeout(idle); };
+    const up = () => { touching = false; window.clearTimeout(idle); idle = window.setTimeout(settle, 140); };
+    const resize = () => { measure(); paint(); };
     el.addEventListener('scroll', on, { passive: true });
-    window.addEventListener('resize', on);
-    on();
-    return () => { cancelAnimationFrame(raf); el.removeEventListener('scroll', on); window.removeEventListener('resize', on); };
+    el.addEventListener('touchstart', down, { passive: true });
+    el.addEventListener('touchend', up, { passive: true });
+    el.addEventListener('touchcancel', up, { passive: true });
+    window.addEventListener('resize', resize);
+    measure(); paint();
+    return () => {
+      cancelAnimationFrame(raf); window.clearTimeout(idle);
+      el.removeEventListener('scroll', on); el.removeEventListener('touchstart', down); el.removeEventListener('touchend', up); el.removeEventListener('touchcancel', up);
+      window.removeEventListener('resize', resize);
+    };
   }, [active]);
-  // Rows come and go (a section folded, prices arriving): mark again.
-  useEffect(() => { if (active) paint(); });
+  // Rows come and go (a section folded, prices arriving): measure and mark again.
+  useEffect(() => { if (active) { measure(); paint(); } });
   // IT OPENS ON ONE ROW (18 Nov 2026). Martin: "Keep the highlighter at Dow
   // jones index by default in the sidebar". The list used to open at its top,
   // so the first row was the picked one. Each time it opens it is now brought
@@ -328,7 +372,7 @@ function Wheel({ active, startKey, children }: { active: boolean; startKey?: str
   });
   return (
     <div className="relative flex-1 min-h-0 [container-type:size]">
-      <div ref={ref} data-wheel="" className="h-full overflow-y-auto overscroll-contain snap-y snap-proximity [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" style={{ paddingTop: 'calc(50cqh - 29px)', paddingBottom: 'calc(50cqh - 29px)' }}>
+      <div ref={ref} data-wheel="" className="h-full overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" style={{ paddingTop: 'calc(50cqh - 29px)', paddingBottom: 'calc(50cqh - 29px)' }}>
         {children}
       </div>
       {/* The line down the right and the handle at its middle. */}
