@@ -3044,10 +3044,12 @@ function BreakerSettingsModal({ value, onChange, onClose, onApply }: {
           {chk('showBull', 'Bullish breakers (support)', 'LL → LH → LL, then a close above the LH: the bearish OB flips')}
           {chk('showRetest', 'Mark the first retest', 'Triangle where price first comes back into the zone')}
           {chk('showInvalidated', 'Keep invalidated breakers (faded)', 'A close through the zone ends it')}
+          {chk('showBreakText', 'Show "break" text', 'The word at the swing a breaker broke (the line stays)')}
           {num('maxBreakers', 'Breakers shown (each side)', 1, 30)}
           {sec('Liquidity grabs')}
           {chk('showGrabs', 'Show liquidity grabs', 'Wick through a swing high/low, close back inside ("LG")')}
           {chk('grabPrevDay', 'Include previous day high / low', 'Marked "PDH grab" / "PDL grab"')}
+          {chk('showGrabText', 'Show "LG" text', 'The label at a grab\'s wick, "PDH grab" / "PDL grab" too (the line stays)')}
           {num('maxGrabs', 'Grabs shown', 1, 200)}
         </div>
         <div className="flex justify-between gap-2 px-4 py-3 border-t border-border">
@@ -15324,7 +15326,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                         ctx.strokeStyle = hexToRgba(col, 0.6); ctx.setLineDash([]);
                         ctx.beginPath(); ctx.moveTo(Math.max(0, x0), ys); ctx.lineTo(Math.min(textAlignX, xb), ys); ctx.stroke(); ctx.setLineDash([]);
                         ctx.textAlign = 'left'; ctx.textBaseline = z.dir === 'bull' ? 'bottom' : 'top'; ctx.fillStyle = hexToRgba(col, 0.8);
-                        tag('break', Math.min(textAlignX - 30, xb + 3), z.dir === 'bull' ? ys - 1 : ys + 1);
+                        if (S.showBreakText !== false) tag('break', Math.min(textAlignX - 30, xb + 3), z.dir === 'bull' ? ys - 1 : ys + 1);
                       }
                       // first retest of the zone — the entry the explanation describes
                       if (S.showRetest && z.retestTime) {
@@ -15351,7 +15353,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       ctx.beginPath(); ctx.moveTo(Math.max(0, xl === null ? xg - 40 : xl), y); ctx.lineTo(xg + 6, y); ctx.stroke(); ctx.setLineDash([]);
                       ctx.font = `bold 9px ${FONT}`; ctx.fillStyle = col; ctx.textAlign = 'center';
                       ctx.textBaseline = gb.dir === 'bear' ? 'bottom' : 'top';
-                      tag(gb.kind === 'prev-day' ? (gb.dir === 'bear' ? 'PDH grab' : 'PDL grab') : 'LG', xg, gb.dir === 'bear' ? yw - 3 : yw + 3);
+                      if (S.showGrabText !== false) tag(gb.kind === 'prev-day' ? (gb.dir === 'bear' ? 'PDH grab' : 'PDL grab') : 'LG', xg, gb.dir === 'bear' ? yw - 3 : yw + 3);
                     }
                     ctx.restore();
                   }

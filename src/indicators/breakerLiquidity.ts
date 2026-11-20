@@ -29,10 +29,16 @@ export interface BlSettings {
   showGrabs: boolean;
   grabPrevDay: boolean;        // previous day's high/low as grab levels too
   maxGrabs: number;
+  // The text on the chart (20 Nov 2026). Martin: "Add an option in the breaker
+  // blocks indicator settings to disable this 'break' text as well as 'LG'
+  // appearing on the chart." Display only: what is found is the same.
+  showBreakText: boolean;      // "break" at the swing a breaker broke
+  showGrabText: boolean;       // "LG" / "PDH grab" / "PDL grab" at a grab's wick
 }
 export const BL_DEFAULTS: BlSettings = {
   swingLen: 5, showBull: true, showBear: true, showInvalidated: false, maxBreakers: 6,
   showRetest: true, showGrabs: true, grabPrevDay: true, maxGrabs: 30,
+  showBreakText: true, showGrabText: true,
 };
 export function normaliseBlSettings(s: any): BlSettings {
   const o = { ...BL_DEFAULTS, ...(s && typeof s === 'object' ? s : {}) };
@@ -40,7 +46,7 @@ export function normaliseBlSettings(s: any): BlSettings {
   o.swingLen = int(o.swingLen, 2, 20, BL_DEFAULTS.swingLen);
   o.maxBreakers = int(o.maxBreakers, 1, 30, BL_DEFAULTS.maxBreakers);
   o.maxGrabs = int(o.maxGrabs, 1, 200, BL_DEFAULTS.maxGrabs);
-  for (const k of ['showBull', 'showBear', 'showInvalidated', 'showRetest', 'showGrabs', 'grabPrevDay'] as const) o[k] = !!o[k];
+  for (const k of ['showBull', 'showBear', 'showInvalidated', 'showRetest', 'showGrabs', 'grabPrevDay', 'showBreakText', 'showGrabText'] as const) o[k] = !!o[k];
   return o;
 }
 
