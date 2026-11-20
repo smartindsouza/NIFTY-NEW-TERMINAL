@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, TrendingUp, TrendingDown, Globe, X, LineChart, ChartCandlestick } from "lucide-react";
 import { useLocation } from "wouter";
 import { notificationService } from "../lib/notificationService";
+import { MARKET_ALERTS_OFF } from "./SetupAlerts";
 import { toast } from "sonner";
 
 // ============================================================================
@@ -589,6 +590,7 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
       const hit = detectSuddenMove(m.key, m.label, m.price!, isOpen, now);
       const dayHit = hit ? null : detectDayMove(m.key, m.changePct, isOpen);
       if (!hit && dayHit === null) continue;
+      if (MARKET_ALERTS_OFF) continue;               // ONLY TWO MARKET ALERTS (20 Nov 2026, see components/SetupAlerts)
       const pctMoved = hit ? hit.pct : (m.changePct as number);
       const dir = pctMoved >= 0 ? 'jumped' : 'dropped';
       const arrow = pctMoved >= 0 ? '▲' : '▼';

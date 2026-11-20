@@ -29,6 +29,7 @@ import { registerMarketSnapshot } from './server/market_snapshot';
 import { registerBias, getTodayBias } from './server/bias';
 import { candlesToday } from './server/reversal_watch';
 import { guardIndicatorDoc, withHistory } from './server/indicator_doc';
+import { registerSetupAlerts } from './server/setup_alerts';
 import { buildMarketSnapshot } from './server/market_snapshot';
 // "Check bias" (on-demand Claude note). A CommonJS module: imported the ESM way
 // its README gives, which works under both tsx (dev) and the esbuild bundle.
@@ -3948,12 +3949,18 @@ setInterval(() => {
   // Price-age measurement (diagnostic only).
   try { registerLatencyDiag(app, express); } catch (e) { console.error('[latency] not registered', e); }
   // Golden-zone Swap-Sweep: WATCH-ONLY alerts and a live record (no orders).
-  try { registerGoldenSweep(app, { db, notify: (t: string) => signalNotify(t) }); } catch (e) { console.error('[golden-sweep] not registered', e); }
+  // ONLY TWO MARKET ALERTS (20 Nov 2026). Martin: "Remove all the alerts which are
+  // currently getting a delivered. I just want a breaker block alert and Swap sweep
+  // reversal indicator alert". The Golden Sweep and Expiry Skew pages keep working and
+  // keep their own logs and lists; they no longer send to Telegram.
+  const quietNotify = (who: string) => (t: string) => { console.log(`[${who}] (not sent: market alerts are off) ${String(t).replace(/\n/g, ' · ').slice(0, 200)}`); };
+  try { registerGoldenSweep(app, { db, notify: quietNotify('golden-sweep') }); } catch (e) { console.error('[golden-sweep] not registered', e); }
+  try { registerSetupAlerts(app, { db, getKiteClient, notify: (t: string) => signalNotify(t) }); } catch (e) { console.error('[setup-alerts] not registered', e); }
   // EXPIRY SKEW (14 Nov 2026): Martin's own option-chain indicator, PRACTICE ONLY.
   // It is handed the database and the alert sender and nothing else — no order
   // function, no exit function — so it cannot trade even by mistake. See
   // server/expiry_skew.ts for why it is on test rather than live.
-  try { registerExpirySkew(app, { db, notify: (t: string) => signalNotify(t) }); } catch (e) { console.error('[skew] not registered — the rest of the app is unaffected', e); }
+  try { registerExpirySkew(app, { db, notify: quietNotify('skew') }); } catch (e) { console.error('[skew] not registered — the rest of the app is unaffected', e); }
   // NIFTY futures feed recorder: keeps the feed so a footprint can be judged on
   // evidence. Records only; its own database file.
   try { registerFutRecorder(app); } catch (e) { console.error('[fut-rec] not registered — the rest of the app is unaffected', e); }

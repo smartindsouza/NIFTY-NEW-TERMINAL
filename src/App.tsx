@@ -15,6 +15,7 @@ import { Toaster } from '@/components/ui/sonner';
 import { DiagnosticsPanel } from './components/DiagnosticsPanel';
 // Today's Bias alert: polls the 09:33 note and pops up once per day, on any screen.
 import { BiasAlert } from './components/BiasAlert';
+import { SetupAlerts } from './components/SetupAlerts';
 import { Cpu } from 'lucide-react';
 import { useUserSettings, useResolvedTheme } from './hooks/useUserSettings';
 
@@ -295,6 +296,7 @@ export default function App() {
         )}
       </div>
       <BiasAlert />
+      <SetupAlerts />
       <OptionChainHost />
       {/* The toast follows the app's theme (18 Nov 2026). It was always told
           "dark" while its box takes the theme's colour — so in the light theme

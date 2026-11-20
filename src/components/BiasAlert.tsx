@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { MARKET_ALERTS_OFF } from "./SetupAlerts";
 import { useLocation } from 'wouter';
 import { TrendingUp, TrendingDown, MoveHorizontal, TriangleAlert, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -26,6 +27,7 @@ export function BiasAlert() {
 
   useEffect(() => {
     if (!isRecord(data) || data.date !== istToday()) return;
+    if (MARKET_ALERTS_OFF) return;                   // ONLY TWO MARKET ALERTS (20 Nov 2026): no bias popup, chime or notification; the home card still shows it
     const read = (k: string) => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
     if (read(BIAS_DISMISSED_KEY) !== data.date) setShown(data);
     if (read(BIAS_ALERTED_KEY) === data.date) return;          // sound + notification: once per date

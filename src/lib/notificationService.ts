@@ -271,6 +271,14 @@ export const notificationService = {
     metadata?: any
   ): SavedNotification {
     const id = Math.random().toString(36).substring(2, 11);
+    // ONLY TWO MARKET ALERTS (20 Nov 2026). Martin: "Remove all the alerts which
+    // are currently getting a delivered. I just want a breaker block alert and Swap
+    // sweep reversal indicator alert". Market observations ('divergence',
+    // 'oi_alert') are kept only when they are those two (source 'setup-alert',
+    // see components/SetupAlerts). Orders and system messages are untouched.
+    if ((type === 'divergence' || type === 'oi_alert') && metadata?.source !== 'setup-alert') {
+      return { id, type, title, body, timestamp: new Date().toISOString(), read: true, metadata };
+    }
     const notification: SavedNotification = {
       id,
       type,

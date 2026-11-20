@@ -201,7 +201,9 @@ async function tick(D: Deps) {
       const slNote = w.slOn
         ? (w.slLevel !== null ? ` Structure SL ON: the position is SOLD if a ${charts[0]?.name} ${w.slTf}-min candle closes ${against} ${fmt(w.slLevel)} (trails as new swings form; your option SL stays as a backstop).` : ' Structure SL ON — level set once the chart has enough candles.')
         : ' Alert only — your SL/TP are unchanged.';
-      await D.notify(`👀 Watching ${w.sym} (${w.dir === 'bull' ? 'bullish' : 'bearish'} trade). ${lv.length ? `Reversal alert if a 5-min candle closes ${against} the last swing ${w.dir === 'bull' ? 'low' : 'high'}: ${lv.join(', ')}.` : ''}${slNote}`);
+      // ONLY TWO MARKET ALERTS (20 Nov 2026): the Watching and REVERSAL notes go to the log, not Telegram.
+      // The Structure SL's own moves and exits (above) are about his money and are still sent.
+      console.log('[reversal-watch] (not sent: market alerts are off, 20 Nov 2026)', `👀 Watching ${w.sym} (${w.dir === 'bull' ? 'bullish' : 'bearish'} trade). ${lv.length ? `Reversal alert if a 5-min candle closes ${against} the last swing ${w.dir === 'bull' ? 'low' : 'high'}: ${lv.join(', ')}.` : ''}${slNote}`);
       w.announced = true;
     }
     for (const ch of charts) {
@@ -211,7 +213,7 @@ async function tick(D: Deps) {
       const k = `${ch.name}|${hit.level}`;
       if (w.alerted.has(k)) continue;
       w.alerted.add(k);
-      await D.notify(`⚠️ REVERSAL vs your ${w.sym}: ${ch.name} 5-min candle ${time12(hit.at)}–${time12(hit.at + 300000)} closed ${fmt(hit.close)}, ${against} its last swing ${w.dir === 'bull' ? 'low' : 'high'} ${fmt(hit.level)}. Structure has turned against the trade — consider exiting. (Alert only; nothing was sold.)`);
+      console.log('[reversal-watch] (not sent: market alerts are off, 20 Nov 2026)', `⚠️ REVERSAL vs your ${w.sym}: ${ch.name} 5-min candle ${time12(hit.at)}–${time12(hit.at + 300000)} closed ${fmt(hit.close)}, ${against} its last swing ${w.dir === 'bull' ? 'low' : 'high'} ${fmt(hit.level)}. Structure has turned against the trade — consider exiting. (Alert only; nothing was sold.)`);
     }
   }
   publish();

@@ -6,6 +6,7 @@ import { navigate } from "wouter/use-browser-location";
 import { TradeGuardButton } from "../components/TradeGuard";
 import { ChartCards } from "../components/ChartCards";
 import { parseContract } from "../lib/optionName";
+import { MARKET_ALERTS_OFF } from "../components/SetupAlerts";
 import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { useUserSettings, useResolvedTheme } from "../hooks/useUserSettings";
@@ -4645,6 +4646,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // signal would be noise.
   useEffect(() => {
     if (paneRole === 'option' || !liveSig) return;
+    if (MARKET_ALERTS_OFF) return;                 // ONLY TWO MARKET ALERTS (20 Nov 2026)
     let last = '';
     try { last = localStorage.getItem('liveSignalAlerted') || ''; } catch (e) {}
     if (liveSig.id === last) return;
@@ -10609,6 +10611,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // app in the evening, does not replay the day.
   useEffect(() => {
     if (!ssConfOn || !ssConf.length) return;
+    if (MARKET_ALERTS_OFF) return;                 // ONLY TWO MARKET ALERTS (20 Nov 2026)
     let seen: string[] = [];
     try { const v = JSON.parse(localStorage.getItem('ssConfluenceAlerted') || '[]'); if (Array.isArray(v)) seen = v; } catch (e) {}
     const nowS = Math.floor(Date.now() / 1000);
@@ -10659,6 +10662,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // closed in the last 10 minutes alerts, so a reload never replays the day.
   useEffect(() => {
     if (!gdOn || isOptionView) return;
+    if (MARKET_ALERTS_OFF) return;                 // ONLY TWO MARKET ALERTS (20 Nov 2026)
     let seen: string[] = [];
     try { const v = JSON.parse(localStorage.getItem('giftDivAlerted') || '[]'); if (Array.isArray(v)) seen = v; } catch (e) {}
     const nowS = Math.floor(Date.now() / 1000);
@@ -12640,6 +12644,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // re-announce something that happened before it.
   const MAX_ALERT_BAR_AGE_MS = 6 * 60 * 1000;
   const marketAlertsAllowed = (barTimeSec?: number, optionOk = false) => {
+    // ONLY TWO MARKET ALERTS (20 Nov 2026, see components/SetupAlerts): level
+    // touches, zone taps, breakouts, divergences and 50% levels no longer sound,
+    // pop up or notify. A line he draws and arms himself is not gated here.
+    if (MARKET_ALERTS_OFF) return false;
     // Option charts announce nothing of their own accord. These alerts were all
     // about INDEX structure — support and resistance touches, breakouts,
     // divergences, zone taps — and on a premium chart the same levels are noise: a
