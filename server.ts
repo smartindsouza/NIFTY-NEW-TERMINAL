@@ -3276,11 +3276,32 @@ setInterval(() => {
     });
   });
 
+  // THE SIDEBAR'S FIGURES ARE NEVER WAITED FOR (20 Nov 2026). Martin: "the
+  // list loads freshly everytime I open it". Building this answer means asking
+  // Yahoo for about a dozen quotes, which takes six to seven seconds; the cache
+  // held it for five, so every other request — and the first one from a phone
+  // that has just opened the app — waited the whole seven seconds while the
+  // list read "Loading…". Now a request is answered at once from the last
+  // answer (up to ten minutes old; each row carries its own time), and a fresh
+  // one is built behind it, one at a time. Only the very first request after
+  // the server starts waits.
+  let mcInFlight: Promise<any> | null = null;
+  const refreshMarketContext = (): Promise<any> => {
+    if (!mcInFlight) {
+      mcInFlight = new Promise((resolve) => {
+        marketContextHandler(null, { json: (d: any) => { resolve(d); return d; } }).catch((e: any) => resolve({ success: false, error: String(e?.message || e) }));
+      }).finally(() => { mcInFlight = null; });
+    }
+    return mcInFlight;
+  };
   app.get('/api/market-context', async (_req, res) => {
+    const c = marketContextCache;
+    if (c && Date.now() - c.at < 5000) return res.json(c.data);
+    if (c && Date.now() - c.at < 10 * 60000) { void refreshMarketContext(); return res.json(c.data); }
+    res.json(await refreshMarketContext());
+  });
+  const marketContextHandler = async (_req: any, res: any) => {
     try {
-      if (marketContextCache && Date.now() - marketContextCache.at < 5000) {
-        return res.json(marketContextCache.data);
-      }
       const indian: any[] = [];
       const us: any[] = [];
       const uk: any[] = [];
@@ -3662,7 +3683,7 @@ setInterval(() => {
         global: [],
       });
     }
-  });
+  };
 
   app.get('/api/option-chain', async (req, res) => {
     const symbol = req.query.symbol as string || 'NIFTY 50';

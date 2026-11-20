@@ -539,13 +539,23 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
     };
   };
 
+  // THE LAST FIGURES ARE SHOWN AT ONCE (20 Nov 2026). Martin: "the list loads
+  // freshly everytime I open it". After the app is opened again the list had
+  // nothing until the first answer came back, which took up to seven seconds
+  // (see THE SIDEBAR'S FIGURES ARE NEVER WAITED FOR in server.ts). The last
+  // good answer is kept on the device and shown straight away — each row with
+  // its own age, as always — while a fresh one is asked for at once.
   const { data } = useQuery({
     queryKey: ["market-context"],
     queryFn: async () => {
       const r = await fetch("/api/market-context");
       if (!r.ok) throw new Error("market-context fetch failed");
-      return r.json();
+      const j = await r.json();
+      if (j && j.success !== false) { try { localStorage.setItem("mc_last", JSON.stringify({ at: Date.now(), data: j })); } catch {} }
+      return j;
     },
+    initialData: () => { try { const v = JSON.parse(localStorage.getItem("mc_last") || "null"); return v && Date.now() - v.at < 24 * 3600e3 ? v.data : undefined; } catch { return undefined; } },
+    initialDataUpdatedAt: () => { try { return JSON.parse(localStorage.getItem("mc_last") || "null")?.at ?? 0; } catch { return 0; } },
     refetchInterval: () => (document.visibilityState === "visible" ? 5000 : false),
     staleTime: 4000,
   });
