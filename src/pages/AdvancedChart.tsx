@@ -2986,8 +2986,13 @@ function deriveZoneFvgs(zones: { top: number; bottom: number; time: number; endT
 // between the two. Days are IST calendar days — the market's own — whatever time
 // zone the phone is in. The first day in the data gets no line: nothing precedes
 // it, so there is nothing to separate it from.
-type SbSettings = { on: boolean; color: string; opacity: number; thickness: number; lineStyle: number };
-const SB_DEFAULTS: SbSettings = { on: false, color: '#94a3b8', opacity: 55, thickness: 1, lineStyle: 0 };
+// UP TO A TIMEFRAME (20 Nov 2026). Martin: "Add an option to show session breaks
+// indicator only up to a certain time frame in its settings." maxTf is the
+// largest timeframe, in minutes, the lines are drawn on; 240 (4h) is every
+// intraday timeframe, as before — a saved setting without it means that.
+type SbSettings = { on: boolean; color: string; opacity: number; thickness: number; lineStyle: number; maxTf: number };
+const SB_DEFAULTS: SbSettings = { on: false, color: '#94a3b8', opacity: 55, thickness: 1, lineStyle: 0, maxTf: 240 };
+const SB_TF_CHOICES: [number, string][] = [[1, '1m'], [3, '3m'], [5, '5m'], [15, '15m'], [60, '1h'], [240, '4h']];
 function deriveSessionBreaks(candles: any[]): { prevTime: number; time: number }[] {
   const out: { prevTime: number; time: number }[] = [];
   let prevDay = -1, prevTime = 0;
@@ -3223,8 +3228,16 @@ function SessionBreaksEditorModal({ onClose, value, onChange, onApply }: {
               onLineStyleChange={(l) => onChange({ ...value, lineStyle: l })}
             />
           </div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm font-medium text-foreground/80">Show up to</div>
+            <select data-sb="max-tf" value={String(SB_TF_CHOICES.some(([m]) => m === value.maxTf) ? value.maxTf : 240)}
+              onChange={(e) => onChange({ ...value, maxTf: Number(e.target.value) })}
+              className="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none">
+              {SB_TF_CHOICES.map(([m, label]) => <option key={m} value={m}>{label}</option>)}
+            </select>
+          </div>
           <div className="text-[11px] text-muted-foreground leading-relaxed">
-            A vertical line between the last candle of one trading day and the first of the next (IST). Shown on intraday timeframes; hidden on 1D and above, where every candle is its own day.
+            A vertical line between the last candle of one trading day and the first of the next (IST). Shown on timeframes up to the one chosen above; never on 1D and above, where every candle is its own day.
           </div>
           <button
             onClick={() => onChange({ ...SB_DEFAULTS, on: value.on })}
@@ -14751,7 +14764,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               // every candle is its own day and the lines would be noise. Not on the
               // GIFT NIFTY reference chart, which trades through IST midnight — a
               // break there would fall in the middle of a session.
-              if (sessionBreakRef.current.on && mainSeriesRef.current && !isReferenceChartRef.current && (parseInt(timeframe) || 5) < 1440) {
+              if (sessionBreakRef.current.on && mainSeriesRef.current && !isReferenceChartRef.current && (parseInt(timeframe) || 5) < 1440 && (parseInt(timeframe) || 5) <= (Number(sessionBreakRef.current.maxTf) || 240)) {
                 try {
                   const baseB = chartDataRef.current?.candles || [];
                   const lastBT = baseB.length ? toUnixSeconds(baseB[baseB.length - 1].time) : 0;
