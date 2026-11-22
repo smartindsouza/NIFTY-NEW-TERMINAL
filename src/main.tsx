@@ -4,11 +4,14 @@ import App from './App.tsx';
 import './index.css';
 import { initializeInterceptor } from './lib/apiInterceptor';
 import { initPositionCardLog } from './lib/positionCardLog';
+import { restoreOptionList } from './lib/optionListStore';
 
 // Initialize global performance trackers for API speeds and frequency warnings
 initializeInterceptor();
 // A note to the server each time a trade is put into, or emptied from, the saved copy of open trades.
 initPositionCardLog();
+// The list of option charts, put back from the device's lasting storage before any screen reads it.
+restoreOptionList();
 
 // Self-heal after a deploy: if a lazily-imported chunk 404s because the build
 // changed underneath an open tab (the "Failed to fetch dynamically imported

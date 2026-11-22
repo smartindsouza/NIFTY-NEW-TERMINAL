@@ -1,0 +1,16 @@
+import { optionExpired, listToRestore } from './optionListStore';
+let fails = 0; const ok = (c: boolean, m: string) => { if (!c) { fails++; console.log('FAIL', m); } };
+const T = '2026-11-22';
+ok(optionExpired('NIFTY26N1725200PE', T), 'weekly 17 Nov is past');
+ok(!optionExpired('NIFTY26N2425200PE', T), 'weekly 24 Nov is ahead');
+ok(!optionExpired('NIFTY26N2225200PE', T), 'expiring today is kept');
+ok(!optionExpired('SENSEX26D0382000CE', T), 'weekly 3 Dec');
+ok(optionExpired('SENSEX2691082000CE', T), 'weekly 10 Sep is past');
+ok(!optionExpired('NIFTY26NOV25200CE', T), 'monthly Nov kept through November');
+ok(optionExpired('BANKNIFTY26OCT52000PE', T), 'monthly Oct is past');
+ok(!optionExpired('BANKNIFTY27JAN52000PE', T), 'monthly next Jan');
+ok(!optionExpired('SOMETHINGELSE', T), 'unknown name kept');
+const r = listToRestore([{ tradingsymbol: 'NIFTY26N1725200PE', instrument_token: '1' }, { tradingsymbol: 'NIFTY26N2425200PE', instrument_token: '2' }, { tradingsymbol: 'NIFTY26N2425200PE', instrument_token: '2' }, { tradingsymbol: 'X' }, null], T);
+ok(r.length === 1 && r[0].instrument_token === '2', 'restore drops expired, duplicates and broken entries');
+ok(listToRestore('junk', T).length === 0, 'junk saved value gives an empty list');
+if (fails) { console.log(fails + ' failed'); process.exit(1); } else console.log('optionListStore: all checks passed');

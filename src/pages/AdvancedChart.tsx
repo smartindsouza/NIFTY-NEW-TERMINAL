@@ -16,6 +16,7 @@ import { detectGiftDivergence, type GiftDiv } from "../lib/giftDivergence";
 import { mergeLiveCandles, archiveFingerprint } from "../lib/liveCandles";
 import { DRAWINGS_KEY, DRAW_COLORS, FIB_LEVELS, parseDrawings, timeToIndex, indexToTime, hitDrawing, anchorsOf, moveAnchor, slideDrawing, textSizePx, isPositionType, positionOutcome, positionTexts, POS_COLORS, type Drawing, type DrawingType, type DrawPoint, type DrawGeom, type AnchorKey, type PosBar, type DrawRect } from "../lib/chartDrawings";
 import { usePageScrollLock, lockPageScroll } from "../lib/scrollLock";
+import { saveOptionList } from "../lib/optionListStore";
 import { FolderTabFeet } from "../components/FolderTabFeet";
 import { getDivergences } from "../lib/divergence";
 import { evaluateBreakout } from "../lib/breakoutQuality";
@@ -11070,6 +11071,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   useEffect(() => {
     if (isSpotPane) return;                  // single writer: the option pane
     try { sessionStorage.setItem('openOptionCharts', JSON.stringify(openCharts)); } catch (e) {}
+    saveOptionList(openCharts);              // and the lasting copy: see THE OPTION LIST IS REMEMBERED in lib/optionListStore
   }, [openCharts, isSpotPane]);
 
   // THE OPTION TAB'S LIST IS THE INDEX'S OWN (18 Nov 2026). Martin: "show the
