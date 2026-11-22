@@ -15,7 +15,7 @@ import { confluenceSignals, detectSwapSweep, ssIstDay, type SsConfluence, type S
 import { detectGiftDivergence, type GiftDiv } from "../lib/giftDivergence";
 import { mergeLiveCandles, archiveFingerprint } from "../lib/liveCandles";
 import { DRAWINGS_KEY, DRAW_COLORS, FIB_LEVELS, parseDrawings, timeToIndex, indexToTime, hitDrawing, anchorsOf, moveAnchor, slideDrawing, textSizePx, isPositionType, positionOutcome, positionTexts, POS_COLORS, type Drawing, type DrawingType, type DrawPoint, type DrawGeom, type AnchorKey, type PosBar, type DrawRect } from "../lib/chartDrawings";
-import { usePageScrollLock } from "../lib/scrollLock";
+import { usePageScrollLock, lockPageScroll } from "../lib/scrollLock";
 import { FolderTabFeet } from "../components/FolderTabFeet";
 import { getDivergences } from "../lib/divergence";
 import { evaluateBreakout } from "../lib/breakoutQuality";
@@ -6344,9 +6344,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   useEffect(() => {
     if (!bottomCardUp) return;
     try { if (window.innerWidth >= 768) return; } catch (e) { return; }
-    const html = document.documentElement, body = document.body;
-    const prev = [html.style.overflow, body.style.overflow];
-    html.style.overflow = 'hidden'; body.style.overflow = 'hidden';
+    const unlockPage = lockPageScroll();           // counted: see ONE LOCK, COUNTED in lib/scrollLock
     const CARDS = '[data-range-sheet],[data-interval-sheet],[data-ind-list],[data-draw-sheet],[data-settings-sheet="open"]';
     const onMove = (e: TouchEvent) => {
       const t = e.target as Element | null;
@@ -6392,7 +6390,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       document.removeEventListener('touchend', onHeldLift, true);
       document.removeEventListener('touchcancel', onHeldLift, true);
       if (timer) clearTimeout(timer);
-      html.style.overflow = prev[0]; body.style.overflow = prev[1];
+      unlockPage();
     };
     const onHeldMove = (e: TouchEvent) => { if (e.cancelable) e.preventDefault(); };
     const onHeldLift = (e: TouchEvent) => { if (e.touches.length === 0) release(); };
@@ -11416,6 +11414,43 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       return next;
     });
   };
+  // AN OPTION PICKED IN THE CHAIN JOINS THIS LIST (22 Nov 2026). Martin: "the
+  // option chart selected from option chain opens it in Split View in
+  // scalperX. I want the options to be just added to list in the chart screen
+  // instead of opening in Split View. In the scalperX let it open in Split View
+  // as well as add to list." On the phone's chart page the chain no longer
+  // opens ScalperX: it announces terminal:add-option and the contract is put
+  // on this list, as the search's + does, and the chart on screen stays.
+  // (The chain also writes it to the session's list, for when this page is not
+  // mounted yet; see openInScalpPro.) On ScalperX it opens there as before,
+  // and its option half adds it to the same list.
+  useEffect(() => {
+    if (isPane || scalp) return;
+    const onAdd = (e: any) => {
+      const i = e?.detail; const sym = String(i?.tradingsymbol || '');
+      if (!sym || !i?.instrument_token) return;
+      try { dismissedChart.remove(sym); } catch (err) {}
+      const add = {
+        tradingsymbol: sym,
+        instrument_token: String(i.instrument_token),
+        ...(i.lot_size ? { lot_size: i.lot_size } : {}),
+        ...(i.exchange ? { exchange: i.exchange } : {}),
+      };
+      const onScreen = selectedInstrument?.tradingsymbol;
+      setOpenCharts((prev) => {
+        if (prev.some((c) => c.tradingsymbol === sym)) return prev;
+        const next = dedupeCharts([...prev, add]);
+        while (next.length > CHART_LIST_MAX) {
+          const k = next.findIndex((c) => c.tradingsymbol !== onScreen && c.tradingsymbol !== sym);
+          if (k < 0) break;
+          next.splice(k, 1);
+        }
+        return next;
+      });
+    };
+    window.addEventListener('terminal:add-option', onAdd as any);
+    return () => window.removeEventListener('terminal:add-option', onAdd as any);
+  }, [isPane, scalp, selectedInstrument?.tradingsymbol]);
   const searchList = isSpotPane ? undefined : {
     takes: (i: any) => !isOptionPane || isOptionInstr(i),
     has: (sym: string) => openCharts.some((c) => c.tradingsymbol === sym),

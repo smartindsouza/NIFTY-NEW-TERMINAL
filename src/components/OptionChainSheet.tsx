@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { lockPageScroll } from '../lib/scrollLock';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { navigate } from 'wouter/use-browser-location';
 import { ChevronsUpDown, LineChart, X } from 'lucide-react';
+import { toast } from 'sonner';
 import { addWsMessageListener } from '../hooks/useWebSocket';
 import { optionGreeks, yearsToExpiry, type Greeks } from '../lib/optionGreeks';
 
@@ -125,6 +127,28 @@ export function openInScalpPro(leg: Leg, type: 'CE' | 'PE', name: string) {
   // ScalperX's flag is not left set behind it.
   let desk = false;
   try { desk = window.matchMedia('(min-width: 768px)').matches; } catch (e) {}
+  // ON THE PHONE, OUTSIDE SCALPERX, IT IS ADDED TO THE CHART PAGE'S LIST ONLY
+  // (22 Nov 2026). Martin: "I want the options to be just added to list in the
+  // chart screen instead of opening in Split View. In the scalperX let it open
+  // in Split View as well as add to list." So ScalperX is not opened and the
+  // chart on screen is not changed: the contract goes on the session's list
+  // (read by a chart page that mounts later) and is announced to the one that
+  // is up (see AN OPTION PICKED IN THE CHAIN JOINS THIS LIST in AdvancedChart).
+  // With ScalperX already open it opens there, as before. The desktop is as it was.
+  let inScalp = false;
+  try { inScalp = sessionStorage.getItem('scalpPro') === '1'; } catch (e) {}
+  if (!desk && !inScalp) {
+    const entry = { tradingsymbol: instr.tradingsymbol, instrument_token: instr.instrument_token, exchange: instr.exchange, ...(instr.lot_size ? { lot_size: instr.lot_size } : {}) };
+    try {
+      const raw = JSON.parse(sessionStorage.getItem('openOptionCharts') || '[]');
+      const list = Array.isArray(raw) ? raw : [];
+      if (!list.some((c: any) => c?.tradingsymbol === entry.tradingsymbol)) sessionStorage.setItem('openOptionCharts', JSON.stringify([...list, entry]));
+    } catch (e) {}
+    try { window.dispatchEvent(new CustomEvent('terminal:add-option', { detail: entry })); } catch (e) {}
+    try { toast(`${name} ${leg.strikePrice} ${type} added to the chart's options`, { duration: 2500 }); } catch (e) {}
+    if (window.location.pathname !== '/advanced-chart') navigate('/advanced-chart');
+    return true;
+  }
   try { sessionStorage.setItem('selectedInstrument', JSON.stringify(instr)); if (!desk) sessionStorage.setItem('scalpPro', '1'); } catch (e) {}
   try { window.dispatchEvent(new CustomEvent('terminal:open-option', { detail: instr })); } catch (e) {}
   if (!desk) try { window.dispatchEvent(new CustomEvent('terminal:scalp', { detail: true })); } catch (e) {}
@@ -492,10 +516,8 @@ export function OptionChainSheet({ onClose, start }: { onClose: () => void; star
   // page under it. While the sheet is up the page does not scroll — the same
   // lock the Market Context sidebar uses.
   useEffect(() => {
-    const html = document.documentElement, body = document.body;
-    const was = { h: html.style.overflow, b: body.style.overflow, o: html.style.overscrollBehavior };
-    html.style.overflow = 'hidden'; body.style.overflow = 'hidden'; html.style.overscrollBehavior = 'none';
-    return () => { html.style.overflow = was.h; body.style.overflow = was.b; html.style.overscrollBehavior = was.o; };
+    // The counted lock (see ONE LOCK, COUNTED in lib/scrollLock): it is let go, not "put back as it was".
+    return lockPageScroll(true);
   }, []);
   // CLOSING: on a phone the sheet slides back down first and is taken away when
   // it has gone (see chain-sheet-down in index.css). Anywhere the slide does not

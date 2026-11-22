@@ -1,6 +1,7 @@
 import { FolderTabFeet } from "../components/FolderTabFeet";
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ArrowLeft } from 'lucide-react';
+import { lockPageScroll } from '../lib/scrollLock';
 import { AdvancedChart, type ScalpAt, type ScalpShared } from './AdvancedChart';
 import { startIndicatorSync, indicatorEpoch, onIndicatorEpoch, anyChartBusy, adoptSpotHalfCopy, noteStorageOnce } from '../lib/indicatorSync';
 
@@ -166,15 +167,11 @@ function ScalpScreen({ onClose }: { onClose: () => void }) {
   //     list inside a menu still scrolls, being a scroller of its own;
   //   - nothing bounces at the ends (overscroll-behavior).
   useLayoutEffect(() => {
-    const html = document.documentElement, body = document.body;
-    const was = { ho: html.style.overflow, bo: body.style.overflow, hb: html.style.overscrollBehavior, bb: body.style.overscrollBehavior };
     try { window.scrollTo(0, 0); } catch (e) {}
-    html.style.overflow = 'hidden'; body.style.overflow = 'hidden';
-    html.style.overscrollBehavior = 'none'; body.style.overscrollBehavior = 'none';
-    return () => {
-      html.style.overflow = was.ho; body.style.overflow = was.bo;
-      html.style.overscrollBehavior = was.hb; body.style.overscrollBehavior = was.bb;
-    };
+    // The counted lock (see ONE LOCK, COUNTED in lib/scrollLock). This screen was
+    // the one that left the page stuck: opened from the Option Chain, it
+    // remembered the chain's lock as how the page "was", and put it back on closing.
+    return lockPageScroll(true);
   }, []);
 
   // AN OPTION TO SHOW. The lower chart takes the option that was last on screen

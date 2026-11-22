@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, type ReactNode } from "react";
+import { lockPageScroll } from '../lib/scrollLock';
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, TrendingUp, TrendingDown, Globe, X, LineChart, ChartCandlestick } from "lucide-react";
@@ -475,10 +476,8 @@ export default function MarketContext({ tabHidden = false }: { tabHidden?: boole
   // scrolling to itself at its ends (overscroll-contain on the wheel).
   useEffect(() => {
     if (!open) return;
-    const html = document.documentElement, body = document.body;
-    const was = { h: html.style.overflow, b: body.style.overflow, o: html.style.overscrollBehavior };
-    html.style.overflow = 'hidden'; body.style.overflow = 'hidden'; html.style.overscrollBehavior = 'none';
-    return () => { html.style.overflow = was.h; body.style.overflow = was.b; html.style.overscrollBehavior = was.o; };
+    // The counted lock (see ONE LOCK, COUNTED in lib/scrollLock): it is let go, not "put back as it was".
+    return lockPageScroll(true);
   }, [open]);
   useEffect(() => {
     const f = () => setOpen(true);
