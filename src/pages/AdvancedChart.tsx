@@ -19817,7 +19817,22 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               {tfOpen && (
                 <>
                   <div className="touch-none fixed inset-0 z-[88]" aria-hidden="true" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); sheetClosedAtRef.current = Date.now(); setTfOpen(false); }} />
-                  <div data-interval-sheet="" className="absolute right-1 bottom-[32px] z-[90] min-w-[96px] bg-card border border-white/10 rounded-xl shadow-2xl overflow-hidden">
+                  {/* THE WHOLE LIST, HOWEVER SHORT THE CHART (22 Nov 2026). Martin, with
+                      the top chart dragged shorter and the list starting at 5m: "The
+                      time frames don't show all of them when the top spot chart is
+                      minimized a little." The list hung inside the chart's own box,
+                      which cuts off whatever is taller than itself, so 1m and 3m
+                      were lost off its top. It is placed on the screen now (fixed,
+                      above the button it opens from), so it can rise past the top
+                      of its chart; and if even the screen above the button is too
+                      short for it, it is as tall as fits and scrolls. */}
+                  {(() => {
+                    const r = (scalpCornerRef.current as any)?.getBoundingClientRect?.();
+                    // no higher than the top of ScalperX's own top row (below the phone's status bar)
+                    const ceil = Math.max(8, (document.querySelector('[data-scalp="tab"]') as HTMLElement | null)?.getBoundingClientRect().top ?? 56);
+                    const pos = r ? { right: Math.max(4, window.innerWidth - r.right + 4), bottom: window.innerHeight - r.top + 2, maxHeight: Math.max(120, r.top - 2 - ceil) } : { right: 4, bottom: 32 };
+                    return (
+                  <div data-interval-sheet="" style={pos} className={`${r ? 'fixed' : 'absolute'} z-[90] min-w-[96px] bg-card border border-white/10 rounded-xl shadow-2xl overflow-y-auto overscroll-contain`}>
                     {([['1', '1m'], ['3', '3m'], ['5', '5m'], ['15', '15m'], ['60', '1h'], ['240', '4h'], ['1440', '1D']] as const).map(([k, label]) => (
                       <button key={k} type="button" data-interval-pick={k} onClick={() => { setTimeframe(k); setTfOpen(false); }}
                         className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-left text-[13px] font-medium active:bg-muted ${String(timeframe) === k ? 'text-primary' : 'text-foreground'}`}>
@@ -19825,6 +19840,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       </button>
                     ))}
                   </div>
+                    );
+                  })()}
                 </>
               )}
               </>
