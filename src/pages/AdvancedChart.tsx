@@ -11206,29 +11206,71 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     return () => { dead = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topIndex, scalp, isOptionPane]);
+  // EVERY OPTION, ONE PILL PER INDEX (22 Nov 2026). Martin: "In the scalperX
+  // screen also all the options should be shown regardless of the spot chart.
+  // But group them as list like all nifty options in one list and all sensex
+  // options in one list. So that it doesn't get longer horizontally showing
+  // individual options." The row was one pill per option, and only the options
+  // of the index on the chart above. It is now one pill per index that has
+  // options on the list (NIFTY, BANKNIFTY, SENSEX; anything else under Other),
+  // with how many, whatever index is above. Tapped, a pill drops its list:
+  // every option of that index, the one on this chart marked; a tap on a row
+  // puts it on this chart, its x takes it off the list as before (remembered
+  // as closed on purpose). The list is drawn on the body, fixed under its
+  // pill, because the row of pills clips anything taller than itself; the
+  // layer behind it closes it and takes no dragging.
+  const PILL_GROUPS = ['NIFTY', 'BANKNIFTY', 'SENSEX', 'Other'] as const;
   const pillCharts = scalp && isOptionPane
     ? openCharts.filter((c, i, arr) => arr.findIndex((x) => x.tradingsymbol === c.tradingsymbol) === i)
-        .filter((c) => c.tradingsymbol !== selectedInstrument?.tradingsymbol && rootOfOption(c.tradingsymbol) === topIndex)
     : [];
+  const pillGroups = PILL_GROUPS
+    .map((g) => ({ g, list: pillCharts.filter((c) => (rootOfOption(c.tradingsymbol) || 'Other') === g) }))
+    .filter((x) => x.list.length);
+  const [pillMenu, setPillMenu] = useState<{ g: string; left: number; top: number } | null>(null);
+  const pillMenuList = pillMenu ? (pillGroups.find((x) => x.g === pillMenu.g)?.list || []) : [];
+  useEffect(() => { if (pillMenu && !pillMenuList.length) setPillMenu(null); }, [pillMenu, pillMenuList.length]);
   const pillLabel = (ts: string) => {
-    const p = parseContract(ts), cur = parseContract(String(selectedInstrument?.tradingsymbol || ''));
+    const p = parseContract(ts);
     if (!p || p.strike == null) return ts;
-    // the expiry only where it is not the one on the chart below
-    return `${p.strike} ${p.optionType}${p.expiryLabel && p.expiryLabel !== cur?.expiryLabel ? ` · ${p.expiryLabel}` : ''}`;
+    return `${p.strike} ${p.optionType}${p.expiryLabel ? ` · ${p.expiryLabel}` : ''}`;
   };
-  const scalpPills = pillSlot && pillCharts.length ? createPortal(
+  const scalpPills = pillSlot && pillGroups.length ? createPortal(
     <>
-      {pillCharts.map((c) => (
-        <span key={c.tradingsymbol} data-scalp-pill={c.tradingsymbol}
-          className="shrink-0 h-[26px] flex items-center rounded-full border border-foreground/20 text-[11.5px] leading-none font-medium text-foreground/90 whitespace-nowrap">
-          <button type="button" aria-label={`Open ${c.tradingsymbol}`} onClick={() => setSelectedInstrument(c)}
-            className="h-full pl-[11px] pr-[5px] flex items-center active:opacity-60">{pillLabel(c.tradingsymbol)}</button>
-          <button type="button" aria-label={`Remove ${c.tradingsymbol} from the list`}
-            onClick={() => { try { dismissedChart.add(c.tradingsymbol); } catch (e) {} setOpenCharts((prev) => prev.filter((x) => x.tradingsymbol !== c.tradingsymbol)); }}
-            className="h-full pl-[3px] pr-[9px] flex items-center text-foreground/55 active:text-foreground"><X size={12} strokeWidth={2.2} /></button>
-        </span>
+      {pillGroups.map(({ g, list }) => (
+        <button key={g} type="button" data-scalp-pill={g} aria-label={`${g} options on the list`}
+          onClick={(e) => {
+            if (pillMenu?.g === g) { setPillMenu(null); return; }
+            const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            setPillMenu({ g, left: Math.max(8, Math.min(r.left, window.innerWidth - 228)), top: r.bottom + 6 });
+          }}
+          className={`shrink-0 h-[26px] pl-[11px] pr-[8px] flex items-center gap-[5px] rounded-full border text-[11.5px] leading-none font-medium whitespace-nowrap active:opacity-60 ${pillMenu?.g === g || list.some((c) => c.tradingsymbol === selectedInstrument?.tradingsymbol) ? 'border-primary/60 text-foreground' : 'border-foreground/20 text-foreground/90'}`}>
+          {g}<span className="text-foreground/55">{list.length}</span>
+          <ChevronDown size={12} className={pillMenu?.g === g ? 'rotate-180 transition-transform' : 'transition-transform'} />
+        </button>
       ))}
     </>, pillSlot) : null;
+  const scalpPillMenu = pillMenu && pillMenuList.length ? createPortal(
+    <>
+      <div className="fixed inset-0 z-[90] touch-none" onPointerDown={() => setPillMenu(null)} />
+      <div data-scalp-pill-menu={pillMenu.g} style={{ left: pillMenu.left, top: pillMenu.top }}
+        className="fixed z-[91] w-[220px] max-h-[50vh] overflow-y-auto overscroll-contain bg-card border border-white/10 rounded-md shadow-2xl">
+        {pillMenuList.map((c) => {
+          const on = c.tradingsymbol === selectedInstrument?.tradingsymbol;
+          return (
+            <div key={c.tradingsymbol} data-scalp-pill-row={c.tradingsymbol} className="flex items-center h-10 border-b border-white/5 last:border-b-0">
+              <button type="button" aria-label={`Open ${c.tradingsymbol}`}
+                onClick={() => { if (!on) setSelectedInstrument(c); setPillMenu(null); }}
+                className={`flex-1 min-w-0 h-full pl-3 pr-1 flex items-center gap-2 text-left text-[12.5px] font-medium whitespace-nowrap active:opacity-60 ${on ? 'text-primary' : 'text-foreground/90'}`}>
+                <span className="truncate">{pillLabel(c.tradingsymbol)}</span>{on && <Check size={13} className="shrink-0" />}
+              </button>
+              <button type="button" aria-label={`Remove ${c.tradingsymbol} from the list`}
+                onClick={() => { try { dismissedChart.add(c.tradingsymbol); } catch (e) {} setOpenCharts((prev) => prev.filter((x) => x.tradingsymbol !== c.tradingsymbol)); }}
+                className="h-full px-3 flex items-center text-foreground/55 active:text-foreground"><X size={14} strokeWidth={2.2} /></button>
+            </div>
+          );
+        })}
+      </div>
+    </>, document.body) : null;
 
   // A SWIPE ACROSS THE ROW OF FIVE CHANGES TAB (19 Nov 2026). Martin: "Swiping
   // the bottom row with range, time frame etc to the right or left should
@@ -17179,6 +17221,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             regular, the price medium; a pair of solid triangles after what can
             be changed. */}
         {scalpPills}
+        {scalpPillMenu}
         {scalp && (
           <div data-scalp-head={paneRole} className="relative shrink-0 px-[15px] pt-[13.5px] pb-2 bg-card" onPointerDown={(e) => e.stopPropagation()}>
             {/* THE MENU BUTTON, top right, as Lemonn's is: a 33pt square with 6pt
