@@ -11088,12 +11088,16 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     const m = /^(BANKNIFTY|NIFTY|SENSEX)\d/.exec(String(ts || '').toUpperCase());
     return m ? (m[1] as any) : null;
   };
+  //
+  // EVERY OPTION AGAIN, WHATEVER THE SPOT TAB (22 Nov 2026). Martin: "I had
+  // previously changed the chart to show only option charts related to the spot
+  // chart selected in the left tab. Pls remove it. Let it show all option charts
+  // available no matter the spot chart selected (Nifty, Sensex or Bank Nifty)".
+  // The filter by index is gone; the list is every option chart opened, once
+  // each. Opening one of another index still brings that index to the spot tab
+  // (the effect below), so the two tabs on screen stay about the same index.
   const tabCharts = openCharts
-    .filter((c, i, arr) => arr.findIndex(x => x.tradingsymbol === c.tradingsymbol) === i)
-    .filter((c) => {
-      const r = rootOfOption(c.tradingsymbol);
-      return isReferenceChart || !r || r === underlying || c.tradingsymbol === selectedInstrument?.tradingsymbol;
-    });
+    .filter((c, i, arr) => arr.findIndex(x => x.tradingsymbol === c.tradingsymbol) === i);
   useEffect(() => {
     if (isPane) return;
     const r = rootOfOption(selectedInstrument?.tradingsymbol);
