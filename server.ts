@@ -46,7 +46,7 @@ import { lastUs30Source } from './server/us30';
 import { registerTradeGuard, guardEntryBlock, guardOrderBlock } from './server/trade_guard';
 import { registerSignalTrader, signalOnTick, signalTokens, signalNoteManualRearm, signalManages, signalManagedLevels, signalNotify } from './server/signal_trader';
 import { registerFamilyTrader, familyOnTick, familyTokens } from './server/family_trader';
-import { currentLeg, needsLegAverage } from './server/leg_average';
+import { currentLeg, needsLegAverage, closedLegs, legForRow } from './server/leg_average';
 import { entryWallError } from './server/entry_wall';
 import { registerResearchExport } from './server/research_export';
 import { registerGoldenSweep } from './server/golden_sweep';
@@ -495,14 +495,74 @@ function journalCloseTrade(tradingsymbol: string, c: { exitPrice?: number; pnl?:
     // the other account's open row for the same symbol.
     const owner = journalOwner();
     const row = db.prepare(
-      `SELECT id FROM trade_journal WHERE tradingsymbol = ? AND status = 'OPEN'
+      `SELECT id, side, qty, entry_price, test_mode, simulated FROM trade_journal WHERE tradingsymbol = ? AND status = 'OPEN'
          AND (kite_user_id = ? OR kite_user_id IS NULL)
        ORDER BY entry_time DESC LIMIT 1`
     ).get(tradingsymbol, owner) as any;
     if (!row) return;
+    // THE ROW'S OWN P&L, not the contract's. The server's exit path passes Zerodha's
+    // position pnl, which covers every trade in that contract today: traded twice,
+    // the second row was given both trades' total (see EACH TRADE'S OWN EXIT AND
+    // P&L in server/leg_average.ts). With the row's entry and an exit price known,
+    // the P&L is worked out from those; the figure passed in is only the fallback.
+    let pnl: number | null = (c.pnl ?? null) as any;
+    const ep = Number(row.entry_price), xp = Number(c.exitPrice), q = Number(row.qty);
+    if (ep > 0 && xp > 0 && q > 0) pnl = +(((String(row.side || 'BUY').toUpperCase() === 'SELL') ? ep - xp : xp - ep) * q).toFixed(2);
     db.prepare(`UPDATE trade_journal SET status='CLOSED', exit_price=?, exit_time=?, exit_reason=?, pnl=?, updated_at=? WHERE id=?`)
-      .run((c.exitPrice ?? null) as any, now, c.reason || 'MANUAL', (c.pnl ?? null) as any, now, row.id);
+      .run((c.exitPrice ?? null) as any, now, c.reason || 'MANUAL', pnl as any, now, row.id);
+    // The exit price recorded here is the last price seen as the order went in.
+    // Once the order has filled, the row takes the real fill from Zerodha.
+    if (!row.test_mode && !row.simulated) for (const ms of [6000, 30000]) setTimeout(() => { refineJournalFromFills().catch(() => {}); }, ms);
   } catch (e) { console.error('[Journal] close update failed', e); }
+}
+
+// TODAY'S CLOSED ROWS TAKE THEIR EXIT AND P&L FROM THE FILLS (23 Nov 2026). Every
+// path that closes a row writes what it can see at that moment: the last price as
+// the exit order goes in, or Zerodha's net position, which for a contract traded
+// twice in a day is a blend of both trades. Zerodha's trade list has what really
+// happened. Each such row is matched to its own finished trade there (same side
+// and quantity, entered at the row's entry time) and corrected. Rows the Kite
+// import wrote are already from the fills; hand-corrected (locked), test and
+// practice rows are never touched. A row with no matching trade in the list is
+// left exactly as it is.
+const journalRefined = new Map<number, string>();   // row id -> what it was last settled as
+async function refineJournalFromFills(): Promise<number> {
+  const owner = journalOwner();
+  const kc = getKiteClient();
+  // @ts-ignore
+  if (!owner || !kc || !kc.access_token) return 0;
+  const now = Date.now();
+  const ist = new Date(now + 5.5 * 3600000);
+  const dayStart = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()) - 5.5 * 3600000;
+  const rows = (db.prepare(
+    `SELECT * FROM trade_journal WHERE status='CLOSED' AND exit_time >= ? AND entry_time >= ? AND kite_user_id = ?
+        AND test_mode = 0 AND simulated = 0 AND COALESCE(locked, 0) = 0 AND COALESCE(exit_reason, '') <> 'KITE'`
+  ).all(dayStart, dayStart, owner) as any[]).filter((r) => journalRefined.get(r.id) !== `${r.exit_price}|${r.pnl}`);
+  if (!rows.length) return 0;
+  let fills: any[] = [];
+  try { fills = (await kc.getTrades()) || []; } catch (e) { return 0; }
+  let fixed = 0;
+  const legsBySym = new Map<string, ReturnType<typeof closedLegs>>();
+  for (const r of rows) {
+    const sym = String(r.tradingsymbol);
+    if (!legsBySym.has(sym)) legsBySym.set(sym, closedLegs(fills, sym));
+    const leg = legForRow(legsBySym.get(sym)!, r);
+    if (!leg) {
+      // not in the trade list (yet): try again while the exit is fresh, then let it be
+      if (now - Number(r.exit_time) > 10 * 60000) journalRefined.set(r.id, `${r.exit_price}|${r.pnl}`);
+      continue;
+    }
+    if (Math.abs(Number(r.exit_price) - leg.exit) > 0.004 || Math.abs(Number(r.pnl) - leg.pnl) > 0.004 || r.exit_price == null || r.pnl == null) {
+      try {
+        db.prepare("UPDATE trade_journal SET exit_price=?, pnl=?, exit_time=?, updated_at=? WHERE id=? AND status='CLOSED'")
+          .run(leg.exit, leg.pnl, leg.exitTime || r.exit_time, now, r.id);
+        console.log(`[Journal] ${sym} row ${r.id}: exit ${r.exit_price} -> ${leg.exit}, P&L ${r.pnl} -> ${leg.pnl} (from Zerodha's fills)`);
+        fixed++;
+      } catch (e) { console.error('[Journal] refine update failed', r.id, e); continue; }
+    }
+    journalRefined.set(r.id, `${leg.exit}|${leg.pnl}`);
+  }
+  return fixed;
 }
 
 // Journal rows are closed by the two paths that exit THROUGH this app. Exit in
@@ -518,7 +578,12 @@ function journalCloseTrade(tradingsymbol: string, c: { exitPrice?: number; pnl?:
 // but with a null price and an honest reason rather than a fabricated figure.
 let lastJournalReconcile = 0;
 async function reconcileJournalWithBroker(force = false): Promise<{ closed: number; checked: number; reason?: string }> {
-  if (!force && Date.now() - lastJournalReconcile < 60 * 1000) return { closed: 0, checked: 0, reason: 'throttled' };
+  if (!force && Date.now() - lastJournalReconcile < 60 * 1000) {
+    // Still settle today's closed rows against the fills: it asks Zerodha nothing
+    // unless a row is waiting, and the journal is about to be read.
+    try { await refineJournalFromFills(); } catch (e) {}
+    return { closed: 0, checked: 0, reason: 'throttled' };
+  }
   lastJournalReconcile = Date.now();
   const kc = getKiteClient();
   // @ts-ignore
@@ -554,9 +619,16 @@ async function reconcileJournalWithBroker(force = false): Promise<{ closed: numb
     let reason = 'RECONCILED_NOT_IN_BOOK';
     if (pos) {
       const long = String(row.side || 'BUY').toUpperCase() !== 'SELL';
+      // The net position's sell price and pnl are this row's ONLY when the contract
+      // was traded once today. Traded twice, they are a blend of both trades (23
+      // Nov: exit 186.30 and +2,255.50 on a trade that lost 796.25), so they are
+      // left empty here and filled from the fills just below. Empty is honest;
+      // the blend was a confident wrong number.
+      const q = Math.abs(Number(row.qty) || 0);
+      const once = Number(pos.buy_quantity) === q && Number(pos.sell_quantity) === q && !(Number(pos.overnight_quantity) || 0);
       const px = long ? Number(pos.sell_price) : Number(pos.buy_price);
-      if (Number.isFinite(px) && px > 0) exitPrice = +px.toFixed(2);
-      if (Number.isFinite(Number(pos.pnl))) pnl = +Number(pos.pnl).toFixed(2);
+      if (once && Number.isFinite(px) && px > 0) exitPrice = +px.toFixed(2);
+      if (once && Number.isFinite(Number(pos.pnl))) pnl = +Number(pos.pnl).toFixed(2);
       reason = 'RECONCILED_CLOSED_AT_BROKER';
     }
     try {
@@ -566,6 +638,7 @@ async function reconcileJournalWithBroker(force = false): Promise<{ closed: numb
     } catch (e) { console.error('[Journal] reconcile update failed', row.id, e); }
   }
   if (closed) console.log(`[Journal] reconciled ${closed} row(s) the broker shows as not open`);
+  try { await refineJournalFromFills(); } catch (e) {}
   return { closed, checked: open.length };
 }
 
