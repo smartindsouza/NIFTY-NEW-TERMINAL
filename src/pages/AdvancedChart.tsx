@@ -8006,22 +8006,19 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     // the only handle; it starts the same drag this did, behind the same Quick
     // Trade switch. A press on the line itself is an ordinary press on the chart.
 
-    // His own lines. With a MOUSE any of them can be picked up where the pointer
-    // is. With a FINGER only the selected one can: an unselected line used to
-    // take the press too, so a swipe to scroll that began near any line moved
-    // the line instead. Tap a line to select it (the tap is seen by the chart's
-    // click, below in the chart build), then drag it or its handle.
-    const byFinger = e.pointerType !== 'mouse';
-    let foundLineId = null;
-    for (let i = 0; i < manualLinesRef.current.length; i++) {
-        const line = manualLinesRef.current[i];
-        if (byFinger && line.id !== selectedLineIdRef.current) continue;
-        const lineY = mainSeriesRef.current.priceToCoordinate(line.price);
-        if (lineY !== null && Math.abs(lineY - y) < 15) {
-            foundLineId = line.id;
-            break;
-        }
-    }
+    // HIS OWN LINES MOVE ONLY BY THEIR HANDLE (23 Nov 2026). Martin: "The lines
+    // drawn on the chart must be able to be moved only by holding the handle which
+    // appears while clicking on it. Currently If I hold and drag anywhere on the
+    // line it moves." A press within 15px of the SELECTED line, anywhere along its
+    // width (any line at all with a mouse), used to pick it up — so a swipe to
+    // scroll that began near a selected line moved the line. Same rule as the
+    // SL / TP chips and the drawings' handles: the round handle in the middle
+    // (startLineHandleDrag) is the only grip. A tap on a line still selects it;
+    // that is the chart's own click, below in the chart build, not this press.
+    // draggingLineRef is left unset here, so the move / release paths below stay
+    // idle and the chart scrolls and zooms as usual under any press on a line.
+    void y;
+    const foundLineId: number | null = null;
 
     if (foundLineId) {
        draggingLineRef.current = { id: foundLineId, startY: y, dragged: false };
