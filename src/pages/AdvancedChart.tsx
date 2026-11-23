@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import { notificationService } from "../lib/notificationService";
 import { useUserSettings, useResolvedTheme } from "../hooks/useUserSettings";
 import { zoomDiag } from "../lib/zoomDiag";
-import { confluenceSignals, detectSwapSweep, ssIstDay, type SsConfluence, type SsSignal } from "../lib/swapSweep";
+import { confluenceSignals, detectSwapSweep, ssIstDay, ssTime, type SsConfluence, type SsSignal } from "../lib/swapSweep";
 import { detectGiftDivergence, type GiftDiv } from "../lib/giftDivergence";
 import { mergeLiveCandles, archiveFingerprint } from "../lib/liveCandles";
 import { DRAWINGS_KEY, DRAW_COLORS, FIB_LEVELS, parseDrawings, timeToIndex, indexToTime, hitDrawing, anchorsOf, moveAnchor, slideDrawing, textSizePx, isPositionType, positionOutcome, positionTexts, POS_COLORS, type Drawing, type DrawingType, type DrawPoint, type DrawGeom, type AnchorKey, type PosBar, type DrawRect } from "../lib/chartDrawings";
@@ -24,6 +24,7 @@ import { calculateBollingerBands } from "../indicators/bollingerBands";
 // Martin's TradingView "Institutional Levels" (TCI Key Institutional Levels v2.0), ported 25 Oct 2026.
 import { computeInstitutionalLevels, ilColors, normaliseIlSettings, IL_DEFAULTS, IL_FONT_PX, type IlResult, type IlSettings } from "../indicators/institutionalLevels";
 import { computeBreakersAndGrabs, normaliseBlSettings, BL_DEFAULTS, type BlResult, type BlSettings } from "../indicators/breakerLiquidity";
+import { computeExitZones, tradeDirOnChart, type ExitZone } from "../lib/exitZones";
 import { format } from "date-fns";
 import { SymbolSearch } from "../components/SymbolSearch";
 import { PullRefresh } from "../components/PullRefresh";
@@ -1441,8 +1442,12 @@ const indGet = (key: string, opt: boolean): string | null => {
     // Session breaks are a small object, not a yes / no: not set means its own defaults, which are off.
     // "Show BOS" is BOS-CHoCH's own setting (its gear), not a switch of the list:
     // not set, it is on, as on the index chart (see BOS IS A SETTING, below).
-    return v !== null ? v : (key === 'sessionBreaks' || key === 'showBos') ? null : 'false';
-  } catch (e) { return opt && key !== 'sessionBreaks' && key !== 'showBos' ? 'false' : null; }
+    // Exit Zones (23 Nov) are not one of the indicators he had cleared from option
+    // charts: they exist only while a trade is open, only on that trade's own
+    // contract, and he asked for them "once the trade is taken". Read as off here
+    // they never appeared on the one chart the trade is actually on. Not set, on.
+    return v !== null ? v : (key === 'sessionBreaks' || key === 'showBos' || key === 'showExitZones') ? null : 'false';
+  } catch (e) { return opt && key !== 'sessionBreaks' && key !== 'showBos' && key !== 'showExitZones' ? 'false' : null; }
 };
 // Says what it did, when it changed something (see WHAT HIS PHONE ACTUALLY DOES
 // WHEN HE TAPS A SWITCH, in lib/indicatorSync): the name it wrote under, and
@@ -5036,6 +5041,13 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   useEffect(() => { try { indSet('showBreakers', optKindRef.current, String(showBreakers)); } catch (e) {} }, [showBreakers]);
   const showBreakersRef = useRef(showBreakers);
   showBreakersRef.current = showBreakers;
+  // Exit Zones (src/lib/exitZones.ts, 23 Nov 2026). On unless he switches it off:
+  // it draws nothing at all until a trade is open, and that is when he asked for it.
+  const [showExitZones, setShowExitZones] = useState<boolean>(() => {
+    try { const v = indGet('showExitZones', optKindRef.current); return v === null ? true : v === 'true'; } catch (e) { return true; }
+  });
+  useEffect(() => { try { indSet('showExitZones', optKindRef.current, String(showExitZones)); } catch (e) {} }, [showExitZones]);
+  const xzRef = useRef<{ zones: ExitZone[]; dir: 'up' | 'down'; premium: boolean }>({ zones: [], dir: 'up', premium: false });
   const [blSettings, setBlSettings] = useState<BlSettings>(() => {
     try { return normaliseBlSettings(JSON.parse(localStorage.getItem('breakerSettings') || 'null')); } catch (e) { return { ...BL_DEFAULTS }; }
   });
@@ -10542,6 +10554,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     setShowOrderBlocks(on('showOrderBlocks', true));
     setShowInstLevels(on('showInstLevels', false));
     setShowBreakers(on('showBreakers', false));
+    setShowExitZones(on('showExitZones', true));
     setShowFvg(on('showFvg', true));
     setShowDsZones(on('showDsZones', true));
     setShowSnR(on('showSnR', true));
@@ -10603,6 +10616,56 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     if (!ssOptOn || !Array.isArray(c5) || !Array.isArray(c15)) return [];
     try { return confluenceSignals(c5, c15, { nowSec: Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current }); } catch (e) { return []; }
   }, [ssOpt5, ssOpt15, ssOptOn]);
+
+  // EXIT ZONES — WHILE A TRADE IS OPEN (23 Nov 2026, src/lib/exitZones.ts). Martin:
+  // "Can you mark probable reversal zones once the trade is taken based on the
+  // previous chart structure and historical strong consolidation zones that would
+  // help in taking an exit decision." Drawn on the traded contract's own chart
+  // (from the premium's own candles, above the entry for a bought option) and on
+  // the chart of the index it belongs to (above for a call, below for a put).
+  // Nowhere else: another contract's chart, another index, GIFT and US30 get
+  // nothing, because the trade is not on them.
+  // Always from 5 and 15-minute candles of the chart's own instrument, whatever
+  // timeframe is showing, so changing the timeframe does not move a zone. The
+  // query keys are the Swap-Sweep ones on purpose: with that indicator on, the
+  // same candles are already being fetched and nothing extra is asked of Zerodha.
+  // CLOSED candles only, by the server's clock, so a zone goes only when a
+  // 5-minute candle has closed through it, not on a wick.
+  const xzSym = String(slActivePos?.symbol || '');
+  const xzRoot = (/^(BANKNIFTY|NIFTY|SENSEX)\d/.exec(xzSym.toUpperCase()) || [])[1] || null;
+  const xzOnContract = !!xzSym && isOptionView && selectedInstrument?.tradingsymbol === xzSym;
+  const xzOnIndex = !!xzSym && !isOptionView && !isReferenceChart && xzRoot === underlying;
+  const xzOn = showExitZones && !!instrumentToken && (xzOnContract || xzOnIndex);
+  const xzFetch = (tf: number) => async () => {
+    const r = await fetch(`/api/ta?timeframe=${tf}&token=${instrumentToken}&symbol=${encodeURIComponent(selectedInstrument ? selectedInstrument.tradingsymbol : indexLabel)}`);
+    if (!r.ok) throw new Error('exit-zone candles');
+    return r.json();
+  };
+  const { data: xz5 } = useQuery({ queryKey: ['ss-conf-ta', 5, instrumentToken], queryFn: xzFetch(5), enabled: xzOn, refetchInterval: 15000, staleTime: 10000, refetchOnWindowFocus: true });
+  const { data: xz15 } = useQuery({ queryKey: ['ss-conf-ta', 15, instrumentToken], queryFn: xzFetch(15), enabled: xzOn, refetchInterval: 15000, staleTime: 10000, refetchOnWindowFocus: true });
+  xzRef.current = useMemo(() => {
+    const none = { zones: [] as ExitZone[], dir: 'up' as 'up' | 'down', premium: xzOnContract };
+    const a = xz5?.candles, b = xz15?.candles, pos = slActivePos;
+    if (!xzOn || !pos || !Array.isArray(a) || !Array.isArray(b)) return none;
+    try {
+      const now = Math.floor(Date.now() / 1000) + serverTimeOffsetRef.current;
+      const norm = (cs: any[], sec: number) => cs.map((c: any) => ({ time: ssTime(c.time), open: +c.open, high: +c.high, low: +c.low, close: +c.close }))
+        .filter((c) => Number.isFinite(c.time) && Number.isFinite(c.close) && c.high >= c.low && c.time + sec <= now);
+      const c5 = norm(a, 300), c15 = norm(b, 900);
+      if (c5.length < 30) return none;
+      const dir = tradeDirOnChart(pos.symbol, pos.side, xzOnContract);
+      const eT = pos.timestamp ? Math.floor(new Date(pos.timestamp).getTime() / 1000) : NaN;
+      const entryTime = Number.isFinite(eT) ? eT : null;
+      const price = c5[c5.length - 1].close;
+      // On the index chart the entry is the index at the moment the trade was
+      // taken: the close of the 5-minute candle it fell in. Not known (a position
+      // found at the broker with no time of its own): the zones are simply the
+      // ones ahead of the price.
+      let entry: number | null = xzOnContract ? Number(pos.entryPrice) : null;
+      if (!xzOnContract && entryTime !== null) { let k = -1; for (let i = 0; i < c5.length; i++) { if (c5[i].time <= entryTime) k = i; else break; } if (k >= 0) entry = c5[k].close; }
+      return { zones: computeExitZones(c5, c15, { dir, price, entry: entry && Number.isFinite(entry) ? entry : null, entryTime }), dir, premium: xzOnContract };
+    } catch (e) { return none; }
+  }, [xz5, xz15, xzOn, xzOnContract, slActivePos]);
 
   // Alert ONCE per signal (index + direction + the 15-min candle), remembered across
   // reloads. A signal is known when its 15-min C3 closes; one older than 10 minutes
@@ -11527,7 +11590,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     showBos: [showBos, setShowBos], favIndicators: [favIndicators, setFavIndicators],
     showStructure: [showStructure, setShowStructure], showOrderBlocks: [showOrderBlocks, setShowOrderBlocks],
     showInstLevels: [showInstLevels, setShowInstLevels], ilSettings: [ilSettings, setIlSettings],
-    showBreakers: [showBreakers, setShowBreakers], blSettings: [blSettings, setBlSettings],
+    showBreakers: [showBreakers, setShowBreakers], blSettings: [blSettings, setBlSettings], showExitZones: [showExitZones, setShowExitZones],
     showFvg: [showFvg, setShowFvg], showDsZones: [showDsZones, setShowDsZones], dzStyle: [dzStyle, setDzStyle],
     dzFvg: [dzFvg, setDzFvg], dsZoneOpacity: [dsZoneOpacity, setDsZoneOpacity],
     levelAlertsOn: [levelAlertsOn, setLevelAlertsOn], zoneTapAlertsOn: [zoneTapAlertsOn, setZoneTapAlertsOn],
@@ -15451,6 +15514,54 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                 } catch (e) { /* an indicator must never break the frame */ }
               }
 
+              // EXIT ZONES (src/lib/exitZones.ts): only while a trade is open and only
+              // on its own charts — xzRef is empty otherwise. An amber band from where
+              // the zone formed to the right edge, stronger = more solid, with what it
+              // is made of and how far the price still is from its near edge. Called
+              // "Zone", not "reversal": see the note at the top of exitZones.ts.
+              if (xzRef.current.zones.length && mainSeriesRef.current) {
+                try {
+                  const X = xzRef.current, tsX = mainChartRef.current?.timeScale();
+                  const live = Number(lastCandleDataRef.current?.close);
+                  const COL = '#f59e0b', FONT = drawFontRef.current;
+                  const xzLabelYs: number[] = [];
+                  ctx.save();
+                  for (const z of X.zones) {
+                    const yT = mainSeriesRef.current.priceToCoordinate(z.top), yB = mainSeriesRef.current.priceToCoordinate(z.bottom);
+                    if (yT === null || yB === null) continue;
+                    const x0 = tsX ? tsX.timeToCoordinate(z.since as any) : null;
+                    const l = x0 === null || x0 === undefined ? 0 : Math.max(0, Math.min(textAlignX - 60, x0)), r = textAlignX;
+                    const yA = Math.min(yT, yB), h = Math.max(2, Math.abs(yB - yT));
+                    const k = z.strength === 'strong' ? 1 : z.strength === 'medium' ? 0.65 : 0.4;
+                    ctx.fillStyle = hexToRgba(COL, 0.16 * k); ctx.fillRect(l, yA, r - l, h);
+                    ctx.strokeStyle = hexToRgba(COL, 0.8 * k); ctx.lineWidth = 1; ctx.setLineDash(z.strength === 'weak' ? [4, 3] : []);
+                    ctx.beginPath(); ctx.moveTo(l, yA + 0.5); ctx.lineTo(r, yA + 0.5); ctx.moveTo(l, yA + h - 0.5); ctx.lineTo(r, yA + h - 0.5); ctx.stroke(); ctx.setLineDash([]);
+                    let away = '';
+                    if (Number.isFinite(live)) {
+                      const d = X.dir === 'up' ? z.near - live : live - z.near;
+                      away = d > 0 ? ` · ${X.premium ? d.toFixed(1) : Math.round(d)} away` : ' · price is in it';
+                    }
+                    // The words sit along the NEAR edge, the one the price reaches first:
+                    // inside the band when it is tall enough to hold them, just outside it
+                    // (on the price's side) when it is a thin line. The far edge was tried
+                    // first and is often off the top of the chart; pinning the words to the
+                    // chart's edge instead wrote two zones' labels on top of each other.
+                    // A label that would still land on the one before it is left out.
+                    const yN = X.dir === 'up' ? yA + h : yA, inside = h >= 15;
+                    ctx.font = `10px ${FONT}`; ctx.fillStyle = hexToRgba(COL, 0.55 + 0.4 * k); ctx.textAlign = 'right';
+                    ctx.textBaseline = (X.dir === 'up') === inside ? 'bottom' : 'top';
+                    const yTxt = (X.dir === 'up') === inside ? yN - 2 : yN + 2;
+                    if (yTxt > 14 && yTxt < (canvas.clientHeight || 1e9) - 30 && !xzLabelYs.some((y) => Math.abs(y - yTxt) < 13)) {
+                      xzLabelYs.push(yTxt);
+                      // short words: on a phone the full ones ran under the trade's own chips
+                      const why = z.reasons.join(' + ').replace(/swing (high|low)/g, '$1').replace(/previous day/g, 'prev day').replace(/ consolidation/g, ' range').replace(/ min/g, 'm');
+                      tag(`Zone · ${z.strength} · ${why}${away}`, r - 3, yTxt);
+                    }
+                  }
+                  ctx.restore();
+                } catch (e) { /* an indicator must never break the frame */ }
+              }
+
               // FVG WITH DIRECTIONAL ZONES — a separate pass over the zones block's
               // OUTPUT. The block above is untouched; this only reads obZonesRef.
               // Derived once per recompute (keyed on the zones block's own signature),
@@ -18119,6 +18230,22 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       title={isFav('BreakersGrabs') ? 'Remove from favourites' : 'Mark as favourite'} aria-label="Toggle favourite"
                       className={`p-1 transition-colors ${isFav('BreakersGrabs') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}>
                       <Star size={14} fill={isFav('BreakersGrabs') ? 'currentColor' : 'none'} />
+                    </button>
+                  </div>
+
+                  {/* Exit Zones (23 Nov 2026): drawn only while a trade is open */}
+                  <div className={`flex items-center justify-between pl-3 pr-9 md:pr-3 hover:bg-muted transition-colors group ${rowOrder('ExitZones', showExitZones)}`}>
+                      <div className="flex items-center gap-2 py-2 text-sm text-foreground/80 flex-grow min-w-0">
+                        <button onClick={(e) => { e.stopPropagation(); setShowExitZones(!showExitZones); }} aria-label="Toggle Exit Zones" data-ind-toggle="ExitZones" className="w-4 flex items-center justify-center shrink-0">
+                          <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors ${showExitZones ? "bg-emerald-500 border-emerald-500" : "border-muted-foreground/40"}`}>{showExitZones && <Check size={9} className="text-black" strokeWidth={3.5} />}</span>
+                        </button>
+                        <span className="truncate select-none" title="While a trade is open: zones ahead of it where the chart turned or stalled before (old swing highs and lows, long consolidations, the previous day's and today's high and low). Reference levels only.">Exit Zones (while in a trade)</span>
+                      </div>
+                    <span className="p-1 w-[22px] shrink-0" aria-hidden="true" />
+                    <button onClick={(e) => { e.stopPropagation(); toggleFav('ExitZones'); }}
+                      title={isFav('ExitZones') ? 'Remove from favourites' : 'Mark as favourite'} aria-label="Toggle favourite"
+                      className={`p-1 transition-colors ${isFav('ExitZones') ? 'text-primary' : 'text-muted-foreground/40 hover:text-muted-foreground'}`}>
+                      <Star size={14} fill={isFav('ExitZones') ? 'currentColor' : 'none'} />
                     </button>
                   </div>
 

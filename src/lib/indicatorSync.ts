@@ -53,7 +53,7 @@
 
 /** The index chart's indicator switches. */
 export const SWITCH_KEYS = [
-  'showPdhPdl', 'showOpeningRange', 'showBos', 'showInstLevels', 'showBreakers', 'showStructure', 'showOrderBlocks',
+  'showPdhPdl', 'showOpeningRange', 'showBos', 'showInstLevels', 'showBreakers', 'showExitZones', 'showStructure', 'showOrderBlocks',
   'showFvg', 'showDsZones', 'showSnR', 'showOiBars', 'showRsi', 'showBB', 'showHLevels', 'showFiftyPercentLevels',
   'showVolume', 'showConfSignals', 'showPinBars', 'showSwapSweep', 'showGiftDivergence', 'sessionBreaks', 'showBiasLevels',
   // the three alerts that are rows of the same list
