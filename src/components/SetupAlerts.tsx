@@ -5,8 +5,8 @@
 //
 // The server finds them (server/setup_alerts.ts, the chart's own indicators on
 // NIFTY 5m, 15m, 30m and 1h) and sends them to Telegram. This shows the same ones
-// in the app wherever it is open: a toast, a short chime, a phone notification if
-// they are allowed, and a line in the Notifications list. Each once per device;
+// in the app wherever it is open: a toast, a short chime and a line in the
+// Notifications list. Each once per device;
 // one made before the app was opened is not announced.
 //
 // MARKET_ALERTS_OFF silences every other market alert in the app (level touches,
@@ -38,7 +38,11 @@ export function SetupAlerts() {
     const poll = async () => {
       if (stopped || document.visibilityState !== 'visible') return;
       try {
-        const r = await fetch(`/api/setup-alerts?since=${Date.now() - 6 * 3600000}`);
+        // screen=1: this only runs while the app is the thing on screen (the check
+        // just above), and it tells the server so. The server then leaves the
+        // alerts this is about to show off Telegram (NOT ON TELEGRAM WHILE THE APP
+        // IS ON HIS SCREEN, server/setup_alerts.ts).
+        const r = await fetch(`/api/setup-alerts?screen=1&since=${Date.now() - 6 * 3600000}`);
         if (!r.ok) return;
         const j = await r.json();
         let seen: string[] = [];
@@ -50,7 +54,10 @@ export function SetupAlerts() {
           if (Number(a.at) < OPENED_AT - 60000) continue;      // before the app was opened: listed nowhere, not replayed
           try { toast(a.title, { description: a.body, duration: 12000, closeButton: true }); } catch (e) {}
           try { notificationService.add('divergence', a.title, a.body, { ephemeral: true, source: 'setup-alert', key: a.id }); } catch (e) {}
-          try { if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification(a.title, { body: a.body, tag: a.id }); } catch (e) {}
+          // No phone notification from here (25 Nov 2026). Martin: "Can you change it
+          // to not send phone notifications when my app screen is on display." This
+          // code only ever runs while the app is on display, so the banner it raised
+          // was always a second copy of the toast above.
           chime();
         }
         if (changed) { try { localStorage.setItem(SEEN_KEY, JSON.stringify(seen.slice(-300))); } catch (e) {} }

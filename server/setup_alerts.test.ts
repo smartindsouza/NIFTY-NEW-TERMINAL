@@ -25,4 +25,14 @@ const one = dueAlerts(c.slice(0, idxOf(bb[0].breakTime) + 1), tf, (bb[0].breakTi
 console.log('sample:', one.title, '|', one.body);
 ok(/^🧱 NIFTY 5m · (Bullish|Bearish) breaker block$/.test(one.title), 'title format');
 ok(dueAlerts(c.slice(0, 2), tf, Date.now()).length === 0, 'too few candles: nothing');
+// ---- not on Telegram while the app is on his screen (25 Nov 2026) ----
+const { telegramDecision } = await import('./setup_alerts');
+const T0 = 1_800_000_000_000;
+ok(telegramDecision(T0, 0, T0) === 'send', 'app never opened: Telegram at once');
+ok(telegramDecision(T0, T0 - 5 * 60000, T0) === 'send', 'app last on screen 5 minutes ago: Telegram at once');
+ok(telegramDecision(T0, T0 - 12000, T0 + 1000) === 'wait', 'app asked 12 s before the alert: wait for its next ask');
+ok(telegramDecision(T0, T0 + 8000, T0 + 9000) === 'skip', 'the app asked after the alert was stored: it has it, no Telegram');
+ok(telegramDecision(T0, T0, T0) === 'skip', 'asked in the same instant counts as having it');
+ok(telegramDecision(T0, T0 - 12000, T0 + 29000) === 'wait' && telegramDecision(T0, T0 - 12000, T0 + 30000) === 'send', 'phone locked in between: Telegram goes out 30 s late, not never');
+ok(telegramDecision(T0, T0 - 30000, T0) === 'wait' && telegramDecision(T0, T0 - 30001, T0) === 'send', 'the 30 s edge');
 if (fails) { console.log(fails + ' failed'); process.exit(1); } else console.log('all checks passed');

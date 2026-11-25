@@ -60,6 +60,28 @@ export function dueAlerts(c: { time: number; open: number; high: number; low: nu
   return out;
 }
 
+// NOT ON TELEGRAM WHILE THE APP IS ON HIS SCREEN (25 Nov 2026). Martin: "I get in
+// app notifications as well as phone notifications for breaker blocks and SS
+// signals. Can you change it to not send phone notifications when my app screen
+// is on display. Since I receive both of them on my screen it’s a little
+// irritating."
+//
+// The app asks for this list every 20 seconds, and only while it is the thing on
+// screen (SetupAlerts.tsx, with screen=1). That asking is how the server knows:
+//   * nothing asked in the 30 seconds before the alert: the app is not on screen,
+//     Telegram goes out at once, as before;
+//   * something did: wait for the next ask. If it comes, the app has just been
+//     handed this alert and is showing it, so Telegram is skipped. If 30 seconds
+//     pass with no ask (he locked the phone in between), Telegram goes out late
+//     rather than not at all.
+// So an alert is never lost to this: it reaches the app or Telegram, every time.
+export const SCREEN_RECENT_MS = 30000, SCREEN_WAIT_MS = 30000;
+export function telegramDecision(storedAt: number, lastScreenAsk: number, now: number): 'send' | 'wait' | 'skip' {
+  if (lastScreenAsk >= storedAt) return 'skip';
+  if (storedAt - lastScreenAsk > SCREEN_RECENT_MS) return 'send';
+  return now - storedAt >= SCREEN_WAIT_MS ? 'send' : 'wait';
+}
+
 let lastRun: any = { running: false };
 const lastFetch: Record<number, number> = {};
 
@@ -68,6 +90,19 @@ export function registerSetupAlerts(app: any, D: Deps) {
   const has = D.db.prepare('SELECT 1 FROM setup_alerts WHERE id = ?');
   const put = D.db.prepare('INSERT OR IGNORE INTO setup_alerts (id, at, tf, kind, dir, title, body) VALUES (?, ?, ?, ?, ?, ?, ?)');
   let busy = false;
+  let lastScreenAsk = 0;
+  const waiting: { id: string; text: string; storedAt: number }[] = [];
+  const settle = async () => {
+    for (const w of [...waiting]) {                    // oldest first, so Telegram reads in the order they formed
+      const d = telegramDecision(w.storedAt, lastScreenAsk, Date.now());
+      if (d === 'wait') continue;
+      waiting.splice(waiting.indexOf(w), 1);
+      if (d === 'skip') { console.log(`[setup-alerts] ${w.id}: shown in the app, not sent to Telegram`); continue; }
+      console.log(`[setup-alerts] ${w.id}: app not on screen, sent to Telegram`);
+      try { await D.notify(w.text); } catch (e) { /* in the app's list regardless */ }
+    }
+  };
+  setInterval(() => { if (waiting.length) settle().catch(() => {}); }, 5000);
   const tick = async () => {
     if (busy) return; busy = true;
     try {
@@ -89,9 +124,10 @@ export function registerSetupAlerts(app: any, D: Deps) {
           put.run(a.id, a.at, a.tf, a.kind, a.dir, a.title, a.body);
           sent.push(a.id);
           console.log(`[setup-alerts] ${a.title} — ${a.body}`);
-          try { await D.notify(`${a.title}\n${a.body}`); } catch (e) { /* in the app's list regardless */ }
+          waiting.push({ id: a.id, text: `${a.title}\n${a.body}`, storedAt: Date.now() });
         }
       }
+      await settle();
       lastRun = { running: true, at: now, sent };
     } catch (e: any) { lastRun = { running: true, error: String(e?.message || e), at: Date.now() }; }
     finally { busy = false; }
@@ -100,8 +136,9 @@ export function registerSetupAlerts(app: any, D: Deps) {
   // The app's own list: what was sent since `since` (ms), newest last. Read-only.
   app.get('/api/setup-alerts', (req: any, res: any) => {
     const since = Number(req.query.since) || Date.now() - 6 * 3600000;
+    if (String(req.query.screen || '') === '1') lastScreenAsk = Date.now();   // the app is on screen and about to show these
     const rows = D.db.prepare('SELECT * FROM setup_alerts WHERE at > ? ORDER BY at LIMIT 200').all(since);
-    res.setHeader('Cache-Control', 'no-store'); res.json({ ok: true, alerts: rows, status: lastRun });
+    res.setHeader('Cache-Control', 'no-store'); res.json({ ok: true, alerts: rows, status: { ...lastRun, appOnScreenAt: lastScreenAsk || null, waiting: waiting.length } });
   });
   console.log('[setup-alerts] registered: NIFTY breaker blocks + Swap-Sweep, 5m/15m/30m/1h');
 }
