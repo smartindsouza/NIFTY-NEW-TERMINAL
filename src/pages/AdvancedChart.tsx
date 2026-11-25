@@ -10797,7 +10797,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   indexLabelRef.current = indexLabel;
   const queryClient = useQueryClient();
 
-  const { data: taInfo, isLoading: isLoadingTa, isError: isTaError, error: taError, refetch: refetchTa } = useQuery({
+  const { data: taInfo, isLoading: isLoadingTa, isError: isTaError, error: taError, refetch: refetchTa, isFetching: isTaFetching, isPlaceholderData: isTaPlaceholder } = useQuery({
     queryKey: ["ta-data-live-chart", timeframe, instrumentToken],
     queryFn: async () => {
       // Shared with the "decision" query just below, which asks for the same
@@ -14384,6 +14384,91 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     // Re-run if chartData structure changes drastically, but memo keeps it stable
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartData, divergences, showRsi, showBB, bbData, bbColor, rsiColor, rsiLineWidth, rsiLineStyle, rsiSmaLineWidth, rsiSmaLineStyle, rsiOverbought1, rsiOverbought2, rsiOversold1, rsiOversold2, rsiSmaColor, rsiOverboughtColor, rsiOversoldColor, showHLevels, hLevels, hLevelsStyle, hLevelsWidth, selectedStrikeOnChart, showVolume, settings.candleUpColor, settings.candleDownColor, settings.customFontUrl, resolvedTheme]);
+
+  // THE OLD CHART STAYS UP UNTIL THE RIGHT CANDLES ARE IN (25 Nov 2026). Martin:
+  // "Whenever I switch charts or time frames for a brief moment it shows wrong
+  // candles and then sets up the correct candles for the chart. Can we fix this
+  // by keeping the same chart candlesticks until it loads the correct chart or
+  // time frame candlesticks instead of showing wrong candles for a brief moment
+  // of 2-3 seconds".
+  //
+  // The wrong candles were real ones, but OLD: on a switch the chart paints at
+  // once from whatever it last held for that chart and timeframe — the copy kept
+  // in memory from the last visit (up to 10 minutes old) or the first-paint
+  // snapshot saved on the phone (FIRST-PAINT SNAPSHOT above; as old as the last
+  // visit, which can be yesterday) — with the live price joined onto the end,
+  // and redraws when Zerodha's fresh candles land 2-3 seconds later. That
+  // instant paint was added so a first load is not an empty screen, and it still
+  // does that job; on a SWITCH there is something better to look at, the chart
+  // he was just on.
+  //
+  // So at the moment of a switch, before anything is redrawn, a picture is taken
+  // of the chart as it stands (candles, price scale and everything drawn over
+  // them) and laid over the chart. Underneath, the chart loads exactly as it
+  // always has. The picture comes off as soon as the fresh candles for the new
+  // chart have been drawn. Nothing about loading, orders, lines or live prices
+  // is changed by this — it is a cover.
+  //
+  // IT SITS ABOVE THE SL / TP CHIPS AND TAKES TOUCHES. The chips and line handles
+  // are not part of the picture: they are separate pieces placed for the chart
+  // underneath, which for these 2-3 seconds is on a different price scale from
+  // the picture. Left showing, the SL chip sat at a height that meant one price
+  // on the picture and another on the real chart, and a drag would have moved a
+  // stop he could not see. So for as long as the picture is up they are covered
+  // and the chart cannot be touched; the lines themselves are in the picture.
+  //
+  // Not on first load (there is no chart to keep), and not when the candles for
+  // the new chart are already fresh in memory (under 10 seconds old: nothing is
+  // fetched, so there is nothing to wait for). If the fresh candles never come
+  // — a failed request — the cover comes off when the request gives up, and in
+  // any case after 8 seconds, so the chart can never stay hidden.
+  const switchCoverRef = useRef<HTMLCanvasElement>(null);
+  const switchKeyRef = useRef(`${timeframe}|${instrumentToken}`);
+  const switchCoverAtRef = useRef(0);
+  const [switchCover, setSwitchCover] = useState(false);
+  useLayoutEffect(() => {
+    const key = `${timeframe}|${instrumentToken}`;
+    if (switchKeyRef.current === key) return;
+    switchKeyRef.current = key;
+    // a second switch while the first is still loading: the picture already up is
+    // the last good chart, and what is underneath it now is the in-between
+    if (switchCoverAtRef.current) { switchCoverAtRef.current = performance.now(); return; }
+    const chart = mainChartRef.current, box = chartContainerRef.current, cv = switchCoverRef.current;
+    if (!chart || !box || !cv) return;
+    try {
+      const shot = chart.takeScreenshot();
+      const br = box.getBoundingClientRect();
+      if (!shot || !shot.width || !shot.height || !br.width || !br.height) return;
+      cv.width = shot.width; cv.height = shot.height;
+      const g = cv.getContext('2d'); if (!g) return;
+      g.drawImage(shot, 0, 0);
+      // what the app draws over the candles (levels, zones, his lines) is on two
+      // canvases of its own, laid over the same box
+      for (const o of [overlayCanvasRef.current, rrCanvasRef.current]) {
+        if (!o || !o.width || !o.height) continue;
+        const or = o.getBoundingClientRect(); if (!or.width || !or.height) continue;
+        const kx = o.width / or.width, ky = o.height / or.height;
+        g.drawImage(o, (br.left - or.left) * kx, (br.top - or.top) * ky, br.width * kx, br.height * ky, 0, 0, cv.width, cv.height);
+      }
+      cv.style.left = `${box.offsetLeft}px`; cv.style.top = `${box.offsetTop}px`;
+      cv.style.width = `${box.offsetWidth}px`; cv.style.height = `${box.offsetHeight}px`;
+      switchCoverAtRef.current = performance.now();
+      setSwitchCover(true);
+    } catch (e) { /* no picture: the chart simply loads the way it did before */ }
+  }, [timeframe, instrumentToken]);
+  useEffect(() => {
+    if (!switchCover) return;
+    const off = () => { switchCoverAtRef.current = 0; setSwitchCover(false); };
+    // Fresh candles for THIS chart: not the stand-in, and the request has finished
+    // (or given up). This effect is declared after the one that builds the chart,
+    // so by now they are on it; two frames let the browser put them on screen.
+    const ready = !isTaFetching && !isTaPlaceholder && (!!taInfo || isTaError);
+    let r1 = 0, r2 = 0;
+    if (ready) r1 = requestAnimationFrame(() => { r2 = requestAnimationFrame(off); });
+    const left = Math.max(0, 8000 - (performance.now() - switchCoverAtRef.current));
+    const t = window.setTimeout(off, left);
+    return () => { cancelAnimationFrame(r1); cancelAnimationFrame(r2); window.clearTimeout(t); };
+  }, [switchCover, isTaFetching, isTaPlaceholder, taInfo, isTaError, timeframe, instrumentToken]);
 
   // Dedicated R:R renderer. Mounted ONCE with no dependencies and reading only
   // refs, so it never rebuilds and never waits on the heavy overlay loop. Its
@@ -19692,6 +19777,24 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               ref={rrCanvasRef}
               className="absolute inset-0 w-full h-full pointer-events-none rounded-none z-[31]"
             />
+            {/* The picture of the chart he was on, held over the chart while a switch
+                loads (THE OLD CHART STAYS UP UNTIL THE RIGHT CANDLES ARE IN). Always in
+                the page so the picture can be drawn before React shows it. Above the
+                SL / TP chips (z 41-45) and it takes touches, so nothing on the hidden
+                chart can be dragged while it is up; below the menus and sheets (z 55+).
+                The small "Loading" tag says the candles are the previous chart's,
+                since the name and price above have already changed. */}
+            <canvas
+              ref={switchCoverRef}
+              data-switch-cover={switchCover ? 'on' : 'off'}
+              className="absolute rounded-none z-[46] bg-background touch-none"
+              style={{ display: switchCover ? 'block' : 'none' }}
+            />
+            {switchCover && (
+              <div data-switch-loading="" className="absolute left-1/2 -translate-x-1/2 top-2 z-[47] pointer-events-none px-2.5 py-1 rounded-full bg-card/90 border border-foreground/15 text-[10px] font-semibold text-muted-foreground">
+                Loading…
+              </div>
+            )}
             {(() => {
               if (showOiBars && !isOptionView && oiData && crosshairInfo) {
                 const priceScaleWidth = mainChartRef.current ? mainChartRef.current.priceScale('right').width() : 60;
