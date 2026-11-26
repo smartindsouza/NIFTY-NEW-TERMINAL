@@ -11232,42 +11232,25 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     window.addEventListener('terminal:chart-underlying', onIdx);
     return () => window.removeEventListener('terminal:chart-underlying', onIdx);
   }, [scalp, isOptionPane]);
-  // THE OPTION BELOW FOLLOWS THE INDEX ABOVE (19 Nov 2026). Martin, with NIFTY 50
-  // chosen above a SENSEX option: "When I change it to nifty from sensex. The
-  // bottom chart still remains as Sensex option chart. So I can't open nifty
-  // option chain." (The chain opens from the option's name, on the option's own
-  // index — so with the index's name now opening the list of indices, a SENSEX
-  // option below left no way to NIFTY's chain.) When the index above is
-  // changed, this chart moves to an option of it: the newest one of that index
-  // on the list, or, with none there, the at-the-money Call of its nearest
-  // expiry from the app's own chain — the option ScalperX opens on when it has
-  // none (see AN OPTION TO SHOW in ChartWorkspace). Only on a change made
-  // above: an option of another index he puts here himself (from the chain or
-  // a search) stays.
-  const topIndexSeenRef = useRef(topIndex);
-  useEffect(() => {
-    if (!scalp || !isOptionPane) return;
-    if (topIndexSeenRef.current === topIndex) return;
-    topIndexSeenRef.current = topIndex;
-    if (topIndex !== 'NIFTY' && topIndex !== 'BANKNIFTY' && topIndex !== 'SENSEX') return;
-    if (rootOfOption(selectedInstrument?.tradingsymbol) === topIndex) return;
-    const same = openCharts.filter((c) => isOptionInstr(c) && rootOfOption(c.tradingsymbol) === topIndex);
-    if (same.length) { setSelectedInstrument(same[same.length - 1]); return; }
-    let dead = false;
-    const q = topIndex === 'SENSEX' ? '?symbol=SENSEX' : topIndex === 'BANKNIFTY' ? `?symbol=${encodeURIComponent('NIFTY BANK')}` : '';
-    fetch(`/api/option-chain${q}`).then((r) => (r.ok ? r.json() : null)).then((d) => {
-      if (dead || !d) return;
-      const strikes: number[] = Array.isArray(d.strikes) ? d.strikes : [];
-      const spot = Number(d.spot);
-      if (!strikes.length || !(spot > 0)) return;
-      const atm = strikes.reduce((x, y) => (Math.abs(y - spot) < Math.abs(x - spot) ? y : x), strikes[0]);
-      const c = d.ceData?.[atm];
-      if (!c?.tradingsymbol || !c?.instrument_token || rootOfOption(c.tradingsymbol) !== topIndex) return;
-      setSelectedInstrument({ tradingsymbol: c.tradingsymbol, instrument_token: String(c.instrument_token), exchange: c.exchange || (topIndex === 'SENSEX' ? 'BFO' : 'NFO'), lot_size: c.lot_size, instrument_type: 'CE', strike: atm, expiry: c.expiry } as any);
-    }).catch(() => {});
-    return () => { dead = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [topIndex, scalp, isOptionPane]);
+  // THE OPTION BELOW STAYS WHEN THE INDEX ABOVE IS CHANGED (26 Nov 2026). Martin:
+  // "When I change the spot chart in scalperX screen the bottom option chart also
+  // changes to that index option chart. Pls fix it so it does not change".
+  //
+  // From 19 Nov this chart FOLLOWED the index above: changed there, it moved to
+  // the newest option of that index on the list, or to the at-the-money Call of
+  // its nearest expiry. That was written for his complaint that day, with NIFTY
+  // chosen above a SENSEX option: "The bottom chart still remains as Sensex
+  // option chart. So I can't open nifty option chain." (the chain opens from the
+  // option's name, on the option's own index). Moving the chart was one way to
+  // give him a way in; it also took the option he was watching, or trading, off
+  // the screen every time he looked at another index.
+  //
+  // So the chart no longer moves, and the way in to another index's chain is in
+  // the row of pills instead (below): each index's list ends with "Option
+  // chain", and the index shown above always has a pill, which opens its chain
+  // directly when no option of it is on the list yet. An option here changes
+  // only when he changes it: a pill, the chain, a search.
+  const openChainOf = (g: string) => { try { window.dispatchEvent(new CustomEvent('terminal:option-chain', { detail: { underlying: g } })); } catch (e) {} };
   // EVERY OPTION, ONE PILL PER INDEX (22 Nov 2026). Martin: "In the scalperX
   // screen also all the options should be shown regardless of the spot chart.
   // But group them as list like all nifty options in one list and all sensex
@@ -11287,7 +11270,8 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     : [];
   const pillGroups = PILL_GROUPS
     .map((g) => ({ g, list: pillCharts.filter((c) => (rootOfOption(c.tradingsymbol) || 'Other') === g) }))
-    .filter((x) => x.list.length);
+    // the index shown above keeps a pill even with nothing on the list: it is the way to its chain
+    .filter((x) => x.list.length || (scalp && isOptionPane && x.g !== 'Other' && x.g === topIndex));
   const [pillMenu, setPillMenu] = useState<{ g: string; left: number; top: number } | null>(null);
   const pillMenuList = pillMenu ? (pillGroups.find((x) => x.g === pillMenu.g)?.list || []) : [];
   useEffect(() => { if (pillMenu && !pillMenuList.length) setPillMenu(null); }, [pillMenu, pillMenuList.length]);
@@ -11299,15 +11283,16 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const scalpPills = pillSlot && pillGroups.length ? createPortal(
     <>
       {pillGroups.map(({ g, list }) => (
-        <button key={g} type="button" data-scalp-pill={g} aria-label={`${g} options on the list`}
+        <button key={g} type="button" data-scalp-pill={g} aria-label={list.length ? `${g} options on the list` : `Open the ${g} option chain`}
           onClick={(e) => {
+            if (!list.length) { setPillMenu(null); openChainOf(g); return; }
             if (pillMenu?.g === g) { setPillMenu(null); return; }
             const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
             setPillMenu({ g, left: Math.max(8, Math.min(r.left, window.innerWidth - 228)), top: r.bottom + 6 });
           }}
           className={`shrink-0 h-[26px] pl-[11px] pr-[8px] flex items-center gap-[5px] rounded-full border text-[11.5px] leading-none font-medium whitespace-nowrap active:opacity-60 ${pillMenu?.g === g || list.some((c) => c.tradingsymbol === selectedInstrument?.tradingsymbol) ? 'border-primary/60 text-foreground' : 'border-foreground/20 text-foreground/90'}`}>
-          {g}<span className="text-foreground/55">{list.length}</span>
-          <ChevronDown size={12} className={pillMenu?.g === g ? 'rotate-180 transition-transform' : 'transition-transform'} />
+          {g}<span className="text-foreground/55">{list.length || 'chain'}</span>
+          {list.length > 0 && <ChevronDown size={12} className={pillMenu?.g === g ? 'rotate-180 transition-transform' : 'transition-transform'} />}
         </button>
       ))}
     </>, pillSlot) : null;
@@ -11319,7 +11304,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
         {pillMenuList.map((c) => {
           const on = c.tradingsymbol === selectedInstrument?.tradingsymbol;
           return (
-            <div key={c.tradingsymbol} data-scalp-pill-row={c.tradingsymbol} className="flex items-center h-10 border-b border-white/5 last:border-b-0">
+            <div key={c.tradingsymbol} data-scalp-pill-row={c.tradingsymbol} className="flex items-center h-10 border-b border-white/5">
               <button type="button" aria-label={`Open ${c.tradingsymbol}`}
                 onClick={() => { if (!on) setSelectedInstrument(c); setPillMenu(null); }}
                 className={`flex-1 min-w-0 h-full pl-3 pr-1 flex items-center gap-2 text-left text-[12.5px] font-medium whitespace-nowrap active:opacity-60 ${on ? 'text-primary' : 'text-foreground/90'}`}>
@@ -11331,6 +11316,12 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             </div>
           );
         })}
+        {pillMenu.g !== 'Other' && (
+          <button type="button" data-scalp-pill-chain={pillMenu.g} onClick={() => { const g = pillMenu.g; setPillMenu(null); openChainOf(g); }}
+            className="w-full h-10 pl-3 pr-3 flex items-center text-left text-[12.5px] font-medium text-foreground/70 active:opacity-60">
+            Option chain
+          </button>
+        )}
       </div>
     </>, document.body) : null;
 
