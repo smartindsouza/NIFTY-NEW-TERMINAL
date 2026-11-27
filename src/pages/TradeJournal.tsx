@@ -9,7 +9,7 @@ import {
   istDay, sessionDay, addDays, dayMonth, dayTitle, periodRange, shiftPeriod, dayTallies, sumDays, valueOf, quality,
   monthGrid, weekCells, monthWeeks, yearMonths, profitAndLoss, compact,
 } from '../lib/journalStats';
-import { ArrowLeft, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, Eye, EyeOff, Pencil, RefreshCw, Trash2, WalletMinimal, X } from 'lucide-react';
+import { ArrowLeft, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Download, Eye, EyeOff, RefreshCw, WalletMinimal, X } from 'lucide-react';
 
 // THE TRADE JOURNAL IS LEMONN'S POSITIONS SCREEN (17 Nov 2026).
 // Martin, with four pictures of Lemonn (Positions, the wallet, Orders and
@@ -316,39 +316,13 @@ export default function TradeJournal() {
   // ----- the open card: what the old rows spelled out -----
   const [openId, setOpenId] = useState<number | null>(null);
   const [costOpen, setCostOpen] = useState<number | null>(null);
-  // Correcting a price by hand. Zerodha's trade list only covers today, so a
-  // position carried in from a previous day has no entry price the import can
-  // read — it has to come from the user, and it has to survive the next rebuild.
-  const [editId, setEditId] = useState<number | null>(null);
-  const [editEntry, setEditEntry] = useState('');
-  const [editExit, setEditExit] = useState('');
-  const startEdit = (t: JournalTrade) => {
-    setEditId(t.id);
-    setEditEntry(t.entry_price == null ? '' : String(t.entry_price));
-    setEditExit(t.exit_price == null ? '' : String(t.exit_price));
-  };
-  const saveEdit = async (t: JournalTrade) => {
-    try {
-      const res = await fetch(`/api/journal/${t.id}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entry_price: editEntry === '' ? null : Number(editEntry), exit_price: editExit === '' ? null : Number(editExit) }),
-      });
-      const d = await res.json().catch(() => ({ success: false }));
-      if (!d.success) { toast.error(d.error || 'Not saved'); return; }
-      toast.success('Saved');
-      setEditId(null);
-      refetch();
-    } catch { toast.error('Not saved'); }
-  };
-  // Deleting a row takes two taps, like the chart's Exit: the first arms it for
-  // three seconds. It used to go on one, from a bin beside the P&L of every row.
-  const [delArm, setDelArm] = useState<number | null>(null);
-  useEffect(() => { if (delArm === null) return; const t = setTimeout(() => setDelArm(null), 3000); return () => clearTimeout(t); }, [delArm]);
-  const handleDelete = async (id: number) => {
-    if (delArm !== id) { setDelArm(id); return; }
-    setDelArm(null);
-    try { await fetch(`/api/journal/${id}`, { method: 'DELETE' }); refetch(); } catch { /* the row stays */ }
-  };
+  // NO CORRECT PRICE, NO DELETE (27 Nov 2026). Martin, of the two buttons that
+  // stood at the foot of an opened trade: "Remove the correct price and delete
+  // buttons from the trade journal. I want it to be precisely extracted from
+  // kite and keep the records without deletions". Both are gone, with the
+  // little form the first one opened, and the server refuses both changes too
+  // (PATCH and DELETE /api/journal/:id), so no other screen or old copy of the
+  // app can alter or remove a row. The journal is what Zerodha's books say.
 
   // What a trade made, on the page's basis; an open one, what it is making now.
   const returnsOf = (t: JournalTrade): number | null => {
@@ -374,7 +348,7 @@ export default function TradeJournal() {
     const details = 'text-[12px] leading-4 font-medium text-muted-foreground';
     return (
       <div key={t.id} data-trade={t.id} data-trade-state={open ? 'open' : 'closed'} className="rounded-[12px] bg-card border border-border">
-        <button type="button" onClick={() => { setOpenId(expanded ? null : t.id); setEditId(null); setCostOpen(null); }}
+        <button type="button" onClick={() => { setOpenId(expanded ? null : t.id); setCostOpen(null); }}
           className="relative block w-full text-left pl-[12.5px] pr-3 pt-[16px] pb-[13px] text-[12px] leading-none">
           <div data-trade-line="when" className="font-medium text-muted-foreground/80 pr-[150px] lg:pr-[112px] truncate">{t.product || 'NRML'} • {timeOf(t.entry_time)}{out}</div>
           <div className="absolute right-3 top-3 flex items-center gap-2">
@@ -433,30 +407,6 @@ export default function TradeJournal() {
                 {([['Spot', ctx.spot], ['RSI', ctx.rsi], ['OI', ctx.oiBias], ['TF', ctx.timeframe], ['S', ctx.support], ['R', ctx.resistance], ['PDH', ctx.pdh], ['PDL', ctx.pdl]] as const)
                   .filter(([, v]) => v !== null && v !== undefined && v !== '')
                   .map(([k, v]) => <span key={k}>{k} <span className="text-foreground">{typeof v === 'number' ? v.toFixed(2) : String(v)}</span></span>)}
-              </div>
-            )}
-            {editId === t.id ? (
-              <div className="flex items-center gap-2 flex-wrap pt-0.5">
-                <label className="flex items-center gap-1.5">Entry
-                  <input value={editEntry} onChange={(e) => setEditEntry(e.target.value)} inputMode="decimal" data-edit="entry"
-                    className="w-20 h-8 bg-background border border-border rounded-[8px] px-2 text-foreground text-center focus:outline-none focus:ring-1 focus:ring-foreground/40" />
-                </label>
-                {!open && (
-                  <label className="flex items-center gap-1.5">Exit
-                    <input value={editExit} onChange={(e) => setEditExit(e.target.value)} inputMode="decimal" data-edit="exit"
-                      className="w-20 h-8 bg-background border border-border rounded-[8px] px-2 text-foreground text-center focus:outline-none focus:ring-1 focus:ring-foreground/40" />
-                  </label>
-                )}
-                <button type="button" data-edit="save" onClick={() => saveEdit(t)} aria-label="Save" className={cn('h-8 w-8 rounded-[8px] flex items-center justify-center bg-foreground/[0.08]', GREEN)}><Check className="w-4 h-4" /></button>
-                <button type="button" onClick={() => setEditId(null)} aria-label="Cancel" className="h-8 w-8 rounded-[8px] flex items-center justify-center bg-foreground/[0.08]"><X className="w-4 h-4" /></button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 pt-0.5">
-                <button type="button" data-trade-act="edit" onClick={() => startEdit(t)} className="h-8 px-2.5 rounded-[8px] flex items-center gap-1.5 bg-foreground/[0.08] text-foreground/90"><Pencil className="w-3.5 h-3.5" />Correct price</button>
-                <button type="button" data-trade-act="delete" onClick={() => handleDelete(t.id)}
-                  className={cn('h-8 px-2.5 rounded-[8px] flex items-center gap-1.5', delArm === t.id ? 'bg-[#d43f52] text-white' : cn('bg-foreground/[0.08]', RED))}>
-                  <Trash2 className="w-3.5 h-3.5" />{delArm === t.id ? 'Confirm' : 'Delete'}
-                </button>
               </div>
             )}
           </div>

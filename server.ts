@@ -2346,51 +2346,19 @@ setInterval(() => {
     }
   });
 
-  // Correct a row by hand and LOCK it against the next import. The only source for
-  // a carried position's true entry is the user: Kite's trade list stops at today.
-  // P&L is recomputed from the corrected prices rather than trusted from the body.
-  app.patch('/api/journal/:id', express.json(), (req, res) => {
-    try {
-      const uid = journalOwner();
-      if (!uid) return res.status(401).json({ success: false, error: 'No active Kite session.' });
-      const id = parseInt(String(req.params.id), 10);
-      const row = db.prepare('SELECT * FROM trade_journal WHERE id = ? AND kite_user_id = ?').get(id, uid) as any;
-      if (!row) return res.status(404).json({ success: false, error: 'Trade not found for this account.' });
-
-      const num = (v: any, fallback: number | null) => {
-        if (v === undefined || v === null || v === '') return fallback;
-        const n = Number(v);
-        return Number.isFinite(n) ? n : fallback;
-      };
-      const entryPrice = num(req.body?.entry_price, row.entry_price);
-      const exitPrice = num(req.body?.exit_price, row.exit_price);
-      const entryTime = num(req.body?.entry_time, row.entry_time);
-      const exitTime = num(req.body?.exit_time, row.exit_time);
-
-      let pnl = row.pnl;
-      if (row.status === 'CLOSED' && entryPrice != null && exitPrice != null) {
-        const dir = String(row.side).toUpperCase() === 'BUY' ? 1 : -1;
-        pnl = Math.round(dir * (exitPrice - entryPrice) * (Number(row.qty) || 0) * 100) / 100;
-      }
-
-      let ctx: any = null; try { ctx = row.context ? JSON.parse(row.context) : null; } catch {}
-      ctx = { ...(ctx || {}), edited: true };
-      delete ctx.basisIsClose;                    // no longer an estimate
-
-      db.prepare(
-        // The stored charges were worked out on the old prices. Cleared, so the
-        // journal re-prices the row by the formula on the corrected ones.
-        `UPDATE trade_journal SET entry_price = ?, exit_price = ?, entry_time = ?, exit_time = ?,
-           pnl = ?, context = ?, locked = 1, updated_at = ?, charges = NULL, charges_detail = NULL WHERE id = ? AND kite_user_id = ?`
-      ).run(entryPrice, exitPrice, entryTime, exitTime, pnl, JSON.stringify(ctx), Date.now(), id, uid);
-
-      const updated = db.prepare('SELECT * FROM trade_journal WHERE id = ?').get(id) as any;
-      return res.json({ success: true, trade: { ...updated, context: updated.context ? JSON.parse(updated.context) : null } });
-    } catch (e: any) {
-      console.error('[journal patch]', e);
-      return res.status(500).json({ success: false, error: e?.message || String(e) });
-    }
-  });
+  // NO CORRECTING BY HAND, NO DELETING (27 Nov 2026). Martin: "Remove the correct
+  // price and delete buttons from the trade journal. I want it to be precisely
+  // extracted from kite and keep the records without deletions".
+  // PATCH /api/journal/:id let a row's prices be typed in and LOCKED it against
+  // the next import (written for a position carried in from an earlier day,
+  // whose entry Zerodha's list of today's trades does not have); DELETE removed
+  // a row outright, for any account, with no check. The buttons are gone from
+  // the Journal, and both routes now refuse, so nothing — an old copy of the
+  // app still open, another screen, a script — can alter or remove a record.
+  // Rows corrected before this stay as they are (still locked): what he typed
+  // then is not thrown away by a release. Rows are still WRITTEN by the app
+  // (a trade opened and closed) and rebuilt from Zerodha by Import.
+  app.patch('/api/journal/:id', (_req, res) => res.status(403).json({ success: false, error: 'Journal prices come from Zerodha and are not corrected by hand.' }));
 
   // Excel export of the journal. Defaults to TODAY; ?from=&to= (YYYY-MM-DD, IST)
   // widens it. Scoped to the logged-in account like every other journal read.
@@ -2639,17 +2607,8 @@ setInterval(() => {
     }
   });
 
-  app.delete('/api/journal/:id', (req, res) => {
-    try {
-      const id = parseInt(req.params.id, 10);
-      if (!id) return res.status(400).json({ success: false, error: 'Bad id' });
-      db.prepare(`DELETE FROM trade_journal WHERE id = ?`).run(id);
-      return res.json({ success: true });
-    } catch (e: any) {
-      console.error('[journal DELETE]', e);
-      return res.status(500).json({ success: false, error: e?.message || String(e) });
-    }
-  });
+  // See NO CORRECTING BY HAND, NO DELETING above.
+  app.delete('/api/journal/:id', (_req, res) => res.status(403).json({ success: false, error: 'The journal keeps every trade: rows are not deleted.' }));
 
   app.get('/api/exit-rules', (_req, res) => {
     try {
