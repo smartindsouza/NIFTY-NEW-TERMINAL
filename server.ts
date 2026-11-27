@@ -43,7 +43,8 @@ import { buildDhanOrder, instrumentByKey } from './server/dhan_kite_adapter';
 import { activeBroker, getDhanKite, startDhanTrial, endDhanTrial } from './server/kite_service';
 import { registerChartRef, resolveChartRef } from './server/chart_ref';
 import { lastUs30Source } from './server/us30';
-import { registerTradeGuard, guardEntryBlock, guardOrderBlock } from './server/trade_guard';
+import { registerTradeGuard, guardEntryBlock, guardOrderBlock, setGuardExempt } from './server/trade_guard';
+import { registerJodi, jodiTokens, jodiOnTick, jodiManages, jodiExempt } from './server/jodi';
 import { registerSignalTrader, signalOnTick, signalTokens, signalNoteManualRearm, signalManages, signalManagedLevels, signalNotify } from './server/signal_trader';
 import { registerFamilyTrader, familyOnTick, familyTokens } from './server/family_trader';
 import { currentLeg, needsLegAverage, closedLegs, legForRow } from './server/leg_average';
@@ -1037,6 +1038,9 @@ function pushTickerSubscriptions() {
   for (const t of signalTokens()) all.add(t);
   // Second account (wife): the same channel contracts, while she watches or holds one.
   for (const t of familyTokens()) all.add(t);
+  // A Jodi's two options, from the moment it is saved (server/jodi.ts): it is
+  // entered and managed on their live prices.
+  for (const t of jodiTokens()) all.add(t);
   setSubscriptions(Array.from(all));
 }
 
@@ -1218,6 +1222,8 @@ function connectTicker() {
       try { signalOnTick(tick.token, tick.ltp); } catch (e) {}
       // Second account: her own ladder and exits, on her own Zerodha (server/family_trader.ts).
       try { familyOnTick(tick.token, tick.ltp); } catch (e) {}
+      // Jodi (server/jodi.ts): the pair is judged on the tick of either leg.
+      try { jodiOnTick(tick.token, tick.ltp); } catch (e) {}
       const rule = premiumRulesByToken.get(tick.token);
       if (rule && typeof tick.ltp === 'number' && tick.ltp > 0) {
         persistRuleLtpThrottled(rule.tradingsymbol, tick.ltp);
@@ -1674,6 +1680,14 @@ setInterval(() => {
       // The chart's AUTOMATIC default (-10%/+20%) never replaces a stop the
       // Telegram auto-trader is managing: answer with the managed rule instead.
       // Only a deliberate change (drag, TP & SL editor) hands such a trade over.
+      // ...nor is it put on a leg of a Jodi (server/jodi.ts): a Jodi's legs are
+      // sold by the Jodi's own rules — half price, the combined SL and target —
+      // and a -10% stop on one leg would end the trade the Jodi is there to run.
+      // A stop he sets on a leg himself (a drag, the editor) is still armed.
+      if (req.body?.source === 'auto' && tradingsymbol && jodiManages(String(tradingsymbol))) {
+        console.log(`[premium-exit] ${tradingsymbol} is a leg of a Jodi; ignored the chart's automatic default`);
+        return res.json({ success: true, kept: true, jodi: true, rule: null });
+      }
       if (req.body?.source === 'auto' && tradingsymbol && signalManages(String(tradingsymbol))) {
         const kept: any = db.prepare("SELECT * FROM premium_exit_rules WHERE tradingsymbol=?").get(tradingsymbol);
         console.log(`[premium-exit] kept the Telegram rule for ${tradingsymbol}; ignored the chart's automatic default`);
@@ -1821,7 +1835,10 @@ setInterval(() => {
       const sym = String(req.query.tradingsymbol || ''), entry = Number(req.query.entry);
       if (!sym || !Number.isFinite(entry)) return res.json({ free: false });
       const row = db.prepare('SELECT 1 FROM premium_exit_free WHERE tradingsymbol = ? AND ABS(entry - ?) < 0.001').get(sym, entry);
-      return res.json({ free: !!row });
+      // A leg of a Jodi runs free of the chart's automatic SL / TP for as long as
+      // the Jodi is managing it (server/jodi.ts): the chart asks here before it
+      // arms its default, and draws no SL / TP lines for a position that is free.
+      return res.json({ free: !!row || jodiManages(sym), jodi: jodiManages(sym) || undefined });
     } catch (e: any) { return res.json({ free: false }); }
   });
 
@@ -3927,7 +3944,8 @@ setInterval(() => {
     registerReversalWatch(app, express, {
       db,
       exitPosition: (sym: string, reason: string) => closePositionBySymbol(sym, reason),
-      isAutoTrade: (sym: string) => signalManages(sym),
+      // ...and a Jodi's legs (server/jodi.ts): the Structure SL would sell one side on the index's swing.
+      isAutoTrade: (sym: string) => signalManages(sym) || jodiManages(sym),
       getKiteClient,
       getGift: async () => { const g: any = await getGiftNiftyInstrument(); return g?.token ? { token: Number(g.token) } : null; },
       getBseIndexToken: async (n: string) => { const t: any = await getBseIndexToken(n); return t ? Number(t) : null; },
@@ -3937,6 +3955,33 @@ setInterval(() => {
   // Armed orders are handed the guard's check only once the guard itself has
   // started: if it did not, they go on unguarded, exactly as they were.
   try { registerTradeGuard(app, express, { db, getKiteClient }); setTriggerGuard(guardOrderBlock); } catch (e) { console.error('[guard] failed to start — orders are unaffected', e); }
+  // JODI (27 Nov 2026, server/jodi.ts): a pair of options bought together and
+  // managed as one trade. Its buys go through this server's own /api/orders
+  // WITHOUT the journal flag, which is what the Trade Guard reads as "an
+  // opening order" — Martin chose "Ignore Trade Guard" for Jodi — and its exits
+  // through closePositionBySymbol, like every other exit here.
+  try {
+    registerJodi(app, express, {
+      db, getKiteClient,
+      placeBuy: async (o) => {
+        try {
+          const r = await axios.post(`http://127.0.0.1:${process.env.PORT || 3000}/api/orders`,
+            { action: 'BUY', tradingsymbol: o.tradingsymbol, exchange: o.exchange, quantity: o.quantity, product: o.product, order_type: 'MARKET' },
+            { timeout: 15000, proxy: false });
+          const d = r.data || {};
+          if (d.success === false) return { ok: false, error: d.error || 'order rejected' };
+          return { ok: true, orderId: d.orderId || d.order_id };
+        } catch (e: any) { return { ok: false, error: e?.response?.data?.error || e?.message || String(e) }; }
+      },
+      exitPosition: (sym: string, reason: string) => closePositionBySymbol(sym, reason),
+      notify: (text: string) => signalNotify(text),
+      liveTick: (token: number) => { const t = getLatestTick(token); return t && t.ltp > 0 ? { ltp: t.ltp, at: t.ts } : null; },
+      resubscribe: () => { try { pushTickerSubscriptions(); } catch (e) {} },
+      journalOpen: (o) => journalOpenTrade({ tradingsymbol: o.tradingsymbol, exchange: o.exchange, side: 'BUY', qty: o.qty, product: o.product, entryPrice: o.entryPrice,
+        optionType: o.tradingsymbol.endsWith('PE') ? 'PE' : 'CE', context: { strategy: 'JODI' }, testMode: o.practice }),
+    });
+    setGuardExempt(jodiExempt);
+  } catch (e) { console.error('[jodi] failed to start — everything else is unaffected', e); }
   // Today's Bias: the 09:33 IST note posted by the scheduled task (same key).
   registerBias(app, db, {
     // NIFTY's completed 15-minute candles of today, for the bias's reversal

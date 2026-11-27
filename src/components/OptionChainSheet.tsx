@@ -3,10 +3,11 @@ import { lockPageScroll } from '../lib/scrollLock';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { navigate } from 'wouter/use-browser-location';
-import { ChevronsUpDown, LineChart, X } from 'lucide-react';
+import { ChevronsUpDown, LineChart, ShoppingBasket, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { addWsMessageListener } from '../hooks/useWebSocket';
 import { optionGreeks, yearsToExpiry, type Greeks } from '../lib/optionGreeks';
+import { jodiBasket, useJodiBasket, basketFull } from '../lib/jodiBasket';
 
 // THE OPTION CHAIN IS LEMONN'S (17 Nov 2026). Martin: "I also want to completely
 // redesign the option chain screen same as in the lemon app. So remove the
@@ -103,7 +104,9 @@ function cellOf(col: Col, leg: Leg | undefined, ltp: number, g: Greeks | null): 
  * sees beside it are the ones he can swap it for. Left out, the index is the
  * chart's and the expiry the nearest, as before.
  */
-export interface ChainStart { underlying?: string; expiry?: string }
+export interface ChainStart { underlying?: string; expiry?: string;
+  /** Opened to pick a Jodi's two options (Strategy > Jodi): the basket starts on. See lib/jodiBasket. */
+  basket?: boolean }
 
 // `token` is the index's own, for its daily candles when the chain does not say which it is.
 const underlyingOf = (asked?: string): { symbol: string | null; ta: string; name: string; token: number } => {
@@ -334,12 +337,24 @@ export function OptionChainView({ onPicked, start, wide = false, onClose }: { on
   const rowTop = (i: number) => i * rowH + (i >= below ? spotH : 0);
   const total = strikes.length * rowH + (strikes.length ? spotH : 0);
 
+  // THE BASKET (27 Nov 2026; lib/jodiBasket has what he asked for). With it on,
+  // a tap on a price puts that option on the Jodi list instead of opening its
+  // chart — the chain stays open, and the foot of the sheet shows the list.
+  const basket = useJodiBasket();
   const pick = (k: number, type: 'CE' | 'PE') => {
     if (Date.now() - dragged.current < 350) return;                 // the end of a slide is not a tap
     if (menu) return;                                               // a tap with a menu open only puts the menu away
     const leg = (type === 'CE' ? chain?.ceData : chain?.peData)?.[k];
+    if (basket.on) {
+      if (!leg?.tradingsymbol || !leg?.instrument_token) return;
+      jodiBasket.tap({ type, tradingsymbol: leg.tradingsymbol, instrument_token: String(leg.instrument_token), exchange: leg.exchange || (under.name === 'SENSEX' ? 'BFO' : 'NFO'),
+        lot_size: leg.lot_size, strike: k, expiry: leg.expiry || chain?.expiryDate, underlying: under.name, ltp: ltpOf(leg) });
+      return;
+    }
     if (leg && openInScalpPro(leg, type, under.name)) onPicked?.();
   };
+  const inBasket = (k: number, put: boolean) => { const b = put ? basket.PE : basket.CE; return !!b && basket.on && b.strike === k && b.underlying === under.name && String(b.expiry || '').slice(0, 10) === String(chain?.expiryDate || '').slice(0, 10); };
+  const basketLtp = (b: { instrument_token: string; ltp: number } | null) => (b ? (ticks.current.get(String(b.instrument_token)) ?? b.ltp) || 0 : 0);
 
   const headCell = (c: Col, put: boolean) => (
     <div key={c} className="shrink-0 flex items-center justify-center text-[12px] leading-none text-foreground/60 whitespace-nowrap" style={{ width: colW }}>{HEAD[c][put ? 1 : 0]}</div>
@@ -358,8 +373,8 @@ export function OptionChainView({ onPicked, start, wide = false, onClose }: { on
         const max = put ? maxOi.pe : maxOi.ce;
         const len = max > 0 ? Math.min(1, (Number(leg?.oi) || 0) / max) * sideW : 0;
         return (
-          <div key={k} data-chain-cell={put ? 'pe' : 'ce'} onClick={() => pick(k, put ? 'PE' : 'CE')}
-            className={`absolute inset-x-0 border-b border-foreground/[0.07] ${itm ? 'bg-primary/[0.08]' : ''} ${wide ? 'cursor-pointer hover:bg-foreground/[0.05]' : ''}`} style={{ top: rowTop(i), height: rowH }}>
+          <div key={k} data-chain-cell={put ? 'pe' : 'ce'} data-in-basket={inBasket(k, put) ? '' : undefined} onClick={() => pick(k, put ? 'PE' : 'CE')}
+            className={`absolute inset-x-0 border-b border-foreground/[0.07] ${inBasket(k, put) ? 'bg-primary/25 shadow-[inset_0_0_0_1.5px_var(--primary)]' : itm ? 'bg-primary/[0.08]' : ''} ${wide ? 'cursor-pointer hover:bg-foreground/[0.05]' : ''}`} style={{ top: rowTop(i), height: rowH }}>
             {len > 1 && <div className="absolute bottom-[-1px] h-[2px] rounded-full z-[1]" style={{ width: len, ...(put ? { left: 0, background: `linear-gradient(to right, ${GREEN}55, ${GREEN})` } : { right: 0, background: `linear-gradient(to left, ${RED}55, ${RED})` }) }} />}
           </div>
         );
@@ -396,17 +411,23 @@ export function OptionChainView({ onPicked, start, wide = false, onClose }: { on
           <span className="text-foreground/60">Expiry:</span><span className="font-semibold">{expiryText(chain?.expiryDate || '')}</span>
           <svg width="8" height="5" viewBox="0 0 8 5" aria-hidden="true"><path d="M0 0h8L4 5z" fill="currentColor" /></svg>
         </button>
+        {/* The basket button (27 Nov 2026): on, a tap on a price adds that option to the Jodi list. */}
+        <button type="button" data-chain="basket" role="switch" aria-checked={basket.on} aria-label="Basket: add options to the Jodi list" title="Basket: add options to the Jodi list"
+          onClick={(e) => { e.stopPropagation(); jodiBasket.toggle(); }}
+          className={`ml-auto h-[29px] px-[9px] flex items-center gap-[5px] rounded-full border text-[12px] leading-none ${basket.on ? 'border-primary text-primary bg-primary/10' : 'border-foreground/20 text-foreground/70'}`}>
+          <ShoppingBasket size={15} strokeWidth={2} />{basket.on && <span className="font-semibold tabular-nums">{(basket.CE ? 1 : 0) + (basket.PE ? 1 : 0)}/2</span>}
+        </button>
         {wide ? (
           onClose && (
             <button type="button" data-chain="close" aria-label="Close the option chain" title="Close (Esc)" onClick={onClose}
-              className="ml-auto h-8 w-8 flex items-center justify-center rounded-full text-foreground/70 hover:bg-foreground/10 hover:text-foreground">
+              className="ml-3 h-8 w-8 flex items-center justify-center rounded-full text-foreground/70 hover:bg-foreground/10 hover:text-foreground">
               <X size={18} />
             </button>
           )
         ) : (
           <>
           <button type="button" data-chain="greeks" role="switch" aria-checked={greeks} onClick={() => setGreeks((v) => !v)}
-            className="ml-auto h-[29px] pl-[9px] pr-[8px] flex items-center gap-[7px] rounded-full border border-foreground/20 text-[12px] leading-none text-foreground/70">
+            className="ml-[8px] h-[29px] pl-[9px] pr-[8px] flex items-center gap-[7px] rounded-full border border-foreground/20 text-[12px] leading-none text-foreground/70">
             Greeks
             <span className="relative h-3 w-[22px] rounded-full transition-colors" style={{ background: greeks ? BLUE : 'rgba(128,128,128,0.35)' }}>
               <span className="absolute top-[2px] h-2 w-2 rounded-full bg-white transition-[left]" style={{ left: greeks ? 12 : 2 }} />
@@ -490,6 +511,36 @@ export function OptionChainView({ onPicked, start, wide = false, onClose }: { on
             )}
         </div>
       </div>
+      {/* THE JODI LIST, while the basket is on: the two options picked, what they
+          cost together now, and Done — which closes the chain, as its own cross
+          does, and with a Call and a Put on the list that opens the Jodi card. */}
+      {basket.on && (
+        <div data-chain="basket-list" className="shrink-0 flex items-center gap-2 px-3 py-2 border-t border-foreground/15 bg-card pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
+          <div className="flex-1 min-w-0">
+            {!basket.CE && !basket.PE
+              ? <div className="text-[12px] leading-snug text-foreground/60">Jodi list: tap one Call and one Put.</div>
+              : (
+                <>
+                  <div className="flex flex-wrap items-center gap-[6px]">
+                    {([basket.CE, basket.PE] as const).map((b) => b && (
+                      <span key={b.type} data-basket-leg={b.type} className="h-[26px] pl-[9px] pr-[3px] flex items-center gap-[5px] rounded-full border border-primary/50 text-[12px] leading-none whitespace-nowrap">
+                        <span className="font-semibold tabular-nums">{b.strike} {b.type}</span><span className="text-foreground/60 tabular-nums">{basketLtp(b) > 0 ? basketLtp(b).toFixed(2) : '—'}</span>
+                        <button type="button" aria-label={`Remove ${b.strike} ${b.type} from the Jodi list`} onClick={(e) => { e.stopPropagation(); jodiBasket.remove(b.type); }} className="h-[22px] w-[22px] flex items-center justify-center rounded-full text-foreground/55 active:bg-foreground/10"><X size={13} /></button>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="mt-[5px] text-[11px] leading-none text-foreground/60">
+                    {basketFull(basket)
+                      ? <>Combined now <span data-basket="combined" className="font-semibold text-foreground tabular-nums">{(basketLtp(basket.CE) + basketLtp(basket.PE)).toFixed(2)}</span></>
+                      : `Now tap one ${basket.CE ? 'Put' : 'Call'}.`}
+                  </div>
+                </>
+              )}
+          </div>
+          <button type="button" data-basket="done" disabled={!basketFull(basket)} onClick={(e) => { e.stopPropagation(); onClose?.(); }}
+            className={`shrink-0 h-9 px-4 rounded-full text-[13px] font-semibold ${basketFull(basket) ? 'bg-primary text-primary-foreground active:opacity-80' : 'bg-foreground/10 text-foreground/40'}`}>Done</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -632,9 +683,23 @@ export function OptionChainSheet({ onClose, start }: { onClose: () => void; star
 export function OptionChainHost() {
   const [open, setOpen] = useState<ChainStart | null>(null);
   useEffect(() => {
-    const onOpen = (e: any) => setOpen(e?.detail && typeof e.detail === 'object' ? { ...e.detail } : {});
+    const onOpen = (e: any) => {
+      const d = e?.detail && typeof e.detail === 'object' ? { ...e.detail } : {};
+      jodiBasket.open(d.basket === true);                 // the basket on only when asked for; the list always starts empty
+      setOpen(d);
+    };
     window.addEventListener('terminal:option-chain', onOpen as any);
     return () => window.removeEventListener('terminal:option-chain', onOpen as any);
   }, []);
-  return open ? <OptionChainSheet start={open} onClose={() => setOpen(null)} /> : null;
+  // CLOSED WITH A CALL AND A PUT ON THE LIST: the Jodi card opens (27 Nov 2026;
+  // Martin: "Once the 2 are added and I close it, open a small card..."). By the
+  // cross, by Done, by a tap outside — however it is closed. With fewer than
+  // two, nothing follows and the list is forgotten.
+  const close = () => {
+    const b = jodiBasket.get();
+    setOpen(null);
+    if (b.on && b.CE && b.PE) { try { window.dispatchEvent(new CustomEvent('terminal:jodi-setup', { detail: { ce: b.CE, pe: b.PE } })); } catch (e) {} }
+    jodiBasket.clear();
+  };
+  return open ? <OptionChainSheet start={open} onClose={close} /> : null;
 }

@@ -20,6 +20,15 @@ export const RangeIcon = ({ size = 18, className }: P) => box(size, className, <
   <path d="M4 19.5h16M4 17v5M20 17v5" />
 </>);
 
+// Strategy (27 Nov 2026). Martin: "Remove the range icon at the bottom of the
+// chart screen and add a strategy icon." Drawn to the same weight as the
+// others: two paths that start apart and cross on their way up — a plan with
+// two legs, which is what the first strategy on its list (Jodi) is.
+export const StrategyIcon = ({ size = 18, className }: P) => box(size, className, <>
+  <path d="M4 19c5 0 6.5-14 16-14M4 5c5 0 6.5 14 16 14" />
+  <path d="M17 3l3.2 2L17 7M17 17l3.2 2-3.2 2" />
+</>);
+
 export const IndicatorsIcon = ({ size = 18, className }: P) => box(size, className,
   <text x="12" y="18.5" textAnchor="middle" fill="currentColor" stroke="none"
     style={{ font: 'italic 700 20px Georgia, "Times New Roman", serif' }}>fx</text>);

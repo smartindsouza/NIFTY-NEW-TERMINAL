@@ -1,0 +1,18 @@
+import { basketTap, basketFull, type Basket, type BasketLeg } from './jodiBasket';
+let fails = 0; const ok = (c: boolean, m: string) => { if (!c) { fails++; console.log('FAIL', m); } };
+const leg = (type: 'CE' | 'PE', strike: number, o: Partial<BasketLeg> = {}): BasketLeg => ({ type, strike, tradingsymbol: `SENSEX26N26${strike}${type}`, instrument_token: String(strike) + type, exchange: 'BFO', lot_size: 20, expiry: '2026-11-26', underlying: 'SENSEX', ltp: 110, ...o });
+const empty: Basket = { on: true, CE: null, PE: null };
+let b = basketTap(empty, leg('CE', 84100));
+ok(b.CE?.strike === 84100 && b.PE === null && !basketFull(b), 'a call goes on the list');
+b = basketTap(b, leg('PE', 84000));
+ok(b.CE?.strike === 84100 && b.PE?.strike === 84000 && basketFull(b), 'a put beside it: the list is full');
+const c2 = basketTap(b, leg('CE', 84200));
+ok(c2.CE?.strike === 84200 && c2.PE?.strike === 84000, 'a second call replaces the first; the put stays');
+const off = basketTap(b, leg('PE', 84000));
+ok(off.PE === null && off.CE?.strike === 84100, 'tapped again, it comes off the list');
+const otherExp = basketTap(b, leg('PE', 84000, { expiry: '2026-12-03', tradingsymbol: 'SENSEX26D0384000PE' }));
+ok(otherExp.PE?.expiry === '2026-12-03' && otherExp.CE === null, 'another expiry starts the list again');
+const otherIdx = basketTap(b, leg('CE', 25300, { underlying: 'NIFTY', tradingsymbol: 'NIFTY26N2725300CE' }));
+ok(otherIdx.CE?.underlying === 'NIFTY' && otherIdx.PE === null, 'another index starts the list again');
+ok(basketTap({ ...empty, on: false }, leg('CE', 84100)).on === false, 'the switch is not touched by a tap');
+if (fails) { console.log(fails + ' failed'); process.exit(1); } else console.log('jodiBasket: all checks passed');

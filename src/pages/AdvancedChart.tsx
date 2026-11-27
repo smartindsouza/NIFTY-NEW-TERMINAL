@@ -28,7 +28,7 @@ import { computeExitZones, tradeDirOnChart, type ExitZone } from "../lib/exitZon
 import { format } from "date-fns";
 import { SymbolSearch } from "../components/SymbolSearch";
 import { PullRefresh } from "../components/PullRefresh";
-import { RangeIcon, IndicatorsIcon, DrawingsIcon, SettingsIcon } from "../components/BarIcons";
+import { RangeIcon, IndicatorsIcon, DrawingsIcon, SettingsIcon, StrategyIcon } from "../components/BarIcons";
 import { BiasButton } from "../components/BiasCheck";
 import MarketContext from "../components/MarketContext";
 import BounceConviction from "../components/BounceConviction";
@@ -6165,6 +6165,21 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const [phoneSearchOpen, setPhoneSearchOpen] = useState(false);
   const [phoneSettingsOpen, setPhoneSettingsOpen] = useState(false);
   const [rangeOpen, setRangeOpen] = useState(false);
+  // STRATEGY, WHERE RANGE WAS (27 Nov 2026). Martin: "Remove the range icon at the
+  // bottom of the chart screen and add a strategy icon. Add the Jodi strategy
+  // [to] this list so that I can take a Jodi trade from here." The first of the
+  // row of five on the phone's chart screen is now Strategy; it opens a list,
+  // and Jodi is on it (components/JodiCard, server/jodi.ts). How much of the
+  // chart is on screen is still set from ScalperX's menu, and by pinching.
+  // While a Jodi is waiting or running the button carries a dot and the row says
+  // so; that state is announced by the Jodi host, which is mounted app-wide.
+  const [strategyOpen, setStrategyOpen] = useState(false);
+  const [jodiState, setJodiState] = useState<{ status: string; pnl: number | null; practice: boolean } | null>(() => { try { return (window as any).__jodiState || null; } catch (e) { return null; } });
+  useEffect(() => {
+    const on = (e: any) => setJodiState(e?.detail || null);
+    window.addEventListener('terminal:jodi-state', on as any);
+    return () => window.removeEventListener('terminal:jodi-state', on as any);
+  }, []);
   // The interval's list (phone, and ScalperX's corner), and when the see-through
   // layer behind either list last closed it (see the Range button).
   const [tfOpen, setTfOpen] = useState(false);
@@ -17910,32 +17925,31 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
           <div className="flex flex-1 items-center gap-1.5 sm:gap-2 justify-end min-w-0 md:contents max-md:justify-between max-md:gap-0">
           {!isPane && (
             <div className="md:hidden relative flex-1 flex justify-center order-1">
-              <button type="button" data-bar="range" title="How much of the chart is on screen"
+              <button type="button" data-bar="strategy" title="Strategies"
                 onClick={() => {
-                  // A SECOND TAP HIDES THE LIST (18 Nov 2026). Martin: "when I tap the
-                  // range or time frame button again, the list should disappear.
-                  // Currently it keeps appearing again and again". The press lands on
-                  // the see-through layer behind the list, which closes it; the click
-                  // that follows then reached this button and opened it again. A click
-                  // within half a second of that close is the same tap, and is let go
-                  // (as the Indicators button does).
+                  // The same tap that closed the list must not open it again (see A SECOND TAP HIDES THE LIST, on the interval button).
                   if (Date.now() - sheetClosedAtRef.current < 500) { sheetClosedAtRef.current = 0; return; }
-                  pageToTop(); setPhoneSettingsOpen(false); setTfOpen(false); setRangeOpen(o => !o);
+                  pageToTop(); setPhoneSettingsOpen(false); setTfOpen(false); setRangeOpen(false); setStrategyOpen(o => !o);
                 }}
-                className={`h-10 w-full flex flex-col items-center justify-center gap-0.5 rounded-md ${rangeOpen ? 'text-primary' : 'text-foreground/90'}`}>
-                {rangeChoice ? <span className="h-[18px] text-[15px] leading-[18px] font-semibold">{rangeChoice === 'ALL' ? 'All' : rangeChoice}</span> : <RangeIcon size={18} />}
-                <span className="text-[10px] leading-none font-medium text-muted-foreground">Range</span>
+                className={`relative h-10 w-full flex flex-col items-center justify-center gap-0.5 rounded-md ${strategyOpen || jodiState ? 'text-primary' : 'text-foreground/90'}`}>
+                <span className="relative"><StrategyIcon size={18} />{jodiState && <span data-bar="strategy-dot" className="absolute -top-0.5 -right-1.5 h-2 w-2 rounded-full bg-primary" />}</span>
+                <span className="text-[10px] leading-none font-medium text-muted-foreground">Strategy</span>
               </button>
-              {rangeOpen && (
+              {strategyOpen && (
                 <>
-                  <div className="touch-none fixed inset-0 z-[88]" aria-hidden="true" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); sheetClosedAtRef.current = Date.now(); setRangeOpen(false); }} />
-                  <div data-range-sheet="" className="fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+8px)] z-[90] bg-card border border-foreground/15 dark:border-white/10 rounded-xl shadow-2xl overflow-hidden">
-                    {([['1D', '1D'], ['2D', '2D'], ['5D', '5D'], ['1M', '1M'], ['ALL', 'All']] as const).map(([k, label]) => (
-                      <button key={k} type="button" data-range-pick={k} onClick={() => applyRange(k)}
-                        className={`w-full flex items-center justify-between px-3 py-2.5 text-left text-[13px] font-medium active:bg-muted ${rangeChoice === k ? 'text-primary' : 'text-foreground'}`}>
-                        <span>{label}</span>{rangeChoice === k && <Check size={15} />}
-                      </button>
-                    ))}
+                  <div className="touch-none fixed inset-0 z-[88]" aria-hidden="true" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); sheetClosedAtRef.current = Date.now(); setStrategyOpen(false); }} />
+                  <div data-strategy-sheet="" className="fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom)+var(--chart-bar-h,3.25rem)+8px)] z-[90] bg-card border border-foreground/15 dark:border-white/10 rounded-xl shadow-2xl overflow-hidden">
+                    <button type="button" data-strategy-pick="jodi"
+                      onClick={() => { setStrategyOpen(false); try { window.dispatchEvent(new CustomEvent('terminal:jodi-open')); } catch (e) {} }}
+                      className="w-full flex items-center justify-between gap-3 px-3 py-3 text-left active:bg-muted">
+                      <span className="min-w-0">
+                        <span className="block text-[14px] font-semibold text-foreground">Jodi</span>
+                        <span className="block text-[11px] text-muted-foreground mt-0.5">One Call and one Put bought together, on expiry day</span>
+                      </span>
+                      {jodiState
+                        ? <span className="shrink-0 text-[11.5px] font-semibold text-primary whitespace-nowrap">{jodiState.status === 'PENDING' ? 'Waiting' : jodiState.status === 'ERROR' ? 'Needs you' : 'Running'}{jodiState.practice ? ' · practice' : ''}</span>
+                        : <ChevronRight size={16} className="shrink-0 text-muted-foreground" />}
+                    </button>
                   </div>
                 </>
               )}

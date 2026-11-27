@@ -153,6 +153,18 @@ export function countEntries(orders: any[], net: any[] | null, notHis: Set<strin
   return n;
 }
 
+// WHAT IS LEFT OUT OF THE COUNT AND THE DAY'S P&L (27 Nov 2026). A Jodi
+// (server/jodi.ts) is a strategy he switches on by hand, and asked, he chose
+// "Ignore Trade Guard" for it: not stopped by these rules and not counted by
+// them. So its two buys are not entries here (like the Telegram trader's), and
+// the profit or loss in its two contracts is not part of the day's loss that
+// stops his other trading. Handed in by server.ts; with nothing handed in,
+// nothing is left out.
+type Exempt = (day: string) => { orderIds: Set<string>; symbols: Set<string> };
+let exemptFn: Exempt | null = null;
+export function setGuardExempt(fn: Exempt | null) { exemptFn = fn; cache = null; }
+const exemptFor = (day: string) => { try { return exemptFn ? exemptFn(day) : null; } catch { return null; } };
+
 // net: the account's net positions as the broker returned them (null when they
 // could not be read) — what tells an armed order that opens from one that exits.
 type Measured = { entries: number | null; dayPnl: number | null; errors: string[]; net: any[] | null };
@@ -186,7 +198,9 @@ async function readBroker(): Promise<Measured> {
       const pos = await kc.getPositions();
       const net: any[] = (pos && pos.net) || [];
       netRows = net;
+      const skip = exemptFor(day)?.symbols;
       dayPnl = Math.round(net.reduce((s, p) => {
+        if (skip && skip.has(String(p.tradingsymbol))) return s;                 // a Jodi's contracts: see WHAT IS LEFT OUT
         const bv = Number(p.buy_value), sv = Number(p.sell_value);
         const ltp = Number(p.last_price) || Number(p.average_price) || 0;
         return s + ((isFinite(bv) && isFinite(sv)) ? (sv - bv) + (Number(p.quantity) || 0) * ltp * (Number(p.multiplier) || 1) : Number(p.pnl) || 0);
@@ -194,7 +208,9 @@ async function readBroker(): Promise<Measured> {
     } catch (e: any) { errors.push(`positions: ${e?.message || e}`); }
     try {
       const orders: any[] = await kc.getOrders();
-      entries = countEntries(orders, netRows, telegramOrderIds(day));
+      const notHis = telegramOrderIds(day);
+      for (const id of exemptFor(day)?.orderIds || []) notHis.add(id);
+      entries = countEntries(orders, netRows, notHis);
     } catch (e: any) { errors.push(`orders: ${e?.message || e}`); }
   }
   cache = { at: Date.now(), v: { entries, dayPnl, errors, net: netRows } };

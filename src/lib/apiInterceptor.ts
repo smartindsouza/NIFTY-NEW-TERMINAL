@@ -44,6 +44,10 @@ const LOCAL_ONLY_ENDPOINTS = new Set([
   // dropped — which was enough to set the warning off on every drag on the
   // spot chart.
   '/api/premium-spot-map',
+  // The Jodi card and the Strategy button's dot (server/jodi.ts): the read is the
+  // Jodi's row out of the local database with the two prices the live feed
+  // already holds. Every 2 s while a Jodi is waiting or running.
+  '/api/jodi',
   // Price-age measurement: a clock ping each minute and a summary every 30 s.
   '/api/diag/time',
   '/api/diag/latency/client',

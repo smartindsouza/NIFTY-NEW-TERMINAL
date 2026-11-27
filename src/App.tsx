@@ -6,6 +6,7 @@
 import { lazy, Suspense, useState, useEffect } from 'react';
 import { Redirect, Route, Switch, useLocation } from 'wouter';
 import { OptionChainHost } from './components/OptionChainSheet';
+import { JodiHost } from './components/JodiCard';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Header } from './components/Header';
 // The live tick connection must belong to the APP, not to a piece of chrome.
@@ -298,6 +299,7 @@ export default function App() {
       <BiasAlert />
       <SetupAlerts />
       <OptionChainHost />
+      <JodiHost />
       {/* The toast follows the app's theme (18 Nov 2026). It was always told
           "dark" while its box takes the theme's colour — so in the light theme
           its second line was the dark theme's pale grey on white (Martin's
