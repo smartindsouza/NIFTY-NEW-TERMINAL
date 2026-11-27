@@ -17946,8 +17946,25 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                         <span className="block text-[14px] font-semibold text-foreground">Jodi</span>
                         <span className="block text-[11px] text-muted-foreground mt-0.5">One Call and one Put bought together, on expiry day</span>
                       </span>
+                      {/* AT THE RIGHT END: LIVE OR PRACTICE, AND THE P&L WHILE IT RUNS (27 Nov 2026).
+                          Martin: "Show either live or practice at the right end and live P&L if
+                          the Jodi is active along with it." It said "Running · practice", and for
+                          a real one only "Running" — nothing said it was real money, and the
+                          figure he wanted was a tap away on the Jodi's card. Before it is entered
+                          there is no P&L, so the second line says it is waiting. */}
                       {jodiState
-                        ? <span className="shrink-0 text-[11.5px] font-semibold text-primary whitespace-nowrap">{jodiState.status === 'PENDING' ? 'Waiting' : jodiState.status === 'ERROR' ? 'Needs you' : 'Running'}{jodiState.practice ? ' · practice' : ''}</span>
+                        ? (
+                          <span data-strategy-state="" className="shrink-0 flex flex-col items-end gap-1 whitespace-nowrap">
+                            <span data-strategy-mode="" className="text-[12px] leading-none font-semibold text-primary">{jodiState.practice ? 'Practice' : 'Live'}</span>
+                            {jodiState.status === 'PENDING' || jodiState.status === 'ENTERING'
+                              ? <span className="text-[11.5px] leading-none text-muted-foreground">{jodiState.status === 'PENDING' ? 'Waiting to enter' : 'Buying both…'}</span>
+                              : jodiState.status === 'ERROR'
+                                ? <span className="text-[11.5px] leading-none font-semibold text-destructive">Exit failed</span>
+                                : jodiState.pnl != null && Number.isFinite(Number(jodiState.pnl))
+                                  ? <span data-strategy-pnl="" className="text-[14px] leading-none font-semibold tabular-nums" style={{ color: Number(jodiState.pnl) < 0 ? '#E24556' : '#2EA068' }}>{Number(jodiState.pnl) < 0 ? '−' : '+'}₹{Math.abs(Number(jodiState.pnl)).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                                  : <span className="text-[11.5px] leading-none text-muted-foreground">Running</span>}
+                          </span>
+                        )
                         : <ChevronRight size={16} className="shrink-0 text-muted-foreground" />}
                     </button>
                   </div>

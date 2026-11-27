@@ -32,6 +32,23 @@ export function basketTap(b: Basket, leg: BasketLeg): Basket {
 }
 export const basketFull = (b: Basket) => !!(b.CE && b.PE);
 
+// NOT EXPIRY DAY (27 Nov 2026). Martin: "Don't forget to add an alert in the card
+// when it's not expiry day. It works well only on expiry days". The options he
+// picked carry their expiry date; the day is India's, whatever the phone's clock
+// zone is (he is in Dubai). null when the expiry is not known: nothing is said
+// rather than a warning that may be wrong.
+/** Pure: is this expiry (YYYY-MM-DD...) today in India? null if it cannot be told. */
+export function expiryIsToday(expiry: string | undefined, nowMs: number = Date.now()): boolean | null {
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(expiry || ''));
+  if (!m) return null;
+  return new Date(nowMs + 5.5 * 3600000).toISOString().slice(0, 10) === m[1];
+}
+/** "2026-12-03" -> "3 Dec" */
+export function expiryWords(expiry: string | undefined): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(expiry || ''));
+  return m ? `${Number(m[3])} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][Number(m[2]) - 1]}` : '';
+}
+
 let state: Basket = { on: false, CE: null, PE: null };
 const subs = new Set<() => void>();
 const put = (next: Basket) => { state = next; subs.forEach((f) => { try { f(); } catch (e) {} }); };

@@ -22,11 +22,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { X, Minus, Plus } from 'lucide-react';
+import { X, Minus, Plus, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { addWsMessageListener } from '../hooks/useWebSocket';
 import { lockPageScroll } from '../lib/scrollLock';
-import type { BasketLeg } from '../lib/jodiBasket';
+import { expiryIsToday, expiryWords, type BasketLeg } from '../lib/jodiBasket';
 
 // His example (114 + 110 in, SL 100, target 300-310) as shares of the combined
 // premium. Only what the SL and target boxes are FILLED with; he changes them.
@@ -129,6 +129,16 @@ function JodiSetup({ ce, pe, onClose, onSaved }: { ce: BasketLeg; pe: BasketLeg;
         <button type="button" aria-label="Close" onClick={onClose} className="h-9 w-9 flex items-center justify-center rounded-full text-foreground/70 active:bg-foreground/10"><X size={18} /></button>
       </div>
       <div className="px-4 pb-4 space-y-3">
+        {/* NOT EXPIRY DAY (27 Nov 2026). Martin: "Don't forget to add an alert in the
+            card when it's not expiry day. It works well only on expiry days". A
+            warning, not a lock: he can still save it. Said only when the options'
+            expiry is known and is not today. */}
+        {expiryIsToday(ce.expiry || pe.expiry) === false && (
+          <div data-jodi="not-expiry" role="alert" className="flex items-start gap-2 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-[12px] leading-snug text-foreground">
+            <AlertTriangle size={15} className="mt-[1px] shrink-0 text-amber-500" />
+            <span><span className="font-semibold">Not expiry day.</span> These options expire on {expiryWords(ce.expiry || pe.expiry)}. Jodi is meant for expiry day only.</span>
+          </div>
+        )}
         {([[ce, ceNow, ceEntry, setCeEntry, 'ceEntry'], [pe, peNow, peEntry, setPeEntry, 'peEntry']] as const).map(([l, nowPx, val, setVal, nm]) => (
           <div key={l.type} className="flex items-end gap-3">
             <div className="flex-1 min-w-0 pb-[7px]">

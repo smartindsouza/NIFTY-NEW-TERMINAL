@@ -1,4 +1,4 @@
-import { basketTap, basketFull, type Basket, type BasketLeg } from './jodiBasket';
+import { basketTap, basketFull, expiryIsToday, expiryWords, type Basket, type BasketLeg } from './jodiBasket';
 let fails = 0; const ok = (c: boolean, m: string) => { if (!c) { fails++; console.log('FAIL', m); } };
 const leg = (type: 'CE' | 'PE', strike: number, o: Partial<BasketLeg> = {}): BasketLeg => ({ type, strike, tradingsymbol: `SENSEX26N26${strike}${type}`, instrument_token: String(strike) + type, exchange: 'BFO', lot_size: 20, expiry: '2026-11-26', underlying: 'SENSEX', ltp: 110, ...o });
 const empty: Basket = { on: true, CE: null, PE: null };
@@ -15,4 +15,13 @@ ok(otherExp.PE?.expiry === '2026-12-03' && otherExp.CE === null, 'another expiry
 const otherIdx = basketTap(b, leg('CE', 25300, { underlying: 'NIFTY', tradingsymbol: 'NIFTY26N2725300CE' }));
 ok(otherIdx.CE?.underlying === 'NIFTY' && otherIdx.PE === null, 'another index starts the list again');
 ok(basketTap({ ...empty, on: false }, leg('CE', 84100)).on === false, 'the switch is not touched by a tap');
+// not expiry day: India's date, whatever the clock's own zone
+const at = (iso: string) => Date.parse(iso);
+ok(expiryIsToday('2026-11-27', at('2026-11-27T04:30:00Z')) === true, '10:00 AM IST on expiry day');
+ok(expiryIsToday('2026-11-27T00:00:00.000Z', at('2026-11-27T04:30:00Z')) === true, 'an expiry written with a time');
+ok(expiryIsToday('2026-12-01', at('2026-11-27T04:30:00Z')) === false, 'next week\'s expiry is not today');
+ok(expiryIsToday('2026-11-27', at('2026-11-26T19:00:00Z')) === true, '12:30 AM IST on the 27th is already the 27th in India (still the 26th in UTC)');
+ok(expiryIsToday('2026-11-26', at('2026-11-26T19:00:00Z')) === false, '...and no longer the 26th');
+ok(expiryIsToday(undefined) === null && expiryIsToday('soon') === null, 'an unknown expiry is not called either way');
+ok(expiryWords('2026-12-03') === '3 Dec' && expiryWords('') === '', 'the date in words');
 if (fails) { console.log(fails + ' failed'); process.exit(1); } else console.log('jodiBasket: all checks passed');
