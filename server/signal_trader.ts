@@ -29,7 +29,7 @@ import crypto from 'node:crypto';
 import express from 'express';
 import { TelegramClient, Api, sessions, password as tgPassword } from 'telegram';
 import { parseSignalMessage, validateSetup, type ParsedCall, type ParsedLevels } from './signal_parser';
-import { createLadder, onLadderPrice, keepTrailing, type LadderState, type LadderAction } from './signal_ladder';
+import { createLadder, onLadderPrice, keepTrailing, setTrailing, type LadderState, type LadderAction } from './signal_ladder';
 
 export interface SignalDeps {
   db: any;
@@ -61,10 +61,14 @@ interface Settings {
   lastEntry: string; squareOff: string; channelId: string | null; channelTitle: string | null;
   // The broker the app was on when LIVE was last chosen (see heldOnDhan).
   liveBroker?: string;
+  // Trailing SL for NEW channel trades (27 Nov 2026). Each open trade also has
+  // its own switch (ladder.trailOff), which is what the ladder actually reads.
+  trailSl: boolean;
 }
 const DEFAULTS: Settings = {
   mode: 'OFF', lots: 1, maxLotsCap: 20, maxTrades: 3, allowAbove: 2, waitMin: 10,
   lastEntry: '15:00', squareOff: '15:15', channelId: null, channelTitle: null,
+  trailSl: true,      // as before: a saved setting without it keeps trailing
 };
 
 // ---------- clock (IST) ----------
@@ -566,6 +570,9 @@ async function enter(c: any, ltp: number, cap: number) {
   // Channel trades use the "double" rules (4 Nov 2026): TP1 → SL to entry, TP3 →
   // SL to TP1, everything out at 2 × entry. My Order keeps the classic ladder.
   const ladder = createLadder(fillPx, c.sl, [c.tp1, c.tp2, c.tp3], manual ? 'classic' : 'double');
+  // The rules' default applies to channel trades; My Order keeps trailing unless
+  // its own switch is turned off on the trade.
+  if (!manual && settings.trailSl === false) ladder.trailOff = true;
   const ins = D.db.prepare(`INSERT INTO signal_trades (call_id, day, mode, tradingsymbol, exchange, token, qty, entry, entry_at, order_id, ladder, status, last_ltp, updated_at)
     VALUES (?,?,?,?,?,?,?,?,?,?,?, 'OPEN', ?, ?)`)
     .run(c.id, istParts().date, mode, c.tradingsymbol, c.exchange, c.token, filledQty, fillPx, Date.now(), orderId, JSON.stringify(ladder), fillPx, Date.now());
@@ -587,8 +594,9 @@ async function enter(c: any, ltp: number, cap: number) {
     // "sell half" is said only when there is a half to sell: two or more lots
     // actually FILLED, which is what bookHalfAtTp1 goes by at TP1.
     (ladder.rules === 'double' ? `\nRules: TP1 → ${filledQty >= 2 * c.lot_size ? 'sell half, ' : ''}SL to entry · TP3 → SL to TP1 · all out at 2× entry ${rs(ladder.target!)}` : '') +
+    (ladder.trailOff ? `\nTrailing SL is OFF — the SL stays at ${rs(c.sl)} until you move it.` : '') +
     (sizeNote ? `\n${sizeNote}` : '') + (filledQty < qty ? `\nOnly ${filledQty} of ${qty} filled — the rest was cancelled.` : ''),
-    [{ text: '🚪 Exit now', data: `exit:${tradeId}` }]);
+    [{ text: '🚪 Exit now', data: `exit:${tradeId}` }, trailButton(tradeId, ladder)]);
 }
 
 // ---------- open trades: ladder, exits, square-off ----------
@@ -628,6 +636,9 @@ async function applyLadder(id: number, acts: LadderAction[]) {
           try { if (D.ruleStatus(t.tradingsymbol) === 'ACTIVE' && openTrades.has(id)) void closeTrade(id, `2× entry target ${a.target} hit`, undefined, true); } catch { }
         }, 5000);
       }
+    } else if (a.type === 'TP3_TRAILING' && st.trailOff) {
+      await notify(`🎯 TP3 reached on ${t.tradingsymbol}. Trailing SL is off — the SL stays at ${rs(st.sl)} until you move it.`,
+        [{ text: '🚪 Exit now', data: `exit:${id}` }, trailButton(id, st)]);
     } else if (a.type === 'TP3_TRAILING') {
       await notify(`🎯 TP3 reached on ${t.tradingsymbol}. SL is now at TP2 (${rs(st.sl)}) and trailing is ON — it steps up ${rs(st.tps[2] - st.tps[1])} behind the price.\nTap Exit to book it now.`,
         [{ text: '🚪 Exit now', data: `exit:${id}` }]);
@@ -889,7 +900,7 @@ export function signalManagedLevels(tradingsymbol: string) {
   // double rules: after TP3 the line on the chart is the 2 × entry target (shown as TARGET)
   const after3 = m.st.rules === 'double' ? (m.st.target ?? null) : null;
   return { id: m.id, sl: m.st.sl, nextTp: idx == null ? after3 : (m.st.tps as number[])[idx], tpIndex: idx == null ? null : idx + 1,
-    stage: m.st.stage, trailing: m.st.decision === 'KEEP', source: tradeCallSource(m.t.call_id) };
+    stage: m.st.stage, trailing: m.st.decision === 'KEEP' && !m.st.trailOff, trailOff: !!m.st.trailOff, source: tradeCallSource(m.t.call_id) };
 }
 const tradeCallSource = (callId: number) => {
   try { return (D.db.prepare('SELECT source FROM signal_calls WHERE id = ?').get(callId) as any)?.source || 'telegram'; } catch { return 'telegram'; }
@@ -954,6 +965,30 @@ export function signalNoteManualRearm(tradingsymbol: string) {
   }
 }
 
+// ---------- the trailing SL switch on an open trade (27 Nov 2026) ----------
+// Off: the ladder stops moving the stop and he moves the SL line himself; the
+// TP lines, TP1's half, the 2 × entry exit and the square-off are unchanged.
+// On again: the stop catches up with the targets already reached (upwards only).
+// No PIN, like Exit and the chart drags: it only ever concerns a trade already open.
+function trailButton(id: number, st: LadderState) {
+  return st.trailOff ? { text: '📈 Trailing SL on', data: `trail:${id}` } : { text: '✋ Trailing SL off', data: `trail:${id}` };
+}
+async function setTrail(id: number, on: boolean): Promise<{ ok: boolean; error?: string; message?: string; trailOff?: boolean }> {
+  const st = openTrades.get(id), t = tradeRow(id);
+  if (!st || !t || t.status !== 'OPEN') return { ok: false, error: 'That trade is not open (or the chart has taken it over).' };
+  if (!!st.trailOff === !on) return { ok: true, message: on ? 'Trailing SL is already on.' : 'Trailing SL is already off.', trailOff: !!st.trailOff };
+  const acts = setTrailing(st, on);
+  saveLadder(id, st);
+  logEvent(`${t.tradingsymbol}: trailing SL switched ${on ? 'ON' : 'OFF'}`);
+  // A catch-up raise reaches the exit engine before any message goes out.
+  await applyLadder(id, acts);
+  await notify(on
+    ? `📈 Trailing SL is ON for ${t.tradingsymbol}.${acts.length ? '' : ` SL ${rs(st.sl)}.`}`
+    : `✋ Trailing SL is OFF for ${t.tradingsymbol}. The SL stays at ${rs(st.sl)} — move the SL line on the chart yourself. TP lines and exits are unchanged.`,
+    [{ text: '🚪 Exit now', data: `exit:${id}` }, trailButton(id, st)]);
+  return { ok: true, message: on ? `Trailing SL on — SL ${rs(st.sl)}` : `Trailing SL off — SL stays at ${rs(st.sl)}`, trailOff: !!st.trailOff };
+}
+
 async function keep(id: number) {
   const st = openTrades.get(id);
   if (!st) return 'That trade is no longer open.';
@@ -1002,6 +1037,7 @@ async function onBotUpdate(u: any) {
   let answer = '…';
   if (act === 'exit') { const r = await closeTrade(id, 'Exit button (Telegram)'); answer = r.ok ? 'Exiting…' : (r.error || 'failed'); }
   else if (act === 'keep') answer = await keep(id);
+  else if (act === 'trail') { const st = openTrades.get(id); const r = await setTrail(id, !!st?.trailOff); answer = r.ok ? (r.message || 'Done') : (r.error || 'failed'); }
   else if (act === 'cancel') {
     const c: any = D.db.prepare("SELECT status FROM signal_calls WHERE id = ? AND source = 'manual'").get(id);
     if (c?.status === 'WATCHING') { await skip(id, 'cancelled by you'); answer = 'Order cancelled.'; }
@@ -1073,8 +1109,9 @@ export function registerSignalTrader(app: any, deps: SignalDeps) {
     if (b.waitMin !== undefined) settings.waitMin = num(b.waitMin, 0, 60, settings.waitMin);
     if (typeof b.lastEntry === 'string' && /^\d{2}:\d{2}$/.test(b.lastEntry)) settings.lastEntry = b.lastEntry;
     if (typeof b.squareOff === 'string' && /^\d{2}:\d{2}$/.test(b.squareOff)) settings.squareOff = b.squareOff;
+    if (b.trailSl !== undefined) settings.trailSl = b.trailSl !== false && b.trailSl !== 'false';
     saveSettings();
-    logEvent(`settings: ${settings.mode}, ${settings.lots === 'MAX' ? `MAX lots (cap ${settings.maxLotsCap})` : `${settings.lots} lot`}, max ${settings.maxTrades}/day, +${settings.allowAbove} above range, wait ${settings.waitMin} min`);
+    logEvent(`settings: ${settings.mode}, ${settings.lots === 'MAX' ? `MAX lots (cap ${settings.maxLotsCap})` : `${settings.lots} lot`}, max ${settings.maxTrades}/day, +${settings.allowAbove} above range, wait ${settings.waitMin} min, trailing SL ${settings.trailSl === false ? 'off' : 'on'} for new trades`);
     res.json({ ok: true, settings });
   });
 
@@ -1151,6 +1188,10 @@ export function registerSignalTrader(app: any, deps: SignalDeps) {
   // Chart drags on a managed trade (Quick Trade on): move the SL or the next TP.
   app.post('/api/signals/levels', json, async (req: any, res: any) => {
     try { res.json(await setManagedLevels(String(req.body?.tradingsymbol || ''), { sl: req.body?.sl, tp: req.body?.tp })); }
+    catch (e: any) { res.json({ ok: false, error: e?.message || String(e) }); }
+  });
+  app.post('/api/signals/trail', json, async (req: any, res: any) => {
+    try { res.json(await setTrail(Number(req.body?.id), req.body?.on !== false && req.body?.on !== 'false')); }
     catch (e: any) { res.json({ ok: false, error: e?.message || String(e) }); }
   });
   app.post('/api/signals/keep', json, async (req: any, res: any) => {

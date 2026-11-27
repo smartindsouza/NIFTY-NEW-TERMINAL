@@ -19,6 +19,24 @@ const t = (ms?: number | null) => {
   const d = new Date(ms + 5.5 * 3600000);
   return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
 };
+// TRAILING SL SWITCH (27 Nov 2026). Martin: "Add an option to disable trailing SL
+// in Telegram Auto trade so that I can disable it and move the SL line manually.
+// Keep the TP lines as it is. Keep the option available even after the trade is
+// taken." Off: the ladder stops moving the stop; targets, TP1's half and the
+// 2 × entry exit carry on. It is in two places: the Rules (the default for new
+// channel trades) and on each open trade, where it can be flipped at any time.
+function TrailSwitch({ on, onChange, disabled, label, data }: { on: boolean; onChange: () => void; disabled?: boolean; label: string; data: string }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} data-trail={data} disabled={disabled} onClick={() => onChange()}
+      className="flex items-center gap-2 text-xs text-foreground/80 disabled:opacity-40">
+      {label}
+      <span className={cn('relative h-[18px] w-8 rounded-full transition-colors shrink-0', on ? 'bg-primary' : 'bg-foreground/25')}>
+        <span className="absolute top-[3px] h-3 w-3 rounded-full bg-white transition-[left]" style={{ left: on ? 17 : 3 }} />
+      </span>
+    </button>
+  );
+}
+
 const PIN_KEY = 'signalsPin';
 const readPin = () => { try { return localStorage.getItem(PIN_KEY) || ''; } catch { return ''; } };
 
@@ -156,7 +174,16 @@ export default function TelegramSignals() {
                 </div>
               ))}
             </div>
-            {L.decision === 'KEEP' && <div className="text-[11px] text-primary">Trailing above TP3 in steps of {inr(tps[2] - tps[1])}.</div>}
+            {L.decision === 'KEEP' && !L.trailOff && <div className="text-[11px] text-primary">Trailing above TP3 in steps of {inr(tps[2] - tps[1])}.</div>}
+            {x.status === 'OPEN' && (
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <span className="text-[11px] text-muted-foreground flex-1 min-w-0">
+                  {L.trailOff ? `Trailing SL is off: the SL stays at ${inr(L.sl)} until you move the SL line on the chart. TP lines and exits are unchanged.` : 'Trailing SL is on: the app moves the SL up as targets are reached.'}
+                </span>
+                <TrailSwitch on={!L.trailOff} disabled={busy} label="Trailing SL" data={`trade-${x.id}`}
+                  onChange={() => post('/api/signals/trail', { id: x.id, on: !!L.trailOff }, false).then(d => { if (d?.ok && d.message) toast.success(d.message); })} />
+              </div>
+            )}
           </div>
         );
       })}
@@ -221,9 +248,13 @@ export default function TelegramSignals() {
             ))}
           </div>
           {form.lots === 'MAX' && <div className="text-[11px] text-muted-foreground mt-2">Max possible: at each call it buys as many lots as your Zerodha funds allow at the top of the entry range (keeping 1.5% spare for charges), up to the limit you set (25 at most). If funds can't be read, it buys 1 lot and tells you.</div>}
-          <div className="text-[11px] text-muted-foreground mt-2">SL is always the one in the message. TP1 → SL to entry, and with 2 or more lots half of them are sold (with 1 lot nothing is sold at TP1) · TP2 → SL stays at entry · TP3 → SL to TP1 · 2× the entry price → everything left is sold. Tap Exit any time to book.</div>
+          <div className="flex items-center justify-between gap-3 mt-3 rounded-lg bg-popover px-3 py-2">
+            <span className="text-[11px] text-muted-foreground flex-1 min-w-0">Trailing SL for new trades. Off: the SL stays at the message's SL and you move it on the chart yourself. Each open trade has its own switch too.</span>
+            <TrailSwitch on={form.trailSl !== false} label="Trailing SL" data="rules" onChange={() => setForm({ ...form, trailSl: form.trailSl === false })} />
+          </div>
+          <div className="text-[11px] text-muted-foreground mt-2">SL is always the one in the message.{form.trailSl === false ? ' Trailing SL is off, so the SL does not move by itself; the rest of these rules still apply:' : ''} TP1 → SL to entry, and with 2 or more lots half of them are sold (with 1 lot nothing is sold at TP1) · TP2 → SL stays at entry · TP3 → SL to TP1 · 2× the entry price → everything left is sold. Tap Exit any time to book.</div>
           <button disabled={busy} onClick={async () => { const d = await post('/api/signals/settings', {
-              lots: form.lots, maxLotsCap: form.maxLotsCap, maxTrades: form.maxTrades, allowAbove: form.allowAbove, waitMin: form.waitMin, lastEntry: form.lastEntry, squareOff: form.squareOff });
+              lots: form.lots, maxLotsCap: form.maxLotsCap, maxTrades: form.maxTrades, allowAbove: form.allowAbove, waitMin: form.waitMin, lastEntry: form.lastEntry, squareOff: form.squareOff, trailSl: form.trailSl !== false });
               if (d.ok) { setForm({ ...d.settings }); toast.success('Saved'); } }}
             className="mt-3 text-xs font-bold px-3 py-2 rounded-lg bg-primary text-primary-foreground">Save rules</button>
         </div>

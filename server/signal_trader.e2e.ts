@@ -10,7 +10,7 @@ import express from 'express';
 
 process.env.SIGNALS_PIN = '123456';
 delete process.env.TELEGRAM_API_ID; delete process.env.TELEGRAM_BOT_TOKEN;
-const { registerSignalTrader, signalOnTick, signalNoteManualRearm, __test } = await import('./signal_trader');
+const { registerSignalTrader, signalOnTick, signalNoteManualRearm, signalManagedLevels, __test } = await import('./signal_trader');
 
 const dbFile = path.join(os.tmpdir(), `sig-e2e-${Date.now()}.db`);
 const db = new Database(dbFile);
@@ -460,6 +460,47 @@ __test.setSettings({ lots: 1 });
   ok('LIVE picked again on Dhan: the next call is bought');
   await __test.closeTrade(trades().at(-1).id, 'x'); await __test.reconcileLive();
   brokerNow = 'kite';
+  srv.close();
+}
+
+// 12h) TRAILING SL SWITCH (27 Nov 2026): off in the Rules for new trades, and on/off
+// on an open trade at any time. Off: the stop never moves by itself; the targets,
+// the chart drag and the 2× entry exit still work. On again: it catches up.
+{
+  const srv = app.listen(0); const port = (srv.address() as any).port;
+  const api = async (path: string, body?: any) => (await fetch(`http://127.0.0.1:${port}${path}`, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {})).json();
+  __test.setClockOffset(Date.UTC(2026, 9, 29, 5, 0) - Date.now());         // Thu 29 Oct 10:30 IST
+  let r: any = await api('/api/signals/settings', { trailSl: false });
+  assert.equal(r.ok, false); ok('the Rules switch needs the PIN');
+  r = await api('/api/signals/settings', { pin: '123456', mode: 'LIVE', lots: 1, trailSl: false });
+  assert.equal(r.settings.trailSl, false); assert.equal(__test.settings.mode, 'LIVE'); ok('trailing SL off saved for new trades');
+  __test.clearPriceCache(); price.set(SYM, 147);
+  const at = msg(CALL); await __test.handleMessage(at, 'push'); await __test.handleMessage(msg(LEVELS, at.id), 'push'); await settle(900);
+  const tr = () => trades().at(-1); const id = tr().id;
+  assert.equal(tr().status, 'OPEN'); assert.equal(JSON.parse(tr().ladder).trailOff, true);
+  assert.ok(events().some(e => /BOUGHT[\s\S]*Trailing SL is OFF — the SL stays at ₹130/.test(e))); ok('bought with trailing off; the buy alert says so');
+  tick(165); await settle(300);
+  assert.equal(rules.get(SYM).sl, 130); assert.ok(events().some(e => e.includes('TP1 hit — trailing SL is off, SL stays'))); ok('TP1 → the SL stays at 130 (and the alert says why)');
+  assert.equal(signalManagedLevels(SYM)?.trailOff, true); assert.equal(signalManagedLevels(SYM)?.nextTp, 179); ok('the chart still gets the next TP line (TP2 179) and is told the SL is fixed');
+  r = await api('/api/signals/levels', { tradingsymbol: SYM, sl: 140 });
+  assert.equal(r.ok, true); assert.equal(rules.get(SYM).sl, 140); ok('a drag of the SL line moves it (130 → 140)');
+  tick(200); await settle(300); assert.equal(rules.get(SYM).sl, 140); ok('TP3 → still 140, where he put it');
+  r = await api('/api/signals/trail', { id, on: true });
+  assert.equal(r.ok, true); assert.equal(r.trailOff, false); assert.equal(rules.get(SYM).sl, 164); ok('switched ON after TP3 → SL catches up to TP1 164 at once');
+  __test.setOwner('777');
+  await __test.onBotUpdate({ update_id: 2, callback_query: { id: 'q2', from: { id: 777 }, data: `trail:${id}` } });
+  assert.equal(JSON.parse(tr().ladder).trailOff, true); assert.equal(rules.get(SYM).sl, 164); ok('the Telegram button turns it off again; the SL stays at 164');
+  r = await api('/api/signals/trail', { id, on: false }); assert.match(r.message, /already off/); ok('pressing off twice changes nothing');
+  r = await api('/api/signals/status'); assert.equal(r.trades.find((x: any) => x.id === id).ladder.trailOff, true); ok('the page sees the switch state');
+  tick(294); await settle(); await __test.housekeeping(); await __test.reconcileLive(); await settle();
+  assert.equal(tr().status, 'CLOSED'); assert.equal(tr().exit_price, 294); ok('2× entry still sells everything with trailing off');
+  r = await api('/api/signals/trail', { id, on: true }); assert.equal(r.ok, false); ok('a closed trade has no switch');
+  r = await api('/api/signals/settings', { pin: '123456', trailSl: true }); assert.equal(r.settings.trailSl, true);
+  __test.clearPriceCache(); price.set(SYM, 147);
+  const au = msg(CALL); await __test.handleMessage(au, 'push'); await __test.handleMessage(msg(LEVELS, au.id), 'push'); await settle(900);
+  assert.equal(JSON.parse(tr().ladder).trailOff, undefined); tick(165); await settle(300); assert.equal(rules.get(SYM).sl, 147);
+  ok('back on in the Rules: the next trade trails as before (TP1 → SL to entry 147)');
+  await __test.closeTrade(tr().id, 'x'); await __test.reconcileLive();
   srv.close();
 }
 

@@ -1,7 +1,7 @@
 // Parser + ladder tests. Pure, no network.   npx tsx server/signal_parser.test.ts
 import assert from 'node:assert/strict';
 import { parseSignalMessage, validateSetup } from './signal_parser';
-import { createLadder, onLadderPrice, keepTrailing } from './signal_ladder';
+import { createLadder, onLadderPrice, keepTrailing, setTrailing } from './signal_ladder';
 
 let n = 0;
 const ok = (name: string, fn: () => void) => { fn(); n++; console.log('ok', name); };
@@ -123,6 +123,49 @@ ok('classic is unchanged for My Order and old saved trades', () => {
   const st = createLadder(147, 130, [164, 179, 199]);
   assert.equal(st.rules, undefined);
   onLadderPrice(st, 199); assert.equal(st.sl, 179); assert.equal(st.decision, 'KEEP');
+});
+
+// ---- trailing SL off (27 Nov 2026): the stop never moves, everything else does ----
+ok('trail off (double): targets are tracked, SL stays, 2× still exits', () => {
+  const st = createLadder(150, 130, [165, 180, 200], 'double'); st.trailOff = true;
+  const a1 = onLadderPrice(st, 166);
+  assert.equal(st.sl, 130); assert.equal(st.stage, 1);
+  assert.deepEqual(a1, [{ type: 'NOTE', reason: 'TP1 hit — trailing SL is off, SL stays' }]);
+  onLadderPrice(st, 201); assert.equal(st.sl, 130); assert.equal(st.stage, 3);
+  assert.deepEqual(onLadderPrice(st, 300), [{ type: 'TARGET', target: 300 }]);
+});
+ok('trail off: a stop he dragged is kept as it is', () => {
+  const st = createLadder(150, 130, [165, 180, 200], 'double'); st.trailOff = true;
+  st.sl = 140; onLadderPrice(st, 201); assert.equal(st.sl, 140);
+});
+ok('trail back on: the stop catches up with the targets already reached', () => {
+  const st = createLadder(150, 130, [165, 180, 200], 'double'); st.trailOff = true;
+  onLadderPrice(st, 201);
+  assert.deepEqual(setTrailing(st, true), [{ type: 'SET_SL', sl: 165, reason: 'trailing SL back on — SL to TP1' }]);
+  assert.equal(st.trailOff, false);
+  const b = createLadder(150, 130, [165, 180, 200], 'double'); b.trailOff = true; onLadderPrice(b, 170);
+  setTrailing(b, true); assert.equal(b.sl, 150);
+});
+ok('trail back on never lowers a stop he put higher', () => {
+  const st = createLadder(150, 130, [165, 180, 200], 'double'); st.trailOff = true;
+  onLadderPrice(st, 170); st.sl = 160;
+  assert.deepEqual(setTrailing(st, true), []); assert.equal(st.sl, 160);
+});
+ok('switching off mid-trade leaves the stop where the ladder had put it', () => {
+  const st = createLadder(150, 130, [165, 180, 200], 'double');
+  onLadderPrice(st, 166); assert.equal(st.sl, 150);
+  assert.deepEqual(setTrailing(st, false), []); assert.equal(st.sl, 150);
+  onLadderPrice(st, 205); assert.equal(st.sl, 150);
+});
+ok('trail off (classic): no SL steps above TP3 and no note per step', () => {
+  const st = createLadder(150, 130, [165, 180, 200]); st.trailOff = true;
+  onLadderPrice(st, 201); assert.equal(st.sl, 130);
+  assert.deepEqual(onLadderPrice(st, 260), []); assert.equal(st.sl, 130);
+  setTrailing(st, true); assert.equal(st.sl, 240);       // TP2, then the steps above TP3 the peak (260) reached
+});
+ok('a trade saved before this keeps trailing (no flag = on)', () => {
+  const st = createLadder(150, 130, [165, 180, 200], 'double');
+  assert.equal(st.trailOff, undefined); onLadderPrice(st, 166); assert.equal(st.sl, 150);
 });
 
 console.log(`\n${n} passed`);

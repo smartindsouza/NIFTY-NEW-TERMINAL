@@ -29,7 +29,15 @@
 export type LadderRules = 'classic' | 'double';
 
 export interface LadderState {
-  rules?: LadderRules;           // absent = classic (states saved before 4 Nov)
+  rules?: LadderRules;
+  // TRAILING SL OFF (27 Nov 2026, Martin: "Add an option to disable trailing SL
+  // in Telegram Auto trade so that I can disable it and move the SL line
+  // manually. Keep the TP lines as it is."). While true the ladder still tracks
+  // which targets were reached — TP1's half-booking, the TP lines on the chart
+  // and the 2 × entry exit carry on — but it never moves the stop: the SL stays
+  // wherever it is (the message's, or wherever he drags it). Absent = on, so
+  // every trade saved before this keeps trailing.
+  trailOff?: boolean;           // absent = classic (states saved before 4 Nov)
   target?: number;               // double: 2 × entry
   targetHit?: boolean;
   entry: number;                 // actual average fill price
@@ -57,6 +65,12 @@ const r2 = (x: number) => Math.round(x * 100) / 100;
 
 function raise(st: LadderState, to: number, reason: string, out: LadderAction[]) {
   const v = r2(to);
+  if (st.trailOff) {
+    // The step is still reported (once per target, not per trail step above TP3),
+    // so he knows a target was reached and that the stop was left where he put it.
+    if (v > st.sl && !/^trail step/.test(reason)) out.push({ type: 'NOTE', reason: `${reason.split(' — ')[0]} — trailing SL is off, SL stays` });
+    return;
+  }
   if (v > st.sl) { st.sl = v; out.push({ type: 'SET_SL', sl: v, reason }); }
 }
 
@@ -97,6 +111,30 @@ export function onLadderPrice(st: LadderState, ltp: number): LadderAction[] {
   // A trade saved by the old version while it waited for an answer at TP3
   // (stage 3, PENDING) trails from its next price too, without a second alert.
   if (st.stage >= 3 && st.decision === 'PENDING') st.decision = 'KEEP';
+  applyKeepSteps(st, out);
+  return out;
+}
+
+/** The trailing SL switch, on an open trade. OFF: the stop stays where it is.
+ *  ON again: the stop catches up at once with the targets already reached, as if
+ *  it had been on all along — but only ever upwards, so a stop he dragged above
+ *  that level is kept. */
+export function setTrailing(st: LadderState, on: boolean): LadderAction[] {
+  const out: LadderAction[] = [];
+  st.trailOff = !on;
+  if (!on) return out;
+  const [t1, t2] = st.tps;
+  if (st.rules === 'double') {
+    if (st.stage >= 3) raise(st, t1, 'trailing SL back on — SL to TP1', out);
+    else if (st.stage >= 1) raise(st, st.entry, 'trailing SL back on — SL to entry', out);
+    return out;
+  }
+  if (st.stage >= 3) raise(st, t2, 'trailing SL back on — SL to TP2', out);
+  else if (st.stage >= 2) raise(st, t1, 'trailing SL back on — SL to TP1', out);
+  else if (st.stage >= 1) raise(st, st.entry, 'trailing SL back on — SL to entry', out);
+  // The steps above TP3 were counted while off without moving the stop; count
+  // them again from the peak so the stop catches up (raise only ever lifts it).
+  st.stepsAbove = 0;
   applyKeepSteps(st, out);
   return out;
 }

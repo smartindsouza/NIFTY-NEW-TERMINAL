@@ -1214,7 +1214,7 @@ function invalidateArmedRule() { ruleCache = null; }
 // rule goes through fetchArmedRule, so this map is always as fresh as the rule.
 // A drag on such a trade goes to /api/signals/levels (the ladder keeps running)
 // instead of re-arming the rule (which would hand the trade over).
-const managedBySymbol = new Map<string, { id: number; sl: number; nextTp: number | null; tpIndex: number | null; stage: number; trailing: boolean } | null>();
+const managedBySymbol = new Map<string, { id: number; sl: number; nextTp: number | null; tpIndex: number | null; stage: number; trailing: boolean; trailOff?: boolean } | null>();
 function noteManaged(symbol: string, m: any) { managedBySymbol.set(symbol, m && typeof m === 'object' ? m : null); }
 function managedFor(symbol: string | null | undefined) { return symbol ? managedBySymbol.get(symbol) || null : null; }
 
@@ -9221,7 +9221,9 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       const mg = managedFor(pos?.symbol);
       if (mg) {
         const shown = label === 'TARGET' && mg.tpIndex ? `TP${mg.tpIndex}` : label;
-        return `${shown} ${sign(pct)}${Math.abs(pct).toFixed(1)}%${money} · TG${mg.trailing ? ' · TRAILING' : ''}`;
+        // "SL FIXED": trailing SL switched off on the Telegram page (27 Nov 2026) —
+        // the stop moves only when he drags it.
+        return `${shown} ${sign(pct)}${Math.abs(pct).toFixed(1)}%${money} · TG${mg.trailOff ? ' · SL FIXED' : mg.trailing ? ' · TRAILING' : ''}`;
       }
       return `${label} ${sign(pct)}${Math.abs(pct).toFixed(1)}%${money}${stage}`;
     };
