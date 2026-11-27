@@ -86,6 +86,48 @@ export default function TelegramSignals() {
     finally { setBusy(false); }
   };
 
+  // THE FULL BACKUP'S DOWNLOAD (27 Nov 2026). The first version handed the
+  // download to the browser as a form in a new tab; on Martin's office PC it
+  // closed half a second in and no file was saved ("It shows the copy is
+  // already being made" on his next try). Now the page fetches it itself: the
+  // PIN goes in the request's body, the button shows how far it has got, a
+  // connection that breaks is carried on from the byte it stopped at (up to
+  // 20 times), and only the finished file is handed to the browser to save.
+  const [bk, setBk] = useState('');
+  const takeBackup = async () => {
+    if (bk) return;
+    if (!window.confirm('Download a full copy of the app\'s data to this device?\n\nIt contains your journal, settings and today\'s logins, so keep the file private. It can be taken once.')) return;
+    const parts: BlobPart[] = []; let got = 0, total = 0, tries = 0, name = 'nifty-terminal-backup.tar.gz', shown = 0;
+    const pct = () => (total ? `${Math.floor((got / total) * 100)}%` : '…');
+    setBk('preparing…');
+    for (;;) {
+      try {
+        const r = await fetch('/api/admin/backup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin, offset: got }) });
+        if (!r.ok) { toast.error((await r.text().catch(() => '')) || `Backup failed (HTTP ${r.status})`); setBk(''); return; }
+        total = Number(r.headers.get('X-Backup-Size')) || total;
+        const m = /filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') || ''); if (m) name = m[1];
+        const rd = r.body!.getReader();
+        for (;;) {
+          const { done, value } = await rd.read();
+          if (done) break;
+          parts.push(value); got += value.length;
+          if (Date.now() - shown > 400) { shown = Date.now(); setBk(`${pct()} of ${Math.round(total / 1048576)} MB`); }
+        }
+        if (total && got >= total) break;
+        throw new Error('ended early');
+      } catch (e) {
+        if (++tries > 20) { toast.error(`The download kept breaking (${pct()} received). Nothing was saved; it can be tried again.`); setBk(''); return; }
+        setBk(`reconnecting at ${pct()}…`);
+        await new Promise((res) => setTimeout(res, 1500));
+      }
+    }
+    const url = URL.createObjectURL(new Blob(parts, { type: 'application/gzip' }));
+    const a = document.createElement('a'); a.href = url; a.download = name; a.style.display = 'none';
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 60000);
+    setBk(''); toast.success(`Backup saved: ${name} (${Math.round(got / 1048576)} MB). Check your Downloads folder.`, { duration: 15000 });
+  };
+
   const setMode = async (mode: 'OFF' | 'PRACTICE' | 'LIVE') => {
     if (mode === 'LIVE' && !window.confirm('Turn on LIVE auto-trading? Real orders will be placed from the channel\'s calls.')) return;
     const d = await post('/api/signals/settings', { mode }, mode !== 'OFF');
@@ -135,20 +177,13 @@ export default function TelegramSignals() {
           className="h-7 w-28 px-2 rounded-md bg-card border border-border font-mono text-foreground" placeholder="SIGNALS_PIN" />
         <span className="opacity-70 flex-1 min-w-0">needed for setup, settings and Practice/Live — not for Off or Exit</span>
         {/* FULL BACKUP, ONCE (27 Nov 2026). Martin, before the server is moved to
-            Singapore: "Let's go for option 2. Full copy first." Posts the PIN as a
-            form (never in a link) to /api/admin/backup, which answers with one
-            .tar.gz of everything the app has stored; the browser saves it. In a
-            new tab, so a refusal ("Wrong PIN.") does not replace the app. Meant
-            for a computer: the file holds the day's logins. To be taken out
-            again after the move. */}
-        <button type="button" data-backup="full" disabled={busy || !pin} title="Download one file with everything the app has stored (needs the PIN). Once per server start."
-          onClick={() => {
-            if (!window.confirm('Download a full copy of the app\'s data to this device?\n\nIt contains your journal, settings and today\'s logins, so keep the file private. It can be taken once.')) return;
-            const f = document.createElement('form'); f.method = 'POST'; f.action = '/api/admin/backup'; f.target = '_blank'; f.style.display = 'none';
-            const i = document.createElement('input'); i.type = 'hidden'; i.name = 'pin'; i.value = pin; f.appendChild(i);
-            document.body.appendChild(f); f.submit(); setTimeout(() => f.remove(), 1000);
-          }}
-          className="shrink-0 flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-popover text-foreground disabled:opacity-40">Full backup</button>
+            Singapore: "Let's go for option 2. Full copy first." One .tar.gz of
+            everything the app has stored, saved by the browser (see takeBackup).
+            Meant for a computer: the file holds the day's logins. To be taken
+            out again after the move. */}
+        <button type="button" data-backup="full" disabled={busy || !pin || !!bk} title="Download one file with everything the app has stored (needs the PIN). Once per server start."
+          onClick={() => takeBackup()}
+          className="shrink-0 flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-popover text-foreground disabled:opacity-40">{bk ? `Backup: ${bk}` : 'Full backup'}</button>
         {data?.telegram?.loggedIn && (
           <button disabled={busy} onClick={async () => { const d = await post('/api/signals/test-alert'); if (d.ok) toast.success(d.linked ? 'Test alert sent to your bot' : 'Test alert sent to your Saved Messages'); }}
             className="shrink-0 flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-popover text-foreground"><Bot className="w-3 h-3" /> Test alert</button>
