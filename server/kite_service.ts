@@ -1,4 +1,5 @@
 import { KiteConnect } from 'kiteconnect';
+import { withKeepAlive } from './kite_keepalive';
 import Database from 'better-sqlite3';
 import { generateSimulatedChain } from './simulate_data';
 import { rankInstruments, type Major } from './instrument_search';
@@ -95,7 +96,8 @@ export function getKiteClient() {
   const apiKey = process.env.KITE_API_KEY;
   if (!apiKey) return null;
   
-  const kc = new KiteConnect({ api_key: apiKey });
+  // Every client shares the app's open lines to Zerodha: see server/kite_keepalive.ts.
+  const kc = withKeepAlive(new KiteConnect({ api_key: apiKey }));
   
   try {
     const today = new Date().toISOString().split('T')[0];
@@ -126,7 +128,8 @@ export async function generateSession(requestToken: string) {
     throw new Error('Zerodha Kite API keys are not configured. Please define KITE_API_KEY and KITE_API_SECRET in your settings (such as the Secrets menu).');
   }
 
-  const kc = new KiteConnect({ api_key: apiKey });
+  // Every client shares the app's open lines to Zerodha: see server/kite_keepalive.ts.
+  const kc = withKeepAlive(new KiteConnect({ api_key: apiKey }));
   try {
     const response = await kc.generateSession(requestToken, apiSecret);
     

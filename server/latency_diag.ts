@@ -44,6 +44,7 @@ const summary = (a: number[]) => ({ n: a.length, p50: pct(a, 0.5), p90: pct(a, 0
 // round-trip time of that leg. Only milliseconds are returned: not the proxy's
 // address, and never its user name or password.
 import net from 'node:net';
+import { keepAliveStats } from './kite_keepalive';
 function tcpMs(host: string, port: number, timeoutMs = 4000): Promise<number | null> {
   return new Promise((resolve) => {
     const t0 = process.hrtime.bigint();
@@ -72,7 +73,9 @@ export function registerLatencyDiag(app: any, express: any) {
         proxy = { configured: true, ...(await leg(u.hostname, Number(u.port) || (u.protocol === 'https:' ? 443 : 80))) };
       } catch (e) { /* no proxy set */ }
       const direct = await leg('api.kite.trade', 443);
-      res.json({ ok: true, note: 'ms for one TCP handshake (one round trip) from this server; nothing is sent', region: process.env.RAILWAY_REPLICA_REGION || null, toProxy: proxy, toZerodhaDirect: direct });
+      res.json({ ok: true, note: 'ms for one TCP handshake (one round trip) from this server; nothing is sent', region: process.env.RAILWAY_REPLICA_REGION || null, toProxy: proxy, toZerodhaDirect: direct,
+        // how many Zerodha calls found a line already open (see server/kite_keepalive.ts)
+        zerodhaLines: keepAliveStats() });
     } catch (e: any) { res.json({ ok: false, error: e?.message || String(e) }); }
   });
 

@@ -47,6 +47,8 @@ import { registerTradeGuard, guardEntryBlock, guardOrderBlock, setGuardExempt } 
 import { registerJodi, jodiTokens, jodiOnTick, jodiManages, jodiExempt } from './server/jodi';
 import { registerSignalTrader, signalOnTick, signalTokens, signalNoteManualRearm, signalManages, signalManagedLevels, signalNotify, signalPinOk } from './server/signal_trader';
 import { registerDataBackup } from './server/data_backup';
+import { startKiteWarmer } from './server/kite_keepalive';
+import { isTradingDay as isTradingDayIst } from './server/calendar_service';
 import { registerFamilyTrader, familyOnTick, familyTokens } from './server/family_trader';
 import { currentLeg, needsLegAverage, closedLegs, legForRow } from './server/leg_average';
 import { entryWallError } from './server/entry_wall';
@@ -4035,6 +4037,15 @@ setInterval(() => {
   });
   // Price-age measurement (diagnostic only).
   try { registerLatencyDiag(app, express); } catch (e) { console.error('[latency] not registered', e); }
+  // A line to Zerodha is kept open through market hours (server/kite_keepalive.ts):
+  // one small read every 15 s, on a trading day, 9:00 AM to 3:35 PM India time.
+  try {
+    startKiteWarmer(() => getKiteClient(), () => {
+      const d = new Date(Date.now() + 5.5 * 3600000); const mins = d.getUTCHours() * 60 + d.getUTCMinutes();
+      if (mins < 9 * 60 || mins > 15 * 60 + 35) return false;
+      try { return isTradingDayIst(d.toISOString().slice(0, 10)); } catch (e) { return d.getUTCDay() !== 0 && d.getUTCDay() !== 6; }
+    });
+  } catch (e) { console.error('[keepalive] warmer not started', e); }
   // Golden-zone Swap-Sweep: WATCH-ONLY alerts and a live record (no orders).
   // ONLY TWO MARKET ALERTS (20 Nov 2026). Martin: "Remove all the alerts which are
   // currently getting a delivered. I just want a breaker block alert and Swap sweep
