@@ -7,7 +7,7 @@ import { ChevronsUpDown, LineChart, ShoppingBasket, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { addWsMessageListener } from '../hooks/useWebSocket';
 import { optionGreeks, yearsToExpiry, type Greeks } from '../lib/optionGreeks';
-import { jodiBasket, useJodiBasket, basketFull } from '../lib/jodiBasket';
+import { jodiBasket, useJodiBasket, basketFull, basketCount, LIST_MAX, type BasketLeg } from '../lib/jodiBasket';
 
 // THE OPTION CHAIN IS LEMONN'S (17 Nov 2026). Martin: "I also want to completely
 // redesign the option chain screen same as in the lemon app. So remove the
@@ -118,6 +118,26 @@ const underlyingOf = (asked?: string): { symbol: string | null; ta: string; name
   return { symbol: null, ta: 'NSE:NIFTY 50', name: 'NIFTY', token: 256265 };
 };
 
+/** THE BASKET'S OPTIONS GO ONTO THE CHART LIST (27 Nov 2026; lib/jodiBasket has
+ *  what he asked for). All of them, at once: written to the session's list (for
+ *  a chart page that mounts later) and announced to the one that is up, as a
+ *  single option picked on the phone is. The chart on screen is not changed and
+ *  no order is placed. The list holds ten: over that the oldest give way. */
+export function addOptionsToChartList(legs: BasketLeg[]) {
+  const entries = legs.filter((l) => l?.tradingsymbol && l?.instrument_token)
+    .map((l) => ({ tradingsymbol: l.tradingsymbol, instrument_token: String(l.instrument_token), exchange: l.exchange, ...(l.lot_size ? { lot_size: l.lot_size } : {}) }));
+  if (!entries.length) return 0;
+  try {
+    const raw = JSON.parse(sessionStorage.getItem('openOptionCharts') || '[]');
+    const kept = (Array.isArray(raw) ? raw : []).filter((c: any) => !entries.some((e) => e.tradingsymbol === c?.tradingsymbol));
+    sessionStorage.setItem('openOptionCharts', JSON.stringify([...kept, ...entries].slice(-LIST_MAX)));
+  } catch (e) {}
+  for (const entry of entries) { try { window.dispatchEvent(new CustomEvent('terminal:add-option', { detail: entry })); } catch (e) {} }
+  try { toast(`${entries.length} option${entries.length === 1 ? '' : 's'} added to the chart's options`, { duration: 2500 }); } catch (e) {}
+  if (window.location.pathname !== '/advanced-chart') navigate('/advanced-chart');
+  return entries.length;
+}
+
 /** Hands an option to ScalpPro: written to the session first (a chart mounting later starts from it), then announced. */
 export function openInScalpPro(leg: Leg, type: 'CE' | 'PE', name: string) {
   if (!leg?.tradingsymbol || !leg?.instrument_token) return false;
@@ -159,7 +179,9 @@ export function openInScalpPro(leg: Leg, type: 'CE' | 'PE', name: string) {
   return true;
 }
 
-export function OptionChainView({ onPicked, start, wide = false, onClose }: { onPicked?: () => void; start?: ChainStart; wide?: boolean; onClose?: () => void }) {
+export function OptionChainView({ onPicked, start, wide = false, onClose, onIndex }: { onPicked?: () => void; start?: ChainStart; wide?: boolean; onClose?: () => void;
+  /** Given where the screen behind offers no way to change the index (ScalperX, other pages): the chain shows its own index list. */
+  onIndex?: (underlying: 'NIFTY' | 'SENSEX' | 'BANKNIFTY') => void }) {
   const under = useMemo(() => underlyingOf(start?.underlying), []);
   const strikeW = wide ? WIDE.strikeW : STRIKE_W, rowH = wide ? WIDE.rowH : ROW_H, spotH = wide ? WIDE.spotH : SPOT_H;
   // An expiry the server no longer lists (an option kept past its day) is not
@@ -167,7 +189,7 @@ export function OptionChainView({ onPicked, start, wide = false, onClose }: { on
   const [expiry, setExpiry] = useState<string>(() => (/^\d{4}-\d{2}-\d{2}/.test(String(start?.expiry || '')) ? String(start?.expiry).slice(0, 10) : ''));
   const [greeks, setGreeks] = useState<boolean>(() => { try { return localStorage.getItem('chainGreeks') === '1'; } catch (e) { return false; } });
   useEffect(() => { try { localStorage.setItem('chainGreeks', greeks ? '1' : '0'); } catch (e) {} }, [greeks]);
-  const [menu, setMenu] = useState<null | 'expiry' | 'all'>(null);
+  const [menu, setMenu] = useState<null | 'expiry' | 'all' | 'index'>(null);
 
   const { data: chain } = useQuery<Chain>({
     queryKey: ['option-chain-sheet', under.symbol, expiry],
@@ -341,19 +363,26 @@ export function OptionChainView({ onPicked, start, wide = false, onClose }: { on
   // a tap on a price puts that option on the Jodi list instead of opening its
   // chart — the chain stays open, and the foot of the sheet shows the list.
   const basket = useJodiBasket();
+  const listMode = basket.mode === 'list';
   const pick = (k: number, type: 'CE' | 'PE') => {
     if (Date.now() - dragged.current < 350) return;                 // the end of a slide is not a tap
     if (menu) return;                                               // a tap with a menu open only puts the menu away
     const leg = (type === 'CE' ? chain?.ceData : chain?.peData)?.[k];
     if (basket.on) {
       if (!leg?.tradingsymbol || !leg?.instrument_token) return;
+      if (listMode && (basket.items || []).length >= LIST_MAX && !(basket.items || []).some((x) => x.tradingsymbol === leg.tradingsymbol)) {
+        try { toast(`The list is full (${LIST_MAX}). Take one off to add another.`, { duration: 2500 }); } catch (e) {}
+        return;
+      }
       jodiBasket.tap({ type, tradingsymbol: leg.tradingsymbol, instrument_token: String(leg.instrument_token), exchange: leg.exchange || (under.name === 'SENSEX' ? 'BFO' : 'NFO'),
         lot_size: leg.lot_size, strike: k, expiry: leg.expiry || chain?.expiryDate, underlying: under.name, ltp: ltpOf(leg) });
       return;
     }
     if (leg && openInScalpPro(leg, type, under.name)) onPicked?.();
   };
-  const inBasket = (k: number, put: boolean) => { const b = put ? basket.PE : basket.CE; return !!b && basket.on && b.strike === k && b.underlying === under.name && String(b.expiry || '').slice(0, 10) === String(chain?.expiryDate || '').slice(0, 10); };
+  const inBasket = (k: number, put: boolean) => {
+    if (listMode) { const sym = (put ? chain?.peData : chain?.ceData)?.[k]?.tradingsymbol; return basket.on && !!sym && (basket.items || []).some((x) => x.tradingsymbol === sym); }
+    const b = put ? basket.PE : basket.CE; return !!b && basket.on && b.strike === k && b.underlying === under.name && String(b.expiry || '').slice(0, 10) === String(chain?.expiryDate || '').slice(0, 10); };
   const basketLtp = (b: { instrument_token: string; ltp: number } | null) => (b ? (ticks.current.get(String(b.instrument_token)) ?? b.ltp) || 0 : 0);
 
   const headCell = (c: Col, put: boolean) => (
@@ -407,15 +436,33 @@ export function OptionChainView({ onPicked, start, wide = false, onClose }: { on
           </button>
         )}
         <span className="mx-[10px] h-[18px] w-px bg-foreground/20" aria-hidden="true" />
+        {/* THE CHAIN'S OWN INDEX LIST (27 Nov 2026). Martin, with ScalperX's chain
+            on screen: "Also in the scalper X screen option chain there is no index
+            selector. Add that to the screen as well". On the phone's chart page
+            the chain leaves the header's index tab in use (THE TOP STAYS IN USE);
+            ScalperX and the other pages have no such tab, so there the index is
+            chosen here. It changes the chain only: the charts behind stay. The
+            word "Expiry:" gives its room to it — the date beside says what it is. */}
+        {!wide && onIndex && (
+          <>
+            <button type="button" data-chain="index-pick" onClick={(e) => { e.stopPropagation(); setMenu(menu === 'index' ? null : 'index'); }} className="flex items-center gap-1 text-[12px] leading-none">
+              <span className="font-semibold">{under.name === 'BANKNIFTY' ? 'BANK NIFTY' : under.name}</span>
+              <svg width="8" height="5" viewBox="0 0 8 5" aria-hidden="true"><path d="M0 0h8L4 5z" fill="currentColor" /></svg>
+            </button>
+            <span className="mx-[10px] h-[18px] w-px bg-foreground/20" aria-hidden="true" />
+          </>
+        )}
         <button type="button" data-chain="expiry" onClick={(e) => { e.stopPropagation(); setMenu(menu === 'expiry' ? null : 'expiry'); }} className="flex items-center gap-1 text-[12px] leading-none">
-          <span className="text-foreground/60">Expiry:</span><span className="font-semibold">{expiryText(chain?.expiryDate || '')}</span>
+          {!(onIndex && !wide) && <span className="text-foreground/60">Expiry:</span>}<span className="font-semibold">{expiryText(chain?.expiryDate || '')}</span>
           <svg width="8" height="5" viewBox="0 0 8 5" aria-hidden="true"><path d="M0 0h8L4 5z" fill="currentColor" /></svg>
         </button>
-        {/* The basket button (27 Nov 2026): on, a tap on a price adds that option to the Jodi list. */}
-        <button type="button" data-chain="basket" role="switch" aria-checked={basket.on} aria-label="Basket: add options to the Jodi list" title="Basket: add options to the Jodi list"
+        {/* The basket button (27 Nov 2026): on, a tap on a price adds that option to
+            the list — the Jodi's two when the chain was opened for a Jodi, otherwise
+            up to ten for the chart's list of options (data-basket-mode says which). */}
+        <button type="button" data-chain="basket" data-basket-mode={listMode ? 'list' : 'jodi'} role="switch" aria-checked={basket.on} aria-label={listMode ? "Basket: add options to the chart's list" : 'Basket: add options to the Jodi list'} title={listMode ? "Basket: add options to the chart's list" : 'Basket: add options to the Jodi list'}
           onClick={(e) => { e.stopPropagation(); jodiBasket.toggle(); }}
           className={`ml-auto h-[29px] px-[9px] flex items-center gap-[5px] rounded-full border text-[12px] leading-none ${basket.on ? 'border-primary text-primary bg-primary/10' : 'border-foreground/20 text-foreground/70'}`}>
-          <ShoppingBasket size={15} strokeWidth={2} />{basket.on && <span className="font-semibold tabular-nums">{(basket.CE ? 1 : 0) + (basket.PE ? 1 : 0)}/2</span>}
+          <ShoppingBasket size={15} strokeWidth={2} />{basket.on && <span className="font-semibold tabular-nums">{basketCount(basket)}/{listMode ? LIST_MAX : 2}</span>}
         </button>
         {wide ? (
           onClose && (
@@ -446,8 +493,12 @@ export function OptionChainView({ onPicked, start, wide = false, onClose }: { on
         )}
       </div>
       {menu && (
-        <div data-chain-menu={menu} className="absolute z-20 top-[46px] max-h-[60%] overflow-y-auto rounded-xl border border-foreground/15 bg-card py-1 shadow-2xl" style={{ left: menu === 'all' ? 10 : wide ? 190 : 44 }} onClick={(e) => e.stopPropagation()}>
-          {menu === 'expiry'
+        <div data-chain-menu={menu} className="absolute z-20 top-[46px] max-h-[60%] overflow-y-auto rounded-xl border border-foreground/15 bg-card py-1 shadow-2xl" style={{ left: menu === 'all' ? 10 : wide ? 190 : menu === 'expiry' && onIndex ? 120 : 44 }} onClick={(e) => e.stopPropagation()}>
+          {menu === 'index'
+            ? ([['NIFTY', 'NIFTY 50'], ['SENSEX', 'SENSEX'], ['BANKNIFTY', 'BANK NIFTY']] as const).map(([k, label]) => (
+              <button key={k} type="button" data-chain-index={k} onClick={() => { setMenu(null); if (k !== under.name) onIndex?.(k); }} className={`block w-full px-4 h-9 text-left text-[13px] whitespace-nowrap ${k === under.name ? 'font-semibold text-foreground' : 'text-foreground/70'}`}>{label}</button>
+            ))
+            : menu === 'expiry'
             ? (chain?.expiries || []).map((d) => (
               <button key={d} type="button" onClick={() => { setExpiry(d); setMenu(null); }} className={`block w-full px-4 h-9 text-left text-[13px] ${d.slice(0, 10) === (chain?.expiryDate || '').slice(0, 10) ? 'font-semibold text-foreground' : 'text-foreground/70'}`}>{expiryText(d)}</button>
             ))
@@ -514,7 +565,30 @@ export function OptionChainView({ onPicked, start, wide = false, onClose }: { on
       {/* THE JODI LIST, while the basket is on: the two options picked, what they
           cost together now, and Done — which closes the chain, as its own cross
           does, and with a Call and a Put on the list that opens the Jodi card. */}
-      {basket.on && (
+      {/* THE CHART LIST'S BASKET (the chain opened any other way): up to ten
+          options in a row that slides sideways, and "Add" — which closes the
+          chain and puts them all on the chart's list of options. */}
+      {basket.on && listMode && (
+        <div data-chain="basket-list" data-basket-mode="list" className="shrink-0 flex items-center gap-2 px-3 py-2 border-t border-foreground/15 bg-card pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
+          <div className="flex-1 min-w-0">
+            {!(basket.items || []).length
+              ? <div className="text-[12px] leading-snug text-foreground/60">Tap prices to add options to the chart's list (up to {LIST_MAX}).</div>
+              : (
+                <div className="flex items-center gap-[6px] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" style={{ touchAction: 'pan-x' }}>
+                  {(basket.items || []).map((b) => (
+                    <span key={b.tradingsymbol} data-basket-item={b.tradingsymbol} className="shrink-0 h-[26px] pl-[9px] pr-[3px] flex items-center gap-[5px] rounded-full border border-primary/50 text-[12px] leading-none whitespace-nowrap">
+                      <span className="font-semibold tabular-nums">{b.underlying !== under.name ? `${b.underlying} ` : ''}{b.strike} {b.type}</span>
+                      <button type="button" aria-label={`Remove ${b.strike} ${b.type} from the list`} onClick={(e) => { e.stopPropagation(); jodiBasket.removeItem(b.tradingsymbol); }} className="h-[22px] w-[22px] flex items-center justify-center rounded-full text-foreground/55 active:bg-foreground/10"><X size={13} /></button>
+                    </span>
+                  ))}
+                </div>
+              )}
+          </div>
+          <button type="button" data-basket="done" disabled={!(basket.items || []).length} onClick={(e) => { e.stopPropagation(); onClose?.(); }}
+            className={`shrink-0 h-9 px-4 rounded-full text-[13px] font-semibold whitespace-nowrap ${(basket.items || []).length ? 'bg-primary text-primary-foreground active:opacity-80' : 'bg-foreground/10 text-foreground/40'}`}>{(basket.items || []).length ? `Add ${(basket.items || []).length}` : 'Add'}</button>
+        </div>
+      )}
+      {basket.on && !listMode && (
         <div data-chain="basket-list" className="shrink-0 flex items-center gap-2 px-3 py-2 border-t border-foreground/15 bg-card pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
           <div className="flex-1 min-w-0">
             {!basket.CE && !basket.PE
@@ -631,7 +705,17 @@ export function OptionChainSheet({ onClose, start }: { onClose: () => void; star
     document.head.appendChild(st);
     return () => { try { st.remove(); } catch (e) {} };
   }, [openTop]);
-  const shown = openTop ? follow : start;
+  // Asked for again while it is up (another index's name tapped behind it): it
+  // goes to what was asked, as it did when `start` was shown directly.
+  const firstStart = useRef(true);
+  useEffect(() => {
+    if (firstStart.current) { firstStart.current = false; return; }
+    if (!openTop) setFollow({ ...start, underlying: underlyingOf(start?.underlying).name });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [start]);
+  // Off the phone's chart page the chain has its own index list (onIndex below),
+  // which sets the same `follow` the header's tab does there.
+  const shown = wide ? start : follow;
   // SQUARE TOP CORNERS OVER THE CHART (18 Nov 2026). Martin, with dark wedges at
   // both top corners in the light theme: "Make the top corner edges of the
   // option chain card pointed instead of curved so that these dark areas around
@@ -672,7 +756,8 @@ export function OptionChainSheet({ onClose, start }: { onClose: () => void; star
       <div style={openTop && topPx != null ? { height: '100%', minHeight: 0 } : undefined} className={wide
         ? 'w-[min(1600px,calc(100vw-48px))] h-[calc(100dvh-48px)] rounded-xl overflow-hidden border border-foreground/10'
         : `${openTop ? '' : leaving ? 'chain-sheet-down ' : 'chain-sheet-up '}w-full md:w-[430px] h-[calc(100dvh-152px)] min-h-[60dvh] md:h-[min(780px,90dvh)] ${openTop ? 'rounded-none' : 'rounded-t-xl'} md:rounded-xl overflow-hidden`} onClick={(e) => e.stopPropagation()}>
-        <OptionChainView key={`${wide ? 'wide' : 'narrow'}|${underlyingOf(shown?.underlying).name}`} onPicked={onClose} start={shown} wide={wide} onClose={leave} />
+        <OptionChainView key={`${wide ? 'wide' : 'narrow'}|${underlyingOf(shown?.underlying).name}`} onPicked={onClose} start={shown} wide={wide} onClose={leave}
+          onIndex={!wide && !openTop ? (u) => setFollow({ underlying: u }) : undefined} />
       </div>
     </div>,
     document.body,
@@ -698,7 +783,8 @@ export function OptionChainHost() {
   const close = () => {
     const b = jodiBasket.get();
     setOpen(null);
-    if (b.on && b.CE && b.PE) { try { window.dispatchEvent(new CustomEvent('terminal:jodi-setup', { detail: { ce: b.CE, pe: b.PE } })); } catch (e) {} }
+    if (b.on && b.mode === 'list') { if ((b.items || []).length) addOptionsToChartList(b.items || []); }
+    else if (b.on && b.CE && b.PE) { try { window.dispatchEvent(new CustomEvent('terminal:jodi-setup', { detail: { ce: b.CE, pe: b.PE } })); } catch (e) {} }
     jodiBasket.clear();
   };
   return open ? <OptionChainSheet start={open} onClose={close} /> : null;

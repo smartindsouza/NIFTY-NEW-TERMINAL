@@ -1,4 +1,4 @@
-import { basketTap, basketFull, expiryIsToday, expiryWords, type Basket, type BasketLeg } from './jodiBasket';
+import { basketTap, basketFull, listTap, basketCount, LIST_MAX, expiryIsToday, expiryWords, type Basket, type BasketLeg } from './jodiBasket';
 let fails = 0; const ok = (c: boolean, m: string) => { if (!c) { fails++; console.log('FAIL', m); } };
 const leg = (type: 'CE' | 'PE', strike: number, o: Partial<BasketLeg> = {}): BasketLeg => ({ type, strike, tradingsymbol: `SENSEX26N26${strike}${type}`, instrument_token: String(strike) + type, exchange: 'BFO', lot_size: 20, expiry: '2026-11-26', underlying: 'SENSEX', ltp: 110, ...o });
 const empty: Basket = { on: true, CE: null, PE: null };
@@ -15,6 +15,21 @@ ok(otherExp.PE?.expiry === '2026-12-03' && otherExp.CE === null, 'another expiry
 const otherIdx = basketTap(b, leg('CE', 25300, { underlying: 'NIFTY', tradingsymbol: 'NIFTY26N2725300CE' }));
 ok(otherIdx.CE?.underlying === 'NIFTY' && otherIdx.PE === null, 'another index starts the list again');
 ok(basketTap({ ...empty, on: false }, leg('CE', 84100)).on === false, 'the switch is not touched by a tap');
+// the chart-list basket: up to ten, any mix
+let L: Basket = { on: true, CE: null, PE: null, mode: 'list', items: [] };
+L = listTap(L, leg('CE', 84100)); L = listTap(L, leg('CE', 84200)); L = listTap(L, leg('PE', 84000));
+ok(basketCount(L) === 3 && L.CE === null, 'two calls and a put all stay on the chart list');
+L = listTap(L, leg('CE', 25300, { underlying: 'NIFTY', tradingsymbol: 'NIFTY26N2725300CE' }));
+L = listTap(L, leg('PE', 84000, { expiry: '2026-12-03', tradingsymbol: 'SENSEX26D0384000PE' }));
+ok(basketCount(L) === 5, 'another index and another expiry are added, not started again');
+L = listTap(L, leg('CE', 84200));
+ok(basketCount(L) === 4 && !L.items!.some((x) => x.strike === 84200), 'tapped again, it comes off');
+for (let k = 0; k < 10; k++) L = listTap(L, leg('PE', 83000 + k * 100));
+ok(LIST_MAX === 10 && basketCount(L) === 10, 'it stops at ten');
+const full = listTap(L, leg('CE', 90000));
+ok(full === L, 'an eleventh is not taken');
+ok(basketCount(listTap(L, L.items![0])) === 9, 'one can still be taken off a full list');
+ok(basketCount({ on: true, CE: leg('CE', 1), PE: null, mode: 'jodi', items: [] }) === 1, 'the Jodi count is still its Call and Put');
 // not expiry day: India's date, whatever the clock's own zone
 const at = (iso: string) => Date.parse(iso);
 ok(expiryIsToday('2026-11-27', at('2026-11-27T04:30:00Z')) === true, '10:00 AM IST on expiry day');

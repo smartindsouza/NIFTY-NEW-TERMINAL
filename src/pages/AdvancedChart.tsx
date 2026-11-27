@@ -11536,8 +11536,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // (The chain also writes it to the session's list, for when this page is not
   // mounted yet; see openInScalpPro.) On ScalperX it opens there as before,
   // and its option half adds it to the same list.
+  // (27 Nov 2026) The chain's basket adds up to ten at once from any screen, so
+  // ScalperX's option chart and the desktop's option half — which own the list
+  // there — take terminal:add-option too. One listener per list, as before.
   useEffect(() => {
-    if (isPane || scalp) return;
+    if (isSpotPane || (scalp && !isOptionPane)) return;
     const onAdd = (e: any) => {
       const i = e?.detail; const sym = String(i?.tradingsymbol || '');
       if (!sym || !i?.instrument_token) return;
