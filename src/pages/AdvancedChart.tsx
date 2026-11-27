@@ -11267,7 +11267,15 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   // chain", and the index shown above always has a pill, which opens its chain
   // directly when no option of it is on the list yet. An option here changes
   // only when he changes it: a pill, the chain, a search.
-  const openChainOf = (g: string) => { try { window.dispatchEvent(new CustomEvent('terminal:option-chain', { detail: { underlying: g } })); } catch (e) {} };
+  //
+  // NO "OPTION CHAIN" AMONG THE PILLS (27 Nov 2026). Martin, with a pill's list
+  // open ("25800 PE · 01 DEC" and under it "Option chain"): "Also don't show the
+  // option chain in the list or among the tabs above." Both ways in from the
+  // pills are gone: the "Option chain" row that ended each list, and the pill
+  // of an index with no option on the list ("SENSEX chain"). They were only
+  // ever a way to another index's chain, and since 437 the chain has its own
+  // index list in ScalperX. A pill is an index with options on the list again,
+  // and its list is those options only.
   // EVERY OPTION, ONE PILL PER INDEX (22 Nov 2026). Martin: "In the scalperX
   // screen also all the options should be shown regardless of the spot chart.
   // But group them as list like all nifty options in one list and all sensex
@@ -11287,8 +11295,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     : [];
   const pillGroups = PILL_GROUPS
     .map((g) => ({ g, list: pillCharts.filter((c) => (rootOfOption(c.tradingsymbol) || 'Other') === g) }))
-    // the index shown above keeps a pill even with nothing on the list: it is the way to its chain
-    .filter((x) => x.list.length || (scalp && isOptionPane && x.g !== 'Other' && x.g === topIndex));
+    .filter((x) => x.list.length);
   const [pillMenu, setPillMenu] = useState<{ g: string; left: number; top: number } | null>(null);
   const pillMenuList = pillMenu ? (pillGroups.find((x) => x.g === pillMenu.g)?.list || []) : [];
   useEffect(() => { if (pillMenu && !pillMenuList.length) setPillMenu(null); }, [pillMenu, pillMenuList.length]);
@@ -11300,15 +11307,14 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const scalpPills = pillSlot && pillGroups.length ? createPortal(
     <>
       {pillGroups.map(({ g, list }) => (
-        <button key={g} type="button" data-scalp-pill={g} aria-label={list.length ? `${g} options on the list` : `Open the ${g} option chain`}
+        <button key={g} type="button" data-scalp-pill={g} aria-label={`${g} options on the list`}
           onClick={(e) => {
-            if (!list.length) { setPillMenu(null); openChainOf(g); return; }
             if (pillMenu?.g === g) { setPillMenu(null); return; }
             const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
             setPillMenu({ g, left: Math.max(8, Math.min(r.left, window.innerWidth - 228)), top: r.bottom + 6 });
           }}
           className={`shrink-0 h-[26px] pl-[11px] pr-[8px] flex items-center gap-[5px] rounded-full border text-[11.5px] leading-none font-medium whitespace-nowrap active:opacity-60 ${pillMenu?.g === g || list.some((c) => c.tradingsymbol === selectedInstrument?.tradingsymbol) ? 'border-primary/60 text-foreground' : 'border-foreground/20 text-foreground/90'}`}>
-          {g}<span className="text-foreground/55">{list.length || 'chain'}</span>
+          {g}<span className="text-foreground/55">{list.length}</span>
           {list.length > 0 && <ChevronDown size={12} className={pillMenu?.g === g ? 'rotate-180 transition-transform' : 'transition-transform'} />}
         </button>
       ))}
@@ -11333,12 +11339,6 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
             </div>
           );
         })}
-        {pillMenu.g !== 'Other' && (
-          <button type="button" data-scalp-pill-chain={pillMenu.g} onClick={() => { const g = pillMenu.g; setPillMenu(null); openChainOf(g); }}
-            className="w-full h-10 pl-3 pr-3 flex items-center text-left text-[12.5px] font-medium text-foreground/70 active:opacity-60">
-            Option chain
-          </button>
-        )}
       </div>
     </>, document.body) : null;
 
@@ -17971,8 +17971,11 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
                       onClick={() => { setStrategyOpen(false); try { window.dispatchEvent(new CustomEvent('terminal:jodi-open')); } catch (e) {} }}
                       className="w-full flex items-center justify-between gap-3 px-3 py-3 text-left active:bg-muted">
                       <span className="min-w-0">
+                        {/* The name only (27 Nov 2026). Martin, of the line that stood under
+                            it ("One Call and one Put bought together, on expiry day"):
+                            "Remove the explanation texts in the strategy card. Just keep
+                            it one liner". */}
                         <span className="block text-[14px] font-semibold text-foreground">Jodi</span>
-                        <span className="block text-[11px] text-muted-foreground mt-0.5">One Call and one Put bought together, on expiry day</span>
                       </span>
                       {/* AT THE RIGHT END: LIVE OR PRACTICE, AND THE P&L WHILE IT RUNS (27 Nov 2026).
                           Martin: "Show either live or practice at the right end and live P&L if

@@ -295,10 +295,22 @@ function ScalpScreen({ onClose }: { onClose: () => void }) {
             of its own — the two panes are a lighter surface and end where it
             begins. (The light theme's page and panes are the same white, so
             there, and only there, it keeps a hairline above and below.) */}
-        <div data-scalp="handle" onPointerDown={startDrag} title="Drag to resize the charts"
-          className="shrink-0 h-4 flex items-center justify-center cursor-row-resize select-none bg-background border-y border-border dark:border-y-0 active:bg-foreground/10"
-          style={{ touchAction: 'none' }}>
-          <div className="w-[42px] h-1 rounded-full bg-foreground/65" />
+        {/* ONLY THE HANDLE IN THE MIDDLE DRAGS (27 Nov 2026). Martin, with a picture
+            of this strip: "Also I want the hold and drag option only when taping
+            the center handle and not the entire bar". The whole strip, edge to
+            edge, took hold — so a finger going down anywhere on it, on its way
+            to the chart above or the option's name below, moved the split. The
+            strip itself now does nothing; the grip (data-scalp="grip") is the
+            bar and the room a finger needs around it: 96pt wide and 32 tall,
+            8pt of that over each chart's edge, in the middle of the screen
+            where neither pane has anything to press. */}
+        <div data-scalp="handle"
+          className="relative z-[47] shrink-0 h-4 flex items-center justify-center select-none bg-background border-y border-border dark:border-y-0">
+          <div data-scalp="grip" onPointerDown={startDrag} title="Drag to resize the charts" role="separator" aria-orientation="horizontal" aria-label="Drag to resize the charts"
+            className="group absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-8 flex items-center justify-center cursor-row-resize"
+            style={{ touchAction: 'none' }}>
+            <div className="w-[42px] h-1 rounded-full bg-foreground/65 group-active:bg-foreground" />
+          </div>
         </div>
         <div data-scalp-pane="option" className="overflow-hidden" style={{ flex: `${1 - frac} 1 0%`, minHeight: 'calc(156px + env(safe-area-inset-bottom))' }}>
           <AdvancedChart key="scalp-option" paneRole="option" split scalp scalpAt={at} onScalpAt={setAt} scalpShared={shared} />

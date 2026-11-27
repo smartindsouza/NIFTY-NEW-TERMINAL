@@ -445,11 +445,18 @@ export function OptionChainView({ onPicked, start, wide = false, onClose, onInde
             word "Expiry:" gives its room to it — the date beside says what it is. */}
         {!wide && onIndex && (
           <>
-            <button type="button" data-chain="index-pick" onClick={(e) => { e.stopPropagation(); setMenu(menu === 'index' ? null : 'index'); }} className="flex items-center gap-1 text-[12px] leading-none">
+            {/* A PILL, IN THE ACCENT (27 Nov 2026, the same evening). Martin, of the
+                plain "NIFTY" with its arrow: "Also show the Index drop down list
+                in a pill shaped button like the Greeks button. Make it little
+                wider and highlight it in accent color". The Greeks button's own
+                height and round ends, with the accent for its outline, tint and
+                words, and more room each side of the name. */}
+            <button type="button" data-chain="index-pick" aria-haspopup="listbox" aria-expanded={menu === 'index'} onClick={(e) => { e.stopPropagation(); setMenu(menu === 'index' ? null : 'index'); }}
+              className="shrink-0 h-[29px] pl-[13px] pr-[11px] flex items-center gap-[7px] rounded-full border border-primary bg-primary/10 text-primary text-[12px] leading-none whitespace-nowrap active:opacity-70">
               <span className="font-semibold">{under.name === 'BANKNIFTY' ? 'BANK NIFTY' : under.name}</span>
               <svg width="8" height="5" viewBox="0 0 8 5" aria-hidden="true"><path d="M0 0h8L4 5z" fill="currentColor" /></svg>
             </button>
-            <span className="mx-[10px] h-[18px] w-px bg-foreground/20" aria-hidden="true" />
+            <span className="w-[10px] shrink-0" aria-hidden="true" />
           </>
         )}
         <button type="button" data-chain="expiry" onClick={(e) => { e.stopPropagation(); setMenu(menu === 'expiry' ? null : 'expiry'); }} className="flex items-center gap-1 text-[12px] leading-none">
@@ -480,15 +487,8 @@ export function OptionChainView({ onPicked, start, wide = false, onClose, onInde
               <span className="absolute top-[2px] h-2 w-2 rounded-full bg-white transition-[left]" style={{ left: greeks ? 12 : 2 }} />
             </span>
           </button>
-          {/* A close button beside it (18 Nov 2026; Martin: "add a small close
-              screen button beside the Greeks button on the extreme right"). A
-              tap above the sheet still closes it too. */}
-          {onClose && (
-            <button type="button" data-chain="close" aria-label="Close the option chain" onClick={onClose}
-              className="ml-[10px] -mr-[6px] h-[29px] w-[29px] flex items-center justify-center rounded-full border border-foreground/20 text-foreground/70 active:bg-foreground/10">
-              <X size={15} />
-            </button>
-          )}
+          {/* The cross that stood here, beside Greeks (18 Nov), is at the foot of
+              the screen now: see THE CROSS AT THE FOOT OF THE SCREEN. */}
           </>
         )}
       </div>
@@ -526,7 +526,7 @@ export function OptionChainView({ onPicked, start, wide = false, onClose, onInde
         </div>
         {/* The list is a scroller of its own, so it must say for itself that only
             up and down is the browser's: what its parent says stops at it. */}
-        <div ref={listRef} data-chain="list" className="flex-1 min-h-0 overflow-y-auto overscroll-contain" style={{ touchAction: 'pan-y' }}>
+        <div ref={listRef} data-chain="list" className="flex-1 min-h-0 overflow-y-auto overscroll-contain" style={{ touchAction: 'pan-y', paddingBottom: !wide && onClose ? (basket.on ? 62 : 'calc(64px + env(safe-area-inset-bottom))') : undefined }}>
           {!strikes.length
             ? <div className="h-40 flex items-center justify-center text-[12px] text-foreground/50">Loading…</div>
             : (
@@ -562,6 +562,24 @@ export function OptionChainView({ onPicked, start, wide = false, onClose, onInde
             )}
         </div>
       </div>
+      {/* THE CROSS AT THE FOOT OF THE SCREEN (27 Nov 2026). Martin: "Move the close
+          button in option chain screen all the way to the bottom of the screen
+          for better reachability" — and, a minute before, "as a floating icon".
+          On the phone the cross beside Greeks, at the very top of the sheet,
+          was the far end of the screen from his thumb. It floats now over the
+          foot of the table, in the middle (over the strike column, which takes
+          no taps, so no price is covered), above the basket's bar when that is
+          up; the table's last rows scroll clear of it. A tap above the sheet,
+          where there is anything above it, still closes it too. The desktop's
+          wide chain keeps its cross at the top right. */}
+      {!wide && onClose && (
+        <div className="relative h-0 shrink-0 z-10">
+          <button type="button" data-chain="close" data-chain-close="foot" aria-label="Close the option chain" onClick={(e) => { e.stopPropagation(); onClose(); }}
+            className={`absolute left-1/2 -translate-x-1/2 h-11 w-11 flex items-center justify-center rounded-full border border-foreground/25 bg-card text-foreground shadow-[0_4px_14px_rgba(0,0,0,0.35)] active:bg-foreground/10 ${basket.on ? 'bottom-[10px]' : 'bottom-[calc(12px+env(safe-area-inset-bottom))]'}`}>
+            <X size={20} />
+          </button>
+        </div>
+      )}
       {/* THE JODI LIST, while the basket is on: the two options picked, what they
           cost together now, and Done — which closes the chain, as its own cross
           does, and with a Call and a Put on the list that opens the Jodi card. */}
@@ -751,17 +769,28 @@ export function OptionChainSheet({ onClose, start }: { onClose: () => void; star
     window.addEventListener('resize', read);
     return () => { t.forEach(clearTimeout); window.removeEventListener('resize', read); };
   }, [openTop, follow]);
+  // THE WHOLE SCREEN IN SCALPERX (27 Nov 2026). Martin: "Extend the option
+  // chain in the scalper X screen all the way to the top of the screen". There
+  // the sheet began 152pt down, over a dimmed strip of ScalperX's top row and
+  // the chart's name — nothing in that strip could be used (a tap on it closed
+  // the chain), and since the same evening the chain has its own index list,
+  // so the strip showed nothing the chain needs. On a phone in ScalperX the
+  // sheet is now the full height of the screen, square-cornered, its control
+  // row starting under the status bar. The cross at its foot closes it.
+  const [fullTop] = useState(() => {
+    try { return !wide && window.innerWidth < 768 && sessionStorage.getItem('scalpPro') === '1'; } catch (e) { return false; }
+  });
   return createPortal(
-    <div data-chain-sheet={wide ? 'wide' : openTop ? 'open-top' : ''}
+    <div data-chain-sheet={wide ? 'wide' : openTop ? 'open-top' : fullTop ? 'full' : ''}
       className={openTop
         ? `${leaving ? 'chain-sheet-down' : 'chain-sheet-up'} fixed inset-x-0 bottom-0 z-[150] flex flex-col justify-end ${topPx != null ? 'bg-card' : ''}`
         : `${leaving ? 'chain-dim-out' : 'chain-dim-in'} fixed inset-0 z-[150] flex flex-col justify-end md:items-center md:justify-center bg-black/75`}
       style={openTop && topPx != null ? { top: topPx } : undefined}
       onAnimationEnd={(e) => { if (leaving && e.animationName === 'chain-sheet-down') onClose(); }}
       onClick={openTop ? undefined : leave}>
-      <div style={openTop && topPx != null ? { height: '100%', minHeight: 0 } : undefined} className={wide
+      <div style={openTop && topPx != null ? { height: '100%', minHeight: 0 } : fullTop ? { height: '100dvh', paddingTop: 'env(safe-area-inset-top)' } : undefined} className={wide
         ? 'w-[min(1600px,calc(100vw-48px))] h-[calc(100dvh-48px)] rounded-xl overflow-hidden border border-foreground/10'
-        : `${openTop ? '' : leaving ? 'chain-sheet-down ' : 'chain-sheet-up '}w-full md:w-[430px] h-[calc(100dvh-152px)] min-h-[60dvh] md:h-[min(780px,90dvh)] ${openTop ? 'rounded-none' : 'rounded-t-xl'} md:rounded-xl overflow-hidden`} onClick={(e) => e.stopPropagation()}>
+        : `${openTop ? '' : leaving ? 'chain-sheet-down ' : 'chain-sheet-up '}w-full md:w-[430px] h-[calc(100dvh-152px)] min-h-[60dvh] md:h-[min(780px,90dvh)] ${openTop || fullTop ? 'rounded-none' : 'rounded-t-xl'} ${fullTop ? 'bg-card ' : ''}md:rounded-xl overflow-hidden`} onClick={(e) => e.stopPropagation()}>
         <OptionChainView key={`${wide ? 'wide' : 'narrow'}|${underlyingOf(shown?.underlying).name}`} onPicked={onClose} start={shown} wide={wide} onClose={leave}
           onIndex={!wide && !openTop ? (u) => setFollow({ underlying: u }) : undefined} />
       </div>
