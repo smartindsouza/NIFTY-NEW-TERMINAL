@@ -134,6 +134,21 @@ export default function TelegramSignals() {
         <input value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 12))} inputMode="numeric" type="password"
           className="h-7 w-28 px-2 rounded-md bg-card border border-border font-mono text-foreground" placeholder="SIGNALS_PIN" />
         <span className="opacity-70 flex-1 min-w-0">needed for setup, settings and Practice/Live — not for Off or Exit</span>
+        {/* FULL BACKUP, ONCE (27 Nov 2026). Martin, before the server is moved to
+            Singapore: "Let's go for option 2. Full copy first." Posts the PIN as a
+            form (never in a link) to /api/admin/backup, which answers with one
+            .tar.gz of everything the app has stored; the browser saves it. In a
+            new tab, so a refusal ("Wrong PIN.") does not replace the app. Meant
+            for a computer: the file holds the day's logins. To be taken out
+            again after the move. */}
+        <button type="button" data-backup="full" disabled={busy || !pin} title="Download one file with everything the app has stored (needs the PIN). Once per server start."
+          onClick={() => {
+            if (!window.confirm('Download a full copy of the app\'s data to this device?\n\nIt contains your journal, settings and today\'s logins, so keep the file private. It can be taken once.')) return;
+            const f = document.createElement('form'); f.method = 'POST'; f.action = '/api/admin/backup'; f.target = '_blank'; f.style.display = 'none';
+            const i = document.createElement('input'); i.type = 'hidden'; i.name = 'pin'; i.value = pin; f.appendChild(i);
+            document.body.appendChild(f); f.submit(); setTimeout(() => f.remove(), 1000);
+          }}
+          className="shrink-0 flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-popover text-foreground disabled:opacity-40">Full backup</button>
         {data?.telegram?.loggedIn && (
           <button disabled={busy} onClick={async () => { const d = await post('/api/signals/test-alert'); if (d.ok) toast.success(d.linked ? 'Test alert sent to your bot' : 'Test alert sent to your Saved Messages'); }}
             className="shrink-0 flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg bg-popover text-foreground"><Bot className="w-3 h-3" /> Test alert</button>

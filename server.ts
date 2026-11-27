@@ -45,7 +45,8 @@ import { registerChartRef, resolveChartRef } from './server/chart_ref';
 import { lastUs30Source } from './server/us30';
 import { registerTradeGuard, guardEntryBlock, guardOrderBlock, setGuardExempt } from './server/trade_guard';
 import { registerJodi, jodiTokens, jodiOnTick, jodiManages, jodiExempt } from './server/jodi';
-import { registerSignalTrader, signalOnTick, signalTokens, signalNoteManualRearm, signalManages, signalManagedLevels, signalNotify } from './server/signal_trader';
+import { registerSignalTrader, signalOnTick, signalTokens, signalNoteManualRearm, signalManages, signalManagedLevels, signalNotify, signalPinOk } from './server/signal_trader';
+import { registerDataBackup } from './server/data_backup';
 import { registerFamilyTrader, familyOnTick, familyTokens } from './server/family_trader';
 import { currentLeg, needsLegAverage, closedLegs, legForRow } from './server/leg_average';
 import { entryWallError } from './server/entry_wall';
@@ -3961,6 +3962,10 @@ setInterval(() => {
   // TELEGRAM SIGNAL AUTO-TRADER. Everything it does to an open position goes
   // through the same premium_exit_rules row, tick path and exit function as a
   // chart-armed stop — it only decides WHERE the stop is.
+  // A full copy of the data folder, once, behind the PIN: taken before the server
+  // is moved to another region (27 Nov 2026; see server/data_backup.ts). To be
+  // taken out again in the release after the move.
+  registerDataBackup(app, { dataDir: KITE_DATA_DIR, pinOk: signalPinOk, pinConfigured: () => !!process.env.SIGNALS_PIN });
   registerSignalTrader(app, {
     db,
     getKiteClient,
