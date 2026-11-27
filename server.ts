@@ -652,13 +652,18 @@ async function closePositionBySymbolNow(tradingsymbol: string, reason: string): 
     // @ts-ignore
     if (!kc || !kc.access_token) return { ok: false, error: 'No active Kite session — please log in to Zerodha today.' };
     let positions: any;
+    // Timed, as an entry is (see HOW LONG AN ORDER TAKES): reading the position, then the exit order through to its fill.
+    const tExit = Date.now();
     try { positions = await kc.getPositions(); } catch (e: any) { return { ok: false, error: 'Could not read positions: ' + (e?.message || e) }; }
+    const tRead = Date.now() - tExit;
     const net = (positions && positions.net) || [];
     const pos = net.find((p: any) => p.tradingsymbol === tradingsymbol && p.quantity !== 0);
     if (!pos) return { ok: false, alreadyClosed: true, error: `No open position found for ${tradingsymbol} on ${activeBroker() === 'dhan' ? 'Dhan' : 'Zerodha'} (it may already be closed).` };
     const qty = Math.abs(pos.quantity);
     const side = pos.quantity > 0 ? 'SELL' : 'BUY'; // long -> sell to close; short -> buy to close
+    const tSend = Date.now();
     const exitResult = await placeKiteLimitExit({ exchange: pos.exchange || 'NFO', tradingsymbol, qty, product: pos.product || 'NRML', side });
+    try { console.log(`[order-timing] EXIT ${tradingsymbol} (${reason}): positions ${tRead}ms, order to fill ${Date.now() - tSend}ms | total ${Date.now() - tExit}ms | ${exitResult.ok ? 'ok' : 'failed'}`); } catch (e) {}
     if (exitResult.ok) {
       // Record the close in the trade journal (Kite's own last price + P&L for this leg)
       journalCloseTrade(tradingsymbol, { exitPrice: pos.last_price, pnl: pos.pnl, reason });
@@ -4480,6 +4485,16 @@ setInterval(() => {
 
   app.post('/api/orders', express.json(), async (req, res) => {
     marginsTouched(); res.on('finish', marginsTouched);      // the funds change with it: see /api/margins
+    // HOW LONG AN ORDER TAKES, STEP BY STEP (27 Nov 2026). Martin: "Also can you
+    // make the order placement like entry and exit much more quicker compared to
+    // Zerodha's own kite app where it places order instantly". Before anything
+    // is changed in this path it is measured: one line per order in the log,
+    // with the time each step took (the guard's check, the price lookup when
+    // the phone sent none, the broker's own placeOrder call) and the total.
+    // Timing only: nothing about what is sent, or when, is different.
+    const tOrder = Date.now(); const steps: string[] = [];
+    const lap = (name: string, from: number) => { steps.push(`${name} ${Date.now() - from}ms`); };
+    res.on('finish', () => { try { console.log(`[order-timing] ${String(req.body?.action || '')} ${String(req.body?.tradingsymbol || '')}: ${steps.join(', ') || 'no broker call'} | total ${Date.now() - tOrder}ms | status ${res.statusCode}`); } catch (e) {} });
     try {
       const { 
         action, // BUY/SELL
@@ -4501,7 +4516,9 @@ setInterval(() => {
       // do not — and only a real one (test mode places nothing). Exits are never
       // checked, so the guard can never trap him in a position.
       if (req.body?.journal === true && !test_mode) {
+        const tG = Date.now();
         const g = await guardEntryBlock();
+        lap('guard', tG);
         if (g) return res.status(403).json({ success: false, guard: true, error: g });
       }
 
@@ -4522,7 +4539,9 @@ setInterval(() => {
           const quoteClient = getKiteClient();
           // @ts-ignore
           if (quoteClient && quoteClient.access_token) {
+            const tQ = Date.now();
             const q = await quoteClient.getQuote([fullSymbol]);
+            lap('quote', tQ);
             basePrice = q?.[fullSymbol]?.last_price;
           }
         } catch (e) {
@@ -4590,7 +4609,9 @@ setInterval(() => {
       // @ts-ignore
       if (kc && kc.access_token) {
         try {
-          const orderResponse = await kc.placeOrder("regular", payloadObj);
+          const tP = Date.now();
+          let orderResponse: any;
+          try { orderResponse = await kc.placeOrder("regular", payloadObj); } finally { lap('placeOrder', tP); }
           
           let orderId = typeof orderResponse === 'string' ? orderResponse : (orderResponse as any).order_id;
           let exchangeOrderId = typeof orderResponse === 'object' ? (orderResponse as any).exchange_order_id : null;

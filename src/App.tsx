@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { lazy, Suspense, useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect, type ComponentType } from 'react';
 import { Redirect, Route, Switch, useLocation } from 'wouter';
 import { OptionChainHost } from './components/OptionChainSheet';
 import { JodiHost } from './components/JodiCard';
@@ -20,34 +20,63 @@ import { SetupAlerts } from './components/SetupAlerts';
 import { Cpu } from 'lucide-react';
 import { useUserSettings, useResolvedTheme } from './hooks/useUserSettings';
 
+// A SCREEN THAT IS ALREADY DOWNLOADED OPENS AT ONCE (27 Nov 2026). Martin: "Also
+// why does it not move smoothly between screens. There is a bit of a lag when
+// switching between home, chart, Journal etc. make it smoother."
+// Measured on a phone-speed test copy: the FIRST visit to each screen showed
+// the spinner ("Lazy-loading terminal module...") while its code was fetched —
+// about 0.7 s for the chart, 0.3 s for News, 0.2 s for the Journal, on a fast
+// line; longer on a phone's. Each screen is its own file, fetched when first
+// opened. Later visits had no spinner.
+// Two things here. (1) lazyPage: as React's lazy, but its file can be fetched
+// ahead (.preload), and once it is in, the screen is drawn in the same frame as
+// the tap — React's own lazy still shows the fallback for a moment even when
+// the file is already there. Which of the two a screen uses is fixed when it
+// mounts, so a file arriving while its screen is up never remounts it.
+// (2) The bottom bar's screens are fetched in the background a little after
+// the app starts (see PRELOAD below), one at a time, when the phone is idle.
+type PageModule = { default: ComponentType<any> };
+function lazyPage(load: () => Promise<PageModule>) {
+  let Loaded: ComponentType<any> | null = null;
+  let pending: Promise<PageModule> | null = null;
+  const run = () => (pending ||= load().then((m) => { Loaded = m.default; return m; }, (e) => { pending = null; throw e; }));
+  const Lazy = lazy(run);
+  const Page = (props: any) => {
+    const [Now] = useState<ComponentType<any> | null>(() => Loaded);
+    return Now ? <Now {...props} /> : <Lazy {...props} />;
+  };
+  (Page as any).preload = () => { run().catch(() => {}); };
+  return Page as ComponentType<any> & { preload: () => void };
+}
+
 // Lazy load all terminal pages & tabs to maximize performance & reduce bundle size
-const Dashboard = lazy(() => import('./pages/Dashboard').then(module => ({ default: module.Dashboard })));
-const KiteLogin = lazy(() => import('./pages/KiteLogin').then(module => ({ default: module.KiteLogin })));
+const Dashboard = lazyPage(() => import('./pages/Dashboard').then(module => ({ default: module.Dashboard })));
+const KiteLogin = lazyPage(() => import('./pages/KiteLogin').then(module => ({ default: module.KiteLogin })));
 // Separate from /fii-dii, which is the F&O participant OI page. This one is the
 // CASH-market rupee flow — different dataset, different question.
-const InstitutionalFlow = lazy(() => import('./pages/InstitutionalFlow').then(module => ({ default: module.InstitutionalFlow })));
-const News = lazy(() => import('./pages/News').then(module => ({ default: module.News })));
+const InstitutionalFlow = lazyPage(() => import('./pages/InstitutionalFlow').then(module => ({ default: module.InstitutionalFlow })));
+const News = lazyPage(() => import('./pages/News').then(module => ({ default: module.News })));
 // The chart route now mounts the workspace, which decides between the desktop
 // split (spot left / options right) and — below md — the original single chart,
 // rendered with no props and therefore on its exact previous code path.
-const AdvancedChart = lazy(() => import('./pages/ChartWorkspace').then(module => ({ default: module.ChartWorkspace })));
+const AdvancedChart = lazyPage(() => import('./pages/ChartWorkspace').then(module => ({ default: module.ChartWorkspace })));
 
 // New diagnostic lazy performance tabs / auxiliary pages
-const Backtesting = lazy(() => import('./pages/Backtesting'));
-const TerminalControl = lazy(() => import('./pages/TerminalControl'));
-const Notifications = lazy(() => import('./pages/Notifications'));
-const TradeJournal = lazy(() => import('./pages/TradeJournal'));
-const GapRisk = lazy(() => import('./pages/GapRisk'));
-const GapScorecard = lazy(() => import('./pages/GapScorecard'));
-const HLevels = lazy(() => import('./pages/HLevels'));
-const RsiBacktest = lazy(() => import('./pages/RsiBacktest'));
-const GammaBlast = lazy(() => import('./pages/GammaBlast'));
-const PremiumPulse = lazy(() => import('./pages/PremiumPulse'));
-const Research = lazy(() => import('./pages/Research'));
+const Backtesting = lazyPage(() => import('./pages/Backtesting'));
+const TerminalControl = lazyPage(() => import('./pages/TerminalControl'));
+const Notifications = lazyPage(() => import('./pages/Notifications'));
+const TradeJournal = lazyPage(() => import('./pages/TradeJournal'));
+const GapRisk = lazyPage(() => import('./pages/GapRisk'));
+const GapScorecard = lazyPage(() => import('./pages/GapScorecard'));
+const HLevels = lazyPage(() => import('./pages/HLevels'));
+const RsiBacktest = lazyPage(() => import('./pages/RsiBacktest'));
+const GammaBlast = lazyPage(() => import('./pages/GammaBlast'));
+const PremiumPulse = lazyPage(() => import('./pages/PremiumPulse'));
+const Research = lazyPage(() => import('./pages/Research'));
 // Telegram channel calls → automatic entries with the message's SL (23 Oct 2026).
-const TelegramSignals = lazy(() => import('./pages/TelegramSignals'));
+const TelegramSignals = lazyPage(() => import('./pages/TelegramSignals'));
 // Martin's own option-chain indicator, Practice only (14 Nov 2026) — server/expiry_skew.ts.
-const ExpirySkew = lazy(() => import('./pages/ExpirySkew'));
+const ExpirySkew = lazyPage(() => import('./pages/ExpirySkew'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -99,6 +128,21 @@ export default function App() {
     catch (e) { return false; }
   })();
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  // PRELOAD (27 Nov 2026; see A SCREEN THAT IS ALREADY DOWNLOADED OPENS AT ONCE).
+  // The five screens of the phone's bottom bar, fetched one after another once
+  // the app has had 2.5 s to draw what was asked for, each when the phone is
+  // idle — so the first tap on Chart or Journal finds its screen already in.
+  // Not on a line that asks for data to be saved. Screens off the bar (More)
+  // are still fetched when first opened, as before.
+  useEffect(() => {
+    try { if ((navigator as any).connection?.saveData) return; } catch (e) {}
+    const pages = [AdvancedChart, TradeJournal, Dashboard, News, InstitutionalFlow];
+    let dead = false, i = 0, timer: any = 0;
+    const idle = (fn: () => void) => { const ric = (window as any).requestIdleCallback; if (ric) ric(fn, { timeout: 1500 }); else timer = setTimeout(fn, 200); };
+    const next = () => { if (dead || i >= pages.length) return; pages[i++].preload(); timer = setTimeout(() => idle(next), 400); };
+    timer = setTimeout(() => idle(next), 2500);
+    return () => { dead = true; clearTimeout(timer); };
+  }, []);
   // Tell the chart page it is covered, so the jump-to-latest bubble gets out of
   // the way instead of floating on top of this panel.
   useEffect(() => {
