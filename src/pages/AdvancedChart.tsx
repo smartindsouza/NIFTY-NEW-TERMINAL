@@ -16448,6 +16448,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
   const pinBgRef = useRef<HTMLDivElement | null>(null);
   const pinBackRef = useRef<HTMLButtonElement | null>(null);
   const flyRefs = useRef<(HTMLSpanElement | null)[]>([null, null, null]);
+  const glideNowRef = useRef<() => void>(() => {});
   useEffect(() => {
     if (isPane || scalp || isFocusedChart) return;
     let raf = 0;
@@ -16474,6 +16475,19 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       const ends = [pin.querySelector('[data-pinned="name"]'), pin.querySelector('[data-pinned="price"]'), pin.querySelector('[data-pinned="change"]')] as (HTMLElement | null)[];
       const starts = [document.querySelector('[data-head-tab="on"] [data-head="name"]'), headPriceRef.current, headChangeRef.current] as (HTMLElement | null)[];
       const gliding = t > 0 && t < 1;
+      // A TAB'S NAME LEFT HIDDEN (27 Nov 2026). Martin, with a screenshot of the
+      // option tab alone in the row: "There seems to be a bug. Where the spot
+      // chart tab disappears. When I swipe to right to move to the spot chart,
+      // the option chart disappears" — "It happens when I swipe left and right
+      // too many times." While its copy is up, the OPEN tab's name is hidden
+      // (below). A swipe across the row of five moves the page a few points, so
+      // the tabs were often switched part of the way down: the tab that had been
+      // open kept its name hidden, because only the tab open NOW is ever put
+      // back. Its outline is drawn only when open, so it looked gone. Every
+      // other tab's name is put back here, on every frame.
+      for (const el of Array.from(document.querySelectorAll('[data-head-tab] [data-head="name"]')) as HTMLElement[]) {
+        if (el !== starts[0] && el.style.visibility) el.style.visibility = '';
+      }
       for (let i = 0; i < 3; i++) {
         const st = starts[i], en = ends[i], fly = flyRefs.current[i];
         if (en) en.style.opacity = !st || t >= 1 ? (st ? '1' : String(shade)) : '0';
@@ -16508,6 +16522,7 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
     };
     const on = () => { if (!raf) raf = requestAnimationFrame(frame); };
     on();
+    glideNowRef.current = on;
     // A price that changes while the page is held part of the way down.
     const iv = setInterval(() => { const y = window.scrollY || 0; if (y > 0 && y < POS_COLLAPSE) on(); }, 500);
     window.addEventListener('scroll', on, { passive: true });
@@ -16517,10 +16532,15 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
       clearInterval(iv);
       window.removeEventListener('scroll', on);
       window.removeEventListener('resize', on);
-      try { for (const el of [document.querySelector('[data-head-tab="on"] [data-head="name"]'), headPriceRef.current, headChangeRef.current] as (HTMLElement | null)[]) if (el) el.style.visibility = ''; } catch (e) {}
+      glideNowRef.current = () => {};
+      try { for (const el of [...Array.from(document.querySelectorAll('[data-head-tab] [data-head="name"]')), headPriceRef.current, headChangeRef.current] as (HTMLElement | null)[]) if (el) el.style.visibility = ''; } catch (e) {}
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPane, scalp, isFocusedChart]);
+  // The tab that is open has changed: draw the header again at once, so the
+  // name that was hidden is back and the copy carries the new tab's name —
+  // not at the next scroll, which at the top of the page may never come.
+  useEffect(() => { glideNowRef.current(); }, [selectedInstrument?.tradingsymbol]);
   // NO BOUNCE PAST THE TOP (18 Nov 2026). Martin, with a recording: "when the
   // chart screen is scrolled to the top, the bottom menu gets half or fully
   // hidden for sometime and then appears fully." The recording shows the page
