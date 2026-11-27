@@ -17726,7 +17726,10 @@ export function AdvancedChart({ paneRole, split = false, spotHidden = false, onC
               const stillOpen = lastOption && tabCharts.some(c => c.tradingsymbol === lastOption.tradingsymbol) ? lastOption : null;
               const optionTarget = selectedInstrument || stillOpen || tabCharts[tabCharts.length - 1];
               return (
-              <div className="relative min-w-0 flex-1 basis-0 md:flex-none md:basis-auto">
+              /* data-head="option-tab": the option chain hides this tab while it is
+                 up over the phone's chart (see NO OPTIONS TAB OVER THE CHAIN in
+                 OptionChainSheet). */
+              <div data-head="option-tab" className="relative min-w-0 flex-1 basis-0 md:flex-none md:basis-auto">
                 <div data-head-tab={selectedInstrument ? 'on' : 'off'} className={`flex items-stretch rounded-md border overflow-hidden transition-colors ${
                     selectedInstrument ? `border-primary/50 bg-primary/15 ${PHONE_TAB_ON}` : `border-border/60 bg-card ${PHONE_TAB_OFF}`}`}>
                   {selectedInstrument && <PhoneTabFeet />}

@@ -701,7 +701,13 @@ export function OptionChainSheet({ onClose, start }: { onClose: () => void; star
   useEffect(() => {
     if (!openTop) return;
     const st = document.createElement('style');
-    st.textContent = '[data-index-menu]{z-index:160}';
+    // NO OPTIONS TAB OVER THE CHAIN (27 Nov 2026). Martin, with the chain up under
+    // the two tabs: "When in the option chain do not show the options tab". The
+    // top stays in use for the INDEX (to change the chain's index); the option
+    // tab beside it did nothing for the chain. Hidden, not removed: it keeps its
+    // half of the row, so the index tab does not change width, and it is back
+    // the moment the chain closes.
+    st.textContent = '[data-index-menu]{z-index:160}[data-head="option-tab"]{visibility:hidden;pointer-events:none}';
     document.head.appendChild(st);
     return () => { try { st.remove(); } catch (e) {} };
   }, [openTop]);
