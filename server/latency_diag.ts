@@ -33,7 +33,49 @@ const pct = (a: number[], p: number) => {
 };
 const summary = (a: number[]) => ({ n: a.length, p50: pct(a, 0.5), p90: pct(a, 0.9), max: a.length ? Math.round(Math.max(...a)) : null });
 
+// WHERE THE TIME TO ZERODHA GOES (27 Nov 2026). After the server was moved from
+// San Francisco to Singapore one Zerodha call took LONGER (about 2.0 s for the
+// funds, against 1.15 s before), which says the outbound proxy is not where a
+// look-up of its address had placed it. This measures instead of guessing:
+//   GET /api/diag/egress
+// times a bare TCP connection (the handshake only: nothing is sent, no login,
+// no API call) from this server to the proxy and, for comparison, straight to
+// Zerodha's API host. A handshake takes one round trip, so each figure is the
+// round-trip time of that leg. Only milliseconds are returned: not the proxy's
+// address, and never its user name or password.
+import net from 'node:net';
+function tcpMs(host: string, port: number, timeoutMs = 4000): Promise<number | null> {
+  return new Promise((resolve) => {
+    const t0 = process.hrtime.bigint();
+    let done = false;
+    const fin = (v: number | null) => { if (done) return; done = true; try { s.destroy(); } catch (e) {} resolve(v); };
+    const s = net.connect({ host, port, family: 4 });
+    s.setTimeout(timeoutMs, () => fin(null));
+    s.once('connect', () => fin(Math.round(Number(process.hrtime.bigint() - t0) / 1e5) / 10));
+    s.once('error', () => fin(null));
+  });
+}
+async function leg(host: string, port: number) {
+  const out: (number | null)[] = [];
+  for (let i = 0; i < 5; i++) out.push(await tcpMs(host, port));
+  const ok = out.filter((x): x is number => x != null).sort((a, b) => a - b);
+  return { samples: out, best: ok.length ? ok[0] : null, median: ok.length ? ok[Math.floor(ok.length / 2)] : null };
+}
+
 export function registerLatencyDiag(app: any, express: any) {
+  app.get('/api/diag/egress', async (_req: any, res: any) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      let proxy: any = { configured: false };
+      try {
+        const u = new URL(process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '');
+        proxy = { configured: true, ...(await leg(u.hostname, Number(u.port) || (u.protocol === 'https:' ? 443 : 80))) };
+      } catch (e) { /* no proxy set */ }
+      const direct = await leg('api.kite.trade', 443);
+      res.json({ ok: true, note: 'ms for one TCP handshake (one round trip) from this server; nothing is sent', region: process.env.RAILWAY_REPLICA_REGION || null, toProxy: proxy, toZerodhaDirect: direct });
+    } catch (e: any) { res.json({ ok: false, error: e?.message || String(e) }); }
+  });
+
   // ping for the phone's clock correction
   app.get('/api/diag/time', (_req: any, res: any) => { res.setHeader('Cache-Control', 'no-store'); res.json({ now: Date.now() }); });
   app.post('/api/diag/latency/client', express.json({ limit: '8kb' }), (req: any, res: any) => {
